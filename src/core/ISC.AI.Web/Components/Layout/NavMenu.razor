@@ -1,0 +1,12 @@
+@inject IProfile Profile
+
+@* Навигация строится из реестра модулей профиля (ТС-007). Хост не знает имён модулей заранее. *@
+<MudNavMenu>
+    <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Home">Главная</MudNavLink>
+    @foreach (var module in Profile.Modules)
+    {
+        <MudNavLink Href="@module.Route" Match="NavLinkMatch.Prefix" Icon="@module.MenuIcon">
+            @module.MenuTitle
+        </MudNavLink>
+    }
+</MudNavMenu>
