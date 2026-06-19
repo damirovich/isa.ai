@@ -1,18 +1,27 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
+  <PropertyGroup>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+  </PropertyGroup>
+
+  <!-- Хост и единственная точка композиции. Ссылается на ядро И на выбранный профиль
+       (единственное допустимое исключение из правила «ядро не знает профиль»). -->
   <ItemGroup>
     <ProjectReference Include="..\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
     <ProjectReference Include="..\ISC.AI.AI\ISC.AI.AI.csproj" />
     <ProjectReference Include="..\ISC.AI.Documents\ISC.AI.Documents.csproj" />
     <ProjectReference Include="..\ISC.AI.Persistence\ISC.AI.Persistence.csproj" />
     <ProjectReference Include="..\ISC.AI.Ingestion\ISC.AI.Ingestion.csproj" />
+    <ProjectReference Include="..\..\profiles\inspector\ISC.AI.Profile.Inspector\ISC.AI.Profile.Inspector.csproj" />
   </ItemGroup>
 
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
-  </PropertyGroup>
+  <!-- Mediator.SourceGenerator — ТОЛЬКО в хосте (генерирует диспетчер и DI). -->
+  <ItemGroup>
+    <PackageReference Include="MudBlazor" />
+    <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="Serilog.Sinks.Console" />
+    <PackageReference Include="Mediator.SourceGenerator" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
+  </ItemGroup>
 
 </Project>

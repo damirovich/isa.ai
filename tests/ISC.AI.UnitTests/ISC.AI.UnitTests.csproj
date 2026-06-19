@@ -1,21 +1,9 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <IsPackable>false</IsPackable>
-  </PropertyGroup>
-
+  <!-- Быстрые тесты без БД и моделей (моки через NSubstitute). Blazor-компоненты — bUnit.
+       Общая тестовая обвязка наследуется из tests/Directory.Build.props. -->
   <ItemGroup>
-    <PackageReference Include="coverlet.collector" Version="6.0.4" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Using Include="Xunit" />
+    <PackageReference Include="bunit" />
   </ItemGroup>
 
   <ItemGroup>
@@ -24,6 +12,7 @@
     <ProjectReference Include="..\..\src\core\ISC.AI.Documents\ISC.AI.Documents.csproj" />
     <ProjectReference Include="..\..\src\profiles\inspector\ISC.AI.Profile.Inspector.Application\ISC.AI.Profile.Inspector.Application.csproj" />
     <ProjectReference Include="..\..\src\profiles\inspector\ISC.AI.Profile.Inspector.Domain\ISC.AI.Profile.Inspector.Domain.csproj" />
+    <ProjectReference Include="..\..\src\profiles\inspector\ISC.AI.Profile.Inspector.UI\ISC.AI.Profile.Inspector.UI.csproj" />
   </ItemGroup>
 
 </Project>

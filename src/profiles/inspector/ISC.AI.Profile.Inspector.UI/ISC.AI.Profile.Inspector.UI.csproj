@@ -11,14 +11,16 @@
     <SupportedPlatform Include="browser" />
   </ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.9" />
-  </ItemGroup>
-
+  <!-- Страницы модулей (Razor Class Library), монтируемые хостом. -->
   <ItemGroup>
     <ProjectReference Include="..\..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
     <ProjectReference Include="..\ISC.AI.Profile.Inspector.Application\ISC.AI.Profile.Inspector.Application.csproj" />
     <ProjectReference Include="..\ISC.AI.Profile.Inspector.Domain\ISC.AI.Profile.Inspector.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
+    <PackageReference Include="MudBlazor" />
   </ItemGroup>
 
 </Project>
