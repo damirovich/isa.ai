@@ -1,3 +1,24 @@
 <Solution>
-  <Project Path="ISC.AI.Inspector/ISC.AI.Inspector.csproj" />
+  <Folder Name="/src/" />
+  <Folder Name="/src/core/">
+    <Project Path="src/core/ISC.AI.Abstractions/ISC.AI.Abstractions.csproj" Id="1cfeaa43-4084-486c-b6d2-65829027f0f0" />
+    <Project Path="src/core/ISC.AI.AI/ISC.AI.AI.csproj" Id="f18df91e-0467-4aa8-8c5f-a7316030f4bc" />
+    <Project Path="src/core/ISC.AI.Documents/ISC.AI.Documents.csproj" Id="25800578-8fad-40b0-b61b-dbc55ad16c39" />
+    <Project Path="src/core/ISC.AI.Ingestion/ISC.AI.Ingestion.csproj" Id="8fd6b9fc-ed43-4abe-ac88-334d90e67d71" />
+    <Project Path="src/core/ISC.AI.Persistence/ISC.AI.Persistence.csproj" Id="065788bd-f3d2-4fe1-be00-2b9e7033131c" />
+    <Project Path="src/core/ISC.AI.Web/ISC.AI.Web.csproj" Id="4e1b5082-ddb3-4d56-a277-a84a52cd5a6f" />
+  </Folder>
+  <Folder Name="/src/profiles/" />
+  <Folder Name="/src/profiles/inspector/">
+    <Project Path="src/profiles/inspector/ISC.AI.Profile.Inspector.Application/ISC.AI.Profile.Inspector.Application.csproj" Id="bc718037-f85a-434f-82eb-6903528f2700" />
+    <Project Path="src/profiles/inspector/ISC.AI.Profile.Inspector.Data/ISC.AI.Profile.Inspector.Data.csproj" Id="1bc4ea50-6fa4-4fdc-bc30-686f284068c2" />
+    <Project Path="src/profiles/inspector/ISC.AI.Profile.Inspector.Domain/ISC.AI.Profile.Inspector.Domain.csproj" Id="522c8952-4ef7-400a-b581-862c08d7b09c" />
+    <Project Path="src/profiles/inspector/ISC.AI.Profile.Inspector.UI/ISC.AI.Profile.Inspector.UI.csproj" Id="c045e1c0-4655-4792-bc03-70da6999ab4b" />
+    <Project Path="src/profiles/inspector/ISC.AI.Profile.Inspector/ISC.AI.Profile.Inspector.csproj" Id="47a6e48b-dbf4-456b-9bdd-752e97d848b7" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ISC.AI.Evals/ISC.AI.Evals.csproj" Id="d8e5669e-a27a-47c3-b0d7-3943d7069417" />
+    <Project Path="tests/ISC.AI.IntegrationTests/ISC.AI.IntegrationTests.csproj" Id="99eae9dd-2d2b-4861-adc8-13b31c0a392d" />
+    <Project Path="tests/ISC.AI.UnitTests/ISC.AI.UnitTests.csproj" Id="a40dc825-5021-4354-9808-3e6e8e2c22ef" />
+  </Folder>
 </Solution>

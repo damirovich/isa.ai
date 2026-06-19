@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+    <ProjectReference Include="..\ISC.AI.Profile.Inspector.Domain\ISC.AI.Profile.Inspector.Domain.csproj" />
+    <ProjectReference Include="..\..\..\core\ISC.AI.Persistence\ISC.AI.Persistence.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
