@@ -1,13 +1,16 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
   </ItemGroup>
 
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
+  <!-- Конвейер загрузки: OCR (Tesseract) → парсинг (.docx) → чанкинг → эмбеддинги.
+       Фоновый сервис запускается хостом (Hosting.Abstractions). -->
+  <ItemGroup>
+    <PackageReference Include="Tesseract" />
+    <PackageReference Include="DocumentFormat.OpenXml" />
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+  </ItemGroup>
 
 </Project>

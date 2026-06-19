@@ -1,0 +1,62 @@
+<Project>
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- CQRS-lite: Mediator (martinothamar). SourceGenerator — только в хосте Web. -->
+    <PackageVersion Include="Mediator.Abstractions" Version="3.0.2" />
+    <PackageVersion Include="Mediator.SourceGenerator" Version="3.0.2" />
+
+    <!-- Маппинг и валидация (MIT/Apache) -->
+    <PackageVersion Include="Riok.Mapperly" Version="4.3.1" />
+    <PackageVersion Include="FluentValidation" Version="12.1.1" />
+    <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
+
+    <!-- ИИ: Microsoft.Extensions.AI (IChatClient) → vLLM (OpenAI-совместимый) -->
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="10.7.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.7.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="10.7.0" />
+    <PackageVersion Include="OpenAI" Version="2.11.0" />
+
+    <!-- Данные: EF Core + PostgreSQL + pgvector -->
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.2" />
+    <PackageVersion Include="Pgvector" Version="0.3.2" />
+    <PackageVersion Include="Pgvector.EntityFrameworkCore" Version="0.3.0" />
+
+    <!-- Логи -->
+    <PackageVersion Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageVersion Include="Serilog.Sinks.Console" Version="6.1.1" />
+
+    <!-- Промпты (Scriban), экспорт документов (OpenXml), OCR (Tesseract) -->
+    <PackageVersion Include="Scriban" Version="7.2.4" />
+    <PackageVersion Include="DocumentFormat.OpenXml" Version="3.5.1" />
+    <PackageVersion Include="Tesseract" Version="5.2.0" />
+
+    <!-- UI: Blazor + MudBlazor -->
+    <PackageVersion Include="MudBlazor" Version="9.5.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Components.Web" Version="10.0.9" />
+
+    <!-- Microsoft.Extensions.* — тонкие абстракции для контрактов, hosting и HttpClient -->
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.9" />
+
+    <!-- Тесты: xUnit + NSubstitute + Shouldly + Testcontainers; Blazor — bUnit -->
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageVersion Include="coverlet.collector" Version="6.0.4" />
+    <PackageVersion Include="NSubstitute" Version="5.3.0" />
+    <PackageVersion Include="Shouldly" Version="4.3.0" />
+    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.12.0" />
+    <PackageVersion Include="bunit" Version="2.7.2" />
+  </ItemGroup>
+
+</Project>

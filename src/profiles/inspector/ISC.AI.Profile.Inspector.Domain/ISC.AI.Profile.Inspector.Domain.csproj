@@ -1,5 +1,6 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- Доменные сущности профиля (Проверка, Нарушение, Риск, Поручение). Зависит только от Abstractions. -->
   <ItemGroup>
     <ProjectReference Include="..\..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
   </ItemGroup>
