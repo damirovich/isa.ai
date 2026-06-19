@@ -1,6 +1,16 @@
-﻿<Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+@inject ISC.AI.Abstractions.Profiles.IProfile Profile
+
+<Router AppAssembly="typeof(Program).Assembly"
+        AdditionalAssemblies="ModuleAssemblies"
+        NotFoundPage="typeof(Pages.NotFound)">
     <Found Context="routeData">
         <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
         <FocusOnNavigate RouteData="routeData" Selector="h1" />
     </Found>
 </Router>
+
+@code {
+    // Маршруты страниц модулей профиля собираются из реестра модулей (ТС-007, ТО-прог-05).
+    private IEnumerable<System.Reflection.Assembly> ModuleAssemblies =>
+        Profile.Modules.Select(m => m.ComponentType.Assembly).Distinct();
+}

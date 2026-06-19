@@ -6,6 +6,8 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- Имена тестов с подчёркиваниями (в т.ч. на русском) — идиоматичны для xUnit; CA1707 не применяем к тестам. -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
   </PropertyGroup>
 
   <!-- Общая тестовая обвязка для всех тестовых проектов (xUnit + NSubstitute + Shouldly). -->

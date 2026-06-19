@@ -47,6 +47,7 @@ tests/        UnitTests | IntegrationTests | Evals
 - **Blazor Server:** `DbContext` через `IDbContextFactory` на операцию, не как долгоживущий scoped. Длинные вызовы модели — стримить через `IAsyncEnumerable` с `CancellationToken`.
 - Версии пакетов — через **Central Package Management** (`Directory.Packages.props`).
 - В тестах **НЕ** использовать EF Core InMemory как БД — только Testcontainers с настоящим Postgres+pgvector.
+- Имена тестов — **английские (ASCII)** идентификаторы; человекочитаемая формулировка — по-русски через `[Fact(DisplayName = "…")]`. (CA1707 для тестовых проектов отключён.)
 - Комментарии к коду обязательны: XML-doc на русском для публичного API; код безопасности/грунтовки — с пояснением инварианта и ссылкой на пункт ТЗ (см. [docs/10_Стандарт_кодирования.md](docs/10_Стандарт_кодирования.md), ТД-001..008).
 
 ## Как работать над задачами

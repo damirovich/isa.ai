@@ -1,0 +1,54 @@
+using ISC.AI.Abstractions.AI;
+using ISC.AI.Abstractions.Modules;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace ISC.AI.Abstractions.Profiles;
+
+/// <summary>
+/// Манифест сменной доменной вертикали (профиля) ISC.AI.
+/// Профиль декларирует свой состав и сам регистрирует свои сервисы, контексты данных
+/// и привязки моделей в контейнере хоста. Реализуется ровно одним профилем на развёртывание;
+/// единственное место, знающее о конкретном профиле, — хост <c>ISC.AI.Web</c> (ТС-004, ТС-006).
+/// </summary>
+/// <remarks>
+/// Хост вызывает методы манифеста на старте в фиксированном порядке композиции (ТО-прог-05):
+/// регистрация сервисов → регистрация контекстов данных → keyed-регистрация моделей →
+/// построение навигации из реестра модулей. Ядро не зависит от профиля — это правило
+/// проверяется архитектурным тестом (ТС-009).
+/// </remarks>
+public interface IProfile
+{
+    /// <summary>Стабильный технический идентификатор профиля (например, <c>"inspector"</c>).</summary>
+    string Id { get; }
+
+    /// <summary>Человекочитаемое наименование профиля для интерфейса (например, «ИнспекторAI»).</summary>
+    string DisplayName { get; }
+
+    /// <summary>
+    /// Реестр модулей профиля (ТС-007). Источник навигации хоста; порядок элементов
+    /// определяет порядок пунктов меню.
+    /// </summary>
+    IReadOnlyList<IModule> Modules { get; }
+
+    /// <summary>
+    /// Поставщики привязок моделей по ролям (keyed): draft / analysis / embeddings (ТО-прог-03).
+    /// Применяются хостом на шаге keyed-регистрации.
+    /// </summary>
+    IReadOnlyList<IModelContributor> ModelContributors { get; }
+
+    /// <summary>
+    /// Регистрация прикладных сервисов профиля (обработчики сценариев, валидаторы,
+    /// провайдеры промптов и т. п.). Вызывается хостом до построения приложения.
+    /// Контексты данных регистрируются отдельно (см. <see cref="RegisterDataContexts"/>),
+    /// через фабрику, а не как scoped-сервис (ТС-008).
+    /// </summary>
+    void RegisterServices(IServiceCollection services, IConfiguration configuration);
+
+    /// <summary>
+    /// Регистрация контекстов данных профиля через фабрику <c>IDbContextFactory</c> (ТС-008).
+    /// Профиль регистрирует свой доменный контекст (схема <c>inspector</c>); универсальный
+    /// контекст ядра (схема <c>core</c>) регистрирует хост (ТО-инф-01).
+    /// </summary>
+    void RegisterDataContexts(IServiceCollection services, IConfiguration configuration);
+}
