@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+    <ProjectReference Include="..\ISC.AI.AI\ISC.AI.AI.csproj" />
+    <ProjectReference Include="..\ISC.AI.Documents\ISC.AI.Documents.csproj" />
+    <ProjectReference Include="..\ISC.AI.Persistence\ISC.AI.Persistence.csproj" />
+    <ProjectReference Include="..\ISC.AI.Ingestion\ISC.AI.Ingestion.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+  </PropertyGroup>
+
+</Project>

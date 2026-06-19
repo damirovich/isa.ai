@@ -1,4 +1,4 @@
-using ISC.AI.Inspector.Components;
+using ISC.AI.Web.Components;
 
 var builder = WebApplication.CreateBuilder(args);
 
