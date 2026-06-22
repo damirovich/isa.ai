@@ -21,4 +21,7 @@
     <Project Path="tests/ISC.AI.IntegrationTests/ISC.AI.IntegrationTests.csproj" Id="99eae9dd-2d2b-4861-adc8-13b31c0a392d" />
     <Project Path="tests/ISC.AI.UnitTests/ISC.AI.UnitTests.csproj" Id="a40dc825-5021-4354-9808-3e6e8e2c22ef" />
   </Folder>
+  <Folder Name="/spikes/">
+    <Project Path="spikes/LlmChat/LlmChat.csproj" Id="a1b2c3d4-1111-2222-3333-abcdef012345" />
+  </Folder>
 </Solution>

@@ -12,7 +12,7 @@
 - **Маппинг:** Riok.Mapperly (source-генератор)
 - **Валидация:** FluentValidation (Apache 2.0 — **НЕ** путать с FluentAssertions)
 - **Данные:** EF Core + PostgreSQL (Npgsql) + pgvector
-- **ИИ:** Microsoft.Extensions.AI (`IChatClient`) → vLLM (OpenAI-совместимый) с Gemma и Qwen
+- **ИИ:** Microsoft.Extensions.AI (`IChatClient`) → локальный OpenAI-совместимый сервер инференса (`llama-server` / ik_llama.cpp), модель Gemma; **эмбеддинги — отдельной моделью**. Сервер/модель — по конфигу (см. [ADR-0011](docs/06_ADR/ADR-0011-vybor-modeley-i-embedder.md), [справочник API](docs/reference/llm-api-gemma.md))
 - **Логи:** Serilog
 - **Промпты:** Scriban (файлы-шаблоны). **Экспорт:** DocumentFormat.OpenXml. **OCR:** Tesseract
 - **Тесты:** xUnit + NSubstitute + Shouldly (или AwesomeAssertions) + Testcontainers.PostgreSql; Blazor — bUnit
