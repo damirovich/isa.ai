@@ -1,23 +1,8 @@
+using ISC.AI.Abstractions.Enums;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ISC.AI.Abstractions.AI;
-
-/// <summary>
-/// Канонические роли моделей (keyed-регистрация). Ядро оперирует только ролью;
-/// конкретные веса, размер и квантизация задаются конфигурацией под бюджет VRAM (ТО-прог-03).
-/// </summary>
-public enum ModelRole
-{
-    /// <summary>Быстрая генерация и форматирование документов.</summary>
-    Draft,
-
-    /// <summary>Анализ и сверка НПА; длинный контекст.</summary>
-    Analysis,
-
-    /// <summary>Векторизация текста (эмбеддинги) для семантического поиска (ru/ky).</summary>
-    Embeddings,
-}
 
 /// <summary>
 /// Поставщик keyed-регистрации клиента модели по роли. Регистрирует клиента

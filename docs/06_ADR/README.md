@@ -39,6 +39,7 @@
 | ADR-0004 | Доступ к модели за `IChatClient` и keyed-роли | Принято | ТО-прог-02, ТО-прог-03 (также ТСТ-003) | [ADR-0004-model-za-ichatclient-keyed-roli.md](ADR-0004-model-za-ichatclient-keyed-roli.md) |
 | ADR-0005 | Грунтовка как контракт в ядре | Принято | ТБ-040, ТБ-041 (также ТО-мат-01, GATE-2) | [ADR-0005-gruntovka-kak-kontrakt-v-yadre.md](ADR-0005-gruntovka-kak-kontrakt-v-yadre.md) |
 | ADR-0006 | Multi-instance вместо мультиарендности | Принято | ТС-005 (также ТО-инф-03, ТФ-ДШ-01/03) | [ADR-0006-multi-instance-vmesto-multiarendnosti.md](ADR-0006-multi-instance-vmesto-multiarendnosti.md) |
+| ADR-0013 | Нейтральный флаг годности источника в грунтовке | Принято | ТБ-040, ТО-инф-04 (также ТС-003, ADR-0002/0005/0008, GATE-2/3, КИ-02) | [ADR-0013-neytralnyy-flag-godnosti-v-gruntovke.md](ADR-0013-neytralnyy-flag-godnosti-v-gruntovke.md) |
 
 ### Предложенные (требуют решения на Э1)
 

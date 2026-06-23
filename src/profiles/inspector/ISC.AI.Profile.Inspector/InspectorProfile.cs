@@ -1,6 +1,7 @@
 using ISC.AI.Abstractions.AI;
 using ISC.AI.Abstractions.Modules;
 using ISC.AI.Abstractions.Profiles;
+using ISC.AI.Profile.Inspector.Data;
 using ISC.AI.Profile.Inspector.UI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -49,6 +50,7 @@ public sealed class InspectorProfile : IProfile
     /// <inheritdoc />
     public void RegisterDataContexts(IServiceCollection services, IConfiguration configuration)
     {
-        // TODO (Э3): AddDbContextFactory<InspectorDbContext> (схема inspector) с Npgsql + pgvector.
+        // Доменный контекст профиля (схема inspector) через фабрику (ТС-008, ТО-инф-01, ADR-0003).
+        services.AddInspectorPersistence(configuration);
     }
 }
