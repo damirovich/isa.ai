@@ -4,6 +4,7 @@ using ISC.AI.Abstractions.Profiles;
 using ISC.AI.AI.Grounding;
 using ISC.AI.AI.Models;
 using ISC.AI.AI.Retrieval;
+using ISC.AI.Ingestion;
 using ISC.AI.Persistence;
 using ISC.AI.Profile.Inspector;
 using ISC.AI.Web.Components;
@@ -47,6 +48,9 @@ try
 
     // Грунтовка: ссылки только из извлечённых фрагментов; «по памяти» запрещено (ТБ-040, GATE-2).
     builder.Services.AddCoreGrounding();
+
+    // Загрузка в корпус: fail-closed (без грифа/подразделения — отказ), идемпотентно (ТБ-024, ТНД-002).
+    builder.Services.AddCoreIngestion();
 
     // --- Точка композиции профиля (ТО-прог-05/06). Только хост знает о конкретном профиле. ---
     var profile = new InspectorProfile();

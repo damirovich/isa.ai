@@ -1,0 +1,114 @@
+using System.Security.Cryptography;
+using System.Text;
+using ISC.AI.Abstractions.Enums;
+using ISC.AI.Abstractions.Ingestion;
+using ISC.AI.Persistence;
+using ISC.AI.Persistence.Entities;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
+using Pgvector;
+
+namespace ISC.AI.Ingestion;
+
+/// <summary>
+/// Конвейер загрузки документов в корпус ядра (ТО-мат-03, ТО-инф-07). FAIL-CLOSED (ТБ-024): без явных
+/// грифа и подразделения документ НЕ индексируется. Идемпотентность (ТНД-002): повтор того же содержимого
+/// не создаёт дублей. Запись документа, чанков и эмбеддингов — в одной транзакции.
+/// </summary>
+/// <remarks>
+/// Гриф/подразделение денормализуются на каждый чанк и эмбеддинг (опора фильтра доступа Э3-05, ТБ-020),
+/// все новые фрагменты — актуальные (<c>IsCurrent = true</c>). Векторизация — отдельной моделью роли
+/// <see cref="ModelRole.Embeddings"/>. Контекст создаётся через <c>IDbContextFactory</c> (ТС-008).
+/// </remarks>
+public sealed class IngestionPort(
+    IDbContextFactory<CoreDbContext> contextFactory,
+    [FromKeyedServices(ModelRole.Embeddings)] IEmbeddingGenerator<string, Embedding<float>> embeddingGenerator,
+    ITextChunker chunker) : IIngestionPort
+{
+    /// <inheritdoc />
+    public async Task<IngestionResult> IngestAsync(IngestionRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // fail-closed (ТБ-024): гриф и подразделение обязательны и явные.
+        if (request.Classification is not { } classification || request.DivisionId is not { } divisionId)
+        {
+            return IngestionResult.Reject("Не задан гриф или подразделение — индексация запрещена (fail-closed, ТБ-024).");
+        }
+
+        var contentHash = SHA256.HashData(Encoding.UTF8.GetBytes(request.Text ?? string.Empty));
+
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Идемпотентность (ТНД-002): тот же контент уже загружен — не дублируем.
+        var existingId = await db.Documents
+            .Where(d => d.ContentHash == contentHash)
+            .Select(d => (int?)d.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (existingId is { } duplicateId)
+        {
+            return IngestionResult.Duplicate(duplicateId);
+        }
+
+        var chunkTexts = chunker.Chunk(request.Text ?? string.Empty);
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        var document = new DocumentEntity
+        {
+            DocType = request.DocType,
+            Title = request.Title,
+            Source = request.Source,
+            DocDate = request.DocDate,
+            StorageUri = request.StorageUri,
+            ContentHash = contentHash,
+            Classification = classification,
+            DivisionId = divisionId,
+        };
+        db.Documents.Add(document);
+        await db.SaveChangesAsync(cancellationToken);
+
+        if (chunkTexts.Count == 0)
+        {
+            await transaction.CommitAsync(cancellationToken);
+            return IngestionResult.Ok(document.Id, 0);
+        }
+
+        var chunks = new List<ChunkEntity>(chunkTexts.Count);
+        for (var ordinal = 0; ordinal < chunkTexts.Count; ordinal++)
+        {
+            chunks.Add(new ChunkEntity
+            {
+                DocumentId = document.Id,
+                Ordinal = ordinal,
+                Text = chunkTexts[ordinal],
+                Classification = classification,
+                DivisionId = divisionId,
+                IsCurrent = true,
+            });
+        }
+
+        db.Chunks.AddRange(chunks);
+        await db.SaveChangesAsync(cancellationToken);
+
+        var embeddings = await embeddingGenerator.GenerateAsync(chunkTexts, cancellationToken: cancellationToken);
+        for (var i = 0; i < chunks.Count; i++)
+        {
+            db.Embeddings.Add(new EmbeddingEntity
+            {
+                ChunkId = chunks[i].Id,
+                Embedding = new Vector(embeddings[i].Vector),
+                ModelKey = ModelRole.Embeddings.ToString(),
+                Classification = classification,
+                DivisionId = divisionId,
+                IsCurrent = true,
+            });
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return IngestionResult.Ok(document.Id, chunks.Count);
+    }
+}

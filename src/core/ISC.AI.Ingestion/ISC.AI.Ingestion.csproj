@@ -2,6 +2,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+    <!-- Загрузка пишет в корпус ядра (core→core допустимо; на профиль ссылок нет). -->
+    <ProjectReference Include="..\ISC.AI.Persistence\ISC.AI.Persistence.csproj" />
   </ItemGroup>
 
   <!-- Конвейер загрузки: OCR (Tesseract) → парсинг (.docx) → чанкинг → эмбеддинги.
@@ -11,6 +13,8 @@
     <PackageReference Include="DocumentFormat.OpenXml" />
     <PackageReference Include="Microsoft.Extensions.AI.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Pgvector" />
   </ItemGroup>
 
 </Project>
