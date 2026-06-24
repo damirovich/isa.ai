@@ -1,3 +1,5 @@
+using ISC.AI.Abstractions.Audit;
+using ISC.AI.Persistence.Audit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -31,6 +33,9 @@ public static class CorePersistenceServiceCollectionExtensions
                     npg.UseVector(); // маппинг pgvector (ТО-инф-02)
                 })
                 .UseSnakeCaseNamingConvention());
+
+        // Неизменяемый журнал аудита (ТБ-030/031), append-only с хеш-цепочкой.
+        services.AddScoped<IAuditWriter, AuditWriter>();
 
         return services;
     }

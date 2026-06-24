@@ -30,9 +30,9 @@ public abstract class AuditedDbContext : DbContext
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
-    // Мягкое удаление и авто-таймстемпы. Захват diff для неизменяемого аудита — на Э3-03
-    // (журнала в этой БД пока нет; копится в sink). Перехват в обоих SaveChanges-путях, чтобы
-    // аудит нельзя было обойти синхронным вызовом.
+    // Мягкое удаление и авто-таймстемпы. Неизменяемый журнал ДЕЙСТВИЙ ведётся отдельно — через
+    // IAuditWriter (Э3-03, core.audit_record, хеш-цепочка); захват CRUD-диффа сюда можно добавить
+    // позже как EF-interceptor. Перехват в обоих SaveChanges-путях, чтобы хук нельзя было обойти.
     private void ApplyAudit()
     {
         ApplySoftDelete();

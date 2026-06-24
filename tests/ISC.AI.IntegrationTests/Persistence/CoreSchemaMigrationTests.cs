@@ -2,6 +2,7 @@ using System.Data.Common;
 using ISC.AI.Persistence;
 using ISC.AI.Persistence.Entities;
 using Microsoft.EntityFrameworkCore;
+using Pgvector.EntityFrameworkCore;
 using Shouldly;
 using Testcontainers.PostgreSql;
 
@@ -25,7 +26,11 @@ public sealed class CoreSchemaMigrationTests : IAsyncLifetime
     private CoreDbContext CreateContext() =>
         new(new DbContextOptionsBuilder<CoreDbContext>()
             .UseNpgsql(_postgres.GetConnectionString(), npg =>
-                npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema))
+            {
+                npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
+                npg.UseVector(); // InitialCore включает vector-колонку эмбеддинга
+            })
+            .UseSnakeCaseNamingConvention()
             .Options);
 
     [Fact(DisplayName = "Миграция InitialCore создаёт схему core и сохраняет документ")]
