@@ -1,5 +1,6 @@
 using ISC.AI.AI.Retrieval;
 using ISC.AI.AI.Security;
+using ISC.AI.Abstractions.Retrieval;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Persistence;
 using ISC.AI.Persistence.Entities;
@@ -13,16 +14,17 @@ using Testcontainers.PostgreSql;
 namespace ISC.AI.IntegrationTests.Persistence;
 
 /// <summary>
-/// GATE-1 (ТБ-020/021/022): фильтр доступа на стороне БД. Материал выше допуска, из чужого
-/// подразделения и утративший силу не выдаётся; запрос без подходящего допуска возвращает ПУСТО —
-/// неотличимо от «документ отсутствует» (по контенту). Реальный PostgreSQL+pgvector через Testcontainers.
+/// GATE-3 (КИ-02, ТЭ-003, ADR-0013): версионность редакций. Утратившая силу редакция
+/// (<c>IsCurrent = false</c>) НЕ выдаётся как действующая по умолчанию (КИ-02 — доля
+/// «устаревшее-как-актуальное» = 0); неактуальные источники включаются ТОЛЬКО явным
+/// <see cref="RetrievalFilter.IncludeSuperseded"/> — для показа с пометкой «утратила силу» (ТЭ-003).
+/// Реальный PostgreSQL+pgvector через Testcontainers.
 /// </summary>
 /// <remarks>
-/// Требуется Docker. Эмбеддер — фиксированный фейк (тест проверяет ФИЛЬТРАЦИЮ, не качество векторов).
-/// Неразличимость по времени/тексту ошибки (timing/oracle) — отдельная методика (Э3-09), здесь не покрыта.
+/// Требуется Docker. Эмбеддер — фиксированный фейк (тест проверяет ВИДИМОСТЬ ПО РЕДАКЦИИ, не качество векторов).
 /// </remarks>
 [Trait("Category", "Gate")]
-public sealed class RetrieverAccessFilterTests : IAsyncLifetime
+public sealed class Gate3RevisionVisibilityTests : IAsyncLifetime
 {
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16").Build();
 
@@ -30,8 +32,8 @@ public sealed class RetrieverAccessFilterTests : IAsyncLifetime
 
     public Task DisposeAsync() => _postgres.DisposeAsync().AsTask();
 
-    [Fact(DisplayName = "GATE-1: выше допуска / чужое подразделение / устаревшее не выдаётся; нет доступа = пусто")]
-    public async Task Retriever_enforces_access_filter_on_db_side()
+    [Fact(DisplayName = "GATE-3: утратившая силу не выдаётся как действующая; видна только при IncludeSuperseded")]
+    public async Task Superseded_revision_is_not_served_as_current()
     {
         var factory = new TestContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
@@ -45,43 +47,41 @@ public sealed class RetrieverAccessFilterTests : IAsyncLifetime
             new FixedEmbeddingGenerator(EmbeddingEntity.Dimensions),
             new AllowAllAccessPolicy());
 
-        // Субъект: допуск гриф ≤ 1, подразделение 7.
-        var access = new AccessContext("u1", MaxClassification: 1, AllowedDivisions: [7]);
-        var results = await retriever.RetrieveAsync("любой запрос", access, topK: 50);
+        var access = new AccessContext("u1", MaxClassification: 0, AllowedDivisions: [7]);
 
-        // Возвращается ТОЛЬКО допустимый актуальный фрагмент (cls=1, div=7, current).
-        results.Count.ShouldBe(1);
-        results[0].Classification.ShouldBe<short>(1);
-        results[0].DivisionId.ShouldBe(7);
-        results[0].IsCurrent.ShouldBeTrue();
+        // По умолчанию: только действующая редакция (КИ-02 — устаревшее как актуальное не выдаётся).
+        var current = await retriever.RetrieveAsync("любой запрос", access, topK: 50);
+        current.Count.ShouldBe(1);
+        current.ShouldAllBe(c => c.IsCurrent);
 
-        // Неразличимость (по контенту): субъект без подходящего допуска получает ПУСТО.
-        var noAccess = new AccessContext("u2", MaxClassification: 0, AllowedDivisions: [999]);
-        (await retriever.RetrieveAsync("любой запрос", noAccess, topK: 50)).ShouldBeEmpty();
+        // Явный показ утративших силу (ТЭ-003): обе редакции; неактуальная помечена IsCurrent=false.
+        var withStale = await retriever.RetrieveAsync(
+            "любой запрос", access, topK: 50, filter: new RetrievalFilter(IncludeSuperseded: true));
+        withStale.Count.ShouldBe(2);
+        withStale.ShouldContain(c => c.IsCurrent);
+        withStale.ShouldContain(c => !c.IsCurrent);
     }
 
     private static async Task SeedAsync(CoreDbContext db)
     {
-        var doc = new DocumentEntity { DocType = "приказ", Title = "Тест", Classification = 1, DivisionId = 7 };
+        var doc = new DocumentEntity { DocType = "положение", Title = "Положение о порядке", Classification = 0, DivisionId = 7 };
         db.Documents.Add(doc);
         await db.SaveChangesAsync();
 
-        await AddChunkWithEmbeddingAsync(db, doc.Id, ordinal: 0, classification: 1, divisionId: 7, isCurrent: true);   // допустимо
-        await AddChunkWithEmbeddingAsync(db, doc.Id, ordinal: 1, classification: 2, divisionId: 7, isCurrent: true);   // выше допуска
-        await AddChunkWithEmbeddingAsync(db, doc.Id, ordinal: 2, classification: 1, divisionId: 9, isCurrent: true);   // чужое подразделение
-        await AddChunkWithEmbeddingAsync(db, doc.Id, ordinal: 3, classification: 1, divisionId: 7, isCurrent: false);  // утратило силу
+        // Две редакции одного материала: действующая и утратившая силу (тот же вектор).
+        await AddChunkWithEmbeddingAsync(db, doc.Id, ordinal: 0, isCurrent: true);
+        await AddChunkWithEmbeddingAsync(db, doc.Id, ordinal: 1, isCurrent: false);
     }
 
-    private static async Task AddChunkWithEmbeddingAsync(
-        CoreDbContext db, int documentId, int ordinal, short classification, int divisionId, bool isCurrent)
+    private static async Task AddChunkWithEmbeddingAsync(CoreDbContext db, int documentId, int ordinal, bool isCurrent)
     {
         var chunk = new ChunkEntity
         {
             DocumentId = documentId,
             Ordinal = ordinal,
-            Text = $"фрагмент {ordinal}",
-            Classification = classification,
-            DivisionId = divisionId,
+            Text = $"редакция {ordinal}",
+            Classification = 0,
+            DivisionId = 7,
             IsCurrent = isCurrent,
         };
         db.Chunks.Add(chunk);
@@ -94,8 +94,8 @@ public sealed class RetrieverAccessFilterTests : IAsyncLifetime
             ChunkId = chunk.Id,
             Embedding = new Vector(values),
             ModelKey = "test",
-            Classification = classification,
-            DivisionId = divisionId,
+            Classification = 0,
+            DivisionId = 7,
             IsCurrent = isCurrent,
         });
         await db.SaveChangesAsync();
@@ -115,7 +115,7 @@ public sealed class RetrieverAccessFilterTests : IAsyncLifetime
                 .Options);
     }
 
-    // Фейковый эмбеддер: всегда один и тот же вектор (тест проверяет фильтрацию, не качество поиска).
+    // Фейковый эмбеддер: всегда один и тот же вектор (тест проверяет видимость по редакции, не качество поиска).
     private sealed class FixedEmbeddingGenerator(int dimensions) : IEmbeddingGenerator<string, Embedding<float>>
     {
         private readonly ReadOnlyMemory<float> _vector = BuildVector(dimensions);
