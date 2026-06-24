@@ -22,15 +22,13 @@ public class EmbeddingEntityConfiguration : IEntityTypeConfiguration<EmbeddingEn
         builder.Property(e => e.IsCurrent).IsRequired().HasDefaultValue(true);
 
         // Pre-filter доступа на стороне БД (ТБ-020): B-tree по режимным полям рядом с ANN-поиском.
-        builder.HasIndex(e => new { e.Classification, e.DivisionId })
-               .HasDatabaseName("ixEmbeddingClassificationDivision");
+        builder.HasIndex(e => new { e.Classification, e.DivisionId });
 
         // ANN-индекс семантического поиска: HNSW + косинусная метрика. Параметры/метрика —
         // тюнинг ADR-0007 (ТБ-022) и выбор эмбеддера (ТО-прог-03); здесь — рабочий дефолт.
         builder.HasIndex(e => e.Embedding)
                .HasMethod("hnsw")
-               .HasOperators("vector_cosine_ops")
-               .HasDatabaseName("ixEmbeddingVectorHnsw");
+               .HasOperators("vector_cosine_ops");
 
         builder.HasOne(e => e.Chunk).WithMany()
                .HasForeignKey(e => e.ChunkId).OnDelete(DeleteBehavior.Cascade);

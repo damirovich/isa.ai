@@ -8,7 +8,7 @@ public class ChunkRevisionLinkConfiguration : IEntityTypeConfiguration<ChunkRevi
 {
     public void Configure(EntityTypeBuilder<ChunkRevisionLink> builder)
     {
-        builder.ToTable("chunkRevisionLink", InspectorDbContext.Schema);
+        builder.ToTable("chunk_revision_link", InspectorDbContext.Schema);
 
         builder.HasKey(e => e.Id);
 
@@ -18,6 +18,6 @@ public class ChunkRevisionLinkConfiguration : IEntityTypeConfiguration<ChunkRevi
 
         // Слабая ссылка на core.chunk.Id (по значению, без FK). Индекс — для материализации is_current и очистки (ТБ-064).
         builder.Property(e => e.ChunkId).IsRequired();
-        builder.HasIndex(e => e.ChunkId).HasDatabaseName("ixChunkRevisionLinkChunk");
+        builder.HasIndex(e => e.ChunkId);
     }
 }

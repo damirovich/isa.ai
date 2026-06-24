@@ -13,12 +13,12 @@ public sealed class InspectorDbContextDesignFactory : IDesignTimeDbContextFactor
     public InspectorDbContext CreateDbContext(string[] args)
     {
         var connectionString = Environment.GetEnvironmentVariable("ISCAI_INSPECTOR_CONNECTION")
-            ?? "Host=localhost;Port=5432;Database=isc_core;Username=postgres;Password=postgres";
+            ?? "Server=10.10.0.115;Database=ISC_AI;Username=postgres;Password=Qwe123!@#";
 
         var options = new DbContextOptionsBuilder<InspectorDbContext>()
             .UseNpgsql(connectionString, npg =>
                 npg.MigrationsHistoryTable("__ef_migrations_history", InspectorDbContext.Schema))
-            .UseCamelCaseNamingConvention()
+            .UseSnakeCaseNamingConvention()
             .Options;
 
         return new InspectorDbContext(options);

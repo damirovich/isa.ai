@@ -15,10 +15,8 @@ public class ChunkEntityConfiguration : IEntityTypeConfiguration<ChunkEntity>
         builder.Property(e => e.Classification).IsRequired();
         builder.Property(e => e.DivisionId).IsRequired();
 
-        builder.HasIndex(e => new { e.Classification, e.DivisionId })
-               .HasDatabaseName("ixChunkClassificationDivision");
-        builder.HasIndex(e => new { e.DocumentId, e.Ordinal })
-               .HasDatabaseName("ixChunkDocumentOrdinal");
+        builder.HasIndex(e => new { e.Classification, e.DivisionId });
+        builder.HasIndex(e => new { e.DocumentId, e.Ordinal });
 
         builder.HasOne(e => e.Document).WithMany(d => d.Chunks)
                .HasForeignKey(e => e.DocumentId).OnDelete(DeleteBehavior.Cascade);

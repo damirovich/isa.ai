@@ -15,7 +15,7 @@ public sealed class CoreDbContextDesignFactory : IDesignTimeDbContextFactory<Cor
     public CoreDbContext CreateDbContext(string[] args)
     {
         var connectionString = Environment.GetEnvironmentVariable("ISCAI_CORE_CONNECTION")
-            ?? "Host=localhost;Port=5432;Database=isc_core;Username=postgres;Password=postgres";
+            ?? "Server=10.10.0.115;Database=ISC_AI;Username=postgres;Password=Qwe123!@#";
 
         var options = new DbContextOptionsBuilder<CoreDbContext>()
             .UseNpgsql(connectionString, npg =>
@@ -23,7 +23,7 @@ public sealed class CoreDbContextDesignFactory : IDesignTimeDbContextFactory<Cor
                 npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
                 npg.UseVector(); // маппинг pgvector (ТО-инф-02)
             })
-            .UseCamelCaseNamingConvention()
+            .UseSnakeCaseNamingConvention()
             .Options;
 
         return new CoreDbContext(options);

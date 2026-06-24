@@ -11,6 +11,6 @@ public class ClearanceEntityConfiguration : IEntityTypeConfiguration<ClearanceEn
 
         builder.Property(e => e.MaxClassification).IsRequired();
 
-        builder.HasIndex(e => e.UserId).IsUnique().HasDatabaseName("ixClearanceUser");
+        builder.HasIndex(e => e.UserId).IsUnique();
     }
 }

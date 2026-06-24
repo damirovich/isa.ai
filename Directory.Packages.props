@@ -25,6 +25,7 @@
     <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.9" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.9" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.9" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.2" />
     <PackageVersion Include="Pgvector" Version="0.3.2" />
     <PackageVersion Include="Pgvector.EntityFrameworkCore" Version="0.3.0" />

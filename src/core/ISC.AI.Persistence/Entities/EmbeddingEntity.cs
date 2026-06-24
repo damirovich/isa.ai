@@ -11,7 +11,7 @@ namespace ISC.AI.Persistence.Entities;
 /// с вектором, без джойнов через чанк/документ. Это опора fail-closed-извлечения и защиты прямого
 /// доступа к таблице векторов (ТБ-020, подпроверка GATE-1). Физически удаляемый носитель ДСП (ТБ-064).
 /// </remarks>
-public class EmbeddingEntity : AuditableEntity
+public class EmbeddingEntity : AuditableEntity, IClassified
 {
     /// <summary>
     /// Размерность вектора выбранного эмбеддера (EmbeddingGemma, ADR-0011); фиксируется на уровне схемы

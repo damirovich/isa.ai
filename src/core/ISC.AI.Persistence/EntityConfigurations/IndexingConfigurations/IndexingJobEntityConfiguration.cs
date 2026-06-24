@@ -5,13 +5,13 @@ public class IndexingJobEntityConfiguration : IEntityTypeConfiguration<IndexingJ
 {
     public void Configure(EntityTypeBuilder<IndexingJobEntity> builder)
     {
-        builder.ToTable("indexingJob", CoreDbContext.Schema);
+        builder.ToTable("indexing_job", CoreDbContext.Schema);
 
         builder.HasKey(e => e.Id);
 
         builder.Property(e => e.Status).IsRequired();
         builder.Property(e => e.Error).HasMaxLength(8000);
 
-        builder.HasIndex(e => e.Status).HasDatabaseName("ixIndexingJobStatus");
+        builder.HasIndex(e => e.Status);
     }
 }
