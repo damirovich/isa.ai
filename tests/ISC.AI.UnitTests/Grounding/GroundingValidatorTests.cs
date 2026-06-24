@@ -10,6 +10,7 @@ namespace ISC.AI.UnitTests.Grounding;
 /// Тесты грунтовки (ТБ-040, GATE-2, ADR-0013): ссылка подтверждается только из АКТУАЛЬНОГО фрагмента;
 /// отсутствующая — непроверенная (вывод не «готов»); найденная лишь в неактуальном — утратила силу.
 /// </summary>
+[Trait("Category", "Gate")]
 public sealed class GroundingValidatorTests
 {
     private static RetrievedChunk Chunk(int id, string text, bool isCurrent) =>
