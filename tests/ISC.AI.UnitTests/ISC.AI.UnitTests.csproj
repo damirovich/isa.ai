@@ -4,6 +4,7 @@
        Общая тестовая обвязка наследуется из tests/Directory.Build.props. -->
   <ItemGroup>
     <PackageReference Include="bunit" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
   </ItemGroup>
 
   <ItemGroup>
