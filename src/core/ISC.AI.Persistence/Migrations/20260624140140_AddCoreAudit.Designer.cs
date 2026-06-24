@@ -13,8 +13,8 @@ using Pgvector;
 namespace ISC.AI.Persistence.Migrations
 {
     [DbContext(typeof(CoreDbContext))]
-    [Migration("20260623084833_AddCoreEmbeddings")]
-    partial class AddCoreEmbeddings
+    [Migration("20260624140140_AddCoreAudit")]
+    partial class AddCoreAudit
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -39,39 +39,99 @@ namespace ISC.AI.Persistence.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("createdAt");
+                        .HasColumnName("created_at");
 
                     b.Property<string>("DisplayName")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
-                        .HasColumnName("displayName");
+                        .HasColumnName("display_name");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean")
-                        .HasColumnName("isActive");
+                        .HasColumnName("is_active");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean")
-                        .HasColumnName("isDeleted");
+                        .HasColumnName("is_deleted");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updatedAt");
+                        .HasColumnName("updated_at");
 
                     b.Property<string>("UserName")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
-                        .HasColumnName("userName");
+                        .HasColumnName("user_name");
 
                     b.HasKey("Id")
-                        .HasName("pK_appUser");
+                        .HasName("pk_app_user");
 
                     b.HasIndex("UserName")
                         .IsUnique()
-                        .HasDatabaseName("ixAppUserUsername");
+                        .HasDatabaseName("ix_app_user_user_name");
 
-                    b.ToTable("appUser", "core");
+                    b.ToTable("app_user", "core");
+                });
+
+            modelBuilder.Entity("ISC.AI.Persistence.Entities.AuditRecordEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("Action")
+                        .HasColumnType("integer")
+                        .HasColumnName("action");
+
+                    b.Property<short>("Classification")
+                        .HasColumnType("smallint")
+                        .HasColumnName("classification");
+
+                    b.Property<int?>("DivisionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("division_id");
+
+                    b.Property<string>("ObjectRef")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("object_ref");
+
+                    b.Property<DateTime>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<string>("PayloadSensitive")
+                        .HasColumnType("text")
+                        .HasColumnName("payload_sensitive");
+
+                    b.Property<byte[]>("PrevHash")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("prev_hash");
+
+                    b.Property<byte[]>("RecordHash")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("record_hash");
+
+                    b.Property<int?>("SubjectId")
+                        .HasColumnType("integer")
+                        .HasColumnName("subject_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_audit_record");
+
+                    b.HasIndex("OccurredAt")
+                        .HasDatabaseName("ix_audit_record_occurred_at");
+
+                    b.HasIndex("Classification", "DivisionId")
+                        .HasDatabaseName("ix_audit_record_classification_division_id");
+
+                    b.ToTable("audit_record", "core");
                 });
 
             modelBuilder.Entity("ISC.AI.Persistence.Entities.ChunkEntity", b =>
@@ -89,21 +149,21 @@ namespace ISC.AI.Persistence.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("createdAt");
+                        .HasColumnName("created_at");
 
                     b.Property<int>("DivisionId")
                         .HasColumnType("integer")
-                        .HasColumnName("divisionId");
+                        .HasColumnName("division_id");
 
                     b.Property<int>("DocumentId")
                         .HasColumnType("integer")
-                        .HasColumnName("documentId");
+                        .HasColumnName("document_id");
 
                     b.Property<bool>("IsCurrent")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(true)
-                        .HasColumnName("isCurrent");
+                        .HasColumnName("is_current");
 
                     b.Property<int>("Ordinal")
                         .HasColumnType("integer")
@@ -116,16 +176,16 @@ namespace ISC.AI.Persistence.Migrations
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updatedAt");
+                        .HasColumnName("updated_at");
 
                     b.HasKey("Id")
-                        .HasName("pK_chunk");
+                        .HasName("pk_chunk");
 
                     b.HasIndex("Classification", "DivisionId")
-                        .HasDatabaseName("ixChunkClassificationDivision");
+                        .HasDatabaseName("ix_chunk_classification_division_id");
 
                     b.HasIndex("DocumentId", "Ordinal")
-                        .HasDatabaseName("ixChunkDocumentOrdinal");
+                        .HasDatabaseName("ix_chunk_document_id_ordinal");
 
                     b.ToTable("chunk", "core");
                 });
@@ -141,30 +201,30 @@ namespace ISC.AI.Persistence.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("createdAt");
+                        .HasColumnName("created_at");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean")
-                        .HasColumnName("isDeleted");
+                        .HasColumnName("is_deleted");
 
                     b.Property<short>("MaxClassification")
                         .HasColumnType("smallint")
-                        .HasColumnName("maxClassification");
+                        .HasColumnName("max_classification");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updatedAt");
+                        .HasColumnName("updated_at");
 
                     b.Property<int>("UserId")
                         .HasColumnType("integer")
-                        .HasColumnName("userId");
+                        .HasColumnName("user_id");
 
                     b.HasKey("Id")
-                        .HasName("pK_clearance");
+                        .HasName("pk_clearance");
 
                     b.HasIndex("UserId")
                         .IsUnique()
-                        .HasDatabaseName("ixClearanceUser");
+                        .HasDatabaseName("ix_clearance_user_id");
 
                     b.ToTable("clearance", "core");
                 });
@@ -184,25 +244,25 @@ namespace ISC.AI.Persistence.Migrations
 
                     b.Property<byte[]>("ContentHash")
                         .HasColumnType("bytea")
-                        .HasColumnName("contentHash");
+                        .HasColumnName("content_hash");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("createdAt");
+                        .HasColumnName("created_at");
 
                     b.Property<int>("DivisionId")
                         .HasColumnType("integer")
-                        .HasColumnName("divisionId");
+                        .HasColumnName("division_id");
 
                     b.Property<DateOnly?>("DocDate")
                         .HasColumnType("date")
-                        .HasColumnName("docDate");
+                        .HasColumnName("doc_date");
 
                     b.Property<string>("DocType")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
-                        .HasColumnName("docType");
+                        .HasColumnName("doc_type");
 
                     b.Property<string>("Source")
                         .HasMaxLength(700)
@@ -211,7 +271,7 @@ namespace ISC.AI.Persistence.Migrations
 
                     b.Property<string>("StorageUri")
                         .HasColumnType("text")
-                        .HasColumnName("storageUri");
+                        .HasColumnName("storage_uri");
 
                     b.Property<string>("Title")
                         .IsRequired()
@@ -221,16 +281,16 @@ namespace ISC.AI.Persistence.Migrations
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updatedAt");
+                        .HasColumnName("updated_at");
 
                     b.HasKey("Id")
-                        .HasName("pK_document");
+                        .HasName("pk_document");
 
                     b.HasIndex("ContentHash")
-                        .HasDatabaseName("ixDocumentContentHash");
+                        .HasDatabaseName("ix_document_content_hash");
 
                     b.HasIndex("Classification", "DivisionId")
-                        .HasDatabaseName("ixDocumentClassificationDivision");
+                        .HasDatabaseName("ix_document_classification_division_id");
 
                     b.ToTable("document", "core");
                 });
@@ -246,7 +306,7 @@ namespace ISC.AI.Persistence.Migrations
 
                     b.Property<int>("ChunkId")
                         .HasColumnType("integer")
-                        .HasColumnName("chunkId");
+                        .HasColumnName("chunk_id");
 
                     b.Property<short>("Classification")
                         .HasColumnType("smallint")
@@ -254,11 +314,11 @@ namespace ISC.AI.Persistence.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("createdAt");
+                        .HasColumnName("created_at");
 
                     b.Property<int>("DivisionId")
                         .HasColumnType("integer")
-                        .HasColumnName("divisionId");
+                        .HasColumnName("division_id");
 
                     b.Property<Vector>("Embedding")
                         .IsRequired()
@@ -269,32 +329,32 @@ namespace ISC.AI.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(true)
-                        .HasColumnName("isCurrent");
+                        .HasColumnName("is_current");
 
                     b.Property<string>("ModelKey")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
-                        .HasColumnName("modelKey");
+                        .HasColumnName("model_key");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updatedAt");
+                        .HasColumnName("updated_at");
 
                     b.HasKey("Id")
-                        .HasName("pK_embedding");
+                        .HasName("pk_embedding");
 
                     b.HasIndex("ChunkId")
-                        .HasDatabaseName("iX_embedding_chunkId");
+                        .HasDatabaseName("ix_embedding_chunk_id");
 
                     b.HasIndex("Embedding")
-                        .HasDatabaseName("ixEmbeddingVectorHnsw");
+                        .HasDatabaseName("ix_embedding_embedding");
 
                     NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Embedding"), "hnsw");
                     NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("Embedding"), new[] { "vector_cosine_ops" });
 
                     b.HasIndex("Classification", "DivisionId")
-                        .HasDatabaseName("ixEmbeddingClassificationDivision");
+                        .HasDatabaseName("ix_embedding_classification_division_id");
 
                     b.ToTable("embedding", "core");
                 });
@@ -310,15 +370,15 @@ namespace ISC.AI.Persistence.Migrations
 
                     b.Property<DateTime?>("CompletedAt")
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("completedAt");
+                        .HasColumnName("completed_at");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("createdAt");
+                        .HasColumnName("created_at");
 
                     b.Property<int?>("DocumentId")
                         .HasColumnType("integer")
-                        .HasColumnName("documentId");
+                        .HasColumnName("document_id");
 
                     b.Property<string>("Error")
                         .HasMaxLength(8000)
@@ -331,15 +391,15 @@ namespace ISC.AI.Persistence.Migrations
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updatedAt");
+                        .HasColumnName("updated_at");
 
                     b.HasKey("Id")
-                        .HasName("pK_indexingJob");
+                        .HasName("pk_indexing_job");
 
                     b.HasIndex("Status")
-                        .HasDatabaseName("ixIndexingJobStatus");
+                        .HasDatabaseName("ix_indexing_job_status");
 
-                    b.ToTable("indexingJob", "core");
+                    b.ToTable("indexing_job", "core");
                 });
 
             modelBuilder.Entity("ISC.AI.Persistence.Entities.ChunkEntity", b =>
@@ -349,7 +409,7 @@ namespace ISC.AI.Persistence.Migrations
                         .HasForeignKey("DocumentId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fK_chunk_documents_documentId");
+                        .HasConstraintName("fk_chunk_documents_document_id");
 
                     b.Navigation("Document");
                 });
@@ -361,7 +421,7 @@ namespace ISC.AI.Persistence.Migrations
                         .HasForeignKey("ISC.AI.Persistence.Entities.ClearanceEntity", "UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fK_clearance_appUser_userId");
+                        .HasConstraintName("fk_clearance_app_user_user_id");
 
                     b.Navigation("User");
                 });
@@ -373,7 +433,7 @@ namespace ISC.AI.Persistence.Migrations
                         .HasForeignKey("ChunkId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fK_embedding_chunk_chunkId");
+                        .HasConstraintName("fk_embedding_chunk_chunk_id");
 
                     b.Navigation("Chunk");
                 });

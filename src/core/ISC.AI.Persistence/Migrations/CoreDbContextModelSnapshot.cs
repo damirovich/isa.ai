@@ -71,6 +71,66 @@ namespace ISC.AI.Persistence.Migrations
                     b.ToTable("app_user", "core");
                 });
 
+            modelBuilder.Entity("ISC.AI.Persistence.Entities.AuditRecordEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("Action")
+                        .HasColumnType("integer")
+                        .HasColumnName("action");
+
+                    b.Property<short>("Classification")
+                        .HasColumnType("smallint")
+                        .HasColumnName("classification");
+
+                    b.Property<int?>("DivisionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("division_id");
+
+                    b.Property<string>("ObjectRef")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("object_ref");
+
+                    b.Property<DateTime>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<string>("PayloadSensitive")
+                        .HasColumnType("text")
+                        .HasColumnName("payload_sensitive");
+
+                    b.Property<byte[]>("PrevHash")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("prev_hash");
+
+                    b.Property<byte[]>("RecordHash")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("record_hash");
+
+                    b.Property<int?>("SubjectId")
+                        .HasColumnType("integer")
+                        .HasColumnName("subject_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_audit_record");
+
+                    b.HasIndex("OccurredAt")
+                        .HasDatabaseName("ix_audit_record_occurred_at");
+
+                    b.HasIndex("Classification", "DivisionId")
+                        .HasDatabaseName("ix_audit_record_classification_division_id");
+
+                    b.ToTable("audit_record", "core");
+                });
+
             modelBuilder.Entity("ISC.AI.Persistence.Entities.ChunkEntity", b =>
                 {
                     b.Property<int>("Id")

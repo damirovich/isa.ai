@@ -24,6 +24,7 @@ public class CoreDbContext(DbContextOptions<CoreDbContext> options) : AuditedDbC
     public DbSet<AppUserEntity> Users { get; set; } = null!;
     public DbSet<ClearanceEntity> Clearances { get; set; } = null!;
     public DbSet<IndexingJobEntity> IndexingJobs { get; set; } = null!;
+    public DbSet<AuditRecordEntity> AuditRecords { get; set; } = null!;
 
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
