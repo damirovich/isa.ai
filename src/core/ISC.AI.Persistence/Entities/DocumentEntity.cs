@@ -7,7 +7,7 @@ namespace ISC.AI.Persistence.Entities;
 /// ДСП — ТБ-064), поэтому НЕ <c>ISoftDeletable</c>. Доменную связь с нормой НПА ведёт профиль
 /// (<c>inspector.norm_document_link</c>, слабая ссылка по <c>Id</c> без FK через границу схем, ТО-инф-06).
 /// </summary>
-public class DocumentEntity : AuditableEntity
+public class DocumentEntity : AuditableEntity, IClassified
 {
     /// <summary>Тип документа (закон, приказ, справка, акт и т. п.).</summary>
     public required string DocType { get; set; }

@@ -8,7 +8,7 @@ namespace ISC.AI.Persistence.Entities;
 /// в той же строке, где лежит вектор, без джойнов. Поля NOT NULL — опора fail-closed (ТБ-021/024).
 /// Вектор (pgvector) добавляется на Э3-02. Физически удаляемый носитель ДСП (ТБ-064).
 /// </remarks>
-public class ChunkEntity : AuditableEntity
+public class ChunkEntity : AuditableEntity, IClassified
 {
     /// <summary>Родительский документ.</summary>
     public int DocumentId { get; set; }

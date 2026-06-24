@@ -18,8 +18,7 @@ public class DocumentEntityConfiguration : IEntityTypeConfiguration<DocumentEnti
         builder.Property(e => e.DivisionId).IsRequired();
 
         // Индекс под фильтр доступа на извлечении (ТБ-020).
-        builder.HasIndex(e => new { e.Classification, e.DivisionId })
-               .HasDatabaseName("ixDocumentClassificationDivision");
-        builder.HasIndex(e => e.ContentHash).HasDatabaseName("ixDocumentContentHash"); // дедупликация (ТНД-002)
+        builder.HasIndex(e => new { e.Classification, e.DivisionId });
+        builder.HasIndex(e => e.ContentHash); // дедупликация (ТНД-002)
     }
 }

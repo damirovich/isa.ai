@@ -5,14 +5,14 @@ public class AppUserEntityConfiguration : IEntityTypeConfiguration<AppUserEntity
 {
     public void Configure(EntityTypeBuilder<AppUserEntity> builder)
     {
-        builder.ToTable("appUser", CoreDbContext.Schema);
+        builder.ToTable("app_user", CoreDbContext.Schema);
 
         builder.HasKey(e => e.Id);
 
         builder.Property(e => e.UserName).HasMaxLength(100).IsRequired();
         builder.Property(e => e.DisplayName).HasMaxLength(200);
 
-        builder.HasIndex(e => e.UserName).IsUnique().HasDatabaseName("ixAppUserUsername");
+        builder.HasIndex(e => e.UserName).IsUnique();
 
         builder.HasOne(e => e.Clearance).WithOne(c => c.User)
                .HasForeignKey<ClearanceEntity>(c => c.UserId).OnDelete(DeleteBehavior.Cascade);

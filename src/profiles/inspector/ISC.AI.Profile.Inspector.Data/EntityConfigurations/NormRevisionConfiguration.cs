@@ -5,7 +5,7 @@ public class NormRevisionConfiguration : IEntityTypeConfiguration<NormRevision>
 {
     public void Configure(EntityTypeBuilder<NormRevision> builder)
     {
-        builder.ToTable("normRevision", InspectorDbContext.Schema);
+        builder.ToTable("norm_revision", InspectorDbContext.Schema);
 
         builder.HasKey(e => e.Id);
 
@@ -16,6 +16,6 @@ public class NormRevisionConfiguration : IEntityTypeConfiguration<NormRevision>
                .HasForeignKey(e => e.NormId).OnDelete(DeleteBehavior.Cascade);
 
         // Быстрый выбор действующей редакции по умолчанию (ТО-инф-04, GATE-3).
-        builder.HasIndex(e => new { e.NormId, e.Status }).HasDatabaseName("ixNormRevisionNormStatus");
+        builder.HasIndex(e => new { e.NormId, e.Status });
     }
 }

@@ -22,7 +22,7 @@ public static class InspectorPersistenceServiceCollectionExtensions
         services.AddDbContextFactory<InspectorDbContext>(options =>
             options.UseNpgsql(connectionString, npg =>
                     npg.MigrationsHistoryTable("__ef_migrations_history", InspectorDbContext.Schema))
-                .UseCamelCaseNamingConvention());
+                .UseSnakeCaseNamingConvention());
 
         return services;
     }

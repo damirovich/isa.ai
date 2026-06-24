@@ -8,7 +8,7 @@ public class NormDocumentLinkConfiguration : IEntityTypeConfiguration<NormDocume
 {
     public void Configure(EntityTypeBuilder<NormDocumentLink> builder)
     {
-        builder.ToTable("normDocumentLink", InspectorDbContext.Schema);
+        builder.ToTable("norm_document_link", InspectorDbContext.Schema);
 
         builder.HasKey(e => e.Id);
 
@@ -18,6 +18,6 @@ public class NormDocumentLinkConfiguration : IEntityTypeConfiguration<NormDocume
 
         // Слабая ссылка на core.document.Id (по значению, без FK). Индекс — для очистки осиротевших связок (ТБ-064).
         builder.Property(e => e.DocumentId).IsRequired();
-        builder.HasIndex(e => e.DocumentId).HasDatabaseName("ixNormDocumentLinkDocument");
+        builder.HasIndex(e => e.DocumentId);
     }
 }

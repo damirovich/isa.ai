@@ -30,7 +30,7 @@ public static class CorePersistenceServiceCollectionExtensions
                     npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
                     npg.UseVector(); // маппинг pgvector (ТО-инф-02)
                 })
-                .UseCamelCaseNamingConvention());
+                .UseSnakeCaseNamingConvention());
 
         return services;
     }

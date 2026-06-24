@@ -59,7 +59,7 @@ public sealed class CoreSchemaMigrationTests : IAsyncLifetime
 
         // Прямой SQL мимо EF: вставка без classification/division_id нарушает NOT NULL.
         var insertWithoutRegime = async () => await db.Database.ExecuteSqlRawAsync(
-            "INSERT INTO core.document (\"docType\", title, \"createdAt\") VALUES ('приказ', 'Без грифа', now())");
+            "INSERT INTO core.document (doc_type, title, created_at) VALUES ('приказ', 'Без грифа', now())");
 
         await insertWithoutRegime.ShouldThrowAsync<DbException>();
     }

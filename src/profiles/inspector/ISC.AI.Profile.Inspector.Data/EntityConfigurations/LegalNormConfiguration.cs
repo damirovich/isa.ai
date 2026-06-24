@@ -5,13 +5,13 @@ public class LegalNormConfiguration : IEntityTypeConfiguration<LegalNorm>
 {
     public void Configure(EntityTypeBuilder<LegalNorm> builder)
     {
-        builder.ToTable("legalNorm", InspectorDbContext.Schema);
+        builder.ToTable("legal_norm", InspectorDbContext.Schema);
 
         builder.HasKey(e => e.Id);
 
         builder.Property(e => e.Identifier).HasMaxLength(200).IsRequired();
         builder.Property(e => e.Title).HasMaxLength(1000).IsRequired();
 
-        builder.HasIndex(e => e.Identifier).HasDatabaseName("ixLegalNormIdentifier");
+        builder.HasIndex(e => e.Identifier);
     }
 }
