@@ -13,6 +13,7 @@
     <ProjectReference Include="..\..\src\core\ISC.AI.Persistence\ISC.AI.Persistence.csproj" />
     <ProjectReference Include="..\..\src\profiles\inspector\ISC.AI.Profile.Inspector.Data\ISC.AI.Profile.Inspector.Data.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.AI\ISC.AI.AI.csproj" />
+    <ProjectReference Include="..\..\src\core\ISC.AI.Ingestion\ISC.AI.Ingestion.csproj" />
   </ItemGroup>
 
 </Project>
