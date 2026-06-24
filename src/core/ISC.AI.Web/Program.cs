@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Reflection;
 using ISC.AI.Abstractions.Profiles;
+using ISC.AI.AI.Grounding;
 using ISC.AI.AI.Models;
 using ISC.AI.AI.Retrieval;
 using ISC.AI.Persistence;
@@ -43,6 +44,9 @@ try
 
     // RAG-извлечение с обязательным фильтром доступа на стороне БД (ADR-0007, ТБ-020, GATE-1).
     builder.Services.AddCoreRetrieval();
+
+    // Грунтовка: ссылки только из извлечённых фрагментов; «по памяти» запрещено (ТБ-040, GATE-2).
+    builder.Services.AddCoreGrounding();
 
     // --- Точка композиции профиля (ТО-прог-05/06). Только хост знает о конкретном профиле. ---
     var profile = new InspectorProfile();
