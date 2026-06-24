@@ -1,11 +1,14 @@
 using System.Globalization;
 using System.Reflection;
 using ISC.AI.Abstractions.Profiles;
+using ISC.AI.Abstractions.Security;
 using ISC.AI.AI.Grounding;
 using ISC.AI.AI.Models;
+using ISC.AI.AI.Rag;
 using ISC.AI.AI.Retrieval;
 using ISC.AI.Ingestion;
 using ISC.AI.Persistence;
+using ISC.AI.Web.Security;
 using ISC.AI.Profile.Inspector;
 using ISC.AI.Web.Components;
 using Mediator;
@@ -51,6 +54,15 @@ try
 
     // Загрузка в корпус: fail-closed (без грифа/подразделения — отказ), идемпотентно (ТБ-024, ТНД-002).
     builder.Services.AddCoreIngestion();
+
+    // RAG-оркестратор: запрос → retriever (фильтр доступа) → промпт+модель → грунтовка → ответ (ТО-мат-01).
+    builder.Services.AddCoreRag();
+
+    // DEV-заглушка контекста доступа (заменяется внешним SSO на Э3-08). Только в Development.
+    if (builder.Environment.IsDevelopment())
+    {
+        builder.Services.AddScoped<IAccessContextProvider, DevAccessContextProvider>();
+    }
 
     // --- Точка композиции профиля (ТО-прог-05/06). Только хост знает о конкретном профиле. ---
     var profile = new InspectorProfile();
