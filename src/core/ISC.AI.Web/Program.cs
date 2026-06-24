@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Reflection;
 using ISC.AI.Abstractions.Profiles;
+using ISC.AI.AI.Models;
 using ISC.AI.Persistence;
 using ISC.AI.Profile.Inspector;
 using ISC.AI.Web.Components;
@@ -35,6 +36,9 @@ try
 
     // Слой данных ядра: CoreDbContext (схема core) через фабрику (ТС-008, ТО-инф-01).
     builder.Services.AddCorePersistence(builder.Configuration);
+
+    // Локальные модели за IChatClient/IEmbeddingGenerator, keyed по роли (ADR-0004, ТО-прог-02/03, ТБ-044).
+    builder.Services.AddCoreAiModels(builder.Configuration);
 
     // --- Точка композиции профиля (ТО-прог-05/06). Только хост знает о конкретном профиле. ---
     var profile = new InspectorProfile();
