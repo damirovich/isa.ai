@@ -2,6 +2,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+    <!-- RAG-извлечение работает над корпусом ядра (core→core допустимо; на профиль ссылок нет). -->
+    <ProjectReference Include="..\ISC.AI.Persistence\ISC.AI.Persistence.csproj" />
   </ItemGroup>
 
   <!-- Движок ИИ и RAG: доступ к моделям через IChatClient, грунтовка, шаблоны промптов. -->
@@ -12,6 +14,8 @@
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
+    <PackageReference Include="Pgvector" />
+    <PackageReference Include="Pgvector.EntityFrameworkCore" />
     <PackageReference Include="Mediator.Abstractions" />
     <PackageReference Include="Scriban" />
   </ItemGroup>

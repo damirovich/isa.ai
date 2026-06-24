@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Reflection;
 using ISC.AI.Abstractions.Profiles;
 using ISC.AI.AI.Models;
+using ISC.AI.AI.Retrieval;
 using ISC.AI.Persistence;
 using ISC.AI.Profile.Inspector;
 using ISC.AI.Web.Components;
@@ -39,6 +40,9 @@ try
 
     // Локальные модели за IChatClient/IEmbeddingGenerator, keyed по роли (ADR-0004, ТО-прог-02/03, ТБ-044).
     builder.Services.AddCoreAiModels(builder.Configuration);
+
+    // RAG-извлечение с обязательным фильтром доступа на стороне БД (ADR-0007, ТБ-020, GATE-1).
+    builder.Services.AddCoreRetrieval();
 
     // --- Точка композиции профиля (ТО-прог-05/06). Только хост знает о конкретном профиле. ---
     var profile = new InspectorProfile();
