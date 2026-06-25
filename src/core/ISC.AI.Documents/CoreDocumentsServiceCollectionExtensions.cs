@@ -1,4 +1,5 @@
 using ISC.AI.Abstractions.Documents;
+using ISC.AI.Documents.Export;
 using ISC.AI.Documents.Extraction;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -14,6 +15,9 @@ public static class CoreDocumentsServiceCollectionExtensions
         services.AddSingleton<IFormatTextExtractor, PlainTextExtractor>();
         services.AddSingleton<IFormatTextExtractor, DocxTextExtractor>();
         services.TryAddSingleton<ITextExtractor, CompositeTextExtractor>();
+
+        // Экспорт документов (.docx) с обязательной маркировкой грифа (Э4-04, ТБ-033).
+        services.AddSingleton<IDocumentExporter, DocxDocumentExporter>();
         return services;
     }
 }
