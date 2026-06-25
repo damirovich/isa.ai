@@ -17,6 +17,8 @@ public static class CoreIngestionServiceCollectionExtensions
         services.AddScoped<IIngestionPort, IngestionPort>();
         // Загрузка из файла (извлечение текста → порт); требует ITextExtractor из AddCoreDocuments.
         services.AddScoped<IFileIngestor, FileIngestionService>();
+        // Импорт пакета сборщика (manifest.json → порт); в-контурная сторона Harvester (Э4-08).
+        services.AddScoped<IBundleImporter, BundleImporter>();
         return services;
     }
 }

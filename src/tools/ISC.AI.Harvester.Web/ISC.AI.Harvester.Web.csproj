@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+  </PropertyGroup>
+
+  <!-- Веб-консоль оператора сборщика — ВНЕ контура (Э4-08, ADR-0015). Ссылается на движок Harvester
+       и Abstractions; НЕ ссылается на проекты контура (Persistence/AI/Web/профиль). Отдельный деплой. -->
+  <ItemGroup>
+    <ProjectReference Include="..\ISC.AI.Harvester\ISC.AI.Harvester.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MudBlazor" />
+  </ItemGroup>
+
+</Project>
