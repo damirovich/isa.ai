@@ -6,6 +6,7 @@ using ISC.AI.AI.Grounding;
 using ISC.AI.AI.Models;
 using ISC.AI.AI.Rag;
 using ISC.AI.AI.Retrieval;
+using ISC.AI.Documents;
 using ISC.AI.Ingestion;
 using ISC.AI.Persistence;
 using ISC.AI.Web.Security;
@@ -51,6 +52,9 @@ try
 
     // Грунтовка: ссылки только из извлечённых фрагментов; «по памяти» запрещено (ТБ-040, GATE-2).
     builder.Services.AddCoreGrounding();
+
+    // Движок документов: извлечение текста из файлов (.txt/.docx; OCR — далее) для загрузки корпуса (Э4-01).
+    builder.Services.AddCoreDocuments();
 
     // Загрузка в корпус: fail-closed (без грифа/подразделения — отказ), идемпотентно (ТБ-024, ТНД-002).
     builder.Services.AddCoreIngestion();

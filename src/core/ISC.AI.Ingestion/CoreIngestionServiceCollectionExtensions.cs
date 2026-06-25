@@ -15,6 +15,8 @@ public static class CoreIngestionServiceCollectionExtensions
     {
         services.TryAddSingleton<ITextChunker, SimpleTextChunker>();
         services.AddScoped<IIngestionPort, IngestionPort>();
+        // Загрузка из файла (извлечение текста → порт); требует ITextExtractor из AddCoreDocuments.
+        services.AddScoped<IFileIngestor, FileIngestionService>();
         return services;
     }
 }

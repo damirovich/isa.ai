@@ -4,10 +4,11 @@
     <ProjectReference Include="..\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
   </ItemGroup>
 
-  <!-- Движок документов: связывание шаблонов с данными, экспорт в .docx. -->
+  <!-- Движок документов: извлечение текста (.docx), связывание шаблонов, экспорт в .docx. -->
   <ItemGroup>
     <PackageReference Include="DocumentFormat.OpenXml" />
     <PackageReference Include="Scriban" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
   </ItemGroup>
 
 </Project>
