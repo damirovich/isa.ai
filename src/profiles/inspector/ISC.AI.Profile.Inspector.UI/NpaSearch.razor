@@ -1,0 +1,92 @@
+@* Модуль «База НПА» (Э4-07, ТФ-НПА-01/02): семантический поиск по корпусу через ядровой IRetriever.
+   Фильтр доступа (GATE-1) и только актуальные (GATE-3) гарантирует ядро. *@
+@page "/npa"
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Profile.Inspector.Application.Search
+@using Mediator
+@inject IMediator Dispatcher
+
+<PageTitle>База НПА — ИнспекторAI</PageTitle>
+
+<MudText Typo="Typo.h4" GutterBottom="true">База НПА — поиск по смыслу</MudText>
+
+<MudPaper Class="pa-4 mb-4" Outlined="true">
+    <MudTextField @bind-Value="_query" Label="Поисковый запрос" Variant="Variant.Outlined"
+                  Immediate="true" Disabled="_busy" />
+    <MudButton Class="mt-2" Color="Color.Primary" Variant="Variant.Filled"
+               OnClick="SearchAsync" Disabled="@(_busy || string.IsNullOrWhiteSpace(_query))">
+        @(_busy ? "Ищу…" : "Найти")
+    </MudButton>
+</MudPaper>
+
+@if (_busy)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-2" />
+}
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_error</MudAlert>
+}
+
+@if (_result is not null)
+{
+    @if (_result.Hits.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+            Ничего не найдено в пределах вашего допуска.
+        </MudAlert>
+    }
+    else
+    {
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Найдено: @_result.Hits.Count</MudText>
+        @foreach (var hit in _result.Hits)
+        {
+            <MudPaper Class="pa-3 mb-2" Outlined="true">
+                <div class="d-flex align-center gap-2 mb-1">
+                    <MudChip T="string" Size="Size.Small" Color="Color.Default">Документ #@hit.DocumentId</MudChip>
+                    @if (!hit.IsCurrent)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">УТРАТИЛА СИЛУ</MudChip>
+                    }
+                    <MudText Typo="Typo.caption">релевантность: @hit.Score.ToString("F3")</MudText>
+                </div>
+                <MudText Typo="Typo.body2" Style="white-space: pre-wrap;">@hit.Text</MudText>
+            </MudPaper>
+        }
+    }
+}
+
+@code {
+    private string _query = string.Empty;
+    private bool _busy;
+    private string? _error;
+    private SearchNpaResult? _result;
+
+    private async Task SearchAsync()
+    {
+        _busy = true;
+        _error = null;
+        _result = null;
+        try
+        {
+            var response = await Dispatcher.Send(new SearchNpaQuery(_query));
+            if (response.Status)
+            {
+                _result = response.Data;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка поиска: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}
