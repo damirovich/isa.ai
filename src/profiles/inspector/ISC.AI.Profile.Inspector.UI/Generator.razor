@@ -5,7 +5,9 @@
 @using ISC.AI.Abstractions.Grounding
 @using ISC.AI.Profile.Inspector.Application.Generation
 @using Mediator
+@using Microsoft.JSInterop
 @inject IMediator Dispatcher
+@inject IJSRuntime JS
 
 <PageTitle>Генератор — ИнспекторAI</PageTitle>
 
@@ -35,6 +37,11 @@
     <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mb-3">
         ЧЕРНОВИК — требует проверки человеком перед использованием (HITL, ТБ-042). Гриф результата: @Result.ResultClassification.
     </MudAlert>
+
+    <MudButton Class="mb-3" Color="Color.Secondary" Variant="Variant.Filled"
+               OnClick="ExportAsync" Disabled="_exporting" StartIcon="@Icons.Material.Filled.Download">
+        @(_exporting ? "Экспорт…" : "Экспорт в .docx")
+    </MudButton>
 
     @if (!Result.AllCitationsConfirmed)
     {
@@ -95,6 +102,42 @@
         finally
         {
             _busy = false;
+        }
+    }
+
+    private bool _exporting;
+
+    private async Task ExportAsync()
+    {
+        if (Result is null)
+        {
+            return;
+        }
+
+        _exporting = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(
+                new ExportReferenceCommand(_topic, Result.DraftText, Result.ResultClassification));
+
+            if (response is { Status: true, Data: { } file })
+            {
+                using var streamReference = new DotNetStreamReference(new MemoryStream(file.Content));
+                await JS.InvokeVoidAsync("downloadFileFromStream", file.FileName, streamReference);
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка экспорта: {ex.Message}";
+        }
+        finally
+        {
+            _exporting = false;
         }
     }
 
