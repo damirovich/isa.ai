@@ -1,6 +1,7 @@
 using ISC.AI.Abstractions.AI;
 using ISC.AI.Abstractions.Modules;
 using ISC.AI.Abstractions.Profiles;
+using ISC.AI.Profile.Inspector.Application;
 using ISC.AI.Profile.Inspector.Data;
 using ISC.AI.Profile.Inspector.UI;
 using Microsoft.Extensions.Configuration;
@@ -35,6 +36,13 @@ public sealed class InspectorProfile : IProfile
             MenuIcon: null,
             ComponentType: typeof(Dashboard),
             RequiredPolicy: "inspector.read"),
+        new ModuleDescriptor(
+            Id: "generator",
+            Route: "/generator",
+            MenuTitle: "Генератор",
+            MenuIcon: null,
+            ComponentType: typeof(Generator),
+            RequiredPolicy: "inspector.read"),
     ];
 
     /// <inheritdoc />
@@ -43,8 +51,9 @@ public sealed class InspectorProfile : IProfile
     /// <inheritdoc />
     public void RegisterServices(IServiceCollection services, IConfiguration configuration)
     {
-        // TODO (Э3): регистрация обработчиков сценариев (Mediator), валидаторов (FluentValidation),
-        // мапперов (Mapperly) и провайдеров промптов (IPromptProvider) профиля.
+        // Сценарии профиля: промпт-рендереры и валидаторы (Mediator-обработчики регистрирует
+        // source-генератор в хосте Web). Сейчас — сценарий «Генератор» (Э4-03).
+        services.AddInspectorApplication();
     }
 
     /// <inheritdoc />

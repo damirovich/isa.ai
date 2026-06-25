@@ -9,6 +9,7 @@ using ISC.AI.AI.Retrieval;
 using ISC.AI.Documents;
 using ISC.AI.Ingestion;
 using ISC.AI.Persistence;
+using ISC.AI.Web.Common.Behaviors;
 using ISC.AI.Web.Security;
 using ISC.AI.Profile.Inspector;
 using ISC.AI.Web.Components;
@@ -38,8 +39,16 @@ try
         .AddInteractiveServerComponents();
     builder.Services.AddMudServices();
 
-    // CQRS-lite: Mediator (source-генератор — в этом хосте).
-    builder.Services.AddMediator();
+    // CQRS-lite: Mediator (source-генератор — в этом хосте). Обработчики — Scoped: они тянут
+    // scoped-сервисы RAG (retriever/оркестратор работают через IDbContextFactory на операцию).
+    builder.Services.AddMediator(options => options.ServiceLifetime = ServiceLifetime.Scoped);
+
+    // Сквозной конвейер Mediator (порядок = порядок регистрации): обработка ошибок (внешняя) →
+    // логирование → валидация → хендлер. ValidationBehavior бросает, ExceptionHandling превращает
+    // исключения в неуспешный ResponseDto (хендлеры — без ручных проверок).
+    builder.Services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ExceptionHandlingBehavior<,>));
+    builder.Services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
+    builder.Services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
 
     // Слой данных ядра: CoreDbContext (схема core) через фабрику (ТС-008, ТО-инф-01).
     builder.Services.AddCorePersistence(builder.Configuration);

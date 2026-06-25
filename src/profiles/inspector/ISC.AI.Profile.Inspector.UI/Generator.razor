@@ -1,0 +1,114 @@
+@* Модуль «Генератор» (Э4-03, ТФ-ГЕН-01): формирует черновик справки через RAG-оркестратор ядра.
+   Результат — ВСЕГДА черновик (HITL, ТБ-042); ссылки помечаются грунтовкой (ТБ-040). *@
+@page "/generator"
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Abstractions.Grounding
+@using ISC.AI.Profile.Inspector.Application.Generation
+@using Mediator
+@inject IMediator Dispatcher
+
+<PageTitle>Генератор — ИнспекторAI</PageTitle>
+
+<MudText Typo="Typo.h4" GutterBottom="true">Генератор справки</MudText>
+
+<MudPaper Class="pa-4 mb-4" Outlined="true">
+    <MudTextField @bind-Value="_topic" Label="Тема справки" Variant="Variant.Outlined"
+                  Lines="2" Immediate="true" Disabled="_busy" />
+    <MudButton Class="mt-2" Color="Color.Primary" Variant="Variant.Filled"
+               OnClick="GenerateAsync" Disabled="@(_busy || string.IsNullOrWhiteSpace(_topic))">
+        @(_busy ? "Формирую…" : "Сформировать")
+    </MudButton>
+</MudPaper>
+
+@if (_busy)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-2" />
+}
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_error</MudAlert>
+}
+
+@if (Result is not null)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mb-3">
+        ЧЕРНОВИК — требует проверки человеком перед использованием (HITL, ТБ-042). Гриф результата: @Result.ResultClassification.
+    </MudAlert>
+
+    @if (!Result.AllCitationsConfirmed)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
+            Не все ссылки подтверждены извлечёнными нормами — вывод НЕ считается готовым (GATE-2).
+        </MudAlert>
+    }
+
+    <MudText Typo="Typo.h6">Текст</MudText>
+    <MudPaper Class="pa-4 mb-4" Outlined="true">
+        <MudText Style="white-space: pre-wrap;">@Result.DraftText</MudText>
+    </MudPaper>
+
+    @if (Result.Citations.Count > 0)
+    {
+        <MudText Typo="Typo.h6" GutterBottom="true">Ссылки (грунтовка)</MudText>
+        @foreach (var citation in Result.Citations)
+        {
+            <div class="d-flex align-center gap-2 mb-1">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@StatusColor(citation.Status)">
+                    @StatusLabel(citation.Status)
+                </MudChip>
+                <MudText Typo="Typo.body2">@citation.Citation</MudText>
+            </div>
+        }
+    }
+}
+
+@code {
+    private string _topic = string.Empty;
+    private bool _busy;
+    private string? _error;
+    private ResponseDto<GenerateReferenceResult>? _response;
+
+    private GenerateReferenceResult? Result => _response?.Data;
+
+    private async Task GenerateAsync()
+    {
+        _busy = true;
+        _error = null;
+        _response = null;
+        try
+        {
+            var response = await Dispatcher.Send(new GenerateReferenceCommand(_topic));
+            if (response.Status)
+            {
+                _response = response;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка генерации: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static Color StatusColor(CitationStatus status) => status switch
+    {
+        CitationStatus.Confirmed => Color.Success,
+        CitationStatus.Superseded => Color.Warning,
+        _ => Color.Error,
+    };
+
+    private static string StatusLabel(CitationStatus status) => status switch
+    {
+        CitationStatus.Confirmed => "подтверждена",
+        CitationStatus.Superseded => "УТРАТИЛА СИЛУ",
+        _ => "не подтверждена",
+    };
+}
