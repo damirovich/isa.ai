@@ -43,6 +43,13 @@ public sealed class InspectorProfile : IProfile
             MenuIcon: null,
             ComponentType: typeof(Generator),
             RequiredPolicy: "inspector.read"),
+        new ModuleDescriptor(
+            Id: "npa-search",
+            Route: "/npa",
+            MenuTitle: "База НПА",
+            MenuIcon: null,
+            ComponentType: typeof(NpaSearch),
+            RequiredPolicy: "inspector.read"),
     ];
 
     /// <inheritdoc />
