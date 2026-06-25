@@ -5,12 +5,20 @@
     <ProjectReference Include="..\ISC.AI.Profile.Inspector.Domain\ISC.AI.Profile.Inspector.Domain.csproj" />
   </ItemGroup>
 
-  <!-- Сценарии (use-cases), валидаторы, мапперы. Промпты — файлы-шаблоны (добавляются с модулями). -->
+  <!-- Сценарии (use-cases), валидаторы, мапперы. Промпты — файлы-шаблоны Scriban (НЕ хардкод). -->
   <ItemGroup>
     <PackageReference Include="Mediator.Abstractions" />
     <PackageReference Include="FluentValidation" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
     <PackageReference Include="Riok.Mapperly" />
     <PackageReference Include="Microsoft.Extensions.AI.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Scriban" />
+  </ItemGroup>
+
+  <!-- Промпты-шаблоны — встроенные ресурсы (загружаются рендерером). -->
+  <ItemGroup>
+    <EmbeddedResource Include="Generation\Prompts\*.scriban" />
   </ItemGroup>
 
 </Project>
