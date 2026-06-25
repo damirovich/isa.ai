@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Сборщик корпуса ВНЕ контура (Э4-08, ADR-0015): нейтральный движок + подключаемые коннекторы.
+       Ссылается ТОЛЬКО на Abstractions (общий контракт пакета). НЕ ссылается на Persistence/AI/Web/
+       профиль контура — это инструмент стадии подготовки данных, вне air-gap-периметра. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AngleSharp" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+  </ItemGroup>
+
+</Project>

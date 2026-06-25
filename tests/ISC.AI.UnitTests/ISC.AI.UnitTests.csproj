@@ -13,6 +13,7 @@
     <ProjectReference Include="..\..\src\core\ISC.AI.Persistence\ISC.AI.Persistence.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.Documents\ISC.AI.Documents.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.Ingestion\ISC.AI.Ingestion.csproj" />
+    <ProjectReference Include="..\..\src\tools\ISC.AI.Harvester\ISC.AI.Harvester.csproj" />
     <ProjectReference Include="..\..\src\profiles\inspector\ISC.AI.Profile.Inspector.Application\ISC.AI.Profile.Inspector.Application.csproj" />
     <ProjectReference Include="..\..\src\profiles\inspector\ISC.AI.Profile.Inspector.Domain\ISC.AI.Profile.Inspector.Domain.csproj" />
     <ProjectReference Include="..\..\src\profiles\inspector\ISC.AI.Profile.Inspector.UI\ISC.AI.Profile.Inspector.UI.csproj" />
