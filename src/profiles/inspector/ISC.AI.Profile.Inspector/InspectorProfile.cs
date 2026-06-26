@@ -50,6 +50,13 @@ public sealed class InspectorProfile : IProfile
             MenuIcon: null,
             ComponentType: typeof(NpaSearch),
             RequiredPolicy: "inspector.read"),
+        new ModuleDescriptor(
+            Id: "load",
+            Route: "/load",
+            MenuTitle: "Загрузка корпуса",
+            MenuIcon: null,
+            ComponentType: typeof(CorpusLoad),
+            RequiredPolicy: "inspector.read"),
     ];
 
     /// <inheritdoc />

@@ -1,0 +1,151 @@
+@* Загрузка корпуса (Э4-01): файлы (.txt/.docx) → IFileIngestor; импорт пакета Harvester → IBundleImporter.
+   Гриф/подразделение ДЕКЛАРИРУЕТ оператор; fail-closed и дедуп — в порту. *@
+@page "/load"
+@using Microsoft.AspNetCore.Components.Forms
+@using ISC.AI.Abstractions.Ingestion
+@using ISC.AI.Profile.Inspector.Application.Loading
+@using Mediator
+@inject IMediator Dispatcher
+
+<PageTitle>Загрузка корпуса — ИнспекторAI</PageTitle>
+
+<MudText Typo="Typo.h4" GutterBottom="true">Загрузка корпуса</MudText>
+<MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-4">
+    Гриф и подразделение задаёт оператор. Без них загрузка отклоняется (fail-closed, ТБ-024); повтор того же
+    содержимого не создаёт дублей. На обезличенных/тестовых данных — гриф 0 (открыто).
+</MudAlert>
+
+<MudPaper Class="pa-4 mb-4" Outlined="true">
+    <MudGrid>
+        <MudItem xs="12" sm="4"><MudTextField @bind-Value="_docType" Label="Тип документа" Variant="Variant.Outlined" /></MudItem>
+        <MudItem xs="6" sm="4"><MudNumericField @bind-Value="_classification" Label="Гриф (Classification)" Variant="Variant.Outlined" Min="0" /></MudItem>
+        <MudItem xs="6" sm="4"><MudNumericField @bind-Value="_divisionId" Label="Подразделение (DivisionId)" Variant="Variant.Outlined" Min="0" /></MudItem>
+    </MudGrid>
+
+    <div class="mt-3">
+        <MudText Typo="Typo.body2" Class="mb-1">Файлы (.txt, .docx) — выбор сразу запускает загрузку:</MudText>
+        <InputFile OnChange="UploadFilesAsync" accept=".txt,.docx" multiple disabled="@_busy" />
+    </div>
+</MudPaper>
+
+@if (_busy)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-2" />
+}
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-2">@_error</MudAlert>
+}
+
+@if (_fileResults.Count > 0)
+{
+    <MudText Typo="Typo.h6" GutterBottom="true">Результаты загрузки</MudText>
+    @foreach (var result in _fileResults)
+    {
+        <div class="d-flex align-center gap-2 mb-1">
+            <MudChip T="string" Size="Size.Small" Color="@ResultColor(result)">@ResultLabel(result)</MudChip>
+            <MudText Typo="Typo.body2">@result.FileName</MudText>
+            <MudText Typo="Typo.caption">
+                @(result.Accepted ? (result.IsDuplicate ? "уже в корпусе" : $"чанков: {result.ChunkCount}") : result.Reason)
+            </MudText>
+        </div>
+    }
+}
+
+<MudPaper Class="pa-4 mt-4" Outlined="true">
+    <MudText Typo="Typo.h6" GutterBottom="true">Импорт пакета сборщика (Harvester)</MudText>
+    <MudTextField @bind-Value="_manifestPath" Label="Путь к manifest.json пакета" Variant="Variant.Outlined" />
+    <MudButton Class="mt-2" Variant="Variant.Filled" Color="Color.Secondary"
+               OnClick="ImportBundleAsync" Disabled="@(_busy || string.IsNullOrWhiteSpace(_manifestPath))">
+        Импортировать пакет
+    </MudButton>
+    @if (_bundleStatus is not null)
+    {
+        <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Class="mt-2">@_bundleStatus</MudAlert>
+    }
+</MudPaper>
+
+@code {
+    private string _docType = "положение";
+    private int _classification;
+    private int _divisionId = 1;
+
+    private bool _busy;
+    private string? _error;
+    private readonly List<IngestFileResult> _fileResults = [];
+
+    private string _manifestPath = string.Empty;
+    private string? _bundleStatus;
+
+    private async Task UploadFilesAsync(InputFileChangeEventArgs args)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            foreach (var file in args.GetMultipleFiles(maximumFileCount: 50))
+            {
+                using var buffer = new MemoryStream();
+                await using (var stream = file.OpenReadStream(maxAllowedSize: 25 * 1024 * 1024))
+                {
+                    await stream.CopyToAsync(buffer);
+                }
+
+                var response = await Dispatcher.Send(
+                    new IngestFileCommand(buffer.ToArray(), file.Name, _docType, (short)_classification, _divisionId));
+
+                if (response is { Status: true, Data: { } result })
+                {
+                    _fileResults.Insert(0, result);
+                }
+                else
+                {
+                    _error = response.StatusMessage;
+                }
+
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка загрузки: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ImportBundleAsync()
+    {
+        _busy = true;
+        _error = null;
+        _bundleStatus = null;
+        try
+        {
+            var response = await Dispatcher.Send(new ImportBundleCommand(_manifestPath));
+            if (response.Status)
+            {
+                _bundleStatus = response.StatusMessage;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка импорта: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static Color ResultColor(IngestFileResult result) =>
+        !result.Accepted ? Color.Error : result.IsDuplicate ? Color.Default : Color.Success;
+
+    private static string ResultLabel(IngestFileResult result) =>
+        !result.Accepted ? "отклонён" : result.IsDuplicate ? "дубликат" : "загружен";
+}
