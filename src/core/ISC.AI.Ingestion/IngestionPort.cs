@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using ISC.AI.Abstractions.AI;
 using ISC.AI.Abstractions.Enums;
 using ISC.AI.Abstractions.Ingestion;
 using ISC.AI.Persistence;
@@ -92,7 +93,15 @@ public sealed class IngestionPort(
         db.Chunks.AddRange(chunks);
         await db.SaveChangesAsync(cancellationToken);
 
-        var embeddings = await embeddingGenerator.GenerateAsync(chunkTexts, cancellationToken: cancellationToken);
+        // Каждый чанк оборачивается document-префиксом: EmbeddingGemma кодирует документ и запрос
+        // асимметрично, иначе retrieval рассогласован (Э4-09, ADR-0011). Порядок входов = порядок чанков.
+        var embeddingInputs = new string[chunkTexts.Count];
+        for (var i = 0; i < chunkTexts.Count; i++)
+        {
+            embeddingInputs[i] = EmbeddingTaskPrompt.Document(chunkTexts[i]);
+        }
+
+        var embeddings = await embeddingGenerator.GenerateAsync(embeddingInputs, cancellationToken: cancellationToken);
         for (var i = 0; i < chunks.Count; i++)
         {
             db.Embeddings.Add(new EmbeddingEntity
