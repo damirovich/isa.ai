@@ -1,4 +1,5 @@
 using ISC.AI.AI.Security;
+using ISC.AI.Abstractions.AI;
 using ISC.AI.Abstractions.Enums;
 using ISC.AI.Abstractions.Retrieval;
 using ISC.AI.Abstractions.Security;
@@ -43,8 +44,10 @@ public sealed class PgVectorRetriever(
             throw new AccessContextRequiredException();
         }
 
-        // Векторизация запроса отдельной моделью эмбеддингов (роль Embeddings).
-        var embeddings = await embeddingGenerator.GenerateAsync([query], cancellationToken: cancellationToken);
+        // Векторизация запроса отдельной моделью эмбеддингов (роль Embeddings). Запрос оборачивается
+        // query-префиксом: EmbeddingGemma кодирует запрос и документ асимметрично (Э4-09, ADR-0011).
+        var embeddings = await embeddingGenerator.GenerateAsync(
+            [EmbeddingTaskPrompt.Query(query)], cancellationToken: cancellationToken);
         var queryVector = new Vector(embeddings.Single().Vector);
 
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
