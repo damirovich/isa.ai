@@ -1,5 +1,7 @@
 using ISC.AI.Abstractions.Audit;
+using ISC.AI.Abstractions.Corpus;
 using ISC.AI.Persistence.Audit;
+using ISC.AI.Persistence.Corpus;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -36,6 +38,9 @@ public static class CorePersistenceServiceCollectionExtensions
 
         // Неизменяемый журнал аудита (ТБ-030/031), append-only с хеш-цепочкой.
         services.AddScoped<IAuditWriter, AuditWriter>();
+
+        // Материализация флага годности чанков (Э4-02, ADR-0013): профиль ставит видимость по редакциям.
+        services.AddScoped<IChunkCurrencyPort, ChunkCurrencyPort>();
 
         return services;
     }

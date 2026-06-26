@@ -1,3 +1,4 @@
+using ISC.AI.Profile.Inspector.Domain.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -23,6 +24,9 @@ public static class InspectorPersistenceServiceCollectionExtensions
             options.UseNpgsql(connectionString, npg =>
                     npg.MigrationsHistoryTable("__ef_migrations_history", InspectorDbContext.Schema))
                 .UseSnakeCaseNamingConvention());
+
+        // Материализация статуса редакции НПА → флаг годности ядра по связкам (Э4-02, ADR-0013).
+        services.AddScoped<IRevisionStatusMaterializer, RevisionStatusMaterializer>();
 
         return services;
     }
