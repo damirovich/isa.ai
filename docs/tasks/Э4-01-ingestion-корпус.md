@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Этап | Э4 — MVP (P0) |
-| Статус | 🔄 В работе (управляемое извлечение `.txt`/`.docx` + файл→порт готовы; OCR и структурный чанкинг НПА — далее) |
+| Статус | ✅ Загрузка операционно готова (извлечение `.txt`/`.docx` + страница «Загрузка корпуса» + импорт пакета; OCR и структурный чанкинг НПА — опциональные расширения) |
 | Требования ТЗ | ТФ-НПА (корпус), ТО-инф-03, ТБ-024, ПОДГ-02 |
 | Документы | [ДОК-02 §10](../02_Архитектура.md) |
 | Зависит от | Э3-07, Э3-04 |
@@ -17,6 +17,7 @@
 - ✅ Векторизация (эмбеддинги) и generic-чанкинг — через `IngestionPort` (Э3-07).
 - ⏳ Чанкинг по структуре НПА — на стороне профиля (поверх generic-чанкера ядра).
 - ✅ Запись с обязательными метаданными, fail-closed (ТБ-024) — в порту.
+- ✅ Операционная загрузка: страница «Загрузка корпуса» (файлы `.txt`/`.docx` + импорт пакета Harvester) + use-cases `IngestFileCommand`/`ImportBundleCommand`.
 
 ## Критерии приёмки
 - Корпус проиндексирован; чанков без грифа нет; данные — только обезличенные/тестовые (до режим-гейта Э4-06).
@@ -27,7 +28,11 @@
 - Связующий [`FileIngestionService`](../../src/core/ISC.AI.Ingestion/FileIngestionService.cs) (`IFileIngestor`): файл → извлечение → `IngestionPort`; неподдержанный формат — явный отказ. Подключено в хост.
 - Тесты: docx/txt/фасад/файл-ingestion. Сборка 0/0; unit 31/31.
 
+## Результат (операционная загрузка)
+- Use-cases [`IngestFileCommand`](../../src/profiles/inspector/ISC.AI.Profile.Inspector.Application/Loading/IngestFileCommand.cs) (файл → `IFileIngestor`) и [`ImportBundleCommand`](../../src/profiles/inspector/ISC.AI.Profile.Inspector.Application/Loading/ImportBundleCommand.cs) (пакет Harvester → `IBundleImporter`).
+- Страница [`CorpusLoad.razor`](../../src/profiles/inspector/ISC.AI.Profile.Inspector.UI/CorpusLoad.razor) («Загрузка корпуса»): загрузка файлов с грифом/подразделением + импорт пакета; модуль в реестре. Сборка 0/0; unit 54/54.
+
 ## Осталось
-- **OCR (Tesseract)**: `OcrTextExtractor : IFormatTextExtractor` для сканов/изображений + `tessdata` (rus/kir), предзагрузка в air-gap.
-- **Структурный чанкинг НПА** — профиль (поверх `SimpleTextChunker`), при необходимости.
-- **End-to-end прогон**: реальный `.docx` → конвейер → корпус на Testcontainers + эмбеддер (live llama-server или фейк).
+- **Боевой прогон оператором:** применить миграции к рабочей БД → загрузить документы через страницу «Загрузка» → проверить «База НПА»/«Генератор» (нужен живой эмбеддер 9001).
+- **OCR (Tesseract)** для сканов/изображений (`tessdata` rus/kir, предзагрузка в air-gap) — расширение.
+- **Структурный чанкинг НПА** — профиль (поверх `SimpleTextChunker`) — расширение.
