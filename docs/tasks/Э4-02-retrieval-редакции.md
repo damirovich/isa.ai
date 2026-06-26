@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Этап | Э4 — MVP (P0) |
-| Статус | ⏳ Запланировано |
+| Статус | 🔄 Механизм готов (порт годности ядра + материализатор профиля + write-side GATE-3, тесты 0/0); наполнение домена редакций из реальных НПА — позже |
 | Требования ТЗ | ТБ-020, ТБ-021, ТФ-НПА-02, ТО-инф-04 |
 | Документы | [ДОК-05 §2.6](../05_Контракты_и_композиция.md), [ДОК-04 §6](../04_Схема_данных.md), [ADR-0013](../06_ADR/) |
 | Зависит от | Э3-05, Э4-01 |
@@ -12,9 +12,18 @@
 Извлекать релевантные фрагменты с учётом допуска (ядро) и актуальности источника (нейтральный флаг `IsCurrent`). Доменное сопоставление «действующая редакция НПА → `IsCurrent`» — на стороне профиля (схема `inspector`), поверх generic-retrieval ядра; ядро про НПА не знает.
 
 ## Что сделать
-- ⏳ Применить ядровый `IRetriever` в сценариях: фильтр доступа (fail-closed) + фильтр по нейтральному флагу `IsCurrent` (по умолчанию только актуальные).
-- ⏳ Профиль материализует статус редакции НПА в `core.chunk.is_current` (по `inspector.chunk_revision_link`, в одной транзакции при смене статуса) — доменная логика поверх ядра (ADR-0013, ДОК-04 §6).
-- ⏳ Пометка «УТРАТИЛА СИЛУ» при явном показе устаревших редакций (ТЭ-003) — на стороне профиля.
+- ✅ Ядровый `IRetriever` применён в сценариях (Э3-05 / Э4-07): фильтр доступа (fail-closed) + только актуальные `IsCurrent`.
+- ✅ Профиль материализует статус редакции → `core.chunk.is_current` по `chunk_revision_link`: нейтральный порт ядра `IChunkCurrencyPort` + доменная служба `IRevisionStatusMaterializer` (ADR-0013).
+- ✅ Пометка «УТРАТИЛА СИЛУ» — в UI «База НПА» (Э4-07) для неактуальных.
 
 ## Критерии приёмки
 - **GATE-3**: утратившая силу не выдаётся как действующая; пользователь не получает материалы выше допуска (GATE-1).
+
+## Результат
+- Ядро: [`IChunkCurrencyPort`](../../src/core/ISC.AI.Abstractions/Corpus/IChunkCurrencyPort.cs) + [`ChunkCurrencyPort`](../../src/core/ISC.AI.Persistence/Corpus/ChunkCurrencyPort.cs) — согласованно ставит `is_current` чанку и эмбеддингу (одной транзакцией).
+- Профиль: [`IRevisionStatusMaterializer`](../../src/profiles/inspector/ISC.AI.Profile.Inspector.Domain/Services/IRevisionStatusMaterializer.cs) (домен) + [`RevisionStatusMaterializer`](../../src/profiles/inspector/ISC.AI.Profile.Inspector.Data/RevisionStatusMaterializer.cs) (данные): по `ChunkRevisionLink` находит чанки редакции → ставит видимость → фиксирует статус. Use-case [`SetRevisionStatusCommand`](../../src/profiles/inspector/ISC.AI.Profile.Inspector.Application/Revisions/SetRevisionStatusCommand.cs).
+- Тесты: handler (unit), [`ChunkCurrencyPortTests`](../../tests/ISC.AI.IntegrationTests/Persistence/ChunkCurrencyPortTests.cs), [`RevisionStatusMaterializerTests`](../../tests/ISC.AI.IntegrationTests/Persistence/RevisionStatusMaterializerTests.cs) (**write-side GATE-3**, две схемы в одной БД). Сборка 0/0; unit 51/51; интеграционные 9/9 (на живом Postgres).
+- **Порядок РЕЖИМНО-безопасный:** видимость в ядре материализуется ДО сохранения статуса (durable hide) — безопаснее единой транзакции (которая при откате оставила бы устаревшее видимым). Полноценная единая транзакция через два контекста — рефайнмент.
+
+## Осталось
+- **Наполнение домена редакций** при загрузке: профиль создаёт `LegalNorm`/`NormRevision`/`ChunkRevisionLink` из метаданных реальных НПА (тогда механизм заработает на боевых данных).
