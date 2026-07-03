@@ -33,6 +33,27 @@ public sealed class LoadingHandlersTests
         captured.DivisionId.ShouldBe(5);
     }
 
+    [Fact(DisplayName = "Загрузка новой версии: SupersedesDocumentId уходит в порт; SupersededDocumentId возвращается (Э4-14)")]
+    public async Task Ingest_new_version_forwards_supersedes_and_surfaces_result()
+    {
+        FileIngestionRequest? captured = null;
+        var ingestor = Substitute.For<IFileIngestor>();
+        ingestor.IngestFileAsync(Arg.Do<FileIngestionRequest>(r => captured = r), Arg.Any<CancellationToken>())
+            .Returns(new IngestionResult(Accepted: true, DocumentId: 12, ChunkCount: 4, RejectionReason: null,
+                SupersededDocumentId: 5, SupersededChunkCount: 3));
+
+        var response = await new IngestFileCommand.Handler(ingestor)
+            .Handle(
+                new IngestFileCommand([1, 2, 3], "v2.txt", "положение", Classification: 0, DivisionId: 1, SupersedesDocumentId: 5),
+                CancellationToken.None);
+
+        response.Status.ShouldBeTrue();
+        response.Data!.SupersededDocumentId.ShouldBe(5);
+
+        captured.ShouldNotBeNull();
+        captured!.SupersedesDocumentId.ShouldBe(5);
+    }
+
     [Fact(DisplayName = "Импорт пакета: отсутствующий манифест — NotFound, импортёр не вызывается")]
     public async Task Import_missing_manifest_not_found()
     {

@@ -15,8 +15,10 @@ using ResModel = ResponseDto<IngestFileResult>;
 /// <param name="DocType">Тип документа.</param>
 /// <param name="Classification">Гриф (объявляется оператором; для открытых данных — 0).</param>
 /// <param name="DivisionId">Подразделение.</param>
+/// <param name="SupersedesDocumentId">Если это новая версия — идентификатор заменяемого документа (Э4-14).</param>
 public sealed record IngestFileCommand(
-    byte[] Content, string FileName, string DocType, short Classification, int DivisionId) : IRequest<ResModel>
+    byte[] Content, string FileName, string DocType, short Classification, int DivisionId,
+    int? SupersedesDocumentId = null) : IRequest<ResModel>
 {
     /// <summary>Обработчик: оборачивает байты в поток и передаёт в файловый загрузчик корпуса.</summary>
     public sealed class Handler(IFileIngestor fileIngestor) : IRequestHandler<IngestFileCommand, ResModel>
@@ -28,7 +30,9 @@ public sealed record IngestFileCommand(
 
             using var stream = new MemoryStream(command.Content);
             var result = await fileIngestor.IngestFileAsync(
-                new FileIngestionRequest(stream, command.FileName, command.DocType, command.Classification, command.DivisionId),
+                new FileIngestionRequest(
+                    stream, command.FileName, command.DocType, command.Classification, command.DivisionId,
+                    SupersedesDocumentId: command.SupersedesDocumentId),
                 cancellationToken);
 
             var payload = new IngestFileResult(
@@ -37,7 +41,8 @@ public sealed record IngestFileCommand(
                 DocumentId: result.DocumentId,
                 ChunkCount: result.ChunkCount,
                 Reason: result.RejectionReason,
-                IsDuplicate: result.Accepted && result.ChunkCount == 0);
+                IsDuplicate: result.Accepted && result.ChunkCount == 0,
+                SupersededDocumentId: result.SupersededDocumentId);
 
             return ResModel.Ok(payload);
         }
