@@ -52,6 +52,14 @@ public sealed class IngestionPort(
             return IngestionResult.Duplicate(duplicateId);
         }
 
+        // Замена версии (Э4-14): заменяемый документ обязан существовать — иначе отказ (не молчаливо
+        // «ничего не погасили», а явная ошибка оператору).
+        if (request.SupersedesDocumentId is { } supersedesTargetId
+            && !await db.Documents.AnyAsync(d => d.Id == supersedesTargetId, cancellationToken))
+        {
+            return IngestionResult.Reject($"Заменяемый документ #{supersedesTargetId} не найден — замена версии отменена.");
+        }
+
         var chunkTexts = chunker.Chunk(request.Text ?? string.Empty);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -70,10 +78,42 @@ public sealed class IngestionPort(
         db.Documents.Add(document);
         await db.SaveChangesAsync(cancellationToken);
 
+        // Замена версии (Э4-14): ПЕРЕД добавлением новых чанков гасим прежнюю версию (hide-first) — её
+        // чанки и эмбеддинги становятся неактуальными в ЭТОЙ ЖЕ транзакции (атомарно, опора GATE-3:
+        // в ИИ/поиск уходит только новая версия, старая и новая одновременно current не бывают).
+        var supersededChunkCount = 0;
+        if (request.SupersedesDocumentId is { } supersededId)
+        {
+            var oldChunkIds = await db.Chunks
+                .Where(c => c.DocumentId == supersededId)
+                .Select(c => c.Id)
+                .ToListAsync(cancellationToken);
+
+            if (oldChunkIds.Count > 0)
+            {
+                await db.Chunks.Where(c => oldChunkIds.Contains(c.Id))
+                    .ExecuteUpdateAsync(s => s.SetProperty(c => c.IsCurrent, false), cancellationToken);
+                await db.Embeddings.Where(e => oldChunkIds.Contains(e.ChunkId))
+                    .ExecuteUpdateAsync(s => s.SetProperty(e => e.IsCurrent, false), cancellationToken);
+            }
+
+            supersededChunkCount = oldChunkIds.Count;
+
+            // Пометить прежнюю версию заменённой (история версий; сама строка документа сохраняется).
+            await db.Documents.Where(d => d.Id == supersededId)
+                .ExecuteUpdateAsync(s => s.SetProperty(d => d.SupersededByDocumentId, (int?)document.Id), cancellationToken);
+        }
+
+        // Итог успеха: с инфо о замене, если это была новая версия.
+        IngestionResult Success(int chunkCount) =>
+            request.SupersedesDocumentId is { } sid
+                ? IngestionResult.Ok(document.Id, chunkCount, sid, supersededChunkCount)
+                : IngestionResult.Ok(document.Id, chunkCount);
+
         if (chunkTexts.Count == 0)
         {
             await transaction.CommitAsync(cancellationToken);
-            return IngestionResult.Ok(document.Id, 0);
+            return Success(0);
         }
 
         var chunks = new List<ChunkEntity>(chunkTexts.Count);
@@ -118,6 +158,6 @@ public sealed class IngestionPort(
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
-        return IngestionResult.Ok(document.Id, chunks.Count);
+        return Success(chunks.Count);
     }
 }

@@ -33,6 +33,13 @@ public class DocumentEntity : AuditableEntity, IClassified
     /// <summary>Хеш содержимого для дедупликации (ТНД-002, ТО-инф-07).</summary>
     public byte[]? ContentHash { get; set; }
 
+    /// <summary>
+    /// Идентификатор документа-преемника, если этот документ заменён более новой версией (Э4-14).
+    /// Слабая ссылка по значению В ПРЕДЕЛАХ схемы <c>core</c>; <see langword="null"/> — актуальная версия.
+    /// При замене чанки этого документа помечаются неактуальными (<c>IsCurrent = false</c>) — опора GATE-3.
+    /// </summary>
+    public int? SupersededByDocumentId { get; set; }
+
     /// <summary>Фрагменты документа.</summary>
     public ICollection<ChunkEntity> Chunks { get; set; } = [];
 }

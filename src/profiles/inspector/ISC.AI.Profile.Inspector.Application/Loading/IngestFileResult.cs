@@ -7,5 +7,7 @@ namespace ISC.AI.Profile.Inspector.Application.Loading;
 /// <param name="ChunkCount">Сколько чанков проиндексировано (0 — дубликат).</param>
 /// <param name="Reason">Причина отказа, если не принят.</param>
 /// <param name="IsDuplicate">Идемпотентный повтор (уже в корпусе).</param>
+/// <param name="SupersededDocumentId">Идентификатор заменённой прежней версии (при загрузке новой версии, Э4-14).</param>
 public sealed record IngestFileResult(
-    string FileName, bool Accepted, int? DocumentId, int ChunkCount, string? Reason, bool IsDuplicate);
+    string FileName, bool Accepted, int? DocumentId, int ChunkCount, string? Reason, bool IsDuplicate,
+    int? SupersededDocumentId = null);

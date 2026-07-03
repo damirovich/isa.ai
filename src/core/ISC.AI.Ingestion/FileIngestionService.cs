@@ -37,7 +37,8 @@ public sealed class FileIngestionService(ITextExtractor extractor, IIngestionPor
             Source: request.Source ?? request.FileName,
             StorageUri: request.StorageUri,
             DocDate: request.DocDate,
-            Metadata: request.Metadata);
+            Metadata: request.Metadata,
+            SupersedesDocumentId: request.SupersedesDocumentId);
 
         return await port.IngestAsync(ingestionRequest, cancellationToken);
     }

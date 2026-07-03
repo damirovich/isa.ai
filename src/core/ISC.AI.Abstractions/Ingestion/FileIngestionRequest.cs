@@ -15,6 +15,7 @@ namespace ISC.AI.Abstractions.Ingestion;
 /// <param name="StorageUri">Ссылка на исходный файл в защищённом хранилище.</param>
 /// <param name="DocDate">Дата документа.</param>
 /// <param name="Metadata">Доменный «багаж» профиля (для НПА — идентификатор нормы и т. п.).</param>
+/// <param name="SupersedesDocumentId">Если это новая версия — идентификатор заменяемого документа (Э4-14).</param>
 public sealed record FileIngestionRequest(
     Stream Content,
     string FileName,
@@ -25,4 +26,5 @@ public sealed record FileIngestionRequest(
     string? Source = null,
     string? StorageUri = null,
     DateOnly? DocDate = null,
-    IReadOnlyDictionary<string, string>? Metadata = null);
+    IReadOnlyDictionary<string, string>? Metadata = null,
+    int? SupersedesDocumentId = null);
