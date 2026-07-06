@@ -3,7 +3,6 @@ using ISC.AI.Ingestion;
 using ISC.AI.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
-using Pgvector.EntityFrameworkCore;
 using Shouldly;
 using Testcontainers.PostgreSql;
 

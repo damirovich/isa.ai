@@ -2,6 +2,7 @@
 
   <PropertyGroup>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <UserSecretsId>83466b43-4aa9-405c-8edf-d1cc57bf3bd0</UserSecretsId>
   </PropertyGroup>
 
   <!-- Хост и единственная точка композиции. Ссылается на ядро И на выбранный профиль
