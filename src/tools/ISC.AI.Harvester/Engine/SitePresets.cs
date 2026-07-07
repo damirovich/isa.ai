@@ -20,15 +20,16 @@ public static class SitePresets
                 BodySelector: ".section-npa")),
 
         // ЦБД Минюста КР — SPA: контент рисуется JavaScript, нужен headless-рендеринг (Э4-15).
-        // ВНИМАНИЕ: селекторы ПРЕДВАРИТЕЛЬНЫЕ — калибруются оператором на отрисованном DOM живого сайта.
-        // «Только действующие» задаётся на стороне источника (фильтр «Статус=Действует» в SeedUrl).
-        // Предпочтительная альтернатива скрапингу — официальный API Минюста через Tunduk (см. Э4-15).
+        // Список: ссылки документов — вида /{id}/edition/{editionId}/ru (проверено на живом сайте).
+        // Заголовок берётся из <title> (fallback коннектора). ВНИМАНИЕ: ТЕКСТ АКТА в DOM НЕ рендерится
+        // (лежит в данных страницы; на экране — вьюер), поэтому BodySelector даёт пусто — тело актов ЦБД
+        // надо брать файловым экспортом (Download) или официальным API Минюста через Tunduk (см. Э4-15).
         new SitePreset(
             Name: "cbd.minjust.gov.kg — ЦБД Минюста (SPA, headless)",
             SuggestedSeedUrl: "https://cbd.minjust.gov.kg/list-docs/ru",
             DocType: "нпа",
             Rules: new SiteRules(
-                ItemLinkSelector: "a[href*='/act/view/']",
+                ItemLinkSelector: "a[href*='/edition/']",
                 TitleSelector: "h1",
                 BodySelector: "main",
                 RenderMode: RenderMode.Headless)),
