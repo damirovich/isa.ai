@@ -21,9 +21,13 @@ public static class HarvesterServiceCollectionExtensions
         services.AddTransient<GenericUrlConnector>();
         services.AddTransient<ConfigurableSiteConnector>();
 
-        // Реестр коннекторов: оба доступны как ISourceConnector (UI выбирает по Id/DisplayName).
+        // API-коннектор ЦБД Минюста (Э4-16): свой HttpClient с реалистичным UA (API режет дефолтный бот-UA).
+        services.AddHttpClient<CbdApiConnector>(ConfigureBrowserClient);
+
+        // Реестр коннекторов: все доступны как ISourceConnector (UI выбирает по Id/DisplayName).
         services.AddTransient<ISourceConnector>(sp => sp.GetRequiredService<GenericUrlConnector>());
         services.AddTransient<ISourceConnector>(sp => sp.GetRequiredService<ConfigurableSiteConnector>());
+        services.AddTransient<ISourceConnector>(sp => sp.GetRequiredService<CbdApiConnector>());
 
         return services;
     }
@@ -32,5 +36,13 @@ public static class HarvesterServiceCollectionExtensions
     {
         client.DefaultRequestHeaders.UserAgent.ParseAdd("ISC.AI.Harvester/1.0");
         client.Timeout = TimeSpan.FromSeconds(30);
+    }
+
+    // Реалистичный desktop-UA: сайты/API с бот-защитой отдают данные браузеру, но режут дефолтный UA.
+    private static void ConfigureBrowserClient(HttpClient client)
+    {
+        client.DefaultRequestHeaders.UserAgent.ParseAdd(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36");
+        client.Timeout = TimeSpan.FromSeconds(60);
     }
 }
