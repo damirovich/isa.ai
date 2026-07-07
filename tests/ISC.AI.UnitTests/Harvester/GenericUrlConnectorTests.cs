@@ -1,5 +1,3 @@
-using System.Net;
-using System.Text;
 using ISC.AI.Abstractions.Harvesting;
 using ISC.AI.Harvester.Connectors;
 using ISC.AI.Harvester.Engine;
@@ -14,8 +12,8 @@ public sealed class GenericUrlConnectorTests
     public async Task Harvests_single_url()
     {
         const string html = "<html><head><title>Док</title></head><body><p>Текст НПА.</p></body></html>";
-        using var client = new HttpClient(new StubHandler(html));
-        var connector = new GenericUrlConnector(client, new HtmlContentExtractor());
+        var pages = new Dictionary<string, string> { ["http://example/doc"] = html };
+        var connector = new GenericUrlConnector(new FakePageFetcherFactory(pages), new HtmlContentExtractor());
 
         var config = new SourceConfig("http://example/doc", DocType: "положение", Classification: 0, DivisionId: 7, Language: "ru");
 
@@ -33,14 +31,5 @@ public sealed class GenericUrlConnectorTests
         docs[0].DivisionId.ShouldBe(7);
         docs[0].SourceUrl.ShouldBe("http://example/doc");
         docs[0].ContentHash.ShouldNotBeNullOrWhiteSpace();
-    }
-
-    private sealed class StubHandler(string html) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(html, Encoding.UTF8, "text/html"),
-            });
     }
 }

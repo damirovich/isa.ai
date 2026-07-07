@@ -1,5 +1,3 @@
-using System.Net;
-using System.Text;
 using ISC.AI.Abstractions.Harvesting;
 using ISC.AI.Harvester.Connectors;
 using ISC.AI.Harvester.Engine;
@@ -9,7 +7,8 @@ namespace ISC.AI.UnitTests.Harvester;
 
 /// <summary>
 /// Коннектор «сайт по правилам» (Э4-08, ADR-0015): по селекторам из конфига обходит список → карточки.
-/// Источник описывается КОНФИГОМ (правилами), а не классом — проверяем на сохранённом HTML.
+/// Источник описывается КОНФИГОМ (правилами), а не классом — проверяем на заранее заданном HTML через
+/// фейковый <see cref="IPageFetcher"/> (способ получения HTML — статический/headless — за абстракцией, Э4-15).
 /// </summary>
 public sealed class ConfigurableSiteConnectorTests
 {
@@ -29,8 +28,7 @@ public sealed class ConfigurableSiteConnectorTests
     [Fact(DisplayName = "Сайт по правилам: список → карточки по селекторам; поля и метаданные заполнены")]
     public async Task Harvests_by_rules()
     {
-        using var client = new HttpClient(new MapHandler(Pages));
-        var connector = new ConfigurableSiteConnector(client);
+        var connector = new ConfigurableSiteConnector(new FakePageFetcherFactory(Pages));
         var rules = new SiteRules(ItemLinkSelector: "a.doc", TitleSelector: "h1.t", BodySelector: "div.c", MaxPages: 1);
         var config = new SourceConfig("http://site/list", "закон", Classification: 0, DivisionId: 7, MaxDocuments: 10, Language: "ru", Rules: rules);
 
@@ -52,8 +50,7 @@ public sealed class ConfigurableSiteConnectorTests
     [Fact(DisplayName = "Сайт по правилам: без правил в конфиге — отказ")]
     public async Task Without_rules_throws()
     {
-        using var client = new HttpClient(new MapHandler(Pages));
-        var connector = new ConfigurableSiteConnector(client);
+        var connector = new ConfigurableSiteConnector(new FakePageFetcherFactory(Pages));
         var config = new SourceConfig("http://site/list", "закон", Classification: 0, DivisionId: 7);
 
         await Should.ThrowAsync<InvalidOperationException>(async () =>
@@ -62,6 +59,27 @@ public sealed class ConfigurableSiteConnectorTests
             {
             }
         });
+    }
+
+    [Fact(DisplayName = "RenderMode=Headless (Э4-15): у фабрики запрашивается headless; документы извлекаются из отрисованного HTML")]
+    public async Task Headless_mode_requests_headless_fetcher_and_extracts()
+    {
+        var factory = new FakePageFetcherFactory(Pages);
+        var rules = new SiteRules(
+            ItemLinkSelector: "a.doc", TitleSelector: "h1.t", BodySelector: "div.c", MaxPages: 1,
+            RenderMode: RenderMode.Headless, ReadySelector: "div.c");
+        var config = new SourceConfig("http://site/list", "закон", Classification: 0, DivisionId: 7, MaxDocuments: 10, Rules: rules);
+
+        var docs = new List<HarvestedDocument>();
+        await foreach (var doc in new ConfigurableSiteConnector(factory).HarvestAsync(config))
+        {
+            docs.Add(doc);
+        }
+
+        // Режим headless проброшен в фабрику; извлечение работает на «отрисованном» HTML так же, как на статическом.
+        factory.LastRequestedMode.ShouldBe(RenderMode.Headless);
+        docs.Count.ShouldBe(2);
+        docs[0].Title.ShouldBe("Закон 1");
     }
 
     [Fact(DisplayName = "Пресет gov.kg: список a[href*='/npa/s/'] → карточки h2.section-name-title + .section-npa, без мусора меню")]
@@ -81,12 +99,11 @@ public sealed class ConfigurableSiteConnectorTests
                 "<div class='section-npa'>Текст постановления 421.</div></body></html>",
         };
 
-        using var client = new HttpClient(new MapHandler(pages));
         var preset = SitePresets.All.First(p => p.Name.Contains("gov.kg", StringComparison.Ordinal));
         var config = new SourceConfig(preset.SuggestedSeedUrl, preset.DocType, Classification: 0, DivisionId: 7, MaxDocuments: 10, Rules: preset.Rules);
 
         var docs = new List<HarvestedDocument>();
-        await foreach (var doc in new ConfigurableSiteConnector(client).HarvestAsync(config))
+        await foreach (var doc in new ConfigurableSiteConnector(new FakePageFetcherFactory(pages)).HarvestAsync(config))
         {
             docs.Add(doc);
         }
@@ -99,18 +116,5 @@ public sealed class ConfigurableSiteConnectorTests
         docs[0].Text.ShouldNotContain("О нас"); // меню навигации не попало
         docs[0].DocType.ShouldBe("постановление");
         docs[1].Title.ShouldBe("Постановление № 421");
-    }
-
-    private sealed class MapHandler(IReadOnlyDictionary<string, string> pages) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            var url = request.RequestUri!.ToString();
-            var html = pages.TryGetValue(url, out var found) ? found : "<html><body>404</body></html>";
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(html, Encoding.UTF8, "text/html"),
-            });
-        }
     }
 }

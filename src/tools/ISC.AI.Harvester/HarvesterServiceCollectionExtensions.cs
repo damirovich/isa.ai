@@ -13,9 +13,13 @@ public static class HarvesterServiceCollectionExtensions
         services.AddSingleton<IContentExtractor, HtmlContentExtractor>();
         services.AddSingleton<IBundleWriter, JsonBundleWriter>();
 
-        // Типизированные HttpClient для коннекторов (вежливый User-Agent, таймаут).
-        services.AddHttpClient<GenericUrlConnector>(ConfigureClient);
-        services.AddHttpClient<ConfigurableSiteConnector>(ConfigureClient);
+        // Получатель HTML: HTTP (статические сайты) или headless-браузер (SPA) — выбор по RenderMode (Э4-15).
+        // Типизированный HttpClient (вежливый User-Agent, таймаут) — на статический путь фабрики.
+        services.AddHttpClient<PageFetcherFactory>(ConfigureClient);
+        services.AddTransient<IPageFetcherFactory>(sp => sp.GetRequiredService<PageFetcherFactory>());
+
+        services.AddTransient<GenericUrlConnector>();
+        services.AddTransient<ConfigurableSiteConnector>();
 
         // Реестр коннекторов: оба доступны как ISourceConnector (UI выбирает по Id/DisplayName).
         services.AddTransient<ISourceConnector>(sp => sp.GetRequiredService<GenericUrlConnector>());

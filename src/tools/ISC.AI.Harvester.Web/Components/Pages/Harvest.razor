@@ -2,6 +2,7 @@
 @page "/"
 @using ISC.AI.Abstractions.Harvesting
 @using ISC.AI.Harvester.Engine
+@using EngineRenderMode = ISC.AI.Harvester.Engine.RenderMode @* однозначность: есть ещё Blazor RenderMode *@
 @inject IEnumerable<ISourceConnector> Connectors
 @inject IBundleWriter BundleWriter
 
@@ -59,7 +60,23 @@
             <MudItem xs="12" sm="4">
                 <MudTextField @bind-Value="_bodySelector" Label="Текст карточки" Variant="Variant.Outlined" />
             </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="EngineRenderMode" @bind-Value="_renderMode" Label="Режим загрузки" Variant="Variant.Outlined">
+                    <MudSelectItem Value="@(EngineRenderMode.Static)">Статический HTML (быстро)</MudSelectItem>
+                    <MudSelectItem Value="@(EngineRenderMode.Headless)">Headless-браузер (для JS-сайтов/SPA)</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_readySelector" Label="Селектор готовности (headless, необязательно)" Variant="Variant.Outlined" />
+            </MudItem>
         </MudGrid>
+        @if (_renderMode == EngineRenderMode.Headless)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-2">
+                Headless требует браузер: один раз выполните <code>playwright install chromium</code>.
+                Селекторы пресета — предварительные; сверьте с реальной страницей (DevTools).
+            </MudAlert>
+        }
     }
 
     <MudButton Class="mt-3" Color="Color.Primary" Variant="Variant.Filled"
@@ -118,6 +135,8 @@
     private string _itemLinkSelector = string.Empty;
     private string _titleSelector = string.Empty;
     private string _bodySelector = string.Empty;
+    private EngineRenderMode _renderMode = EngineRenderMode.Static;
+    private string _readySelector = string.Empty;
 
     private bool _busy;
     private string? _status;
@@ -145,6 +164,8 @@
         _itemLinkSelector = preset.Rules.ItemLinkSelector;
         _titleSelector = preset.Rules.TitleSelector ?? string.Empty;
         _bodySelector = preset.Rules.BodySelector ?? string.Empty;
+        _renderMode = preset.Rules.RenderMode; // важно: SPA-пресет несёт headless-режим (Э4-15)
+        _readySelector = preset.Rules.ReadySelector ?? string.Empty;
     }
 
     private async Task RunAsync()
@@ -158,7 +179,8 @@
             var connector = Connectors.First(c => c.Id == _connectorId);
             SiteRules? rules = string.IsNullOrWhiteSpace(_itemLinkSelector)
                 ? null
-                : new SiteRules(_itemLinkSelector, NullIfEmpty(_titleSelector), NullIfEmpty(_bodySelector));
+                : new SiteRules(_itemLinkSelector, NullIfEmpty(_titleSelector), NullIfEmpty(_bodySelector),
+                    RenderMode: _renderMode, ReadySelector: NullIfEmpty(_readySelector));
             var config = new SourceConfig(_seedUrl, _docType, OpenClassification, _divisionId, _maxDocuments, Rules: rules);
 
             await foreach (var doc in connector.HarvestAsync(config))

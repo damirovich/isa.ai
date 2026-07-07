@@ -13,7 +13,7 @@ namespace ISC.AI.Harvester.Connectors;
 /// ссылки → карточки документов (+ пагинация), извлекая поля селекторами. Любой структурированный
 /// сайт (gov.kg и др.) — это КОНФИГ правил, а не отдельный класс.
 /// </summary>
-public sealed class ConfigurableSiteConnector(HttpClient httpClient) : ISourceConnector
+public sealed class ConfigurableSiteConnector(IPageFetcherFactory fetcherFactory) : ISourceConnector
 {
     private static readonly HtmlParser Parser = new();
 
@@ -31,12 +31,15 @@ public sealed class ConfigurableSiteConnector(HttpClient httpClient) : ISourceCo
         var rules = config.Rules
             ?? throw new InvalidOperationException("ConfigurableSiteConnector требует SiteRules в SourceConfig.Rules.");
 
+        // Получатель HTML по режиму (Static=HTTP, Headless=браузер с JS) — один на прогон (Э4-15).
+        await using var fetcher = await fetcherFactory.CreateAsync(rules.RenderMode, cancellationToken);
+
         string? listUrl = config.SeedUrl;
         var collected = 0;
 
         for (var page = 0; page < rules.MaxPages && listUrl is not null && collected < config.MaxDocuments; page++)
         {
-            var listDocument = Parser.ParseDocument(await httpClient.GetStringAsync(listUrl, cancellationToken));
+            var listDocument = Parser.ParseDocument(await fetcher.GetHtmlAsync(listUrl, rules.ReadySelector, cancellationToken));
 
             var documentUrls = listDocument.QuerySelectorAll(rules.ItemLinkSelector)
                 .Select(element => element.GetAttribute("href"))
@@ -51,7 +54,7 @@ public sealed class ConfigurableSiteConnector(HttpClient httpClient) : ISourceCo
                     break;
                 }
 
-                var document = Parser.ParseDocument(await httpClient.GetStringAsync(documentUrl, cancellationToken));
+                var document = Parser.ParseDocument(await fetcher.GetHtmlAsync(documentUrl, rules.ReadySelector, cancellationToken));
 
                 var title = SelectText(document, rules.TitleSelector) ?? document.Title ?? documentUrl;
                 var rawText = SelectText(document, rules.BodySelector) ?? document.Body?.TextContent ?? string.Empty;
