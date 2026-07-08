@@ -1,23 +1,27 @@
-@* Консоль оператора (Э4-08): выбор источника → сбор → курирование → выгрузка пакета. Вне контура. *@
+@* Консоль оператора (Э4-08/16/17): выбор источника → фоновый сбор со стримингом в шардированный пакет → мониторинг. Вне контура. *@
 @page "/"
 @using ISC.AI.Abstractions.Harvesting
 @using ISC.AI.Harvester.Engine
+@using ISC.AI.Harvester.Web.Services
 @using EngineRenderMode = ISC.AI.Harvester.Engine.RenderMode @* однозначность: есть ещё Blazor RenderMode *@
+@implements IDisposable
 @inject IEnumerable<ISourceConnector> Connectors
-@inject IBundleWriter BundleWriter
+@inject HarvestRunner Runner
 
-<PageTitle>Сборщик корпуса</PageTitle>
+<PageTitle>Сбор корпуса — Сборщик</PageTitle>
 
-<MudText Typo="Typo.h4" GutterBottom="true">Сбор корпуса из источника</MudText>
-<MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-4">
-    Инструмент работает ВНЕ изолированного контура. Собираются только открытые материалы; на выходе —
-    пакет для контролируемого переноса и импорта в контур.
-</MudAlert>
+<MudText Typo="Typo.h5" Class="mb-1">Сбор корпуса из источника</MudText>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-4">
+    Вне контура. Только открытые материалы. На выходе — пакет для контролируемого переноса и импорта в контур.
+    <MudLink Href="/help">Как это работает?</MudLink>
+</MudText>
 
+@* ── Шаг 1. Источник ─────────────────────────────────────────────── *@
 <MudPaper Class="pa-4 mb-4" Outlined="true">
+    <MudText Typo="Typo.subtitle1" Class="mb-3"><b>1. Источник</b></MudText>
     <MudGrid>
         <MudItem xs="12">
-            <MudSelect T="string" Value="_preset" ValueChanged="ApplyPreset" Label="Готовый пресет источника" Variant="Variant.Outlined" Clearable="true">
+            <MudSelect T="string" Value="_preset" ValueChanged="ApplyPreset" Label="Готовый пресет (быстрый старт)" Variant="Variant.Outlined" Clearable="true" Disabled="Runner.IsRunning">
                 <MudSelectItem Value="@(string.Empty)">— без пресета (ручная настройка) —</MudSelectItem>
                 @foreach (var preset in SitePresets.All)
                 {
@@ -26,7 +30,7 @@
             </MudSelect>
         </MudItem>
         <MudItem xs="12" sm="6">
-            <MudSelect T="string" @bind-Value="_connectorId" Label="Источник" Variant="Variant.Outlined">
+            <MudSelect T="string" @bind-Value="_connectorId" Label="Способ сбора (коннектор)" Variant="Variant.Outlined" Disabled="Runner.IsRunning">
                 @foreach (var connector in Connectors)
                 {
                     <MudSelectItem Value="@connector.Id">@connector.DisplayName</MudSelectItem>
@@ -34,102 +38,160 @@
             </MudSelect>
         </MudItem>
         <MudItem xs="12" sm="6">
-            <MudTextField @bind-Value="_seedUrl" Label="URL (страница или список)" Variant="Variant.Outlined" />
-        </MudItem>
-        <MudItem xs="12" sm="4">
-            <MudTextField @bind-Value="_docType" Label="Тип документа" Variant="Variant.Outlined" />
-        </MudItem>
-        <MudItem xs="6" sm="4">
-            <MudNumericField @bind-Value="_divisionId" Label="Подразделение (DivisionId)" Variant="Variant.Outlined" Min="0" />
-        </MudItem>
-        <MudItem xs="6" sm="4">
-            <MudNumericField @bind-Value="_maxDocuments" Label="Максимум документов" Variant="Variant.Outlined" Min="1" />
+            <MudTextField @bind-Value="_seedUrl" Label="URL источника" Variant="Variant.Outlined" Disabled="Runner.IsRunning" HelperText="@SeedHelp()" />
         </MudItem>
     </MudGrid>
 
-    @if (_connectorId == "configurable-site")
+    @if (_connectorId == "cbd-api")
     {
-        <MudText Typo="Typo.subtitle2" Class="mt-3">Правила (CSS-селекторы) для «сайт по правилам»</MudText>
+        <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mt-2">
+            Официальный API: <b>только действующие</b> НПА с <b>полным текстом</b>. Селекторы и браузер не нужны.
+        </MudAlert>
+    }
+    else if (_connectorId == "configurable-site")
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-2">
+            Скрапинг по CSS-селекторам (шаг 3). Для JS-сайтов/SPA включите режим <b>Headless</b>.
+        </MudAlert>
+    }
+</MudPaper>
+
+@* ── Шаг 2. Параметры ────────────────────────────────────────────── *@
+<MudPaper Class="pa-4 mb-4" Outlined="true">
+    <MudText Typo="Typo.subtitle1" Class="mb-3"><b>2. Параметры сбора</b></MudText>
+    <MudGrid>
+        <MudItem xs="12" sm="4">
+            <MudTextField @bind-Value="_docType" Label="Тип документа" Variant="Variant.Outlined" Disabled="Runner.IsRunning"
+                          HelperText="для API берётся из данных источника, если пусто" />
+        </MudItem>
+        <MudItem xs="6" sm="4">
+            <MudNumericField @bind-Value="_divisionId" Label="Подразделение (DivisionId)" Variant="Variant.Outlined" Min="0" Disabled="Runner.IsRunning" />
+        </MudItem>
+        <MudItem xs="6" sm="4">
+            <MudNumericField @bind-Value="_maxDocuments" Label="Максимум документов" Variant="Variant.Outlined" Min="1" Disabled="@(Runner.IsRunning || _collectAll)" />
+        </MudItem>
+        <MudItem xs="12">
+            <MudCheckBox @bind-Value="_collectAll" T="bool" Dense="true" Disabled="Runner.IsRunning"
+                         Label="Собрать все (для полного корпуса — идёт в фоне, может занять часы)" />
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@* ── Шаг 3. Правила скрапинга (только для «сайт по правилам») ─────── *@
+@if (_connectorId == "configurable-site")
+{
+    <MudPaper Class="pa-4 mb-4" Outlined="true">
+        <MudText Typo="Typo.subtitle1" Class="mb-3"><b>3. Правила извлечения (CSS-селекторы)</b></MudText>
         <MudGrid>
-            <MudItem xs="12" sm="4">
-                <MudTextField @bind-Value="_itemLinkSelector" Label="Ссылки списка" Variant="Variant.Outlined" />
-            </MudItem>
-            <MudItem xs="12" sm="4">
-                <MudTextField @bind-Value="_titleSelector" Label="Заголовок карточки" Variant="Variant.Outlined" />
-            </MudItem>
-            <MudItem xs="12" sm="4">
-                <MudTextField @bind-Value="_bodySelector" Label="Текст карточки" Variant="Variant.Outlined" />
-            </MudItem>
+            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_itemLinkSelector" Label="Ссылки списка" Variant="Variant.Outlined" Disabled="Runner.IsRunning" /></MudItem>
+            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_titleSelector" Label="Заголовок карточки" Variant="Variant.Outlined" Disabled="Runner.IsRunning" /></MudItem>
+            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_bodySelector" Label="Текст карточки" Variant="Variant.Outlined" Disabled="Runner.IsRunning" /></MudItem>
             <MudItem xs="12" sm="6">
-                <MudSelect T="EngineRenderMode" @bind-Value="_renderMode" Label="Режим загрузки" Variant="Variant.Outlined">
+                <MudSelect T="EngineRenderMode" @bind-Value="_renderMode" Label="Режим загрузки" Variant="Variant.Outlined" Disabled="Runner.IsRunning">
                     <MudSelectItem Value="@(EngineRenderMode.Static)">Статический HTML (быстро)</MudSelectItem>
                     <MudSelectItem Value="@(EngineRenderMode.Headless)">Headless-браузер (для JS-сайтов/SPA)</MudSelectItem>
                 </MudSelect>
             </MudItem>
+            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_readySelector" Label="Селектор готовности (headless, необязательно)" Variant="Variant.Outlined" Disabled="Runner.IsRunning" /></MudItem>
             <MudItem xs="12" sm="6">
-                <MudTextField @bind-Value="_readySelector" Label="Селектор готовности (headless, необязательно)" Variant="Variant.Outlined" />
+                <MudTextField @bind-Value="_pageParam" Label="Параметр пагинации (напр. page)" Variant="Variant.Outlined" Disabled="Runner.IsRunning"
+                              HelperText="если список листается через ?page=2,3… — иначе берётся 1 страница" />
             </MudItem>
         </MudGrid>
-        @if (_renderMode == EngineRenderMode.Headless)
-        {
-            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-2">
-                Headless требует браузер: один раз выполните <code>playwright install chromium</code>.
-                Селекторы пресета — предварительные; сверьте с реальной страницей (DevTools).
-            </MudAlert>
-        }
-    }
-
-    <MudButton Class="mt-3" Color="Color.Primary" Variant="Variant.Filled"
-               OnClick="RunAsync" Disabled="@(_busy || string.IsNullOrWhiteSpace(_seedUrl))">
-        @(_busy ? "Сбор…" : "Собрать")
-    </MudButton>
-</MudPaper>
-
-@if (_busy)
-{
-    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-2" />
-}
-@if (_status is not null)
-{
-    <MudText Typo="Typo.body2" Class="mb-2">@_status</MudText>
-}
-
-@if (_rows.Count > 0)
-{
-    <MudPaper Class="pa-4 mb-4" Outlined="true">
-        <div class="d-flex align-center justify-space-between mb-2">
-            <MudText Typo="Typo.h6">Собрано: @_rows.Count (выбрано: @_rows.Count(r => r.Include))</MudText>
-            <MudButton Color="Color.Secondary" Variant="Variant.Filled" OnClick="ExportAsync" Disabled="_busy">
-                Выгрузить пакет
-            </MudButton>
-        </div>
-
-        @foreach (var row in _rows)
-        {
-            <div class="d-flex align-center gap-2 mb-1">
-                <MudCheckBox @bind-Value="row.Include" T="bool" Dense="true" />
-                <div>
-                    <MudText Typo="Typo.body2"><b>@row.Doc.Title</b></MudText>
-                    <MudText Typo="Typo.caption">@row.Doc.SourceUrl · символов: @row.Doc.Text.Length</MudText>
-                </div>
-            </div>
-        }
     </MudPaper>
 }
 
-@if (_bundlePath is not null)
+@* ── Управление и прогресс ───────────────────────────────────────── *@
+<div class="d-flex align-center gap-2 mb-3">
+    <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.CloudDownload"
+               OnClick="StartFresh" Disabled="@(Runner.IsRunning || string.IsNullOrWhiteSpace(_seedUrl))">Собрать</MudButton>
+    @if (Runner.IsRunning)
+    {
+        <MudButton Color="Color.Error" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Stop" OnClick="Runner.Stop">Стоп</MudButton>
+    }
+    @if (Runner.Status == HarvestStatus.Stopped && Runner.CurrentPage > 0)
+    {
+        <MudButton Color="Color.Secondary" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="Resume">Продолжить с чекпоинта</MudButton>
+    }
+</div>
+
+@if (Runner.IsRunning)
 {
-    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined">
-        Пакет записан: <code>@_bundlePath</code>. Перенесите его в контур контролируемо и импортируйте.
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-2" />
+    <MudText Typo="Typo.body2" Class="mb-3">Идёт сбор… собрано <b>@Runner.Count</b> · страница @Runner.CurrentPage · коротких @Runner.ShortCount</MudText>
+}
+else if (Runner.Status == HarvestStatus.Stopped)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-3">Остановлено на @Runner.Count (страница @Runner.CurrentPage). Можно продолжить с чекпоинта. Пакет сохранён.</MudAlert>
+}
+else if (Runner.Status == HarvestStatus.Completed)
+{
+    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Class="mb-3">Готово. Собрано @Runner.Count (коротких @Runner.ShortCount).</MudAlert>
+}
+else if (Runner.Status == HarvestStatus.Failed)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">Ошибка: @Runner.Error. Собрано @Runner.Count — частичный пакет сохранён.</MudAlert>
+}
+
+@if (Runner.ManifestPath is not null)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-3">
+        Пакет: <code>@Runner.ManifestPath</code> — перенесите в контур и импортируйте (страница «Загрузка корпуса»).
     </MudAlert>
 }
+
+@* ── Таблица результатов (серверная пагинация по лёгким строкам) ──── *@
+@if (Runner.Count > 0)
+{
+    <MudTable T="HarvestRow" ServerData="ServerReload" @ref="_table" Dense="true" Hover="true" Bordered="true" Striped="true" RowsPerPage="25" OnRowClick="PreviewRow">
+        <ToolBarContent>
+            <MudText Typo="Typo.subtitle1"><b>Собрано: @Runner.Count</b> · коротких: @Runner.ShortCount</MudText>
+            <MudSpacer />
+            <MudTextField @bind-Value="_search" Placeholder="Поиск по заголовку" Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" DebounceInterval="300"
+                          OnDebounceIntervalElapsed="ReloadTable" Class="mt-0" Style="max-width:320px" />
+        </ToolBarContent>
+        <HeaderContent>
+            <MudTh>Заголовок</MudTh>
+            <MudTh>Статус</MudTh>
+            <MudTh>Символов</MudTh>
+            <MudTh>Ссылка</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Заголовок" Style="max-width:520px">@context.Title</MudTd>
+            <MudTd DataLabel="Статус"><MudChip T="string" Size="Size.Small" Color="StatusColor(context.Status)" Variant="Variant.Text">@context.Status</MudChip></MudTd>
+            <MudTd DataLabel="Символов">
+                <span style="@(context.IsShort ? "color:var(--mud-palette-error);font-weight:600" : "")">@context.TextLength</span>
+                @if (context.IsShort)
+                {
+                    <MudTooltip Text="Подозрительно короткий текст — вероятно, пусто/мусор"><MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Error" Size="Size.Small" /></MudTooltip>
+                }
+            </MudTd>
+            <MudTd DataLabel="Ссылка"><MudLink Href="@context.SourceUrl" Target="_blank">открыть</MudLink></MudTd>
+        </RowTemplate>
+        <PagerContent><MudTablePager PageSizeOptions="new[]{25,50,100}" /></PagerContent>
+    </MudTable>
+    <MudText Typo="Typo.caption" Class="mt-1">Клик по строке — просмотр текста документа.</MudText>
+}
+
+@* ── Просмотр текста документа (по требованию, из шарда) ──────────── *@
+<MudOverlay @bind-Visible="_previewOpen" DarkBackground="true" AutoClose="true">
+    <MudPaper Class="pa-4" Style="max-width:820px; max-height:82vh; overflow:auto" @onclick:stopPropagation="true">
+        <div class="d-flex align-center justify-space-between mb-2">
+            <MudText Typo="Typo.subtitle1"><b>@_previewTitle</b></MudText>
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => _previewOpen = false)" />
+        </div>
+        <MudText Typo="Typo.body2" Style="white-space:pre-wrap">@_previewText</MudText>
+    </MudPaper>
+</MudOverlay>
 
 @code {
     private string _connectorId = string.Empty;
     private string _seedUrl = string.Empty;
-    private string _docType = "положение";
+    private string _docType = "нпа";
     private int _divisionId = 1;
     private int _maxDocuments = 20;
+    private bool _collectAll;
     private const short OpenClassification = 0; // вне контура — только открытые материалы
 
     private string _itemLinkSelector = string.Empty;
@@ -137,16 +199,92 @@
     private string _bodySelector = string.Empty;
     private EngineRenderMode _renderMode = EngineRenderMode.Static;
     private string _readySelector = string.Empty;
-
-    private bool _busy;
-    private string? _status;
-    private string? _bundlePath;
-    private readonly List<Row> _rows = [];
+    private string _pageParam = string.Empty;
 
     private string _preset = string.Empty;
+    private string _search = string.Empty;
+    private MudTable<HarvestRow>? _table;
 
-    protected override void OnInitialized() =>
+    private bool _previewOpen;
+    private string _previewTitle = string.Empty;
+    private string _previewText = string.Empty;
+
+    protected override void OnInitialized()
+    {
         _connectorId = Connectors.FirstOrDefault()?.Id ?? string.Empty;
+        Runner.Changed += OnRunnerChanged;
+    }
+
+    public void Dispose() => Runner.Changed -= OnRunnerChanged;
+
+    private void OnRunnerChanged() => InvokeAsync(async () =>
+    {
+        if (_table is not null)
+        {
+            await _table.ReloadServerData();
+        }
+
+        StateHasChanged();
+    });
+
+    private Task<TableData<HarvestRow>> ServerReload(TableState state, CancellationToken token)
+    {
+        var (page, filtered, _) = Runner.GetPage(_search, state.Page * state.PageSize, state.PageSize);
+        return Task.FromResult(new TableData<HarvestRow> { Items = page, TotalItems = filtered });
+    }
+
+    private async Task ReloadTable()
+    {
+        if (_table is not null)
+        {
+            await _table.ReloadServerData();
+        }
+    }
+
+    private void StartFresh() => Start(startPage: 1);
+
+    private void Resume() => Start(startPage: Runner.CurrentPage);
+
+    private void Start(int startPage)
+    {
+        SiteRules? rules = _connectorId == "configurable-site" && !string.IsNullOrWhiteSpace(_itemLinkSelector)
+            ? new SiteRules(_itemLinkSelector, NullIfEmpty(_titleSelector), NullIfEmpty(_bodySelector),
+                RenderMode: _renderMode, ReadySelector: NullIfEmpty(_readySelector), PageParam: NullIfEmpty(_pageParam))
+            : null;
+
+        var config = new SourceConfig(
+            _seedUrl, _docType, OpenClassification, _divisionId,
+            MaxDocuments: _collectAll ? int.MaxValue : _maxDocuments,
+            Rules: rules,
+            StartPage: startPage);
+
+        Runner.Start(config, _connectorId);
+    }
+
+    private async Task PreviewRow(TableRowClickEventArgs<HarvestRow> args)
+    {
+        if (args.Item is not { } row)
+        {
+            return;
+        }
+
+        _previewTitle = row.Title;
+        _previewText = "Загрузка…";
+        _previewOpen = true;
+        var doc = await Runner.ReadDocumentAsync(row.Index);
+        _previewText = string.IsNullOrWhiteSpace(doc?.Text) ? "(текст пуст)" : doc!.Text;
+        StateHasChanged();
+    }
+
+    private string SeedHelp() => _connectorId switch
+    {
+        "cbd-api" => "адрес сайта, напр. https://cbd.minjust.gov.kg",
+        "configurable-site" => "страница со списком документов",
+        _ => "адрес одной страницы",
+    };
+
+    private static Color StatusColor(string status) =>
+        status == "Действует" ? Color.Success : string.IsNullOrEmpty(status) ? Color.Default : Color.Warning;
 
     private void ApplyPreset(string name)
     {
@@ -157,70 +295,19 @@
             return;
         }
 
-        // Пресет — это конфиг: заполняем поля; оператор может поправить селекторы вручную.
-        _connectorId = "configurable-site";
+        _connectorId = preset.ConnectorId;
         _seedUrl = preset.SuggestedSeedUrl;
         _docType = preset.DocType;
-        _itemLinkSelector = preset.Rules.ItemLinkSelector;
-        _titleSelector = preset.Rules.TitleSelector ?? string.Empty;
-        _bodySelector = preset.Rules.BodySelector ?? string.Empty;
-        _renderMode = preset.Rules.RenderMode; // важно: SPA-пресет несёт headless-режим (Э4-15)
-        _readySelector = preset.Rules.ReadySelector ?? string.Empty;
-    }
-
-    private async Task RunAsync()
-    {
-        _busy = true;
-        _status = "Сбор…";
-        _bundlePath = null;
-        _rows.Clear();
-        try
+        if (preset.Rules is { } rules)
         {
-            var connector = Connectors.First(c => c.Id == _connectorId);
-            SiteRules? rules = string.IsNullOrWhiteSpace(_itemLinkSelector)
-                ? null
-                : new SiteRules(_itemLinkSelector, NullIfEmpty(_titleSelector), NullIfEmpty(_bodySelector),
-                    RenderMode: _renderMode, ReadySelector: NullIfEmpty(_readySelector));
-            var config = new SourceConfig(_seedUrl, _docType, OpenClassification, _divisionId, _maxDocuments, Rules: rules);
-
-            await foreach (var doc in connector.HarvestAsync(config))
-            {
-                _rows.Add(new Row(doc));
-                _status = $"Собрано: {_rows.Count}";
-                StateHasChanged();
-            }
-
-            _status = $"Готово. Собрано: {_rows.Count}";
+            _itemLinkSelector = rules.ItemLinkSelector;
+            _titleSelector = rules.TitleSelector ?? string.Empty;
+            _bodySelector = rules.BodySelector ?? string.Empty;
+            _renderMode = rules.RenderMode;
+            _readySelector = rules.ReadySelector ?? string.Empty;
+            _pageParam = rules.PageParam ?? string.Empty;
         }
-        catch (Exception ex)
-        {
-            _status = $"Ошибка: {ex.Message}";
-        }
-        finally
-        {
-            _busy = false;
-        }
-    }
-
-    private async Task ExportAsync()
-    {
-        var included = _rows.Where(r => r.Include).Select(r => r.Doc).ToList();
-        if (included.Count == 0)
-        {
-            _status = "Нет выбранных документов для выгрузки.";
-            return;
-        }
-
-        var directory = Path.Combine(AppContext.BaseDirectory, "bundles", "bundle-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
-        _bundlePath = await BundleWriter.WriteAsync(directory, included);
-        _status = $"Выгружено документов: {included.Count}";
     }
 
     private static string? NullIfEmpty(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
-
-    private sealed class Row(HarvestedDocument doc)
-    {
-        public HarvestedDocument Doc { get; } = doc;
-        public bool Include { get; set; } = true;
-    }
 }

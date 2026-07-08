@@ -21,8 +21,10 @@ public static class HarvesterServiceCollectionExtensions
         services.AddTransient<GenericUrlConnector>();
         services.AddTransient<ConfigurableSiteConnector>();
 
-        // API-коннектор ЦБД Минюста (Э4-16): свой HttpClient с реалистичным UA (API режет дефолтный бот-UA).
-        services.AddHttpClient<CbdApiConnector>(ConfigureBrowserClient);
+        // API-коннектор ЦБД Минюста (Э4-16): свой HttpClient с реалистичным UA (API режет дефолтный бот-UA)
+        // + устойчивость для массового сбора (Э4-17): пауза между запросами и ретрай на 429/5xx.
+        services.AddHttpClient<CbdApiConnector>(ConfigureBrowserClient)
+            .AddHttpMessageHandler(() => new ResilientHttpHandler(TimeSpan.FromMilliseconds(300), maxRetries: 4));
 
         // Реестр коннекторов: все доступны как ISourceConnector (UI выбирает по Id/DisplayName).
         services.AddTransient<ISourceConnector>(sp => sp.GetRequiredService<GenericUrlConnector>());

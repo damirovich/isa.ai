@@ -11,6 +11,7 @@ namespace ISC.AI.Harvester.Engine;
 /// <param name="MaxDocuments">Верхний предел числа документов за прогон (вежливость к источнику).</param>
 /// <param name="Language">Язык по умолчанию (ru/ky), если источник одноязычный.</param>
 /// <param name="Rules">Правила-селекторы для <c>ConfigurableSiteConnector</c>; generic-коннектор их игнорирует.</param>
+/// <param name="StartPage">Стартовая страница пагинации (для возобновления массового сбора, Э4-17). 1 — с начала.</param>
 public sealed record SourceConfig(
     string SeedUrl,
     string DocType,
@@ -18,4 +19,5 @@ public sealed record SourceConfig(
     int DivisionId,
     int MaxDocuments = 50,
     string? Language = null,
-    SiteRules? Rules = null);
+    SiteRules? Rules = null,
+    int StartPage = 1);

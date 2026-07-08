@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using ISC.AI.Abstractions.Harvesting;
 using ISC.AI.Abstractions.Ingestion;
@@ -5,9 +6,11 @@ using ISC.AI.Abstractions.Ingestion;
 namespace ISC.AI.Ingestion;
 
 /// <summary>
-/// Импорт пакета сборщика (Э4-08↔Э4-01): <c>manifest.json</c> → на каждый <see cref="HarvestedDocument"/>
-/// вызывает <see cref="IIngestionPort"/>. Гриф/подразделение приходят из манифеста (декларированы вне
-/// контура); порт всё равно проверяет их fail-closed (ТБ-024) и дедуплицирует (ТНД-002).
+/// Импорт пакета сборщика (Э4-08↔Э4-01): читает <c>manifest.json</c> и на каждый <see cref="HarvestedDocument"/>
+/// вызывает <see cref="IIngestionPort"/>. Поддержаны ДВА формата пакета: одиночный массив (малые пакеты) и
+/// шардированный индекс (<see cref="BundleManifest"/>) для больших корпусов 170К+ (Э4-17). Гриф/подразделение
+/// приходят из манифеста (декларированы вне контура); порт всё равно проверяет их fail-closed (ТБ-024) и
+/// дедуплицирует (ТНД-002).
 /// </summary>
 public sealed class BundleImporter(IIngestionPort port) : IBundleImporter
 {
@@ -18,16 +21,14 @@ public sealed class BundleImporter(IIngestionPort port) : IBundleImporter
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);
 
-        await using var stream = File.OpenRead(manifestPath);
-        var documents = await JsonSerializer.DeserializeAsync<List<HarvestedDocument>>(stream, Options, cancellationToken)
-            ?? [];
-
+        var total = 0;
         var imported = 0;
         var duplicates = 0;
         var rejected = 0;
 
-        foreach (var document in documents)
+        await foreach (var document in ReadDocumentsAsync(manifestPath, cancellationToken))
         {
+            total++;
             var result = await port.IngestAsync(
                 new IngestionRequest(
                     DocType: document.DocType,
@@ -53,6 +54,74 @@ public sealed class BundleImporter(IIngestionPort port) : IBundleImporter
             }
         }
 
-        return new BundleImportResult(documents.Count, imported, duplicates, rejected);
+        return new BundleImportResult(total, imported, duplicates, rejected);
+    }
+
+    // Читает документы из пакета: массив (старый формат) ИЛИ шарды по индексу-манифесту (Э4-17) — потоково.
+    private static async IAsyncEnumerable<HarvestedDocument> ReadDocumentsAsync(
+        string manifestPath, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (!await IsShardedAsync(manifestPath, cancellationToken))
+        {
+            await foreach (var document in ReadArrayAsync(manifestPath, cancellationToken))
+            {
+                yield return document;
+            }
+
+            yield break;
+        }
+
+        BundleManifest manifest;
+        await using (var stream = File.OpenRead(manifestPath))
+        {
+            manifest = await JsonSerializer.DeserializeAsync<BundleManifest>(stream, Options, cancellationToken)
+                ?? new BundleManifest(0, 0, []);
+        }
+
+        var directory = Path.GetDirectoryName(manifestPath) ?? ".";
+        foreach (var shard in manifest.Shards)
+        {
+            var shardPath = Path.Combine(directory, shard);
+            if (!File.Exists(shardPath))
+            {
+                continue;
+            }
+
+            await foreach (var document in ReadArrayAsync(shardPath, cancellationToken))
+            {
+                yield return document;
+            }
+        }
+    }
+
+    private static async IAsyncEnumerable<HarvestedDocument> ReadArrayAsync(
+        string path, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await using var stream = File.OpenRead(path);
+        var documents = await JsonSerializer.DeserializeAsync<List<HarvestedDocument>>(stream, Options, cancellationToken) ?? [];
+        foreach (var document in documents)
+        {
+            yield return document;
+        }
+    }
+
+    // Формат по первому значимому символу: '{' — индекс шардов (новый), иначе '[' — массив (старый).
+    private static async Task<bool> IsShardedAsync(string manifestPath, CancellationToken cancellationToken)
+    {
+        await using var stream = File.OpenRead(manifestPath);
+        var buffer = new byte[64];
+        var read = await stream.ReadAsync(buffer, cancellationToken);
+        for (var i = 0; i < read; i++)
+        {
+            var c = (char)buffer[i];
+            if (char.IsWhiteSpace(c))
+            {
+                continue;
+            }
+
+            return c == '{';
+        }
+
+        return false;
     }
 }

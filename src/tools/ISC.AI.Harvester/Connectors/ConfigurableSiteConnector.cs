@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -36,6 +37,7 @@ public sealed class ConfigurableSiteConnector(IPageFetcherFactory fetcherFactory
 
         string? listUrl = config.SeedUrl;
         var collected = 0;
+        var seen = new HashSet<string>(StringComparer.Ordinal); // дедуп ссылок между страницами
 
         for (var page = 0; page < rules.MaxPages && listUrl is not null && collected < config.MaxDocuments; page++)
         {
@@ -45,7 +47,13 @@ public sealed class ConfigurableSiteConnector(IPageFetcherFactory fetcherFactory
                 .Select(element => element.GetAttribute("href"))
                 .Where(href => !string.IsNullOrWhiteSpace(href))
                 .Select(href => Absolute(listUrl!, href!))
+                .Where(url => seen.Add(url)) // только НОВЫЕ (страница без новых ссылок = конец списка)
                 .ToList();
+
+            if (documentUrls.Count == 0)
+            {
+                break; // новых документов нет — прекращаем пагинацию (иначе крутили бы до MaxPages впустую)
+            }
 
             foreach (var documentUrl in documentUrls)
             {
@@ -72,22 +80,45 @@ public sealed class ConfigurableSiteConnector(IPageFetcherFactory fetcherFactory
                     Language: config.Language);
             }
 
-            listUrl = NextPage(listDocument, rules.NextPageSelector, listUrl!);
+            listUrl = NextPage(listDocument, rules, listUrl!);
         }
     }
 
     private static string? SelectText(IDocument document, string? selector) =>
         string.IsNullOrWhiteSpace(selector) ? null : document.QuerySelector(selector)?.TextContent;
 
-    private static string? NextPage(IDocument listDocument, string? selector, string baseUrl)
+    private static string? NextPage(IDocument listDocument, SiteRules rules, string currentUrl)
     {
-        if (string.IsNullOrWhiteSpace(selector))
+        // 1) «Следующая страница» ссылкой по CSS-селектору — если задан.
+        if (!string.IsNullOrWhiteSpace(rules.NextPageSelector))
         {
-            return null;
+            var href = listDocument.QuerySelector(rules.NextPageSelector)?.GetAttribute("href");
+            return string.IsNullOrWhiteSpace(href) ? null : Absolute(currentUrl, href);
         }
 
-        var href = listDocument.QuerySelector(selector)?.GetAttribute("href");
-        return string.IsNullOrWhiteSpace(href) ? null : Absolute(baseUrl, href);
+        // 2) Инкремент query-параметра страницы (напр. ?page=2,3…) — если задан.
+        if (!string.IsNullOrWhiteSpace(rules.PageParam))
+        {
+            return IncrementPageParam(currentUrl, rules.PageParam);
+        }
+
+        return null; // без пагинации — обрабатываем одну страницу
+    }
+
+    private static string IncrementPageParam(string url, string param)
+    {
+        var uri = new Uri(url);
+        var pairs = uri.Query.TrimStart('?')
+            .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Select(pair => pair.Split('=', 2))
+            .ToDictionary(pair => pair[0], pair => pair.Length > 1 ? pair[1] : string.Empty, StringComparer.OrdinalIgnoreCase);
+
+        var current = pairs.TryGetValue(param, out var value)
+            && int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : 1;
+        pairs[param] = (current + 1).ToString(CultureInfo.InvariantCulture);
+
+        var query = string.Join('&', pairs.Select(kv => $"{kv.Key}={kv.Value}"));
+        return new UriBuilder(uri) { Query = query }.Uri.ToString();
     }
 
     private static string Absolute(string baseUrl, string href) =>

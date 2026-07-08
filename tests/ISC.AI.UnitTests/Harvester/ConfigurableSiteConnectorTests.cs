@@ -47,6 +47,57 @@ public sealed class ConfigurableSiteConnectorTests
         docs[1].Title.ShouldBe("Закон 2");
     }
 
+    [Fact(DisplayName = "Пагинация ?page=N: листает страницы; Максимум документов — реальный потолок (Э4-17)")]
+    public async Task Paginates_by_query_param_and_respects_max()
+    {
+        var pages = new Dictionary<string, string>
+        {
+            ["http://site/list?page=1"] = "<html><body><a class='doc' href='/doc/1'>1</a><a class='doc' href='/doc/2'>2</a></body></html>",
+            ["http://site/list?page=2"] = "<html><body><a class='doc' href='/doc/3'>3</a><a class='doc' href='/doc/4'>4</a></body></html>",
+            ["http://site/list?page=3"] = "<html><body>конец списка</body></html>",
+            ["http://site/doc/1"] = "<html><body><h1 class='t'>Закон 1</h1><div class='c'>Текст 1.</div></body></html>",
+            ["http://site/doc/2"] = "<html><body><h1 class='t'>Закон 2</h1><div class='c'>Текст 2.</div></body></html>",
+            ["http://site/doc/3"] = "<html><body><h1 class='t'>Закон 3</h1><div class='c'>Текст 3.</div></body></html>",
+            ["http://site/doc/4"] = "<html><body><h1 class='t'>Закон 4</h1><div class='c'>Текст 4.</div></body></html>",
+        };
+
+        var rules = new SiteRules(ItemLinkSelector: "a.doc", TitleSelector: "h1.t", BodySelector: "div.c", PageParam: "page");
+        var config = new SourceConfig("http://site/list?page=1", "закон", Classification: 0, DivisionId: 1, MaxDocuments: 3, Rules: rules);
+
+        var docs = new List<HarvestedDocument>();
+        await foreach (var doc in new ConfigurableSiteConnector(new FakePageFetcherFactory(pages)).HarvestAsync(config))
+        {
+            docs.Add(doc);
+        }
+
+        // 4 документа доступно на 2 страницах, но лимит = 3 → собрано ровно 3 (потолок соблюдён, не «застряли на 20»).
+        docs.Count.ShouldBe(3);
+        docs[0].Title.ShouldBe("Закон 1");
+        docs[2].Title.ShouldBe("Закон 3"); // третий — уже со второй страницы
+    }
+
+    [Fact(DisplayName = "Пагинация: пустая страница завершает обход (без лишних запросов)")]
+    public async Task Pagination_stops_on_empty_page()
+    {
+        var pages = new Dictionary<string, string>
+        {
+            ["http://site/list?page=1"] = "<html><body><a class='doc' href='/doc/1'>1</a></body></html>",
+            ["http://site/list?page=2"] = "<html><body>пусто</body></html>",
+            ["http://site/doc/1"] = "<html><body><h1 class='t'>Закон 1</h1><div class='c'>Текст.</div></body></html>",
+        };
+
+        var rules = new SiteRules(ItemLinkSelector: "a.doc", TitleSelector: "h1.t", BodySelector: "div.c", PageParam: "page");
+        var config = new SourceConfig("http://site/list?page=1", "закон", Classification: 0, DivisionId: 1, MaxDocuments: 100, Rules: rules);
+
+        var docs = new List<HarvestedDocument>();
+        await foreach (var doc in new ConfigurableSiteConnector(new FakePageFetcherFactory(pages)).HarvestAsync(config))
+        {
+            docs.Add(doc);
+        }
+
+        docs.Count.ShouldBe(1); // вторая страница пуста → остановились, не перебирая все 100
+    }
+
     [Fact(DisplayName = "Сайт по правилам: без правил в конфиге — отказ")]
     public async Task Without_rules_throws()
     {

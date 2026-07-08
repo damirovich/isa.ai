@@ -26,7 +26,7 @@ public sealed class CbdApiConnector(HttpClient httpClient, IContentExtractor ext
     /// <summary>Единственный «действующий» статус — whitelist (прочие статусы = не выдаём как действующие).</summary>
     private const string ActiveStatus = "Действует";
     private const int PageSize = 50;
-    private const int MaxPages = 200; // предохранитель обхода (вежливость к источнику)
+    private const int MaxPages = 50_000; // предохранитель от бесконечного обхода (при пустой странице — стоп раньше)
 
     /// <inheritdoc />
     public string Id => "cbd-api";
@@ -42,7 +42,7 @@ public sealed class CbdApiConnector(HttpClient httpClient, IContentExtractor ext
         var origin = Origin(config.SeedUrl);
 
         var collected = 0;
-        for (var page = 1; page <= MaxPages && collected < config.MaxDocuments; page++)
+        for (var page = Math.Max(1, config.StartPage); page <= MaxPages && collected < config.MaxDocuments; page++)
         {
             var items = await GetDocumentsPageAsync(origin, page, cancellationToken);
             if (items.Count == 0)
@@ -84,6 +84,7 @@ public sealed class CbdApiConnector(HttpClient httpClient, IContentExtractor ext
                         ["status"] = item.Status ?? string.Empty,
                         ["editionId"] = item.LastEdition.ToString(CultureInfo.InvariantCulture),
                         ["documentCode"] = item.DocumentCode ?? string.Empty,
+                        ["page"] = page.ToString(CultureInfo.InvariantCulture), // для чекпоинта возобновления (Э4-17)
                     });
             }
         }

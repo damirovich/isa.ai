@@ -1,0 +1,53 @@
+@* Справка по сборщику (Э4-16): как выбрать источник и как устроен перенос в контур. *@
+@page "/help"
+
+<PageTitle>Как это работает — Сборщик корпуса</PageTitle>
+
+<MudText Typo="Typo.h5" GutterBottom="true">Как это работает</MudText>
+
+<MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-4">
+    Сборщик работает <b>ВНЕ изолированного контура</b>. Он собирает только <b>открытые</b> материалы и на выходе
+    даёт <b>пакет</b> (manifest.json), который вы контролируемо переносите в контур и импортируете. Гриф — открытый (0);
+    подразделение задаёте вы.
+</MudAlert>
+
+<MudText Typo="Typo.h6" GutterBottom="true">Как выбрать источник</MudText>
+<MudSimpleTable Dense="true" Bordered="true" Class="mb-4">
+    <thead>
+        <tr><th>Тип источника</th><th>Когда</th><th>Что даёт</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><b>Официальный API</b> (напр. ЦБД Минюста)</td>
+            <td>у источника есть API</td>
+            <td>✅ лучший вариант: только действующие + полный текст, без селекторов</td>
+        </tr>
+        <tr>
+            <td><b>Сайт по правилам</b> (скрапинг по CSS-селекторам)</td>
+            <td>структурированный сайт без API</td>
+            <td>каталог по селекторам; для JS-сайтов включите режим <b>Headless</b></td>
+        </tr>
+        <tr>
+            <td><b>Произвольный URL</b></td>
+            <td>одиночная страница</td>
+            <td>текст «как есть» (best-effort)</td>
+        </tr>
+    </tbody>
+</MudSimpleTable>
+
+<MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Class="mb-4">
+    Правило простое: <b>есть официальный API — берите API</b> (надёжнее, с текстом). Скрапинг — когда API нет.
+</MudAlert>
+
+<MudText Typo="Typo.h6" GutterBottom="true">Порядок работы</MudText>
+<MudList T="string" Dense="true">
+    <MudListItem T="string" Icon="@Icons.Material.Filled.LooksOne">Выбрать источник (пресет или вручную) и указать URL.</MudListItem>
+    <MudListItem T="string" Icon="@Icons.Material.Filled.LooksTwo">Задать тип документа, подразделение, максимум документов.</MudListItem>
+    <MudListItem T="string" Icon="@Icons.Material.Filled.Looks3">Нажать «Собрать», отметить нужные документы.</MudListItem>
+    <MudListItem T="string" Icon="@Icons.Material.Filled.Looks4">«Выгрузить пакет» → перенести в контур → импортировать (страница «Загрузка корпуса»).</MudListItem>
+</MudList>
+
+<MudAlert Severity="Severity.Normal" Variant="Variant.Outlined" Class="mt-4">
+    Режим Headless требует один раз установить браузер: <code>playwright install chromium</code>. Официальному API
+    браузер не нужен.
+</MudAlert>

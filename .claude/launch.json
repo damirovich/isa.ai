@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "harvester-web",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "src/tools/ISC.AI.Harvester.Web/ISC.AI.Harvester.Web.csproj", "--urls", "http://localhost:59173"],
+      "port": 59173
+    }
+  ]
+}
