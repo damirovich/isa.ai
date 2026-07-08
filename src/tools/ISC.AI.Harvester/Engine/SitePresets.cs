@@ -28,19 +28,8 @@ public static class SitePresets
                 BodySelector: ".section-npa",
                 PageParam: "page")), // листание ?page=2,3… — иначе брали бы только 1-ю страницу (Э4-17)
 
-        // ЦБД Минюста КР — SPA: контент рисуется JavaScript, нужен headless-рендеринг (Э4-15).
-        // Список: ссылки документов — вида /{id}/edition/{editionId}/ru (проверено на живом сайте).
-        // Заголовок берётся из <title> (fallback коннектора). ВНИМАНИЕ: ТЕКСТ АКТА в DOM НЕ рендерится
-        // (лежит в данных страницы; на экране — вьюер), поэтому BodySelector даёт пусто — тело актов ЦБД
-        // надо брать файловым экспортом (Download) или официальным API Минюста через Tunduk (см. Э4-15).
-        new SitePreset(
-            Name: "ЦБД Минюста — скрапинг SPA (headless, только каталог без текста)",
-            SuggestedSeedUrl: "https://cbd.minjust.gov.kg/list-docs/ru",
-            DocType: "нпа",
-            Rules: new SiteRules(
-                ItemLinkSelector: "a[href*='/edition/']",
-                TitleSelector: "h1",
-                BodySelector: "main",
-                RenderMode: RenderMode.Headless)),
+        // Примечание: headless-пресет для ЦБД убран (Э4-15) — у ЦБД текст акта НЕ в DOM (лежит в данных SPA),
+        // скрапинг там бесполезен. Источник ЦБД — официальный API (выше). Сам headless-режим доступен вручную
+        // (поле «Режим загрузки» → Headless) для ДРУГИХ SPA-сайтов, которые рендерят контент в DOM.
     ];
 }
