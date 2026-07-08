@@ -10,7 +10,7 @@ namespace ISC.AI.Harvester.Connectors;
 /// Универсальный коннектор: скачивает ОДНУ страницу по URL и извлекает текст best-effort (ADR-0015).
 /// Доступен всегда; для точных метаданных — адаптеры источников. Обход по ссылкам — будущее расширение.
 /// </summary>
-public sealed class GenericUrlConnector(HttpClient httpClient, IContentExtractor extractor) : ISourceConnector
+public sealed class GenericUrlConnector(IPageFetcherFactory fetcherFactory, IContentExtractor extractor) : ISourceConnector
 {
     /// <inheritdoc />
     public string Id => "generic-url";
@@ -24,7 +24,9 @@ public sealed class GenericUrlConnector(HttpClient httpClient, IContentExtractor
     {
         ArgumentNullException.ThrowIfNull(config);
 
-        var html = await httpClient.GetStringAsync(config.SeedUrl, cancellationToken);
+        // Одиночный URL — статический режим (для SPA-обхода используется ConfigurableSiteConnector с RenderMode.Headless).
+        await using var fetcher = await fetcherFactory.CreateAsync(RenderMode.Static, cancellationToken);
+        var html = await fetcher.GetHtmlAsync(config.SeedUrl, cancellationToken: cancellationToken);
         var content = extractor.Extract(html, config.SeedUrl);
 
         yield return new HarvestedDocument(

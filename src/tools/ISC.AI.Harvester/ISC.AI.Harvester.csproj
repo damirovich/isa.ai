@@ -9,6 +9,8 @@
 
   <ItemGroup>
     <PackageReference Include="AngleSharp" />
+    <!-- Headless-рендеринг JS-сайтов (SPA вроде ЦБД Минюста) — Э4-15. Лицензия MIT; только в сборщике (вне контура). -->
+    <PackageReference Include="Microsoft.Playwright" />
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
   </ItemGroup>

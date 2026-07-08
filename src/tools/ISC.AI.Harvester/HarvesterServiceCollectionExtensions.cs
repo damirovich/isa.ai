@@ -13,13 +13,23 @@ public static class HarvesterServiceCollectionExtensions
         services.AddSingleton<IContentExtractor, HtmlContentExtractor>();
         services.AddSingleton<IBundleWriter, JsonBundleWriter>();
 
-        // Типизированные HttpClient для коннекторов (вежливый User-Agent, таймаут).
-        services.AddHttpClient<GenericUrlConnector>(ConfigureClient);
-        services.AddHttpClient<ConfigurableSiteConnector>(ConfigureClient);
+        // Получатель HTML: HTTP (статические сайты) или headless-браузер (SPA) — выбор по RenderMode (Э4-15).
+        // Типизированный HttpClient (вежливый User-Agent, таймаут) — на статический путь фабрики.
+        services.AddHttpClient<PageFetcherFactory>(ConfigureClient);
+        services.AddTransient<IPageFetcherFactory>(sp => sp.GetRequiredService<PageFetcherFactory>());
 
-        // Реестр коннекторов: оба доступны как ISourceConnector (UI выбирает по Id/DisplayName).
+        services.AddTransient<GenericUrlConnector>();
+        services.AddTransient<ConfigurableSiteConnector>();
+
+        // API-коннектор ЦБД Минюста (Э4-16): свой HttpClient с реалистичным UA (API режет дефолтный бот-UA)
+        // + устойчивость для массового сбора (Э4-17): пауза между запросами и ретрай на 429/5xx.
+        services.AddHttpClient<CbdApiConnector>(ConfigureBrowserClient)
+            .AddHttpMessageHandler(() => new ResilientHttpHandler(TimeSpan.FromMilliseconds(300), maxRetries: 4));
+
+        // Реестр коннекторов: все доступны как ISourceConnector (UI выбирает по Id/DisplayName).
         services.AddTransient<ISourceConnector>(sp => sp.GetRequiredService<GenericUrlConnector>());
         services.AddTransient<ISourceConnector>(sp => sp.GetRequiredService<ConfigurableSiteConnector>());
+        services.AddTransient<ISourceConnector>(sp => sp.GetRequiredService<CbdApiConnector>());
 
         return services;
     }
@@ -28,5 +38,13 @@ public static class HarvesterServiceCollectionExtensions
     {
         client.DefaultRequestHeaders.UserAgent.ParseAdd("ISC.AI.Harvester/1.0");
         client.Timeout = TimeSpan.FromSeconds(30);
+    }
+
+    // Реалистичный desktop-UA: сайты/API с бот-защитой отдают данные браузеру, но режут дефолтный UA.
+    private static void ConfigureBrowserClient(HttpClient client)
+    {
+        client.DefaultRequestHeaders.UserAgent.ParseAdd(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36");
+        client.Timeout = TimeSpan.FromSeconds(60);
     }
 }

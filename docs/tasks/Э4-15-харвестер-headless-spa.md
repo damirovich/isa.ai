@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Этап | Э4 — сборщик корпуса (вне контура) |
-| Статус | ⏳ Запланировано |
+| Статус | ✅ Реализовано (IPageFetcher + HeadlessPageFetcher/Playwright + флаг RenderMode + пресет ЦБД + тесты; сборка 0/0, unit 59/59). Живой прогон на SPA + калибровка селекторов — операционно |
 | Требования ТЗ | ТО-инф-07 (обновление знаний = загрузка документа), ПОДГ-02 (первичная загрузка корпуса); air-gap ТБ-052 (харвестер ВНЕ контура) |
 | Источник | Разбор реального источника НПА — [cbd.minjust.gov.kg](https://cbd.minjust.gov.kg/ru) |
 | Зависит от | Э4-08 (движок харвестера: `ISourceConnector`, `ConfigurableSiteConnector`, `SiteRules`) |
@@ -40,3 +40,15 @@
 - **Пагинация кликом:** если «следующая» — JS-кнопка, а не `<a href>`, `NextPageSelector` её не пройдёт → потребуется расширение «действие-клик» (отдельно).
 - **Хрупкость:** скрапинг ломается при смене вёрстки сайта → ещё один довод в пользу API-пути.
 - Связано с Э4-08 (движок), ADR-0015; альтернатива — API-коннектор ЦБД (через Tunduk).
+
+## Результат (реализовано)
+- Абстракция [`IPageFetcher`](../../src/tools/ISC.AI.Harvester/Engine/IPageFetcher.cs) + [`IPageFetcherFactory`](../../src/tools/ISC.AI.Harvester/Engine/IPageFetcherFactory.cs): «как достать HTML» отделено от селекторов.
+- [`HttpPageFetcher`](../../src/tools/ISC.AI.Harvester/Engine/HttpPageFetcher.cs) (Static, текущее поведение) и [`HeadlessPageFetcher`](../../src/tools/ISC.AI.Harvester/Engine/HeadlessPageFetcher.cs) (Playwright/Chromium: `Goto`→network-idle→опц. `WaitForSelector`→`ContentAsync`; браузер один на прогон).
+- Флаг [`RenderMode`](../../src/tools/ISC.AI.Harvester/Engine/RenderMode.cs) + `ReadySelector` в [`SiteRules`](../../src/tools/ISC.AI.Harvester/Engine/SiteRules.cs); [`ConfigurableSiteConnector`](../../src/tools/ISC.AI.Harvester/Connectors/ConfigurableSiteConnector.cs) выбирает fetcher по режиму (селекторы/пагинация/бандл — без изменений). `GenericUrlConnector` — статический.
+- Пресет `cbd.minjust` (RenderMode=Headless) в [`SitePresets`](../../src/tools/ISC.AI.Harvester/Engine/SitePresets.cs) — **селекторы предварительные, калибруются на живом сайте**.
+- Playwright (MIT) в CPM + csproj харвестера. Изоляция вне контура сохранена (арх-тест зелёный).
+- Тесты: headless-режим и извлечение из «отрисованного» HTML — [`ConfigurableSiteConnectorTests`](../../tests/ISC.AI.UnitTests/Harvester/ConfigurableSiteConnectorTests.cs) + фейк [`FakePageFetcher`](../../tests/ISC.AI.UnitTests/Harvester/FakePageFetcher.cs). Сборка 0/0; unit 59/59.
+- ⚠️ **Перед первым живым прогоном:** `playwright install chromium` (ставит бинарь браузера). Живой прогон на cbd.minjust + калибровка селекторов/`ReadySelector` — операционно (реальный DOM в CI не гоняем).
+
+### Не вошло (осознанно)
+- Селекторы ЦБД — предварительные (нужен отрисованный DOM живого сайта); UI-тумблер RenderMode для ручного ввода правил — опционально (через пресет уже работает); клик-пагинация SPA (если «следующая» — JS-кнопка) — отдельно; API-путь (Tunduk) — предпочтительная альтернатива, отдельной задачей.
