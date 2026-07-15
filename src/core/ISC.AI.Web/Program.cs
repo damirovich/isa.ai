@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Reflection;
 using ISC.AI.Abstractions.Profiles;
 using ISC.AI.Abstractions.Security;
+using ISC.AI.AI.BackgroundTasks;
 using ISC.AI.AI.Grounding;
 using ISC.AI.AI.Models;
 using ISC.AI.AI.Rag;
@@ -50,6 +51,10 @@ try
     builder.Services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
     builder.Services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
 
+    // Грунтовка как СТРАХОВКА конвейера (Э4-19, §5.3.1.1, ТБ-041): грунтующие сценарии (IGroundedScenario)
+    // не могут вернуть успех без вердикта грунтовки; непроверенные ссылки помечаются. Поведение — в ядре.
+    builder.Services.AddTransient(typeof(IPipelineBehavior<,>), typeof(GroundingBehavior<,>));
+
     // Слой данных ядра: CoreDbContext (схема core) через фабрику (ТС-008, ТО-инф-01).
     builder.Services.AddCorePersistence(builder.Configuration);
 
@@ -70,6 +75,10 @@ try
 
     // RAG-оркестратор: запрос → retriever (фильтр доступа) → промпт+модель → грунтовка → ответ (ТО-мат-01).
     builder.Services.AddCoreRag();
+
+    // Очередь фоновых ИИ-задач (Э4-20, §5.1.3): интеллектуальные операции — асинхронно, со статусом и
+    // управляемой деградацией; при старте — восстановление осиротевших задач. Store — из AddCorePersistence.
+    builder.Services.AddCoreBackgroundTasks();
 
     // DEV-заглушка контекста доступа (заменяется внешним SSO на Э3-08). Только в Development.
     if (builder.Environment.IsDevelopment())

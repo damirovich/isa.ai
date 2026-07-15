@@ -15,8 +15,8 @@ public sealed class NpaCitationExtractorTests
             "Согласно статье 12 и пункту 3, а также ч. 2 Закона № 45 и Уголовного кодекса и Конституции.");
 
         citations.ShouldContain(c => c.Contains("12"));
-        citations.ShouldContain(c => c.Contains("3"));
-        citations.ShouldContain(c => c.Contains("2"));
+        citations.ShouldContain(c => c.Contains('3'));
+        citations.ShouldContain(c => c.Contains('2'));
         citations.ShouldContain(c => c.Contains("45"));
         citations.ShouldContain(c => c.Contains("кодекс", StringComparison.OrdinalIgnoreCase));
         citations.ShouldContain(c => c.Contains("онституци", StringComparison.OrdinalIgnoreCase));

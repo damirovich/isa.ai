@@ -1,6 +1,8 @@
 using ISC.AI.Abstractions.Audit;
+using ISC.AI.Abstractions.BackgroundTasks;
 using ISC.AI.Abstractions.Corpus;
 using ISC.AI.Persistence.Audit;
+using ISC.AI.Persistence.BackgroundTasks;
 using ISC.AI.Persistence.Corpus;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -41,6 +43,9 @@ public static class CorePersistenceServiceCollectionExtensions
 
         // Материализация флага годности чанков (Э4-02, ADR-0013): профиль ставит видимость по редакциям.
         services.AddScoped<IChunkCurrencyPort, ChunkCurrencyPort>();
+
+        // Персист статусов фоновых задач (Э4-20, §5.1.4.5): переживает перезапуск, восстановление осиротевших.
+        services.AddSingleton<IBackgroundTaskStore, EfBackgroundTaskStore>();
 
         return services;
     }

@@ -13,4 +13,4 @@ public sealed record GenerateReferenceResult(
     bool RequiresHumanReview,
     bool AllCitationsConfirmed,
     IReadOnlyList<CitationCheck> Citations,
-    short ResultClassification);
+    short ResultClassification) : IGroundedResult;

@@ -1,4 +1,5 @@
 using ISC.AI.Abstractions.Application;
+using ISC.AI.Abstractions.Grounding;
 using ISC.AI.Abstractions.Rag;
 using ISC.AI.Abstractions.Security;
 using Mediator;
@@ -11,7 +12,7 @@ using ResModel  = ResponseDto<GenerateReferenceResult>;
 /// Результат — ЧЕРНОВИК, требующий проверки человеком (HITL, ТБ-042), в конверте <see cref="ResponseDto{T}"/>.
 /// </summary>
 /// <param name="Topic">Тема/запрос инспектора (используется для семантического извлечения норм).</param>
-public sealed record GenerateReferenceCommand(string Topic) : IRequest<ResModel>
+public sealed record GenerateReferenceCommand(string Topic) : IRequest<ResModel>, IGroundedScenario
 {
     /// <summary>
     /// Обработчик сценария: контекст доступа → задачный промпт (Scriban) → RAG-оркестратор ядра

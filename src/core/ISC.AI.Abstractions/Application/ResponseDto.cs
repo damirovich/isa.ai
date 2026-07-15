@@ -9,10 +9,14 @@ namespace ISC.AI.Abstractions.Application;
 /// <typeparam name="T">Тип полезной нагрузки.</typeparam>
 [SuppressMessage("Design", "CA1000:Do not declare static members on generic types",
     Justification = "Фабричные методы — намеренный паттерн конверта результата (ResponseDto<T>.Ok/Fail/NotFound/...).")]
-public sealed class ResponseDto<T> : IResponseDto
+public sealed class ResponseDto<T> : IResponseDto, IPayloadCarrier
 {
     /// <summary>Полезная нагрузка (при успехе).</summary>
     public T? Data { get; set; }
+
+    /// <inheritdoc />
+    /// <remarks>Нетипизированный доступ к <see cref="Data"/> для сквозных поведений (грунтовка/аудит).</remarks>
+    public object? Payload => Data;
 
     /// <inheritdoc />
     public bool Status { get; set; }
