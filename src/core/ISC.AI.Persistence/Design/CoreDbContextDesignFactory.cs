@@ -14,8 +14,10 @@ public sealed class CoreDbContextDesignFactory : IDesignTimeDbContextFactory<Cor
     /// <inheritdoc />
     public CoreDbContext CreateDbContext(string[] args)
     {
+        // Пароль в коде НЕ хранится (Э4-10): для `database update` задать полную строку в ISCAI_CORE_CONNECTION;
+        // для `migrations add` реального соединения нет — хватает несекретной заглушки без пароля.
         var connectionString = Environment.GetEnvironmentVariable("ISCAI_CORE_CONNECTION")
-            ?? "Server=10.10.0.115;Database=ISC_AI;Username=postgres;Password=Qwe123!@#";
+            ?? "Server=10.10.0.115;Database=ISC_AI;Username=postgres";
 
         var options = new DbContextOptionsBuilder<CoreDbContext>()
             .UseNpgsql(connectionString, npg =>

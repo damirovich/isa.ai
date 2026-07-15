@@ -12,8 +12,10 @@ public sealed class InspectorDbContextDesignFactory : IDesignTimeDbContextFactor
     /// <inheritdoc />
     public InspectorDbContext CreateDbContext(string[] args)
     {
+        // Пароль в коде НЕ хранится (Э4-10): для `database update` задать полную строку в ISCAI_INSPECTOR_CONNECTION;
+        // для `migrations add` реального соединения нет — хватает несекретной заглушки без пароля.
         var connectionString = Environment.GetEnvironmentVariable("ISCAI_INSPECTOR_CONNECTION")
-            ?? "Server=10.10.0.115;Database=ISC_AI;Username=postgres;Password=Qwe123!@#";
+            ?? "Server=10.10.0.115;Database=ISC_AI;Username=postgres";
 
         var options = new DbContextOptionsBuilder<InspectorDbContext>()
             .UseNpgsql(connectionString, npg =>
