@@ -1,4 +1,3 @@
-using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.Retrieval;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Profile.Inspector.Application.Search;
@@ -8,13 +7,13 @@ using Shouldly;
 namespace ISC.AI.UnitTests.Profiles;
 
 /// <summary>
-/// Поиск по НПА (Э4-07): handler зовёт ядровой <see cref="IRetriever"/> с контекстом доступа,
-/// проецирует фрагменты в результат и аудирует обращение (AuditAction.Search, ТБ-030).
+/// Поиск по НПА (Э4-07): handler зовёт ядровой <see cref="IRetriever"/> с контекстом доступа и
+/// проецирует фрагменты в результат. Аудит обращения — сквозное AuditBehavior (Э4-11), проверяется отдельно.
 /// </summary>
 public sealed class SearchNpaHandlerTests
 {
-    [Fact(DisplayName = "Поиск НПА: ретривер зовётся с доступом; фрагменты замаппены; аудит Search (гриф=max)")]
-    public async Task Searches_maps_hits_and_audits()
+    [Fact(DisplayName = "Поиск НПА: ретривер зовётся с доступом; фрагменты замаппены в результат")]
+    public async Task Searches_and_maps_hits()
     {
         var access = new AccessContext("u1", MaxClassification: 1, AllowedDivisions: [7]);
         var accessProvider = Substitute.For<IAccessContextProvider>();
@@ -29,9 +28,7 @@ public sealed class SearchNpaHandlerTests
         retriever.RetrieveAsync("режим хранения", access, Arg.Any<int>(), Arg.Any<RetrievalFilter?>(), Arg.Any<CancellationToken>())
             .Returns(chunks);
 
-        var audit = Substitute.For<IAuditWriter>();
-
-        var response = await new SearchNpaQuery.Handler(retriever, accessProvider, audit)
+        var response = await new SearchNpaQuery.Handler(retriever, accessProvider)
             .Handle(new SearchNpaQuery("режим хранения"), CancellationToken.None);
 
         // Результат: фрагменты замаппены, TotalCount проставлен.
@@ -41,10 +38,5 @@ public sealed class SearchNpaHandlerTests
         response.Data.Hits[0].DocumentId.ShouldBe(5);
         response.Data.Hits[0].Text.ShouldBe("фрагмент A");
         response.TotalCount.ShouldBe(2);
-
-        // Аудит обращения с грифом = максимум грифов выданных фрагментов.
-        await audit.Received(1).WriteAsync(
-            Arg.Is<AuditEntry>(e => e.Action == AuditAction.Search && e.Classification == 1),
-            Arg.Any<CancellationToken>());
     }
 }

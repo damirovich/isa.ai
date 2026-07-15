@@ -10,18 +10,29 @@ using ResModel = ResponseDto<ExportReferenceResult>;
 
 /// <summary>
 /// Экспорт сформированной справки в <c>.docx</c> с обязательной маркировкой грифа (Э4-04, ТФ-ГЕН-03, ТБ-033).
-/// Факт экспорта аудируется (ТБ-030).
+/// Факт экспорта аудируется сквозным AuditBehavior (ТБ-030, Э4-11).
 /// </summary>
 /// <param name="Title">Заголовок документа (тема справки).</param>
 /// <param name="Body">Текст справки (черновик).</param>
 /// <param name="Classification">Гриф результата (наследован из генерации, =max грифов фрагментов).</param>
-public sealed record ExportReferenceCommand(string Title, string Body, short Classification) : IRequest<ResModel>
+public sealed record ExportReferenceCommand(string Title, string Body, short Classification)
+    : IRequest<ResModel>, IAuditableRequest
 {
+    /// <inheritdoc />
+    public AuditAction AuditAction => AuditAction.Export;
+
+    /// <inheritdoc />
+    public string? AuditSummary => $"Экспорт справки в .docx: {Title}";
+
+    /// <inheritdoc />
+    /// <remarks>Точный гриф результата (наследован из генерации) — запись экспорта классифицируется не ниже него.</remarks>
+    public short? AuditClassification => Classification;
+
     /// <summary>
     /// Обработчик: гриф → текстовая маркировка → рендер <c>.docx</c> с грифом в теле и метаданных →
-    /// аудит <see cref="AuditAction.Export"/> → байты файла в конверте.
+    /// байты файла в конверте. Аудит экспорта (<see cref="AuditAction.Export"/>) пишет сквозное AuditBehavior (Э4-11).
     /// </summary>
-    public sealed class Handler(IDocumentExporter exporter, IAuditWriter auditWriter)
+    public sealed class Handler(IDocumentExporter exporter)
         : IRequestHandler<ExportReferenceCommand, ResModel>
     {
         private const string DocxContentType =
@@ -40,15 +51,6 @@ public sealed record ExportReferenceCommand(string Title, string Body, short Cla
                     Body: command.Body,
                     ClassificationMarking: marking,
                     DraftNotice: "ЧЕРНОВИК — требует проверки человеком (HITL, ТБ-042)."),
-                cancellationToken);
-
-            // Аудит экспорта (ТБ-030): гриф = гриф результата; содержимое — отдельно (ТБ-032).
-            // Субъект (SubjectId) проставится с появлением внешней аутентификации (Э3-08).
-            await auditWriter.WriteAsync(
-                new AuditEntry(
-                    AuditAction.Export,
-                    command.Classification,
-                    PayloadSensitive: $"Экспорт справки в .docx: {command.Title}"),
                 cancellationToken);
 
             return ResModel.Ok(new ExportReferenceResult(bytes, BuildFileName(command.Title), DocxContentType));

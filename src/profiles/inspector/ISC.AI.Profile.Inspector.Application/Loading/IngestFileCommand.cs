@@ -1,4 +1,5 @@
 using ISC.AI.Abstractions.Application;
+using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.Ingestion;
 using Mediator;
 
@@ -18,8 +19,18 @@ using ResModel = ResponseDto<IngestFileResult>;
 /// <param name="SupersedesDocumentId">Если это новая версия — идентификатор заменяемого документа (Э4-14).</param>
 public sealed record IngestFileCommand(
     byte[] Content, string FileName, string DocType, short Classification, int DivisionId,
-    int? SupersedesDocumentId = null) : IRequest<ResModel>
+    int? SupersedesDocumentId = null) : IRequest<ResModel>, IAuditableRequest
 {
+    /// <inheritdoc />
+    public AuditAction AuditAction => AuditAction.Ingest;
+
+    /// <inheritdoc />
+    public string? AuditSummary => $"Загрузка файла в корпус: {FileName}";
+
+    /// <inheritdoc />
+    /// <remarks>Объявленный оператором гриф документа может быть ВЫШЕ его допуска — запись журнала не ниже него.</remarks>
+    public short? AuditClassification => Classification;
+
     /// <summary>Обработчик: оборачивает байты в поток и передаёт в файловый загрузчик корпуса.</summary>
     public sealed class Handler(IFileIngestor fileIngestor) : IRequestHandler<IngestFileCommand, ResModel>
     {

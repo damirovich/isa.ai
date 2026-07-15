@@ -14,6 +14,10 @@ using ResModel  = ResponseDto<GenerateReferenceResult>;
 /// <param name="Topic">Тема/запрос инспектора (используется для семантического извлечения норм).</param>
 public sealed record GenerateReferenceCommand(string Topic) : IRequest<ResModel>, IGroundedScenario
 {
+    // Аудит генерации (AuditAction.Generate) пишет RAG-оркестратор ядра (GroundedGenerator) с ТОЧНЫМ грифом
+    // (=max грифов фрагментов), id фрагментов и payload запрос/ответ — поэтому команда НЕ помечается
+    // IAuditableRequest (иначе двойная запись одного события в неизменяемый журнал).
+
     /// <summary>
     /// Обработчик сценария: контекст доступа → задачный промпт (Scriban) → RAG-оркестратор ядра
     /// (извлечение с фильтром доступа → модель → грунтовка → аудит) → черновик с пометкой HITL.

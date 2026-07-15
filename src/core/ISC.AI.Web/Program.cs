@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Reflection;
 using ISC.AI.Abstractions.Profiles;
 using ISC.AI.Abstractions.Security;
+using ISC.AI.AI.Audit;
 using ISC.AI.AI.BackgroundTasks;
 using ISC.AI.AI.Grounding;
 using ISC.AI.AI.Models;
@@ -48,6 +49,9 @@ try
     // логирование → валидация → хендлер. ValidationBehavior бросает, ExceptionHandling превращает
     // исключения в неуспешный ResponseDto (хендлеры — без ручных проверок).
     builder.Services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ExceptionHandlingBehavior<,>));
+    // Сквозной аудит (Э4-11, ТБ-030, инвариант №4): каждый аудируемый сценарий (IAuditableRequest) пишется
+    // в неизменяемый журнал — аудит нельзя «забыть» в хендлере. Внешним слоем после обработки ошибок.
+    builder.Services.AddTransient(typeof(IPipelineBehavior<,>), typeof(AuditBehavior<,>));
     builder.Services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
     builder.Services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
 

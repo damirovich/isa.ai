@@ -1,4 +1,5 @@
 using ISC.AI.Abstractions.Application;
+using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.Ingestion;
 using Mediator;
 
@@ -11,8 +12,14 @@ using ResModel = ResponseDto<BundleImportResult>;
 /// в корпус через <see cref="IBundleImporter"/> (на каждый — fail-closed гриф, дедуп).
 /// </summary>
 /// <param name="ManifestPath">Путь к манифесту пакета.</param>
-public sealed record ImportBundleCommand(string ManifestPath) : IRequest<ResModel>
+public sealed record ImportBundleCommand(string ManifestPath) : IRequest<ResModel>, IAuditableRequest
 {
+    /// <inheritdoc />
+    public AuditAction AuditAction => AuditAction.Ingest;
+
+    /// <inheritdoc />
+    public string? AuditSummary => $"Импорт пакета в корпус: {ManifestPath}";
+
     /// <summary>Обработчик: проверяет наличие манифеста и запускает импорт.</summary>
     public sealed class Handler(IBundleImporter importer) : IRequestHandler<ImportBundleCommand, ResModel>
     {
