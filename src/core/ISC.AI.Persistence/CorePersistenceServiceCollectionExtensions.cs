@@ -26,9 +26,8 @@ public static class CorePersistenceServiceCollectionExtensions
     /// </remarks>
     public static IServiceCollection AddCorePersistence(this IServiceCollection services, IConfiguration configuration)
     {
-        var connectionString = configuration.GetConnectionString("Core")
-            ?? throw new InvalidOperationException(
-                "Не задана строка подключения 'ConnectionStrings:Core' для ядра данных.");
+        // Секрет пароля — отдельно (Database:Password из user-secrets/env), в конфиге лишь несекретная база (Э4-10).
+        var connectionString = ConnectionStringResolver.Resolve(configuration, "Core");
 
         services.AddDbContextFactory<CoreDbContext>(options =>
             options.UseNpgsql(connectionString, npg =>

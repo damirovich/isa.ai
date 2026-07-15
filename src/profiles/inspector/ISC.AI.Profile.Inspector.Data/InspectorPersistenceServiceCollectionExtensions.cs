@@ -1,3 +1,4 @@
+using ISC.AI.Persistence;
 using ISC.AI.Profile.Inspector.Domain.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,10 +16,8 @@ public static class InspectorPersistenceServiceCollectionExtensions
     public static IServiceCollection AddInspectorPersistence(
         this IServiceCollection services, IConfiguration configuration)
     {
-        var connectionString = configuration.GetConnectionString("Inspector")
-            ?? configuration.GetConnectionString("Core")
-            ?? throw new InvalidOperationException(
-                "Не задана строка подключения 'ConnectionStrings:Inspector' (или 'Core') для слоя данных профиля.");
+        // Секрет пароля — отдельно (Database:Password из user-secrets/env), в конфиге лишь несекретная база (Э4-10).
+        var connectionString = ConnectionStringResolver.Resolve(configuration, "Inspector", fallbackName: "Core");
 
         services.AddDbContextFactory<InspectorDbContext>(options =>
             options.UseNpgsql(connectionString, npg =>
