@@ -21,7 +21,7 @@ string endpoint = args.ElementAtOrDefault(0)
 string? model = NullIfBlank(args.ElementAtOrDefault(1))
     ?? Environment.GetEnvironmentVariable("LLM_MODEL");
 string prompt = args.ElementAtOrDefault(2)
-    ?? "Ты сможешь файл сформировать. ";
+    ?? "Ты сможешь прочитать рукописные записи из документов";
 string apiKey = Environment.GetEnvironmentVariable("LLM_API_KEY") ?? "no-key-needed";
 
 // Модель не задана — определяем автоматически из /v1/models (как curl без поля "model").
