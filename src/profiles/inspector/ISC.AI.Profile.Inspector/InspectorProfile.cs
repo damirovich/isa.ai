@@ -6,6 +6,7 @@ using ISC.AI.Profile.Inspector.Data;
 using ISC.AI.Profile.Inspector.UI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using MudBlazor;
 
 namespace ISC.AI.Profile.Inspector;
 
@@ -14,12 +15,16 @@ namespace ISC.AI.Profile.Inspector;
 /// Подключается единственным профилем в хосте <c>ISC.AI.Web</c> (ТС-004, ТС-006).
 /// </summary>
 /// <remarks>
-/// На текущем этапе (Э2 — каркас композиции) объявлен один модуль-заглушка («Дашборд»),
-/// чтобы проверить сквозную сборку «реестр модулей → навигация хоста → страница из RCL».
-/// Регистрация сервисов, контекстов данных и привязок моделей появляется на этапах Э3+.
+/// Реестр модулей соответствует набору из §5.2 ТЗ (11 модулей) плюс операционная «Загрузка корпуса».
+/// Реализованы: Дашборд, Генератор, База НПА, Загрузка; остальные — страницы-заглушки «в разработке»
+/// (очередь Ф1/Ф2 по §6.2). Секции меню объявляет профиль (<c>MenuGroup</c>) — хост лишь группирует.
 /// </remarks>
 public sealed class InspectorProfile : IProfile
 {
+    private const string GroupMain = "Навигация";
+    private const string GroupDivisions = "Подразделения";
+    private const string ReadPolicy = "inspector.read";
+
     /// <inheritdoc />
     public string Id => "inspector";
 
@@ -27,36 +32,46 @@ public sealed class InspectorProfile : IProfile
     public string DisplayName => "ИнспекторAI";
 
     /// <inheritdoc />
+    public string? Subtitle => "ГКНБ КР · Главная инспекция";
+
+    /// <inheritdoc />
     public IReadOnlyList<IModule> Modules { get; } =
     [
-        new ModuleDescriptor(
-            Id: "dashboard",
-            Route: "/dashboard",
-            MenuTitle: "Дашборд",
-            MenuIcon: null,
-            ComponentType: typeof(Dashboard),
-            RequiredPolicy: "inspector.read"),
-        new ModuleDescriptor(
-            Id: "generator",
-            Route: "/generator",
-            MenuTitle: "Генератор",
-            MenuIcon: null,
-            ComponentType: typeof(Generator),
-            RequiredPolicy: "inspector.read"),
-        new ModuleDescriptor(
-            Id: "npa-search",
-            Route: "/npa",
-            MenuTitle: "База НПА",
-            MenuIcon: null,
-            ComponentType: typeof(NpaSearch),
-            RequiredPolicy: "inspector.read"),
-        new ModuleDescriptor(
-            Id: "load",
-            Route: "/load",
-            MenuTitle: "Загрузка корпуса",
-            MenuIcon: null,
-            ComponentType: typeof(CorpusLoad),
-            RequiredPolicy: "inspector.read"),
+        // --- Реализованные модули ---
+        new ModuleDescriptor("dashboard", "/dashboard", "Дашборд", Icons.Material.Filled.Dashboard,
+            typeof(Dashboard), ReadPolicy, GroupMain),
+        new ModuleDescriptor("generator", "/generator", "Генератор", Icons.Material.Filled.AutoAwesome,
+            typeof(Generator), ReadPolicy, GroupMain),
+        new ModuleDescriptor("npa-search", "/npa", "База НПА", Icons.Material.Filled.Gavel,
+            typeof(NpaSearch), ReadPolicy, GroupMain),
+
+        // --- Модули §5.2, ещё не реализованные (страницы-заглушки) ---
+        new ModuleDescriptor("archive", "/archive", "Архив", Icons.Material.Filled.Inventory2,
+            typeof(Archive), ReadPolicy, GroupMain),
+        new ModuleDescriptor("collegium", "/collegium", "Коллегия", Icons.Material.Filled.Groups,
+            typeof(Collegium), ReadPolicy, GroupMain),
+        new ModuleDescriptor("meetings", "/meetings", "Совещания", Icons.Material.Filled.EventNote,
+            typeof(Meetings), ReadPolicy, GroupMain),
+        new ModuleDescriptor("editor", "/editor", "Редактор", Icons.Material.Filled.EditNote,
+            typeof(Editor), ReadPolicy, GroupMain),
+        new ModuleDescriptor("analysis", "/analysis", "Анализ / Сравнение", Icons.Material.Filled.CompareArrows,
+            typeof(Analysis), ReadPolicy, GroupMain),
+        new ModuleDescriptor("risks", "/risks", "Риски и контроль", Icons.Material.Filled.Warning,
+            typeof(Risks), ReadPolicy, GroupMain),
+        new ModuleDescriptor("methods", "/methods", "Методики проверок", Icons.Material.Filled.MenuBook,
+            typeof(Methods), ReadPolicy, GroupMain),
+        new ModuleDescriptor("monitoring", "/monitoring", "Мониторинг", Icons.Material.Filled.MonitorHeart,
+            typeof(Monitoring), ReadPolicy, GroupMain),
+
+        // --- Операционный модуль (вне §5.2): наполнение корпуса ---
+        new ModuleDescriptor("load", "/load", "Загрузка корпуса", Icons.Material.Filled.CloudUpload,
+            typeof(CorpusLoad), ReadPolicy, GroupMain),
+
+        // --- Секция «Подразделения» (объекты контроля, §4.2) ---
+        new ModuleDescriptor("divisions-territorial", "/divisions/territorial", "Территориальные",
+            Icons.Material.Filled.AccountTree, typeof(TerritorialDivisions), ReadPolicy, GroupDivisions),
+        new ModuleDescriptor("divisions-linear", "/divisions/linear", "Линейные",
+            Icons.Material.Filled.Business, typeof(LinearDivisions), ReadPolicy, GroupDivisions),
     ];
 
     /// <inheritdoc />
@@ -65,8 +80,7 @@ public sealed class InspectorProfile : IProfile
     /// <inheritdoc />
     public void RegisterServices(IServiceCollection services, IConfiguration configuration)
     {
-        // Сценарии профиля: промпт-рендереры и валидаторы (Mediator-обработчики регистрирует
-        // source-генератор в хосте Web). Сейчас — сценарий «Генератор» (Э4-03).
+        // Сценарии профиля: промпт-рендереры, валидаторы, доменные швы грунтовки/чанкинга, расчёт риска.
         services.AddInspectorApplication();
     }
 

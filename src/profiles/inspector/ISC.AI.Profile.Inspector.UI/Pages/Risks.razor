@@ -1,0 +1,244 @@
+@namespace ISC.AI.Profile.Inspector.UI
+@page "/risks"
+@using ISC.AI.Profile.Inspector.Domain.Enums
+@using ISC.AI.Profile.Inspector.Domain.Risk
+@using ISC.AI.Profile.Inspector.UI.Demo
+@inject RiskScoreCalculator Calculator
+
+@* Модуль «Риски и внутренний контроль» (§5.2.5.1). ВАЖНО: уровень риска на экране НЕ нарисован — его
+   считает настоящий RiskScoreCalculator по формуле Приложения §2 (детерминированно, код, не ИИ).
+   ДЕМО — только исходные сигналы (нарушения/повторы/просрочки/тренд), пока inspector.violation пуст. *@
+
+<PageTitle>Риски и контроль — ИнспекторAI</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4">
+    <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Primary" Size="Size.Large" />
+    <div class="flex-grow-1">
+        <MudText Typo="Typo.h4">Риски и внутренний контроль</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">Выявление рисков, правила и процедуры контроля</MudText>
+    </div>
+</div>
+
+<MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-4"
+          Icon="@Icons.Material.Filled.Science">
+    Исходные данные показательные (ДЕМО) — <c>inspector.violation</c> ещё не наполнен. Но сам <b>уровень риска
+    вычисляет настоящая детерминированная формула</b> (Приложение §2), а не константа: балл = w1·Σтяжесть +
+    w2·повторы + w3·просрочки + w4·тренд. ИИ здесь не участвует.
+</MudAlert>
+
+@* --- Показатели --- *@
+<MudGrid Class="mb-2">
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Class="pa-4" Outlined="true" Style="border-left:4px solid var(--mud-palette-info);">
+            <MudText Typo="Typo.h4">@_assessed.Count</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Выявленных рисков</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Class="pa-4" Outlined="true" Style="@($"border-left:4px solid {LevelColor(RiskLevel.Critical)};")">
+            <MudText Typo="Typo.h4">@CountOf(RiskLevel.Critical, RiskLevel.High)</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Критичных / высоких</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Class="pa-4" Outlined="true" Style="@($"border-left:4px solid {LevelColor(RiskLevel.Medium)};")">
+            <MudText Typo="Typo.h4">@CountOf(RiskLevel.Medium)</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Средних рисков</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Class="pa-4" Outlined="true" Style="@($"border-left:4px solid {LevelColor(RiskLevel.Low)};")">
+            <MudText Typo="Typo.h4">@CountOf(RiskLevel.Low)</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Низких рисков</MudText>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+<MudGrid>
+    @* ================= Реестр ================= *@
+    <MudItem xs="12" md="7">
+        <MudPaper Class="pa-4 h-100" Outlined="true">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary mb-2 d-block" Style="@SectionStyle">
+                Реестр рисков подразделений
+            </MudText>
+
+            <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" Class="mt-1">
+                <MudTabPanel Text="Реестр рисков" Icon="@Icons.Material.Filled.Warning">
+                    @* --- Фильтр по уровню --- *@
+                    <div class="d-flex align-center gap-2 flex-wrap my-3">
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">Уровень:</MudText>
+                        <MudChip T="string" Size="Size.Small" Variant="@FilterVariant(null)" Color="Color.Default"
+                                 OnClick="@(() => _filter = null)">Все (@_assessed.Count)</MudChip>
+                        @foreach (var level in AllLevels)
+                        {
+                            var count = CountOf(level);
+                            <MudChip T="string" Size="Size.Small" Variant="@FilterVariant(level)"
+                                     Style="@LevelChipStyle(level)" OnClick="@(() => _filter = level)">
+                                @LevelLabel(level) (@count)
+                            </MudChip>
+                        }
+                    </div>
+
+                    @foreach (var item in Filtered)
+                    {
+                        <MudPaper Class="pa-3 mb-2 cursor-pointer" Outlined="true"
+                                  Style="@RowStyle(item)" @onclick="@(() => _selected = item)">
+                            <div class="d-flex align-center gap-2">
+                                <MudText Typo="Typo.body1" Class="flex-grow-1">
+                                    <b>@item.Entry.Division — @item.Entry.Area</b>
+                                </MudText>
+                                <MudChip T="string" Size="Size.Small" Style="@LevelChipStyle(item.Assessment.Level)">
+                                    @LevelLabel(item.Assessment.Level)
+                                </MudChip>
+                            </div>
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary mt-1">@item.Entry.Description</MudText>
+                            <MudText Typo="Typo.caption" Style="@($"color:{LevelColor(RiskLevel.Low)};")" Class="mt-1 d-block">
+                                → @item.Entry.Recommendation
+                            </MudText>
+                        </MudPaper>
+                    }
+                </MudTabPanel>
+
+                <MudTabPanel Text="Правила контроля" Icon="@Icons.Material.Filled.Rule">
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary my-3">
+                        Показатели оценки работы подразделения — детерминированные, каждый трассируется к полю
+                        источника (§5.2.5.2). Оценка «как работает» отлична от уровня риска.
+                    </MudText>
+                    @foreach (var rule in InspectorDemoData.ControlRules)
+                    {
+                        <MudPaper Class="pa-3 mb-2" Outlined="true">
+                            <MudText Typo="Typo.body2"><b>@rule.Title</b></MudText>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">@rule.Note</MudText>
+                        </MudPaper>
+                    }
+                </MudTabPanel>
+
+                <MudTabPanel Text="Генерация документов" Icon="@Icons.Material.Filled.AutoAwesome">
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="my-3">
+                        Аналитическая записка по рискам формируется тем же grounded-конвейером Генератора:
+                        ссылки на НПА проходят грунтовку, результат — черновик для проверки человеком.
+                        Сам балл риска при этом остаётся детерминированным — ИИ пишет только текст.
+                    </MudAlert>
+                    <MudButton Href="/generator" Variant="Variant.Filled" Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.AutoAwesome">Перейти в Генератор</MudButton>
+                </MudTabPanel>
+            </MudTabs>
+        </MudPaper>
+    </MudItem>
+
+    @* ================= Детали ================= *@
+    <MudItem xs="12" md="5">
+        <MudPaper Class="pa-4 h-100" Outlined="true">
+            @if (_selected is null)
+            {
+                <div class="d-flex flex-column align-center justify-center text-center" style="min-height:260px;">
+                    <MudIcon Icon="@Icons.Material.Filled.Warning" Class="mb-3 mud-text-secondary" Style="font-size:3rem;" />
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                        Выберите риск из реестра<br />для работы с ним и правилами контроля
+                    </MudText>
+                </div>
+            }
+            else
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary mb-2 d-block" Style="@SectionStyle">Риск</MudText>
+                <MudText Typo="Typo.h6">@_selected.Entry.Division</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">@_selected.Entry.Area</MudText>
+
+                <div class="d-flex align-center gap-2 mb-3">
+                    <MudChip T="string" Size="Size.Small" Style="@LevelChipStyle(_selected.Assessment.Level)">
+                        @LevelLabel(_selected.Assessment.Level)
+                    </MudChip>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">
+                        балл @_selected.Assessment.Score.ToString("0.#")
+                    </MudChip>
+                </div>
+
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block" Style="@SectionStyle">Существо</MudText>
+                <MudText Typo="Typo.body2" Class="mb-3">@_selected.Entry.Description</MudText>
+
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block" Style="@SectionStyle">Рекомендация</MudText>
+                <MudText Typo="Typo.body2" Class="mb-3">@_selected.Entry.Recommendation</MudText>
+
+                @* Разбор балла — показывает, что уровень получен формулой, а не назначен вручную. *@
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-1" Style="@SectionStyle">
+                    Из чего сложился балл
+                </MudText>
+                <MudSimpleTable Dense="true" Elevation="0" Style="background:transparent;">
+                    <tbody>
+                        <tr>
+                            <td><MudText Typo="Typo.caption">Открытых нарушений (объём×тяжесть)</MudText></td>
+                            <td class="text-right"><MudText Typo="Typo.caption">@_selected.Entry.Signals.OpenSeverities.Count</MudText></td>
+                        </tr>
+                        <tr>
+                            <td><MudText Typo="Typo.caption">Повторяемость</MudText></td>
+                            <td class="text-right"><MudText Typo="Typo.caption">@_selected.Entry.Signals.RepeatCount</MudText></td>
+                        </tr>
+                        <tr>
+                            <td><MudText Typo="Typo.caption">Просроченных устранений</MudText></td>
+                            <td class="text-right"><MudText Typo="Typo.caption">@_selected.Entry.Signals.OverdueCount</MudText></td>
+                        </tr>
+                        <tr>
+                            <td><MudText Typo="Typo.caption">Тренд к пред. периоду</MudText></td>
+                            <td class="text-right"><MudText Typo="Typo.caption">@_selected.Entry.Signals.TrendDelta</MudText></td>
+                        </tr>
+                    </tbody>
+                </MudSimpleTable>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2 d-block">
+                    Веса и пороги — конфигурируемы, калибруются на этапе Э1 (см. методику расчёта риска).
+                </MudText>
+            }
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private const string SectionStyle = "letter-spacing:.08em; text-transform:uppercase; font-weight:600;";
+
+    private static readonly RiskLevel[] AllLevels =
+        [RiskLevel.Critical, RiskLevel.High, RiskLevel.Medium, RiskLevel.Low];
+
+    /// <summary>Запись реестра вместе с ВЫЧИСЛЕННОЙ оценкой (формула, не константа).</summary>
+    private sealed record AssessedRisk(InspectorDemoData.RiskEntry Entry, RiskAssessment Assessment);
+
+    private List<AssessedRisk> _assessed = [];
+    private RiskLevel? _filter;
+    private AssessedRisk? _selected;
+
+    protected override void OnInitialized() =>
+        // Уровень каждого риска считает НАСТОЯЩИЙ калькулятор по демо-сигналам (Приложение §2).
+        _assessed = [.. InspectorDemoData.Risks.Select(r => new AssessedRisk(r, Calculator.Assess(r.Signals)))];
+
+    private IEnumerable<AssessedRisk> Filtered =>
+        _filter is null ? _assessed : _assessed.Where(r => r.Assessment.Level == _filter);
+
+    private int CountOf(params RiskLevel[] levels) => _assessed.Count(r => levels.Contains(r.Assessment.Level));
+
+    private Variant FilterVariant(RiskLevel? level) => _filter == level ? Variant.Filled : Variant.Outlined;
+
+    private string RowStyle(AssessedRisk item) =>
+        $"border-left:3px solid {LevelColor(item.Assessment.Level)};"
+        + (ReferenceEquals(_selected, item) ? " border-color: var(--mud-palette-primary);" : string.Empty);
+
+    // 4 уровня — 4 оттенка (на дашборде они сворачиваются в 3 цвета светофора, Приложение §2).
+    private static string LevelColor(RiskLevel level) => level switch
+    {
+        RiskLevel.Critical => "#ef4444",
+        RiskLevel.High => "#f97316",
+        RiskLevel.Medium => "#eab308",
+        _ => "#22c55e",
+    };
+
+    private static string LevelChipStyle(RiskLevel level)
+    {
+        var color = LevelColor(level);
+        return $"background:{color}22; color:{color}; border:1px solid {color}66;";
+    }
+
+    private static string LevelLabel(RiskLevel level) => level switch
+    {
+        RiskLevel.Critical => "Критичный",
+        RiskLevel.High => "Высокий",
+        RiskLevel.Medium => "Средний",
+        _ => "Низкий",
+    };
+}

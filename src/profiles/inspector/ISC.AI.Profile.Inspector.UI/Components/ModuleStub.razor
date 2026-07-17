@@ -1,0 +1,46 @@
+@namespace ISC.AI.Profile.Inspector.UI
+
+@* Единая заглушка модулей §5.2, ещё не реализованных. Честно показывает, что модуль в разработке,
+   и что он будет делать по ТЗ — чтобы навигация соответствовала замыслу, но никого не вводила в заблуждение. *@
+
+<PageTitle>@Title — ИнспекторAI</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-6">
+    <MudIcon Icon="@Icon" Color="Color.Primary" Size="Size.Large" />
+    <div class="flex-grow-1">
+        <MudText Typo="Typo.h4">@Title</MudText>
+        @if (!string.IsNullOrWhiteSpace(Subtitle))
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">@Subtitle</MudText>
+        }
+    </div>
+    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">в разработке</MudChip>
+</div>
+
+<MudPaper Class="pa-8 d-flex flex-column align-center text-center" Outlined="true">
+    <MudIcon Icon="@Icon" Class="mb-3 mud-text-secondary" Style="font-size: 3.5rem;" />
+    <MudText Typo="Typo.h6" GutterBottom="true">Модуль в разработке</MudText>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-4" Style="max-width: 660px;">@Description</MudText>
+    @if (!string.IsNullOrWhiteSpace(Requirement))
+    {
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default"
+                 Icon="@Icons.Material.Filled.Description">@Requirement</MudChip>
+    }
+</MudPaper>
+
+@code {
+    /// <summary>Заголовок модуля.</summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+
+    /// <summary>Подзаголовок (кратко — назначение).</summary>
+    [Parameter] public string? Subtitle { get; set; }
+
+    /// <summary>Значок модуля (константа MudBlazor).</summary>
+    [Parameter, EditorRequired] public string Icon { get; set; } = string.Empty;
+
+    /// <summary>Что модуль будет делать по ТЗ.</summary>
+    [Parameter, EditorRequired] public string Description { get; set; } = string.Empty;
+
+    /// <summary>Ссылка на пункт ТЗ и приоритет/зависимости.</summary>
+    [Parameter] public string? Requirement { get; set; }
+}

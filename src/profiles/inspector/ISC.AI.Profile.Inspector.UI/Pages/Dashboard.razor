@@ -1,14 +1,199 @@
 @namespace ISC.AI.Profile.Inspector.UI
-@* Страница-заглушка модуля «Дашборд». Демонстрирует монтирование страницы профиля (RCL)
-   хостом через реестр модулей (ТС-007). Содержательная реализация — последующие этапы. *@
 @page "/dashboard"
+@using ISC.AI.Profile.Inspector.UI.Demo
+
+@* Модуль «Дашборд» (ТФ-ДШ-01/02). ВНИМАНИЕ: данные ПОКАЗАТЕЛЬНЫЕ (демо) — реальных записей ещё нет,
+   домен «Нарушение» создан, но пуст. Демо-маркер обязан быть виден (плашка ниже + чип в оболочке).
+   Цвет светофора — свёртка 4 уровней риска в 3 цвета (Приложение §2), считает код, не ИИ. *@
 
 <PageTitle>Дашборд — ИнспекторAI</PageTitle>
 
-<MudText Typo="Typo.h4" GutterBottom="true">Дашборд</MudText>
+<div class="d-flex align-center gap-3 mb-4">
+    <MudIcon Icon="@Icons.Material.Filled.Dashboard" Color="Color.Primary" Size="Size.Large" />
+    <div class="flex-grow-1">
+        <MudText Typo="Typo.h4">Дашборд</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">Сводная картина по подразделениям — обзор</MudText>
+    </div>
+</div>
 
-<MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mt-2">
-    Модуль подключён через реестр модулей профиля (этап Э2 — каркас композиции).
-    Здесь появится сводная картина по подразделениям: «зелёный/жёлтый/красный» по реальным данным,
-    фильтры по подразделению, типу нарушения, тяжести и статусу (ТФ-ДШ-01/02).
+<MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-4"
+          Icon="@Icons.Material.Filled.Science">
+    @InspectorDemoData.Notice
 </MudAlert>
+
+@* --- Показатели --- *@
+<MudGrid Class="mb-2">
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Class="pa-4" Outlined="true" Style="border-left:4px solid var(--mud-palette-info);">
+            <MudText Typo="Typo.h4">@InspectorDemoData.TotalChecks</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Всего проверок</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Class="pa-4" Outlined="true" Style="border-left:4px solid var(--mud-palette-error);">
+            <MudText Typo="Typo.h4">@InspectorDemoData.CriticalViolations</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Критических нарушений</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Class="pa-4" Outlined="true" Style="border-left:4px solid var(--mud-palette-warning);">
+            <MudText Typo="Typo.h4">@InspectorDemoData.NotRemediated</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Не устранено</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Class="pa-4" Outlined="true" Style="border-left:4px solid var(--mud-palette-success);">
+            <MudText Typo="Typo.h4">@InspectorDemoData.Remediated</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Устранено</MudText>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+<MudGrid Class="mb-2">
+    @* --- Последние проверки --- *@
+    <MudItem xs="12" md="6">
+        <MudPaper Class="pa-4 h-100" Outlined="true">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary mb-3 d-block" Style="@SectionStyle">
+                Последние проверки
+            </MudText>
+            @foreach (var check in InspectorDemoData.RecentChecks)
+            {
+                <MudPaper Class="pa-3 mb-2 d-flex align-center gap-3" Outlined="true">
+                    <div class="flex-grow-1">
+                        <MudText Typo="Typo.body1"><b>@check.Title</b></MudText>
+                        <div class="d-flex align-center gap-3 mt-1">
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                <MudIcon Icon="@Icons.Material.Filled.CalendarMonth" Size="Size.Small" /> @check.Date
+                            </MudText>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                <MudIcon Icon="@Icons.Material.Filled.Place" Size="Size.Small" /> @check.Location
+                            </MudText>
+                        </div>
+                    </div>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@StatusColor(check.Status)">
+                        @check.Status
+                    </MudChip>
+                </MudPaper>
+            }
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        @* --- Статус устранения --- *@
+        <MudPaper Class="pa-4 mb-4" Outlined="true">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary mb-3 d-block" Style="@SectionStyle">
+                Статус устранения
+            </MudText>
+            @foreach (var stat in InspectorDemoData.Remediation)
+            {
+                <div class="d-flex align-center justify-space-between mb-1">
+                    <MudText Typo="Typo.body2">@stat.Label</MudText>
+                    <MudText Typo="Typo.body2" Color="@StatusColor(stat.Label)"><b>@stat.Count</b></MudText>
+                </div>
+                <MudProgressLinear Color="@StatusColor(stat.Label)" Value="@stat.Percent" Class="mb-3" Rounded="true" />
+            }
+        </MudPaper>
+
+        @* --- Быстрый старт --- *@
+        <MudPaper Class="pa-4" Outlined="true">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary mb-3 d-block" Style="@SectionStyle">
+                Быстрый старт
+            </MudText>
+            <MudStack Spacing="2">
+                <MudButton Href="/generator" Variant="Variant.Outlined" FullWidth="true"
+                           StartIcon="@Icons.Material.Filled.AutoAwesome" Class="justify-start">
+                    Генератор документов
+                </MudButton>
+                <MudButton Href="/npa" Variant="Variant.Outlined" FullWidth="true"
+                           StartIcon="@Icons.Material.Filled.Gavel" Class="justify-start">
+                    Поиск по НПА
+                </MudButton>
+                <MudButton Href="/archive" Variant="Variant.Outlined" FullWidth="true"
+                           StartIcon="@Icons.Material.Filled.Inventory2" Class="justify-start">
+                    Архив проверок
+                </MudButton>
+                <MudButton Href="/collegium" Variant="Variant.Outlined" FullWidth="true"
+                           StartIcon="@Icons.Material.Filled.Groups" Class="justify-start">
+                    Подготовка к коллегии
+                </MudButton>
+            </MudStack>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@* --- Подразделения --- *@
+<MudGrid>
+    <MudItem xs="12" md="6">
+        <MudPaper Class="pa-4 h-100" Outlined="true">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary mb-2 d-block" Style="@SectionStyle">
+                Территориальные управления
+            </MudText>
+            <MudSimpleTable Dense="true" Hover="true" Elevation="0" Style="background:transparent;">
+                <thead>
+                    <tr>
+                        <th>Подразделение</th>
+                        <th>Регион</th>
+                        <th class="text-right">Проверок</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in InspectorDemoData.Territorial)
+                    {
+                        <tr>
+                            <td><MudText Typo="Typo.body2" Color="Color.Primary">@row.Name</MudText></td>
+                            <td><MudText Typo="Typo.caption" Class="mud-text-secondary">@row.Note</MudText></td>
+                            <td class="text-right">
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                                         Color="@(row.Checks > 0 ? Color.Primary : Color.Default)">@row.Checks</MudChip>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudPaper Class="pa-4 h-100" Outlined="true">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary mb-2 d-block" Style="@SectionStyle">
+                Линейные подразделения
+            </MudText>
+            <MudSimpleTable Dense="true" Hover="true" Elevation="0" Style="background:transparent;">
+                <thead>
+                    <tr>
+                        <th>Подразделение</th>
+                        <th class="text-right">Проверок</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in InspectorDemoData.Linear)
+                    {
+                        <tr>
+                            <td>
+                                <MudText Typo="Typo.body2" Color="Color.Primary">@row.Name</MudText>
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">@row.Note</MudText>
+                            </td>
+                            <td class="text-right">
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                                         Color="@(row.Checks > 0 ? Color.Primary : Color.Default)">@row.Checks</MudChip>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private const string SectionStyle = "letter-spacing:.08em; text-transform:uppercase; font-weight:600;";
+
+    // Цвет статуса устранения: согласован со свёрткой уровней риска в 3 цвета (Приложение §2).
+    private static Color StatusColor(string status) => status switch
+    {
+        "Устранено" => Color.Success,
+        "Частично устранено" => Color.Warning,
+        "На контроле" => Color.Info,
+        _ => Color.Error,
+    };
+}

@@ -1,12 +1,26 @@
 @inject IProfile Profile
 
-@* Навигация строится из реестра модулей профиля (ТС-007). Хост не знает имён модулей заранее. *@
-<MudNavMenu>
+@* Навигация строится из реестра модулей профиля (ТС-007). Хост не знает имён модулей заранее и не
+   хардкодит секции: названия групп объявляет сам профиль (IModule.MenuGroup) — здесь только группировка. *@
+
+<MudNavMenu Class="pb-2">
     <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Home">Главная</MudNavLink>
-    @foreach (var module in Profile.Modules)
+
+    @foreach (var group in Profile.Modules.GroupBy(m => m.MenuGroup))
     {
-        <MudNavLink Href="@module.Route" Match="NavLinkMatch.Prefix" Icon="@module.MenuIcon">
-            @module.MenuTitle
-        </MudNavLink>
+        @if (!string.IsNullOrWhiteSpace(group.Key))
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary px-4 pt-4 pb-1 d-block"
+                     Style="letter-spacing:.08em; text-transform:uppercase; font-weight:600;">
+                @group.Key
+            </MudText>
+        }
+
+        @foreach (var module in group)
+        {
+            <MudNavLink Href="@module.Route" Match="NavLinkMatch.Prefix" Icon="@module.MenuIcon">
+                @module.MenuTitle
+            </MudNavLink>
+        }
     }
 </MudNavMenu>
