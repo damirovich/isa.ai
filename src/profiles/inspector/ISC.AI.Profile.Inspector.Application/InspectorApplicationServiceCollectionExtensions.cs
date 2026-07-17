@@ -4,6 +4,7 @@ using ISC.AI.Abstractions.Ingestion;
 using ISC.AI.Profile.Inspector.Application.Generation;
 using ISC.AI.Profile.Inspector.Application.Grounding;
 using ISC.AI.Profile.Inspector.Application.Ingestion;
+using ISC.AI.Profile.Inspector.Domain.Risk;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -17,6 +18,9 @@ public static class InspectorApplicationServiceCollectionExtensions
     public static IServiceCollection AddInspectorApplication(this IServiceCollection services)
     {
         services.AddSingleton<IReferencePromptRenderer, ScribanReferencePromptRenderer>();
+
+        // Детерминированный расчёт риска подразделения (Э5-01 шаг 2, Приложение §2) — код, не ИИ.
+        services.AddSingleton<RiskScoreCalculator>();
 
         // Профиль ПЕРЕОПРЕДЕЛЯЕТ доменные швы грунтовки/чанкинга НПА поверх нейтральных заглушек ядра
         // (Э4-18, инж-ТЗ §5.3.1.2/§5.3.1.3). Replace — явная замена дефолта, без «мёртвой» второй регистрации.

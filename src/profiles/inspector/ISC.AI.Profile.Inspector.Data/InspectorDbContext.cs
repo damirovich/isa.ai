@@ -22,6 +22,11 @@ public class InspectorDbContext(DbContextOptions<InspectorDbContext> options) : 
     public DbSet<NormDocumentLink> NormDocumentLinks { get; set; } = null!;
     public DbSet<ChunkRevisionLink> ChunkRevisionLinks { get; set; } = null!;
 
+    // Домен «Нарушение» (Э5-01): объект аналитики + опоры (иерархия подразделений, классификатор видов).
+    public DbSet<Division> Divisions { get; set; } = null!;
+    public DbSet<ViolationCategory> ViolationCategories { get; set; } = null!;
+    public DbSet<Violation> Violations { get; set; } = null!;
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
