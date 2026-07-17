@@ -1,0 +1,155 @@
+@namespace ISC.AI.Profile.Inspector.UI
+@page "/analysis"
+@using ISC.AI.Profile.Inspector.UI.Demo
+
+@* Модуль «Анализ и сравнение» (§5.2.3): подсветка противоречий и пробелов между НПА.
+   ЖЁСТКИЙ ИНВАРИАНТ: система лишь ПОМЕЧАЕТ возможные коллизии для проверки человеком и НЕ выдаёт
+   автоматического правового заключения. Данные ПОКАЗАТЕЛЬНЫЕ (демо); сводки считаются из списка. *@
+
+<PageTitle>Анализ и сравнение — ИнспекторAI</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4">
+    <MudIcon Icon="@Icons.Material.Filled.CompareArrows" Color="Color.Primary" Size="Size.Large" />
+    <div class="flex-grow-1">
+        <MudText Typo="Typo.h4">Анализ и сравнение</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            Сравнение документов и НПА, выявление противоречий
+        </MudText>
+    </div>
+</div>
+
+<MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-4"
+          Icon="@Icons.Material.Filled.Gavel">
+    Показательные данные (ДЕМО). Система <b>помечает возможные противоречия и пробелы для проверки человеком</b>
+    и не выдаёт автоматического правового заключения (§5.2.3). Ссылки на НПА проходят грунтовку — формируются
+    только из извлечённых фрагментов.
+</MudAlert>
+
+<MudGrid>
+    @* ================= Находки ================= *@
+    <MudItem xs="12">
+        <MudPaper Class="pa-4" Outlined="true">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary mb-2 d-block" Style="@SectionStyle">
+                Анализ и сравнение документов
+            </MudText>
+
+            <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" Class="mt-1">
+                <MudTabPanel Text="НПА — противоречия и пробелы" Icon="@Icons.Material.Filled.Balance">
+                    @* --- Фильтр по виду находки --- *@
+                    <div class="d-flex align-center gap-2 flex-wrap my-3">
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">Фильтр:</MudText>
+                        <MudChip T="string" Size="Size.Small" Variant="@FilterVariant(null)" Color="Color.Default"
+                                 OnClick="@(() => _filter = null)">Все (@InspectorDemoData.Findings.Count)</MudChip>
+                        @foreach (var kind in AllKinds)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="@FilterVariant(kind)"
+                                     Style="@KindChipStyle(kind)" OnClick="@(() => _filter = kind)">
+                                @KindPlural(kind) (@CountOf(kind))
+                            </MudChip>
+                        }
+                    </div>
+
+                    @foreach (var finding in Filtered)
+                    {
+                        <MudPaper Class="pa-3 mb-2" Outlined="true"
+                                  Style="@($"border-left:3px solid {KindColor(finding.Kind)};")">
+                            <div class="d-flex align-start gap-2">
+                                <MudText Typo="Typo.body1" Class="flex-grow-1"><b>@finding.Title</b></MudText>
+                                <MudChip T="string" Size="Size.Small" Style="@KindChipStyle(finding.Kind)"
+                                         Icon="@KindIcon(finding.Kind)">@KindLabel(finding.Kind)</MudChip>
+                            </div>
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary my-1">@finding.Description</MudText>
+                            <div class="d-flex align-center gap-1 flex-wrap mb-1">
+                                @foreach (var source in finding.Sources)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                                             Color="Color.Default" Icon="@Icons.Material.Filled.Description">
+                                        @source
+                                    </MudChip>
+                                }
+                            </div>
+                            <MudText Typo="Typo.caption" Style="@($"color:{KindColor(finding.Kind)};")"
+                                     Class="d-flex align-center gap-1">
+                                <MudIcon Icon="@Icons.Material.Filled.ArrowRight" Size="Size.Small" /> @finding.Action
+                            </MudText>
+                        </MudPaper>
+                    }
+                </MudTabPanel>
+
+                <MudTabPanel Text="Документы архива" Icon="@Icons.Material.Filled.FolderOpen">
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="my-3">
+                        Здесь будет сопоставление внутриведомственного документа из архива с действующими
+                        редакциями НПА. Источник документов — модуль «Архив» (§5.2.2), пока не подключён.
+                    </MudAlert>
+                </MudTabPanel>
+            </MudTabs>
+
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Class="mt-3"
+                       StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="@(() => _analyzeHint = true)">
+                ИИ-анализ НПА: подготовить заключение (ДЕМО)
+            </MudButton>
+            @if (_analyzeHint)
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-2">
+                    Важно: ИИ готовит <b>черновик-подсветку</b> возможных коллизий со ссылками из грунтовки —
+                    не правовое заключение. Итоговую оценку и решение принимает человек (§5.2.3).
+                </MudAlert>
+            }
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private const string SectionStyle = "letter-spacing:.08em; text-transform:uppercase; font-weight:600;";
+
+    private static readonly InspectorDemoData.FindingKind[] AllKinds =
+        [InspectorDemoData.FindingKind.Contradiction, InspectorDemoData.FindingKind.Gap,
+         InspectorDemoData.FindingKind.Recommendation];
+
+    private InspectorDemoData.FindingKind? _filter;
+    private bool _analyzeHint;
+
+    private static IEnumerable<InspectorDemoData.AnalysisFinding> All => InspectorDemoData.Findings;
+
+    private IEnumerable<InspectorDemoData.AnalysisFinding> Filtered =>
+        _filter is null ? All : All.Where(f => f.Kind == _filter);
+
+    private static int CountOf(InspectorDemoData.FindingKind kind) => All.Count(f => f.Kind == kind);
+
+    private Variant FilterVariant(InspectorDemoData.FindingKind? kind) =>
+        _filter == kind ? Variant.Filled : Variant.Outlined;
+
+    private static string KindColor(InspectorDemoData.FindingKind kind) => kind switch
+    {
+        InspectorDemoData.FindingKind.Contradiction => "#ef4444",
+        InspectorDemoData.FindingKind.Gap => "#eab308",
+        _ => "#3b82f6",
+    };
+
+    private static string KindChipStyle(InspectorDemoData.FindingKind kind)
+    {
+        var color = KindColor(kind);
+        return $"background:{color}22; color:{color}; border:1px solid {color}66;";
+    }
+
+    private static string KindIcon(InspectorDemoData.FindingKind kind) => kind switch
+    {
+        InspectorDemoData.FindingKind.Contradiction => Icons.Material.Filled.Bolt,
+        InspectorDemoData.FindingKind.Gap => Icons.Material.Filled.CropFree,
+        _ => Icons.Material.Filled.Lightbulb,
+    };
+
+    private static string KindLabel(InspectorDemoData.FindingKind kind) => kind switch
+    {
+        InspectorDemoData.FindingKind.Contradiction => "Противоречие",
+        InspectorDemoData.FindingKind.Gap => "Пробел",
+        _ => "Рекомендация",
+    };
+
+    private static string KindPlural(InspectorDemoData.FindingKind kind) => kind switch
+    {
+        InspectorDemoData.FindingKind.Contradiction => "Противоречия",
+        InspectorDemoData.FindingKind.Gap => "Пробелы",
+        _ => "Рекомендации",
+    };
+}

@@ -1,10 +1,13 @@
 @namespace ISC.AI.Profile.Inspector.UI
 @* Модуль «Генератор» (Э4-03, ТФ-ГЕН-01): формирует черновик справки через RAG-оркестратор ядра.
-   Результат — ВСЕГДА черновик (HITL, ТБ-042); ссылки помечаются грунтовкой (ТБ-040). *@
+   Форма (тип → подразделение → нарушения) собирает структурированный запрос; генерация НАСТОЯЩАЯ:
+   извлечение с фильтром доступа → модель → грунтовка (ТБ-040) → черновик (HITL, ТБ-042) → экспорт .docx.
+   ДЕМО здесь только справочник подразделений — реальных записей ещё нет. *@
 @page "/generator"
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Abstractions.Grounding
 @using ISC.AI.Profile.Inspector.Application.Generation
+@using ISC.AI.Profile.Inspector.UI.Demo
 @using Mediator
 @using Microsoft.JSInterop
 @inject IMediator Dispatcher
@@ -12,72 +15,221 @@
 
 <PageTitle>Генератор — ИнспекторAI</PageTitle>
 
-<MudText Typo="Typo.h4" GutterBottom="true">Генератор справки</MudText>
+<div class="d-flex align-center gap-3 mb-4">
+    <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Color="Color.Primary" Size="Size.Large" />
+    <div class="flex-grow-1">
+        <MudText Typo="Typo.h4">Генератор документов</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">Справки, акты, заключения</MudText>
+    </div>
+</div>
 
-<MudPaper Class="pa-4 mb-4" Outlined="true">
-    <MudTextField @bind-Value="_topic" Label="Тема справки" Variant="Variant.Outlined"
-                  Lines="2" Immediate="true" Disabled="_busy" />
-    <MudButton Class="mt-2" Color="Color.Primary" Variant="Variant.Filled"
-               OnClick="GenerateAsync" Disabled="@(_busy || string.IsNullOrWhiteSpace(_topic))">
-        @(_busy ? "Формирую…" : "Сформировать")
-    </MudButton>
-</MudPaper>
+@* --- Шаги заполнения --- *@
+<div class="d-flex gap-2 mb-4 flex-wrap">
+    <MudChip T="string" Variant="@StepVariant(true)" Color="Color.Primary" Icon="@Icons.Material.Filled.LooksOne">
+        Тип документа
+    </MudChip>
+    <MudChip T="string" Variant="@StepVariant(_division is not null)" Color="Color.Primary" Icon="@Icons.Material.Filled.LooksTwo">
+        Подразделение
+    </MudChip>
+    <MudChip T="string" Variant="@StepVariant(!string.IsNullOrWhiteSpace(_violations))" Color="Color.Primary" Icon="@Icons.Material.Filled.Looks3">
+        Нарушения
+    </MudChip>
+</div>
 
-@if (_busy)
-{
-    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-2" />
-}
+<MudGrid>
+    @* ================= Левая колонка: параметры ================= *@
+    <MudItem xs="12" md="7">
+        @* --- Тип документа --- *@
+        <MudPaper Class="pa-4 mb-4" Outlined="true">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary mb-2 d-block" Style="@SectionStyle">Тип документа</MudText>
+            <MudSelect T="string" @bind-Value="_docType" Variant="Variant.Outlined" Dense="true">
+                @foreach (var type in DocumentTypes)
+                {
+                    <MudSelectItem T="string" Value="@type.Title" Disabled="@(!type.Implemented)">
+                        @(type.Implemented ? type.Title : $"{type.Title} — скоро")
+                    </MudSelectItem>
+                }
+            </MudSelect>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1">
+                Первый реализуемый тип — справка (§5.2.1.1); остальные подключаются prompt-каркасом, без правок ядра.
+            </MudText>
+        </MudPaper>
 
-@if (_error is not null)
-{
-    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_error</MudAlert>
-}
+        @* --- Подразделение --- *@
+        <MudPaper Class="pa-4 mb-4" Outlined="true">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary mb-2 d-block" Style="@SectionStyle">Подразделение</MudText>
 
-@if (Result is not null)
-{
-    <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mb-3">
-        ЧЕРНОВИК — требует проверки человеком перед использованием (HITL, ТБ-042). Гриф результата: @Result.ResultClassification.
-    </MudAlert>
+            <MudToggleGroup T="bool" @bind-Value="_territorial" Color="Color.Primary" Class="mb-3" CheckMark="false">
+                <MudToggleItem T="bool" Value="true" Text="Территориальное" />
+                <MudToggleItem T="bool" Value="false" Text="Линейное" />
+            </MudToggleGroup>
 
-    <MudButton Class="mb-3" Color="Color.Secondary" Variant="Variant.Filled"
-               OnClick="ExportAsync" Disabled="_exporting" StartIcon="@Icons.Material.Filled.Download">
-        @(_exporting ? "Экспорт…" : "Экспорт в .docx")
-    </MudButton>
+            <MudGrid Spacing="2">
+                @foreach (var division in (_territorial ? InspectorDemoData.Territorial : InspectorDemoData.Linear))
+                {
+                    <MudItem xs="12" sm="6">
+                        <MudPaper Class="pa-3 cursor-pointer" Outlined="true" Style="@DivisionStyle(division)"
+                                  @onclick="@(() => _division = division)">
+                            <MudText Typo="Typo.body2"><b>@division.Name</b></MudText>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                @division.Note@(division.SubUnits > 0 ? $" · {division.SubUnits} РО" : string.Empty)
+                            </MudText>
+                        </MudPaper>
+                    </MudItem>
+                }
+            </MudGrid>
 
-    @if (!Result.AllCitationsConfirmed)
-    {
-        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
-            Не все ссылки подтверждены извлечёнными нормами — вывод НЕ считается готовым (GATE-2).
-        </MudAlert>
-    }
+            <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2 d-block">
+                Справочник показательный (ДЕМО): реальный появится вместе с наполнением <c>inspector.division</c>.
+            </MudText>
 
-    <MudText Typo="Typo.h6">Текст</MudText>
-    <MudPaper Class="pa-4 mb-4" Outlined="true">
-        <MudText Style="white-space: pre-wrap;">@Result.DraftText</MudText>
-    </MudPaper>
+            <MudGrid Class="mt-1">
+                <MudItem xs="12" sm="6">
+                    <MudDatePicker @bind-Date="_date" Label="Дата" Variant="Variant.Outlined" Editable="true" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudTextField @bind-Value="_period" Label="Период" Variant="Variant.Outlined" Placeholder="2024 г." />
+                </MudItem>
+            </MudGrid>
+        </MudPaper>
 
-    @if (Result.Citations.Count > 0)
-    {
-        <MudText Typo="Typo.h6" GutterBottom="true">Ссылки (грунтовка)</MudText>
-        @foreach (var citation in Result.Citations)
-        {
-            <div class="d-flex align-center gap-2 mb-1">
-                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@StatusColor(citation.Status)">
-                    @StatusLabel(citation.Status)
-                </MudChip>
-                <MudText Typo="Typo.body2">@citation.Citation</MudText>
+        @* --- Нарушения --- *@
+        <MudPaper Class="pa-4" Outlined="true">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary mb-2 d-block" Style="@SectionStyle">Нарушения</MudText>
+            <MudTextField @bind-Value="_violations" Variant="Variant.Outlined" Lines="5" Immediate="true"
+                          Disabled="_busy"
+                          Placeholder="Опишите нарушения в произвольной форме:&#10;— отсутствие контакта с конфидентами&#10;— формальный подход к АОД" />
+
+            <div class="d-flex gap-2 flex-wrap my-2">
+                @foreach (var hint in ViolationHints)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default"
+                             OnClick="@(() => AddHint(hint))">@hint</MudChip>
+                }
             </div>
-        }
-    }
-}
+
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Class="mt-2"
+                       StartIcon="@Icons.Material.Filled.AutoAwesome"
+                       OnClick="GenerateAsync" Disabled="@(_busy || !CanGenerate)">
+                @(_busy ? "Формирую…" : "Сформировать документ")
+            </MudButton>
+        </MudPaper>
+    </MudItem>
+
+    @* ================= Правая колонка: результат ================= *@
+    <MudItem xs="12" md="5">
+        <MudPaper Class="pa-4 h-100" Outlined="true">
+            @if (_busy)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-3" />
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    Извлекаю нормы по допуску, формирую черновик и проверяю ссылки грунтовкой…
+                </MudText>
+            }
+            else if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_error</MudAlert>
+            }
+            else if (Result is null)
+            {
+                <div class="d-flex flex-column align-center justify-center text-center" style="min-height:280px;">
+                    <MudIcon Icon="@Icons.Material.Filled.Description" Class="mb-3 mud-text-secondary" Style="font-size:3rem;" />
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                        Заполните параметры слева<br />и нажмите «Сформировать»
+                    </MudText>
+                </div>
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3">
+                    ЧЕРНОВИК — требует проверки человеком (HITL, ТБ-042). Гриф результата: @Result.ResultClassification.
+                </MudAlert>
+
+                @if (!Result.AllCitationsConfirmed)
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                        Не все ссылки подтверждены извлечёнными нормами — вывод НЕ считается готовым (GATE-2).
+                    </MudAlert>
+                }
+
+                <MudButton Class="mb-3" Color="Color.Secondary" Variant="Variant.Filled" FullWidth="true"
+                           OnClick="ExportAsync" Disabled="_exporting" StartIcon="@Icons.Material.Filled.Download">
+                    @(_exporting ? "Экспорт…" : "Экспорт в .docx")
+                </MudButton>
+
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-1" Style="@SectionStyle">Текст</MudText>
+                <MudPaper Class="pa-3 mb-3" Outlined="true">
+                    <MudText Typo="Typo.body2" Style="white-space: pre-wrap;">@Result.DraftText</MudText>
+                </MudPaper>
+
+                @if (Result.Citations.Count > 0)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-1" Style="@SectionStyle">
+                        Ссылки (грунтовка)
+                    </MudText>
+                    @foreach (var citation in Result.Citations)
+                    {
+                        <div class="d-flex align-center gap-2 mb-1">
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@StatusColor(citation.Status)">
+                                @StatusLabel(citation.Status)
+                            </MudChip>
+                            <MudText Typo="Typo.body2">@citation.Citation</MudText>
+                        </div>
+                    }
+                }
+            }
+        </MudPaper>
+    </MudItem>
+</MudGrid>
 
 @code {
-    private string _topic = string.Empty;
+    private const string SectionStyle = "letter-spacing:.08em; text-transform:uppercase; font-weight:600;";
+
+    // Типы документов §5.2.1.1. Реализована пока только справка; остальные — новый prompt-каркас без правок ядра.
+    private sealed record DocType(string Title, bool Implemented);
+
+    private static readonly DocType[] DocumentTypes =
+    [
+        new("Справка об итогах проверки", true),
+        new("Акт проверки", false),
+        new("Рапорт", false),
+        new("Докладная записка", false),
+        new("Заключение", false),
+        new("Проект приказа", false),
+    ];
+
+    private static readonly string[] ViolationHints = ["Агентурная", "АОД", "Нацменьшинства", "Соц. напряжённость"];
+
+    private string _docType = "Справка об итогах проверки";
+    private bool _territorial = true;
+    private InspectorDemoData.DivisionStat? _division;
+    private DateTime? _date = DateTime.Today;
+    private string _period = "2024 г.";
+    private string _violations = string.Empty;
+
     private bool _busy;
+    private bool _exporting;
     private string? _error;
     private ResponseDto<GenerateReferenceResult>? _response;
 
     private GenerateReferenceResult? Result => _response?.Data;
+
+    private bool CanGenerate => _division is not null && !string.IsNullOrWhiteSpace(_violations);
+
+    private static Variant StepVariant(bool filled) => filled ? Variant.Filled : Variant.Outlined;
+
+    private string DivisionStyle(InspectorDemoData.DivisionStat division) =>
+        ReferenceEquals(_division, division)
+            ? "border-color: var(--mud-palette-primary); border-left: 3px solid var(--mud-palette-primary);"
+            : string.Empty;
+
+    private void AddHint(string hint) =>
+        _violations = string.IsNullOrWhiteSpace(_violations) ? $"— {hint}: " : $"{_violations}\n— {hint}: ";
+
+    // Параметры формы собираются в структурированный запрос для RAG-оркестратора (задачный промпт — в профиле).
+    private string BuildTopic() =>
+        $"{_docType}. Подразделение: {_division?.Name} ({_division?.Note}). "
+        + $"Период: {_period}. Дата: {_date:dd.MM.yyyy}. Выявленные нарушения: {_violations}";
 
     private async Task GenerateAsync()
     {
@@ -86,7 +238,7 @@
         _response = null;
         try
         {
-            var response = await Dispatcher.Send(new GenerateReferenceCommand(_topic));
+            var response = await Dispatcher.Send(new GenerateReferenceCommand(BuildTopic()));
             if (response.Status)
             {
                 _response = response;
@@ -106,8 +258,6 @@
         }
     }
 
-    private bool _exporting;
-
     private async Task ExportAsync()
     {
         if (Result is null)
@@ -120,7 +270,7 @@
         try
         {
             var response = await Dispatcher.Send(
-                new ExportReferenceCommand(_topic, Result.DraftText, Result.ResultClassification));
+                new ExportReferenceCommand(_docType, Result.DraftText, Result.ResultClassification));
 
             if (response is { Status: true, Data: { } file })
             {

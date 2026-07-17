@@ -6,6 +6,12 @@
       "runtimeExecutable": "dotnet",
       "runtimeArgs": ["run", "--project", "src/tools/ISC.AI.Harvester.Web/ISC.AI.Harvester.Web.csproj", "--urls", "http://localhost:59173"],
       "port": 59173
+    },
+    {
+      "name": "isc-ai-web",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "src/core/ISC.AI.Web/ISC.AI.Web.csproj", "--urls", "http://localhost:5134"],
+      "port": 5134
     }
   ]
 }

@@ -1,12 +1,36 @@
 @page "/"
+@inject IProfile Profile
 
-<PageTitle>ИнспекторAI</PageTitle>
+@* Главная хоста — доменно-НЕЙТРАЛЬНА: название, подзаголовок и плитки берутся из манифеста профиля
+   (ТС-003, ТС-007). При смене профиля (напр. на «АИС ЕРП») экран меняется сам, без правок хоста. *@
 
-<MudText Typo="Typo.h4" GutterBottom="true">ИнспекторAI</MudText>
-<MudText Class="mb-4">
-    Платформа внутреннего ведомственного контроля с ИИ. Работает on-premise в изолированном контуре.
-</MudText>
-<MudAlert Severity="Severity.Success" Variant="Variant.Outlined">
-    Каркас композиции собран (этап Э2): хост подключил профиль и построил навигацию из реестра модулей.
-    Модули наполняются содержанием на последующих этапах.
-</MudAlert>
+<PageTitle>@Profile.DisplayName</PageTitle>
+
+<div class="d-flex flex-column align-center text-center my-8">
+    <MudIcon Icon="@Icons.Material.Filled.Shield" Color="Color.Primary" Size="Size.Large" Class="mb-3" />
+    <MudText Typo="Typo.h3" GutterBottom="true">@Profile.DisplayName</MudText>
+    @if (!string.IsNullOrWhiteSpace(Profile.Subtitle))
+    {
+        <MudText Typo="Typo.subtitle1" Color="Color.Primary" Class="mb-2">@Profile.Subtitle</MudText>
+    }
+    <MudText Typo="Typo.body1" Class="mud-text-secondary" Style="max-width:680px;">
+        Интеллектуальная платформа ведомственного контроля на локальных моделях. Работает on-premise
+        в изолированном контуре. Любой результат ИИ — <b>черновик</b>: проверка, решение и ответственность
+        остаются за сотрудником.
+    </MudText>
+</div>
+
+<MudGrid>
+    @foreach (var module in Profile.Modules)
+    {
+        <MudItem xs="12" sm="6" md="4" lg="3">
+            <MudPaper Class="pa-4 h-100 d-flex flex-column" Outlined="true">
+                <MudIcon Icon="@(module.MenuIcon ?? Icons.Material.Filled.Extension)" Color="Color.Primary"
+                         Size="Size.Medium" Class="mb-2" />
+                <MudText Typo="Typo.h6" Class="flex-grow-1">@module.MenuTitle</MudText>
+                <MudButton Href="@module.Route" Variant="Variant.Text" Color="Color.Primary" Class="mt-2 justify-start"
+                           EndIcon="@Icons.Material.Filled.ArrowForward">Открыть</MudButton>
+            </MudPaper>
+        </MudItem>
+    }
+</MudGrid>

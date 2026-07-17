@@ -1,23 +1,56 @@
 @inherits LayoutComponentBase
 @inject IProfile Profile
 
-<MudThemeProvider />
+@* Оболочка хоста: тема, шапка, боковое меню. Доменно-нейтральна — название, подзаголовок и состав
+   меню берутся из манифеста профиля (ТС-003, ТС-007). Хост не знает слова «инспекция». *@
+
+<MudThemeProvider Theme="_theme" IsDarkMode="_isDarkMode" />
 <MudPopoverProvider />
 <MudDialogProvider />
 <MudSnackbarProvider />
 
 <MudLayout>
-    <MudAppBar Elevation="1">
+    <MudAppBar Elevation="0" Dense="true" Color="Color.Transparent">
         <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
                        OnClick="ToggleDrawer" aria-label="Меню" />
-        <MudText Typo="Typo.h6">@Profile.DisplayName</MudText>
         <MudSpacer />
+
+        @* Демо-режим: на экране показательные данные, а не реальные. Метка обязана быть видна всегда. *@
+        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled"
+                 Icon="@Icons.Material.Filled.Science" Class="mr-2">ДЕМО</MudChip>
+        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined"
+                 Icon="@Icons.Material.Filled.Lock" Class="mr-3 d-none d-sm-flex">изолированный контур</MudChip>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary mr-2 d-none d-sm-flex">@DateTime.Now.ToString("dd.MM.yyyy")</MudText>
+        <MudIconButton Icon="@(_isDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
+                       Color="Color.Inherit" OnClick="ToggleTheme" aria-label="Переключить тему" />
     </MudAppBar>
-    <MudDrawer @bind-Open="_drawerOpen" Elevation="1" Variant="DrawerVariant.Responsive" ClipMode="DrawerClipMode.Always">
+
+    <MudDrawer @bind-Open="_drawerOpen" Elevation="0" Variant="DrawerVariant.Responsive"
+               ClipMode="DrawerClipMode.Never">
+        <MudDrawerHeader Class="pb-1">
+            <div class="d-flex align-center gap-2">
+                <MudIcon Icon="@Icons.Material.Filled.Shield" Color="Color.Primary" Size="Size.Medium" />
+                <div>
+                    <MudText Typo="Typo.h6" Style="line-height:1.15;">@Profile.DisplayName</MudText>
+                    @if (!string.IsNullOrWhiteSpace(Profile.Subtitle))
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@Profile.Subtitle</MudText>
+                    }
+                </div>
+            </div>
+        </MudDrawerHeader>
+
         <NavMenu />
+
+        <MudSpacer />
+        <div class="pa-3">
+            <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined"
+                     Icon="@Icons.Material.Filled.AutoAwesome" Class="ma-0">ДЕМО · ИИ активен</MudChip>
+        </div>
     </MudDrawer>
-    <MudMainContent>
-        <MudContainer MaxWidth="MaxWidth.Large" Class="mt-6">
+
+    <MudMainContent Class="pt-4">
+        <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pb-8">
             @Body
         </MudContainer>
     </MudMainContent>
@@ -31,6 +64,43 @@
 
 @code {
     private bool _drawerOpen = true;
+    private bool _isDarkMode = true;
 
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
+    private void ToggleTheme() => _isDarkMode = !_isDarkMode;
+
+    // Тёмная палитра оболочки (тон прототипа: глубокий сине-графитовый фон, синий акцент).
+    private readonly MudTheme _theme = new()
+    {
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#3b82f6",
+            Secondary = "#22d3ee",
+            Info = "#3b82f6",
+            Success = "#22c55e",
+            Warning = "#eab308",
+            Error = "#ef4444",
+            Background = "#0b1220",
+            BackgroundGray = "#0b1220",
+            Surface = "#111c33",
+            DrawerBackground = "#0a1020",
+            DrawerText = "#cbd5e1",
+            DrawerIcon = "#94a3b8",
+            AppbarBackground = "#0b1220",
+            AppbarText = "#e2e8f0",
+            TextPrimary = "#e2e8f0",
+            TextSecondary = "#94a3b8",
+            ActionDefault = "#94a3b8",
+            Divider = "#1e293b",
+            DividerLight = "#1e293b",
+            LinesDefault = "#1e293b",
+            TableLines = "#1e293b",
+        },
+        LayoutProperties = new LayoutProperties
+        {
+            DrawerWidthLeft = "260px",
+            DefaultBorderRadius = "8px",
+        },
+    };
 }

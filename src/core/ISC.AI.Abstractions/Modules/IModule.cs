@@ -19,6 +19,13 @@ public interface IModule
     string? MenuIcon { get; }
 
     /// <summary>
+    /// Необязательная СЕКЦИЯ меню, в которую сгруппирован модуль (например, «Навигация», «Подразделения»);
+    /// <c>null</c> — секция по умолчанию. Названия секций объявляет ПРОФИЛЬ — хост лишь группирует по ним
+    /// и остаётся доменно-нейтральным (ТС-003, ТС-007).
+    /// </summary>
+    string? MenuGroup => null;
+
+    /// <summary>
     /// Тип корневого Razor-компонента модуля. Хост использует его сборку для маршрутизации
     /// (страница объявляет собственный <c>@page</c>) и для построения навигации.
     /// </summary>
@@ -35,10 +42,12 @@ public interface IModule
 /// <summary>
 /// Готовая реализация <see cref="IModule"/> для деклараций модулей в манифесте профиля.
 /// </summary>
+/// <remarks><paramref name="MenuGroup"/> необязателен (по умолчанию <c>null</c>) — существующие декларации не ломаются.</remarks>
 public sealed record ModuleDescriptor(
     string Id,
     string Route,
     string MenuTitle,
     string? MenuIcon,
     Type ComponentType,
-    string RequiredPolicy) : IModule;
+    string RequiredPolicy,
+    string? MenuGroup = null) : IModule;
