@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+    <ProjectReference Include="..\ISC.AI.Profile.ERP.Domain\ISC.AI.Profile.ERP.Domain.csproj" />
+  </ItemGroup>
+
+  <!-- Сценарии (use-cases) профиля ЕРП. Промпты — файлы-шаблоны (Scriban), НЕ хардкод (правило проекта).
+       Пакеты добавляются по мере появления сценариев (валидация, маппинг, промпты). -->
+  <ItemGroup>
+    <PackageReference Include="Mediator.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+  </ItemGroup>
+
+</Project>

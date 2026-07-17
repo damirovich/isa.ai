@@ -10,15 +10,15 @@ namespace ISC.AI.UnitTests.Architecture;
 /// Тесты проверяют граф ссылок <c>ProjectReference</c> решения, а не загруженные сборки, —
 /// это прямой и устойчивый способ зафиксировать инварианты:
 /// (а) ядро никогда не ссылается на профиль; (б) хост подключает ровно один профиль;
-/// (в) профиль зависит «внутрь» (к <c>Abstractions</c>), а единственная его связь с конкретным
-/// проектом ядра — <c>Inspector.Data → Persistence</c>. Нарушение любого из них — провал сборки в CI.
+/// (в) профиль зависит «внутрь» (к <c>Abstractions</c>), а единственная его связь с конкретным проектом
+/// ядра — <c>&lt;Профиль&gt;.Data → Persistence</c>. Правило структурное и действует для ЛЮБОГО профиля
+/// (Inspector, ERP, …), а не для конкретного имени. Нарушение любого из них — провал сборки в CI.
 /// </remarks>
 public sealed class DependencyRulesTests
 {
     private const string Abstractions = "ISC.AI.Abstractions";
     private const string Persistence = "ISC.AI.Persistence";
     private const string Host = "ISC.AI.Web";
-    private const string InspectorData = "ISC.AI.Profile.Inspector.Data";
 
     /// <summary>Проекты-библиотеки ядра (без хоста <c>Web</c>): им запрещено ссылаться на профиль.</summary>
     private static readonly string[] CoreLibraries =
@@ -47,8 +47,8 @@ public sealed class DependencyRulesTests
             $"Хост «{Host}» должен подключать ровно один профиль-манифест, найдено: [{string.Join(", ", manifests)}]");
     }
 
-    [Fact(DisplayName = "Профиль зависит внутрь; только Inspector.Data ссылается на Persistence")]
-    public void Profile_depends_inward_and_only_InspectorData_references_Persistence()
+    [Fact(DisplayName = "Профиль зависит внутрь; на Persistence ссылается только <Профиль>.Data")]
+    public void Profile_depends_inward_and_only_profile_data_references_Persistence()
     {
         foreach (var (project, references) in Graph.Where(kv => IsProfileProject(kv.Key)))
         {
@@ -57,10 +57,12 @@ public sealed class DependencyRulesTests
 
             foreach (var reference in references.Where(IsCoreLibrary))
             {
+                // Правило структурное, а не по имени профиля: слой данных ЛЮБОГО профиля (Inspector.Data,
+                // ERP.Data, …) может ссылаться на Persistence; всем остальным проектам профиля — только Abstractions.
                 var allowed = reference == Abstractions
-                    || (reference == Persistence && project == InspectorData);
+                    || (reference == Persistence && IsProfileDataProject(project));
                 allowed.ShouldBeTrue(
-                    $"Профиль «{project}» ссылается на ядро «{reference}»: разрешено только Abstractions (всем) и Persistence (только {InspectorData}).");
+                    $"Профиль «{project}» ссылается на ядро «{reference}»: разрешено только Abstractions (всем) и Persistence (только слою данных профиля «*.Data»).");
             }
         }
     }
@@ -79,6 +81,10 @@ public sealed class DependencyRulesTests
         name.StartsWith("ISC.AI.Profile.", StringComparison.Ordinal);
 
     private static bool IsCoreLibrary(string name) => CoreLibraries.Contains(name);
+
+    // Слой данных профиля: «ISC.AI.Profile.<Имя>.Data» — единственное место профиля, которому разрешён Persistence.
+    private static bool IsProfileDataProject(string name) =>
+        IsProfileProject(name) && name.EndsWith(".Data", StringComparison.Ordinal);
 
     // Манифест профиля: ровно «ISC.AI.Profile.<Имя>» без доп. сегментов (.Domain/.Data/.Application/.UI).
     private static bool IsProfileManifest(string name) =>
