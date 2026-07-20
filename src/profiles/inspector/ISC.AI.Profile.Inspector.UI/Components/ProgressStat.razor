@@ -1,0 +1,31 @@
+@namespace ISC.AI.Profile.Inspector.UI
+
+@* Показатель с полосой: подпись слева, цветное значение справа, под ними полоса прогресса.
+   Используется в аналитике эффективности и статусе устранения. *@
+
+<div class="@Class">
+    <div class="d-flex align-center">
+        <MudText Typo="Typo.body2" Class="flex-grow-1"><b>@Label</b></MudText>
+        <MudText Typo="Typo.body2" Style="@($"color:{Color};")"><b>@ValueText</b></MudText>
+    </div>
+    <ColorBar Percent="@Percent" Color="@Color" Class="mt-1" />
+</div>
+
+@code {
+    /// <summary>Подпись показателя (подразделение, статус и т.п.).</summary>
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+
+    /// <summary>Заполнение полосы, % (0–100).</summary>
+    [Parameter, EditorRequired] public double Percent { get; set; }
+
+    /// <summary>Текст значения справа; по умолчанию — процент.</summary>
+    [Parameter] public string? Value { get; set; }
+
+    /// <summary>Цвет значения и полосы (CSS-цвет).</summary>
+    [Parameter, EditorRequired] public string Color { get; set; } = "var(--mud-palette-info)";
+
+    /// <summary>CSS-классы контейнера (по умолчанию — отступ снизу).</summary>
+    [Parameter] public string Class { get; set; } = "mb-3";
+
+    private string ValueText => Value ?? $"{Percent:0}%";
+}

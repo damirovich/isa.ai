@@ -1,0 +1,15 @@
+@namespace ISC.AI.Profile.Inspector.UI
+
+@* Мелкая подпись со значком: дата, место, срок и прочие метаданные строки списка. *@
+
+<MudText Typo="Typo.caption" Class="mud-text-secondary d-flex align-center gap-1">
+    <MudIcon Icon="@Icon" Size="Size.Small" /> @ChildContent
+</MudText>
+
+@code {
+    /// <summary>Значок (константа MudBlazor).</summary>
+    [Parameter, EditorRequired] public string Icon { get; set; } = string.Empty;
+
+    /// <summary>Текст подписи.</summary>
+    [Parameter, EditorRequired] public RenderFragment? ChildContent { get; set; }
+}

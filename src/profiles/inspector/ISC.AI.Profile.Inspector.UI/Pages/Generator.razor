@@ -7,21 +7,9 @@
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Abstractions.Grounding
 @using ISC.AI.Profile.Inspector.Application.Generation
-@using ISC.AI.Profile.Inspector.UI.Demo
-@using Mediator
-@using Microsoft.JSInterop
-@inject IMediator Dispatcher
-@inject IJSRuntime JS
 
-<PageTitle>Генератор — ИнспекторAI</PageTitle>
-
-<div class="d-flex align-center gap-3 mb-4">
-    <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Color="Color.Primary" Size="Size.Large" />
-    <div class="flex-grow-1">
-        <MudText Typo="Typo.h4">Генератор документов</MudText>
-        <MudText Typo="Typo.body2" Class="mud-text-secondary">Справки, акты, заключения</MudText>
-    </div>
-</div>
+<PageHeader Title="Генератор документов" Subtitle="Справки, акты, заключения"
+            Icon="@Icons.Material.Filled.AutoAwesome" />
 
 @* --- Шаги заполнения --- *@
 <div class="d-flex gap-2 mb-4 flex-wrap">
@@ -41,7 +29,7 @@
     <MudItem xs="12" md="7">
         @* --- Тип документа --- *@
         <MudPaper Class="pa-4 mb-4" Outlined="true">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary mb-2 d-block" Style="@SectionStyle">Тип документа</MudText>
+            <SectionCaption Text="Тип документа" />
             <MudSelect T="string" @bind-Value="_docType" Variant="Variant.Outlined" Dense="true">
                 @foreach (var type in DocumentTypes)
                 {
@@ -57,7 +45,7 @@
 
         @* --- Подразделение --- *@
         <MudPaper Class="pa-4 mb-4" Outlined="true">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary mb-2 d-block" Style="@SectionStyle">Подразделение</MudText>
+            <SectionCaption Text="Подразделение" />
 
             <MudToggleGroup T="bool" @bind-Value="_territorial" Color="Color.Primary" Class="mb-3" CheckMark="false">
                 <MudToggleItem T="bool" Value="true" Text="Территориальное" />
@@ -95,7 +83,7 @@
 
         @* --- Нарушения --- *@
         <MudPaper Class="pa-4" Outlined="true">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary mb-2 d-block" Style="@SectionStyle">Нарушения</MudText>
+            <SectionCaption Text="Нарушения" />
             <MudTextField @bind-Value="_violations" Variant="Variant.Outlined" Lines="5" Immediate="true"
                           Disabled="_busy"
                           Placeholder="Опишите нарушения в произвольной форме:&#10;— отсутствие контакта с конфидентами&#10;— формальный подход к АОД" />
@@ -132,12 +120,9 @@
             }
             else if (Result is null)
             {
-                <div class="d-flex flex-column align-center justify-center text-center" style="min-height:280px;">
-                    <MudIcon Icon="@Icons.Material.Filled.Description" Class="mb-3 mud-text-secondary" Style="font-size:3rem;" />
-                    <MudText Typo="Typo.body2" Class="mud-text-secondary">
-                        Заполните параметры слева<br />и нажмите «Сформировать»
-                    </MudText>
-                </div>
+                <EmptyState Icon="@Icons.Material.Filled.Description" MinHeight="280">
+                    Заполните параметры слева<br />и нажмите «Сформировать»
+                </EmptyState>
             }
             else
             {
@@ -157,16 +142,14 @@
                     @(_exporting ? "Экспорт…" : "Экспорт в .docx")
                 </MudButton>
 
-                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-1" Style="@SectionStyle">Текст</MudText>
+                <SectionCaption Text="Текст" Class="mb-1" />
                 <MudPaper Class="pa-3 mb-3" Outlined="true">
                     <MudText Typo="Typo.body2" Style="white-space: pre-wrap;">@Result.DraftText</MudText>
                 </MudPaper>
 
                 @if (Result.Citations.Count > 0)
                 {
-                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-1" Style="@SectionStyle">
-                        Ссылки (грунтовка)
-                    </MudText>
+                    <SectionCaption Text="Ссылки (грунтовка)" Class="mb-1" />
                     @foreach (var citation in Result.Citations)
                     {
                         <div class="d-flex align-center gap-2 mb-1">
@@ -183,8 +166,6 @@
 </MudGrid>
 
 @code {
-    private const string SectionStyle = "letter-spacing:.08em; text-transform:uppercase; font-weight:600;";
-
     // Типы документов §5.2.1.1. Реализована пока только справка; остальные — новый prompt-каркас без правок ядра.
     private sealed record DocType(string Title, bool Implemented);
 

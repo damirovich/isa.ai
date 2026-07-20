@@ -1,0 +1,24 @@
+@namespace ISC.AI.Profile.Inspector.UI
+
+@* Тонированный чип статуса/уровня: полупрозрачный фон и рамка от одного CSS-цвета.
+   Используется для уровней риска, статусов устранения, видов находок и чипов-фильтров. *@
+
+<MudChip T="string" Size="Size.Small" Icon="@Icon" Variant="@Variant" OnClick="@OnClick"
+         Style="@($"background:{Color}22; color:{Color}; border:1px solid {Color}66;")">@ChildContent</MudChip>
+
+@code {
+    /// <summary>Базовый CSS-цвет чипа (hex, например «#ef4444»); тон и рамка выводятся из него.</summary>
+    [Parameter, EditorRequired] public string Color { get; set; } = "#3b82f6";
+
+    /// <summary>Необязательный значок слева.</summary>
+    [Parameter] public string? Icon { get; set; }
+
+    /// <summary>Вариант отображения (Filled/Outlined) — фильтры переключают им «выбранность».</summary>
+    [Parameter] public Variant Variant { get; set; } = Variant.Filled;
+
+    /// <summary>Обработчик щелчка (для чипов-фильтров).</summary>
+    [Parameter] public EventCallback<MouseEventArgs> OnClick { get; set; }
+
+    /// <summary>Текст чипа.</summary>
+    [Parameter, EditorRequired] public RenderFragment? ChildContent { get; set; }
+}

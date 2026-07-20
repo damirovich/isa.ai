@@ -1,0 +1,53 @@
+@namespace ISC.AI.Profile.Inspector.UI
+
+@* Таблица подразделений с количеством проверок (Дашборд, экраны Территориальные/Линейные).
+   Пока принимает демо-модель DivisionStat; при наполнении БД перейдёт на доменный DTO
+   (Division + счётчики) — сигнатура сознательно узкая, чтобы замена прошла в одном месте. *@
+
+<MudSimpleTable Dense="true" Hover="true" Elevation="0" Style="background:transparent;">
+    <thead>
+        <tr>
+            <th>Подразделение</th>
+            @if (NoteAsColumn)
+            {
+                <th>@NoteHeader</th>
+            }
+            <th class="text-right">Проверок</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var row in Rows)
+        {
+            <tr>
+                <td>
+                    <MudText Typo="Typo.body2" Color="Color.Primary">@row.Name</MudText>
+                    @if (!NoteAsColumn)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@row.Note</MudText>
+                    }
+                </td>
+                @if (NoteAsColumn)
+                {
+                    <td><MudText Typo="Typo.caption" Class="mud-text-secondary">@row.Note</MudText></td>
+                }
+                <td class="text-right">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                             Color="@(row.Checks > 0 ? Color.Primary : Color.Default)">@row.Checks</MudChip>
+                </td>
+            </tr>
+        }
+    </tbody>
+</MudSimpleTable>
+
+@code {
+    /// <summary>Строки таблицы (демо-модель; см. примечание в шапке компонента).</summary>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<InspectorDemoData.DivisionStat> Rows { get; set; } = [];
+
+    /// <summary>Выводить примечание отдельной колонкой (true — как «Регион» у территориальных;
+    /// false — под названием, как у линейных).</summary>
+    [Parameter] public bool NoteAsColumn { get; set; }
+
+    /// <summary>Заголовок колонки примечания (если она отдельная).</summary>
+    [Parameter] public string NoteHeader { get; set; } = "Регион";
+}

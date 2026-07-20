@@ -1,0 +1,20 @@
+@namespace ISC.AI.Profile.Inspector.UI
+
+@* Карточка-показатель: крупная цифра + подпись + цветная полоса слева. Ряд таких карточек
+   открывает Дашборд, Риски, Мониторинг. Сетка (MudItem) остаётся на странице. *@
+
+<MudPaper Class="pa-4" Outlined="true" Style="@($"border-left:4px solid {Accent};")">
+    <MudText Typo="Typo.h4">@Value</MudText>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary">@Label</MudText>
+</MudPaper>
+
+@code {
+    /// <summary>Значение показателя (число или строка вида «58%»).</summary>
+    [Parameter, EditorRequired] public object? Value { get; set; }
+
+    /// <summary>Подпись показателя.</summary>
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+
+    /// <summary>Цвет полосы-акцента: CSS-цвет («#ef4444» или «var(--mud-palette-info)»).</summary>
+    [Parameter, EditorRequired] public string Accent { get; set; } = "var(--mud-palette-info)";
+}

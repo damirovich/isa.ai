@@ -1,0 +1,22 @@
+@namespace ISC.AI.Profile.Inspector.UI
+
+@* Компактная таблица «показатель — значение» (разбор балла риска, реквизиты документа и т.п.).
+   Для больших реестров с сортировкой это НЕ замена — там использовать MudTable/MudDataGrid. *@
+
+<MudSimpleTable Dense="true" Elevation="0" Style="background:transparent;">
+    <tbody>
+        @foreach (var row in Rows)
+        {
+            <tr>
+                <td><MudText Typo="Typo.caption">@row.Label</MudText></td>
+                <td class="text-right"><MudText Typo="Typo.caption">@row.Value</MudText></td>
+            </tr>
+        }
+    </tbody>
+</MudSimpleTable>
+
+@code {
+    /// <summary>Строки таблицы: подпись и значение.</summary>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<(string Label, string Value)> Rows { get; set; } = [];
+}

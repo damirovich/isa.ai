@@ -1,0 +1,22 @@
+@namespace ISC.AI.Profile.Inspector.UI
+
+@* Полоса прогресса произвольного CSS-цвета. Своя (не MudProgressLinear), потому что MudBlazor
+   красит полосу только цветами палитры (enum Color), а нам нужны цвета уровней/статусов (hex). *@
+
+<div class="@Class" style="@($"height:{Height}px; border-radius:{Height / 2}px; background:var(--mud-palette-divider); overflow:hidden;")">
+    <div style="@($"height:100%; width:{Math.Clamp(Percent, 0, 100).ToString(System.Globalization.CultureInfo.InvariantCulture)}%; background:{Color}; border-radius:inherit;")"></div>
+</div>
+
+@code {
+    /// <summary>Заполнение, % (0–100; значения вне диапазона обрезаются).</summary>
+    [Parameter, EditorRequired] public double Percent { get; set; }
+
+    /// <summary>Цвет заполнения (CSS-цвет: hex или var(--mud-palette-…)).</summary>
+    [Parameter, EditorRequired] public string Color { get; set; } = "var(--mud-palette-info)";
+
+    /// <summary>Высота полосы, px.</summary>
+    [Parameter] public int Height { get; set; } = 6;
+
+    /// <summary>CSS-классы контейнера (по умолчанию — вертикальные отступы).</summary>
+    [Parameter] public string Class { get; set; } = "my-2";
+}

@@ -1,0 +1,30 @@
+@namespace ISC.AI.Profile.Inspector.UI
+
+@* Демо-кнопка действия во всю ширину: по щелчку раскрывает пояснение, как это будет работать
+   в рабочей версии (вместо мёртвой кнопки — честная подсказка). *@
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Class="@Class"
+           StartIcon="@Icon" OnClick="@(() => _open = !_open)">@Text</MudButton>
+@if (_open && Hint is not null)
+{
+    <MudAlert Severity="@HintSeverity" Variant="Variant.Outlined" Dense="true" Class="mt-2">@Hint</MudAlert>
+}
+
+@code {
+    private bool _open;
+
+    /// <summary>Надпись на кнопке.</summary>
+    [Parameter, EditorRequired] public string Text { get; set; } = string.Empty;
+
+    /// <summary>Значок кнопки (по умолчанию — «ИИ»).</summary>
+    [Parameter] public string Icon { get; set; } = Icons.Material.Filled.AutoAwesome;
+
+    /// <summary>CSS-классы кнопки (по умолчанию — отступ сверху).</summary>
+    [Parameter] public string Class { get; set; } = "mt-3";
+
+    /// <summary>Серьёзность плашки-пояснения (Info/Warning).</summary>
+    [Parameter] public Severity HintSeverity { get; set; } = Severity.Info;
+
+    /// <summary>Пояснение, раскрываемое по щелчку.</summary>
+    [Parameter] public RenderFragment? Hint { get; set; }
+}

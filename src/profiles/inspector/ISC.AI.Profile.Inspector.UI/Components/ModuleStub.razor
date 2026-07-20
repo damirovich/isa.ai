@@ -3,19 +3,9 @@
 @* Единая заглушка модулей §5.2, ещё не реализованных. Честно показывает, что модуль в разработке,
    и что он будет делать по ТЗ — чтобы навигация соответствовала замыслу, но никого не вводила в заблуждение. *@
 
-<PageTitle>@Title — ИнспекторAI</PageTitle>
-
-<div class="d-flex align-center gap-3 mb-6">
-    <MudIcon Icon="@Icon" Color="Color.Primary" Size="Size.Large" />
-    <div class="flex-grow-1">
-        <MudText Typo="Typo.h4">@Title</MudText>
-        @if (!string.IsNullOrWhiteSpace(Subtitle))
-        {
-            <MudText Typo="Typo.body2" Class="mud-text-secondary">@Subtitle</MudText>
-        }
-    </div>
+<PageHeader Title="@Title" Subtitle="@Subtitle" Icon="@Icon" Class="mb-6">
     <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">в разработке</MudChip>
-</div>
+</PageHeader>
 
 <MudPaper Class="pa-8 d-flex flex-column align-center text-center" Outlined="true">
     <MudIcon Icon="@Icon" Class="mb-3 mud-text-secondary" Style="font-size: 3.5rem;" />

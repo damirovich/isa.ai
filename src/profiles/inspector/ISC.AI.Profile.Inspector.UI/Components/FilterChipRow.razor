@@ -1,0 +1,42 @@
+@namespace ISC.AI.Profile.Inspector.UI
+@typeparam TValue where TValue : struct
+
+@* Ряд чипов-фильтров: «Все (N)» + чип на каждую категорию с количеством.
+   Выбранный чип — Filled, остальные — Outlined; null — фильтр снят (показывать всё). *@
+
+<div class="d-flex align-center gap-2 flex-wrap my-3">
+    @if (!string.IsNullOrWhiteSpace(Label))
+    {
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">@Label</MudText>
+    }
+    <MudChip T="string" Size="Size.Small" Color="Color.Default"
+             Variant="@(Selected is null ? Variant.Filled : Variant.Outlined)"
+             OnClick="@(() => SelectedChanged.InvokeAsync(null))">Все (@AllCount)</MudChip>
+    @foreach (var item in Items)
+    {
+        var value = item.Value;
+        <TintedChip Color="@item.Color"
+                    Variant="@(IsSelected(value) ? Variant.Filled : Variant.Outlined)"
+                    OnClick="@(_ => SelectedChanged.InvokeAsync(value))">@item.Label (@item.Count)</TintedChip>
+    }
+</div>
+
+@code {
+    /// <summary>Необязательная подпись перед чипами (например, «Уровень:»).</summary>
+    [Parameter] public string? Label { get; set; }
+
+    /// <summary>Категории фильтра: значение, подпись, цвет, количество.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<FilterChipItem<TValue>> Items { get; set; } = [];
+
+    /// <summary>Количество записей без фильтра — для чипа «Все (N)».</summary>
+    [Parameter, EditorRequired] public int AllCount { get; set; }
+
+    /// <summary>Текущий выбор; <c>null</c> — фильтр снят.</summary>
+    [Parameter] public TValue? Selected { get; set; }
+
+    /// <summary>Событие смены выбора (поддерживает <c>@bind-Selected</c>).</summary>
+    [Parameter] public EventCallback<TValue?> SelectedChanged { get; set; }
+
+    private bool IsSelected(TValue value) =>
+        Selected is { } current && EqualityComparer<TValue>.Default.Equals(current, value);
+}

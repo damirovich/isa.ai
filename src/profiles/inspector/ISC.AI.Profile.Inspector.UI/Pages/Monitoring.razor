@@ -1,55 +1,37 @@
 @namespace ISC.AI.Profile.Inspector.UI
 @page "/monitoring"
 @using ISC.AI.Profile.Inspector.Domain.Enums
-@using ISC.AI.Profile.Inspector.UI.Demo
 
 @* Модуль «Мониторинг» (§5.2.6): контроль устранения нарушений и эффективности подразделений.
    ВНИМАНИЕ: данные ПОКАЗАТЕЛЬНЫЕ (демо) — inspector.violation ещё не наполнен. Статусы взяты из
    доменного перечня RemediationStatus, сводки считаются из списка, а не вписаны. *@
 
-<PageTitle>Мониторинг нарушений — ИнспекторAI</PageTitle>
+<PageHeader Title="Мониторинг нарушений"
+            Subtitle="Система контроля устранения нарушений и эффективности подразделений"
+            Icon="@Icons.Material.Filled.MonitorHeart" />
 
-<div class="d-flex align-center gap-3 mb-4">
-    <MudIcon Icon="@Icons.Material.Filled.MonitorHeart" Color="Color.Primary" Size="Size.Large" />
-    <div class="flex-grow-1">
-        <MudText Typo="Typo.h4">Мониторинг нарушений</MudText>
-        <MudText Typo="Typo.body2" Class="mud-text-secondary">
-            Система контроля устранения нарушений и эффективности подразделений
-        </MudText>
-    </div>
-</div>
-
-<MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-4"
-          Icon="@Icons.Material.Filled.Science">
+<DemoAlert>
     Показательные данные (ДЕМО). В рабочей версии карточки заполняются из <c>inspector.violation</c>, а сроки и
     отметки об исполнении — из поручений СКИД (§5.2.6). Проценты и счётчики на экране считаются из списка.
-</MudAlert>
+</DemoAlert>
 
 @* --- Показатели: все считаются из Monitoring, ни одна цифра не вписана --- *@
 <MudGrid Class="mb-2">
     <MudItem xs="12" sm="6" md="3">
-        <MudPaper Class="pa-4" Outlined="true" Style="border-left:4px solid var(--mud-palette-info);">
-            <MudText Typo="Typo.h4">@InspectorDemoData.Monitoring.Count</MudText>
-            <MudText Typo="Typo.body2" Class="mud-text-secondary">Нарушений на мониторинге</MudText>
-        </MudPaper>
+        <StatCard Value="@InspectorDemoData.Monitoring.Count" Label="Нарушений на мониторинге"
+                  Accent="var(--mud-palette-info)" />
     </MudItem>
     <MudItem xs="12" sm="6" md="3">
-        <MudPaper Class="pa-4" Outlined="true" Style="@($"border-left:4px solid {StatusColor(RemediationStatus.Resolved)};")">
-            <MudText Typo="Typo.h4">@CountOf(RemediationStatus.Resolved)</MudText>
-            <MudText Typo="Typo.body2" Class="mud-text-secondary">Устранено</MudText>
-        </MudPaper>
+        <StatCard Value="@CountOf(RemediationStatus.Resolved)" Label="Устранено"
+                  Accent="@StatusColor(RemediationStatus.Resolved)" />
     </MudItem>
     <MudItem xs="12" sm="6" md="3">
-        <MudPaper Class="pa-4" Outlined="true" Style="@($"border-left:4px solid {StatusColor(RemediationStatus.Overdue)};")">
-            <MudText Typo="Typo.h4">@CountOf(RemediationStatus.Overdue)</MudText>
-            <MudText Typo="Typo.body2" Class="mud-text-secondary">Просрочено / не устранено</MudText>
-        </MudPaper>
+        <StatCard Value="@CountOf(RemediationStatus.Overdue)" Label="Просрочено / не устранено"
+                  Accent="@StatusColor(RemediationStatus.Overdue)" />
     </MudItem>
     <MudItem xs="12" sm="6" md="3">
-        <MudPaper Class="pa-4" Outlined="true" Style="border-left:4px solid var(--mud-palette-warning);">
-            <MudText Typo="Typo.h4">@AverageProgress%</MudText>
-            <MudText Typo="Typo.body2" Class="mud-text-secondary">Средний прогресс</MudText>
-        </MudPaper>
+        <StatCard Value="@($"{AverageProgress}%")" Label="Средний прогресс"
+                  Accent="var(--mud-palette-warning)" />
     </MudItem>
 </MudGrid>
 
@@ -57,40 +39,26 @@
     @* ================= Мониторинг устранения ================= *@
     <MudItem xs="12" md="7">
         <MudPaper Class="pa-4 h-100" Outlined="true">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary mb-2 d-block" Style="@SectionStyle">
-                Мониторинг устранения нарушений
-            </MudText>
+            <SectionCaption Text="Мониторинг устранения нарушений" />
 
-            <div class="d-flex align-center gap-2 flex-wrap my-3">
-                <MudChip T="string" Size="Size.Small" Variant="@FilterVariant(null)" Color="Color.Default"
-                         OnClick="@(() => _filter = null)">Все (@InspectorDemoData.Monitoring.Count)</MudChip>
-                @foreach (var status in FilterStatuses)
-                {
-                    <MudChip T="string" Size="Size.Small" Variant="@FilterVariant(status)"
-                             Style="@StatusChipStyle(status)" OnClick="@(() => _filter = status)">
-                        @StatusLabel(status) (@CountOf(status))
-                    </MudChip>
-                }
-            </div>
+            <FilterChipRow TValue="RemediationStatus" AllCount="@InspectorDemoData.Monitoring.Count"
+                           Items="@FilterItems" Selected="@_filter"
+                           SelectedChanged="@((RemediationStatus? v) => _filter = v)" />
 
             @foreach (var item in Filtered)
             {
-                <MudPaper Class="pa-3 mb-2" Outlined="true"
-                          Style="@($"border-left:3px solid {StatusColor(item.Status)};")">
+                <AccentRow Accent="@StatusColor(item.Status)">
                     <div class="d-flex align-center gap-2">
                         <MudText Typo="Typo.body1" Class="flex-grow-1"><b>@item.Division</b></MudText>
-                        <MudChip T="string" Size="Size.Small" Style="@StatusChipStyle(item.Status)">
-                            @StatusLabel(item.Status)
-                        </MudChip>
+                        <TintedChip Color="@StatusColor(item.Status)">@StatusLabel(item.Status)</TintedChip>
                     </div>
                     <MudText Typo="Typo.body2" Class="mud-text-secondary">@item.Issue</MudText>
-                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-flex align-center gap-1 mt-1">
-                        <MudIcon Icon="@Icons.Material.Filled.Schedule" Size="Size.Small" /> Срок: @item.Deadline
-                    </MudText>
-                    <MudProgressLinear Value="@item.Progress" Rounded="true" Class="my-2"
-                                       Style="@($"color:{StatusColor(item.Status)};")" />
+                    <div class="mt-1">
+                        <IconCaption Icon="@Icons.Material.Filled.Schedule">Срок: @item.Deadline</IconCaption>
+                    </div>
+                    <ColorBar Percent="@item.Progress" Color="@StatusColor(item.Status)" />
                     <MudText Typo="Typo.caption" Class="mud-text-secondary">@item.Comment</MudText>
-                </MudPaper>
+                </AccentRow>
             }
         </MudPaper>
     </MudItem>
@@ -98,49 +66,36 @@
     @* ================= Аналитика эффективности ================= *@
     <MudItem xs="12" md="5">
         <MudPaper Class="pa-4 h-100" Outlined="true">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary mb-3 d-block" Style="@SectionStyle">
-                Аналитика эффективности
-            </MudText>
+            <SectionCaption Text="Аналитика эффективности" Class="mb-3" />
 
             @foreach (var item in InspectorDemoData.Monitoring)
             {
-                <div class="mb-3">
-                    <div class="d-flex align-center">
-                        <MudText Typo="Typo.body2" Class="flex-grow-1"><b>@item.Division</b></MudText>
-                        <MudText Typo="Typo.body2" Style="@($"color:{ProgressColor(item.Progress)};")">
-                            <b>@item.Progress%</b>
-                        </MudText>
-                    </div>
-                    <MudProgressLinear Value="@item.Progress" Rounded="true" Class="mt-1"
-                                       Style="@($"color:{ProgressColor(item.Progress)};")" />
-                </div>
+                <ProgressStat Label="@item.Division" Percent="@item.Progress"
+                              Color="@ProgressColor(item.Progress)" />
             }
 
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Class="mt-4"
-                       StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="@(() => _reportHint = true)">
-                Аналитический отчёт для руководства (ДЕМО)
-            </MudButton>
-            @if (_reportHint)
-            {
-                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-2">
+            <ActionHintButton Text="Аналитический отчёт для руководства (ДЕМО)" Class="mt-4">
+                <Hint>
                     В рабочей версии отчёт формируется Генератором через grounded-конвейер: цифры берутся из БД
                     (детерминированно), ИИ пишет только текст, ссылки на НПА проходят грунтовку, результат —
                     черновик для проверки человеком.
-                </MudAlert>
-            }
+                </Hint>
+            </ActionHintButton>
         </MudPaper>
     </MudItem>
 </MudGrid>
 
 @code {
-    private const string SectionStyle = "letter-spacing:.08em; text-transform:uppercase; font-weight:600;";
-
     // Порядок фильтров как в прототипе: Устранено / На контроле / Просрочено.
     private static readonly RemediationStatus[] FilterStatuses =
         [RemediationStatus.Resolved, RemediationStatus.UnderControl, RemediationStatus.Overdue];
 
+    // Чипы фильтра статусов: подпись, цвет и количество считаются из списка при каждом рендере
+    // (свойство, а не static-поле, — иначе счётчики застынут, когда данные станут живыми).
+    private static IReadOnlyList<FilterChipItem<RemediationStatus>> FilterItems =>
+        [.. FilterStatuses.Select(s => new FilterChipItem<RemediationStatus>(s, StatusLabel(s), StatusColor(s), CountOf(s)))];
+
     private RemediationStatus? _filter;
-    private bool _reportHint;
 
     private static IEnumerable<InspectorDemoData.MonitoringItem> All => InspectorDemoData.Monitoring;
 
@@ -150,8 +105,6 @@
     private static int CountOf(RemediationStatus status) => All.Count(i => i.Status == status);
 
     private static int AverageProgress => (int)Math.Round(All.Average(i => i.Progress));
-
-    private Variant FilterVariant(RemediationStatus? status) => _filter == status ? Variant.Filled : Variant.Outlined;
 
     private static string StatusColor(RemediationStatus status) => status switch
     {
@@ -164,12 +117,6 @@
     // Цвет полосы прогресса — по величине, а не по статусу (видно «слабых» и «сильных» на глаз).
     private static string ProgressColor(int progress) =>
         progress >= 100 ? "#22c55e" : progress >= 60 ? "#3b82f6" : progress >= 30 ? "#eab308" : "#ef4444";
-
-    private static string StatusChipStyle(RemediationStatus status)
-    {
-        var color = StatusColor(status);
-        return $"background:{color}22; color:{color}; border:1px solid {color}66;";
-    }
 
     private static string StatusLabel(RemediationStatus status) => status switch
     {

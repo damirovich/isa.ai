@@ -1,0 +1,16 @@
+@namespace ISC.AI.Profile.Inspector.UI
+
+@* Обязательная плашка «ДЕМО» вверху экрана с показательными данными (инвариант: демо-маркер всегда виден).
+   Содержимое — пояснение, откуда данные возьмутся в рабочей версии. *@
+
+<MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-4" Icon="@Icon">
+    @ChildContent
+</MudAlert>
+
+@code {
+    /// <summary>Значок плашки (по умолчанию — «колба»: показательные данные).</summary>
+    [Parameter] public string Icon { get; set; } = Icons.Material.Filled.Science;
+
+    /// <summary>Текст пояснения.</summary>
+    [Parameter, EditorRequired] public RenderFragment? ChildContent { get; set; }
+}

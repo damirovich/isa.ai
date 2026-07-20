@@ -1,88 +1,68 @@
 @namespace ISC.AI.Profile.Inspector.UI
 @page "/methods"
-@using ISC.AI.Profile.Inspector.UI.Demo
 
 @* Модуль «Методики проверок» (§5.2.9, P1). ВНИМАНИЕ: содержимое ПОКАЗАТЕЛЬНОЕ (демо) — реальные методики
    генерируются grounded-конвейером Генератора (промпт-каркас: цель, объект, вопросы, чек-лист, критерии) и
    опционально хранятся как объект «методика». Сейчас экран показывает вид и состав, генерация не подключена. *@
 
-<PageTitle>Методики проверок — ИнспекторAI</PageTitle>
-
-<div class="d-flex align-center gap-3 mb-4">
-    <MudIcon Icon="@Icons.Material.Filled.MenuBook" Color="Color.Primary" Size="Size.Large" />
-    <div class="flex-grow-1">
-        <MudText Typo="Typo.h4">Методики проверок</MudText>
-        <MudText Typo="Typo.body2" Class="mud-text-secondary">
-            Программы, методики, учебные и методические материалы
-        </MudText>
-    </div>
+<PageHeader Title="Методики проверок"
+            Subtitle="Программы, методики, учебные и методические материалы"
+            Icon="@Icons.Material.Filled.MenuBook">
     <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">в разработке</MudChip>
-</div>
+</PageHeader>
 
-<MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-4"
-          Icon="@Icons.Material.Filled.Science">
+<DemoAlert>
     Показательные данные (ДЕМО). Реальные программы и чек-листы будут формироваться grounded-конвейером
     Генератора (§5.2.9): ссылки на НПА проходят грунтовку, результат — черновик для проверки человеком.
-</MudAlert>
+</DemoAlert>
 
 <MudGrid>
     @* --- Список программ / материалов / чек-листов --- *@
     <MudItem xs="12" md="7">
         <MudPaper Class="pa-4 h-100" Outlined="true">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary mb-2 d-block" Style="@SectionStyle">
-                Программы и методики проверок
-            </MudText>
+            <SectionCaption Text="Программы и методики проверок" />
 
             <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" Class="mt-1">
                 <MudTabPanel Text="Программы проверок" Icon="@Icons.Material.Filled.Article">
                     @foreach (var program in InspectorDemoData.Programs)
                     {
-                        <MudPaper Class="pa-3 mb-2 cursor-pointer" Outlined="true"
-                                  Style="@RowStyle(program)" @onclick="@(() => Select(program))">
+                        <AccentRow Selected="@ReferenceEquals(_selected, program)" OnClick="@(() => Select(program))">
                             <MudText Typo="Typo.body1"><b>@program.Title</b></MudText>
                             <div class="d-flex align-center gap-4 mt-1">
-                                <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                                    <MudIcon Icon="@Icons.Material.Filled.Place" Size="Size.Small" /> @program.Scope
-                                </MudText>
-                                <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                                    <MudIcon Icon="@Icons.Material.Filled.Schedule" Size="Size.Small" /> @program.Duration
-                                </MudText>
+                                <IconCaption Icon="@Icons.Material.Filled.Place">@program.Scope</IconCaption>
+                                <IconCaption Icon="@Icons.Material.Filled.Schedule">@program.Duration</IconCaption>
                             </div>
-                        </MudPaper>
+                        </AccentRow>
                     }
 
-                    <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Class="mt-2"
-                               StartIcon="@Icons.Material.Filled.Add" OnClick="ShowCreateHint">
-                        Создать новую программу (ДЕМО)
-                    </MudButton>
-                    @if (_createHint)
-                    {
-                        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-2">
+                    <ActionHintButton Text="Создать новую программу (ДЕМО)"
+                                      Icon="@Icons.Material.Filled.Add" Class="mt-2">
+                        <Hint>
                             В рабочей версии программа формируется Генератором через grounded-конвейер
                             (промпт-каркас: цель, объект, вопросы, чек-лист, критерии) и сохраняется как черновик.
-                        </MudAlert>
-                    }
+                        </Hint>
+                    </ActionHintButton>
                 </MudTabPanel>
 
                 <MudTabPanel Text="Методические материалы" Icon="@Icons.Material.Filled.School">
                     @foreach (var material in InspectorDemoData.Materials)
                     {
-                        <MudPaper Class="pa-3 mb-2" Outlined="true">
+                        <AccentRow>
                             <MudText Typo="Typo.body1"><b>@material.Title</b></MudText>
                             <MudText Typo="Typo.caption" Class="mud-text-secondary">@material.Note</MudText>
-                        </MudPaper>
+                        </AccentRow>
                     }
                 </MudTabPanel>
 
                 <MudTabPanel Text="Чек-листы" Icon="@Icons.Material.Filled.Checklist">
                     @foreach (var checklist in InspectorDemoData.Checklists)
                     {
-                        <MudPaper Class="pa-3 mb-2 d-flex align-center" Outlined="true">
+                        <AccentRow Class="pa-3 mb-2 d-flex align-center">
                             <MudText Typo="Typo.body1" Class="flex-grow-1"><b>@checklist.Title</b></MudText>
                             <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Filled">
                                 @checklist.Points пунктов
                             </MudChip>
-                        </MudPaper>
+                        </AccentRow>
                     }
                 </MudTabPanel>
             </MudTabs>
@@ -94,19 +74,13 @@
         <MudPaper Class="pa-4 h-100" Outlined="true">
             @if (_selected is null)
             {
-                <div class="d-flex flex-column align-center justify-center text-center" style="min-height:260px;">
-                    <MudIcon Icon="@Icons.Material.Filled.MenuBook" Class="mb-3 mud-text-secondary"
-                             Style="font-size:3rem;" />
-                    <MudText Typo="Typo.body2" Class="mud-text-secondary">
-                        Выберите программу из списка<br />или создайте новую
-                    </MudText>
-                </div>
+                <EmptyState Icon="@Icons.Material.Filled.MenuBook">
+                    Выберите программу из списка<br />или создайте новую
+                </EmptyState>
             }
             else
             {
-                <MudText Typo="Typo.caption" Class="mud-text-secondary mb-2 d-block" Style="@SectionStyle">
-                    Программа проверки
-                </MudText>
+                <SectionCaption Text="Программа проверки" />
                 <MudText Typo="Typo.h6" GutterBottom="true">@_selected.Title</MudText>
 
                 <div class="d-flex align-center gap-4 mb-3">
@@ -116,12 +90,10 @@
                              Icon="@Icons.Material.Filled.Schedule">@_selected.Duration</MudChip>
                 </div>
 
-                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block" Style="@SectionStyle">Цель</MudText>
+                <SectionCaption Text="Цель" Class="" />
                 <MudText Typo="Typo.body2" Class="mb-3">@_selected.Purpose</MudText>
 
-                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-1" Style="@SectionStyle">
-                    Перечень вопросов
-                </MudText>
+                <SectionCaption Text="Перечень вопросов" Class="mb-1" />
                 <MudList T="string" Dense="true">
                     @foreach (var question in _selected.Questions)
                     {
@@ -136,22 +108,7 @@
 </MudGrid>
 
 @code {
-    private const string SectionStyle = "letter-spacing:.08em; text-transform:uppercase; font-weight:600;";
-
     private InspectorDemoData.InspectionProgram? _selected;
-    private bool _createHint;
 
-    private void Select(InspectorDemoData.InspectionProgram program)
-    {
-        _selected = program;
-        _createHint = false;
-    }
-
-    private void ShowCreateHint() => _createHint = true;
-
-    // Подсветка выбранной строки списка.
-    private string RowStyle(InspectorDemoData.InspectionProgram program) =>
-        ReferenceEquals(_selected, program)
-            ? "border-color: var(--mud-palette-primary); border-left: 3px solid var(--mud-palette-primary);"
-            : string.Empty;
+    private void Select(InspectorDemoData.InspectionProgram program) => _selected = program;
 }

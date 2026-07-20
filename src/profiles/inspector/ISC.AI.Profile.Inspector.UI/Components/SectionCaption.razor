@@ -1,0 +1,14 @@
+@namespace ISC.AI.Profile.Inspector.UI
+
+@* Подпись секции (капителью): единый стиль заголовков панелей на всех экранах профиля. *@
+
+<MudText Typo="Typo.caption" Class="@($"mud-text-secondary d-block {Class}")"
+         Style="letter-spacing:.08em; text-transform:uppercase; font-weight:600;">@Text</MudText>
+
+@code {
+    /// <summary>Текст подписи.</summary>
+    [Parameter, EditorRequired] public string Text { get; set; } = string.Empty;
+
+    /// <summary>Дополнительные CSS-классы (по умолчанию — отступ снизу).</summary>
+    [Parameter] public string Class { get; set; } = "mb-2";
+}

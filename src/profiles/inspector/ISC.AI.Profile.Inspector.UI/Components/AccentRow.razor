@@ -1,0 +1,33 @@
+@namespace ISC.AI.Profile.Inspector.UI
+
+@* Строка-карточка списка (реестры рисков, программ, находок, нарушений): рамка, необязательная
+   цветная полоса-акцент слева, поддержка выбора и щелчка. Содержимое строки задаёт страница. *@
+
+<MudPaper Class="@CssClass" Outlined="true" Style="@CssStyle" @onclick="OnClick">@ChildContent</MudPaper>
+
+@code {
+    /// <summary>Цвет полосы-акцента слева (CSS-цвет); <c>null</c> — без полосы.</summary>
+    [Parameter] public string? Accent { get; set; }
+
+    /// <summary>Выбрана ли строка (рамка подсвечивается основным цветом).</summary>
+    [Parameter] public bool Selected { get; set; }
+
+    /// <summary>Обработчик щелчка; если задан — у строки курсор-указатель.</summary>
+    [Parameter] public EventCallback OnClick { get; set; }
+
+    /// <summary>CSS-классы контейнера (по умолчанию — отступы строки списка).</summary>
+    [Parameter] public string Class { get; set; } = "pa-3 mb-2";
+
+    /// <summary>Содержимое строки.</summary>
+    [Parameter, EditorRequired] public RenderFragment? ChildContent { get; set; }
+
+    private string CssClass => Class + (OnClick.HasDelegate ? " cursor-pointer" : string.Empty);
+
+    // Порядок объявлений важен: border-color при выборе перекрашивает и полосу-акцент — так задумано.
+    private string CssStyle =>
+        (Accent is null ? string.Empty : $"border-left:3px solid {Accent};")
+        + (Selected
+            ? " border-color:var(--mud-palette-primary);"
+              + (Accent is null ? " border-left:3px solid var(--mud-palette-primary);" : string.Empty)
+            : string.Empty);
+}

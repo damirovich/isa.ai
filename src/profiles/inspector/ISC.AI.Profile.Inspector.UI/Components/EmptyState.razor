@@ -1,0 +1,20 @@
+@namespace ISC.AI.Profile.Inspector.UI
+
+@* Пустое состояние панели деталей: крупный значок + приглашение «выберите …». *@
+
+<div class="d-flex flex-column align-center justify-center text-center"
+     style="@($"min-height:{MinHeight}px;")">
+    <MudIcon Icon="@Icon" Class="mb-3 mud-text-secondary" Style="font-size:3rem;" />
+    <MudText Typo="Typo.body2" Class="mud-text-secondary">@ChildContent</MudText>
+</div>
+
+@code {
+    /// <summary>Значок (обычно совпадает со значком модуля).</summary>
+    [Parameter, EditorRequired] public string Icon { get; set; } = string.Empty;
+
+    /// <summary>Минимальная высота блока, px (чтобы панель не схлопывалась).</summary>
+    [Parameter] public int MinHeight { get; set; } = 260;
+
+    /// <summary>Текст приглашения (можно с <c>&lt;br /&gt;</c>).</summary>
+    [Parameter, EditorRequired] public RenderFragment? ChildContent { get; set; }
+}
