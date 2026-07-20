@@ -23,6 +23,9 @@
     <Project Path="src/profiles/inspector/ISC.AI.Profile.Inspector.UI/ISC.AI.Profile.Inspector.UI.csproj" Id="c045e1c0-4655-4792-bc03-70da6999ab4b" />
     <Project Path="src/profiles/inspector/ISC.AI.Profile.Inspector/ISC.AI.Profile.Inspector.csproj" Id="47a6e48b-dbf4-456b-9bdd-752e97d848b7" />
   </Folder>
+  <Folder Name="/src/profiles/skid/">
+    <Project Path="../skid/SKID.Web/SKID.Web.csproj" />
+  </Folder>
   <Folder Name="/src/tools/">
     <Project Path="src/tools/ISC.AI.Harvester.Web/ISC.AI.Harvester.Web.csproj" />
     <Project Path="src/tools/ISC.AI.Harvester/ISC.AI.Harvester.csproj" />
