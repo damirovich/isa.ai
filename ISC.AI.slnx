@@ -26,9 +26,6 @@
   <Folder Name="/src/integrations/">
     <Project Path="src/integrations/ISC.AI.Identity.Skid/ISC.AI.Identity.Skid.csproj" />
   </Folder>
-  <Folder Name="/src/profiles/skid/">
-    <Project Path="../skid/SKID.Web/SKID.Web.csproj" />
-  </Folder>
   <Folder Name="/src/tools/">
     <Project Path="src/tools/ISC.AI.Harvester.Web/ISC.AI.Harvester.Web.csproj" />
     <Project Path="src/tools/ISC.AI.Harvester/ISC.AI.Harvester.csproj" />

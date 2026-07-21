@@ -1,3 +1,4 @@
+@using Microsoft.AspNetCore.Http
 <!DOCTYPE html>
 <html lang="ru">
 
@@ -10,18 +11,20 @@
     <link rel="stylesheet" href="@Assets["ISC.AI.Web.styles.css"]" />
     <link rel="stylesheet" href="_content/MudBlazor/MudBlazor.min.css" />
     <ImportMap />
-    @* ВНИМАНИЕ (Э3-08): рендер-режим НЕ задаётся здесь глобально. Если задать InteractiveServer на
-       Routes/HeadOutlet, ВСЕ страницы (включая анонимные /login, /access-denied, /Error, /not-found)
-       попадут внутрь интерактивного circuit'а — а фолбэк-политика «только аутентифицированные» блокирует
-       анонимный SignalR-негошиейт (/_blazor), давая бесконечные 401-ретраи на странице входа
-       (см. https://learn.microsoft.com/aspnet/core/blazor/security, «global fallback policy» + Blazor
-       circuit). Режим задаётся ПОКОМПОНЕНТНО — на каждой защищённой странице своим `@rendermode` (см.
-       Home.razor и страницы модулей профиля); анонимные страницы намеренно остаются статичными (SSR). *@
-    <HeadOutlet />
+    @* Рендер-режим — ЕДИНОЙ точкой здесь, не на отдельных страницах (Э3-08): LayoutComponentBase
+       (MainLayout) не может сам объявить @rendermode (та же причина, что и с RenderFragment-параметром —
+       см. learn.microsoft.com/aspnet/core/blazor/components/render-modes, «Render mode inheritance» +
+       предупреждение про layout); если раскидать режим по страницам, кнопки в самом MainLayout (шапка,
+       переключатель темы) остаются статичными и не реагируют на клик, хотя содержимое страницы работает.
+       Анонимные страницы (/login, /access-denied, /Error, /not-found) — статичны намеренно: интерактивный
+       circuit для них заблокирован фолбэк-политикой «только аутентифицированные» (анонимный SignalR-
+       негошиейт получает 401 бесконечно) — паттерн «static SSR pages in an interactive app» из той же
+       документации. *@
+    <HeadOutlet @rendermode="RenderModeForPage" />
 </head>
 
 <body>
-    <Routes />
+    <Routes @rendermode="RenderModeForPage" />
     <ReconnectModal />
     <script src="@Assets["_framework/blazor.web.js"]"></script>
     <script src="_content/MudBlazor/MudBlazor.min.js"></script>
@@ -29,3 +32,19 @@
 </body>
 
 </html>
+
+@code {
+    // Доступен только на этапе первичного (статического) запроса — до открытия circuit'а; этого
+    // достаточно, чтобы решить режим ОДИН раз для всего дерева ниже (Routes/HeadOutlet).
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    // Ровно 4 анонимные страницы (Э3-08, ADR-0016 п.9) — остальное дерево интерактивно единым узлом,
+    // включая MainLayout (шапку, переключатель темы, боковое меню).
+    private static readonly string[] StaticSsrPaths = ["/login", "/access-denied", "/error", "/not-found"];
+
+    private IComponentRenderMode? RenderModeForPage =>
+        StaticSsrPaths.Any(path => HttpContext.Request.Path.StartsWithSegments(path, StringComparison.OrdinalIgnoreCase))
+            ? null
+            : InteractiveServer;
+}
