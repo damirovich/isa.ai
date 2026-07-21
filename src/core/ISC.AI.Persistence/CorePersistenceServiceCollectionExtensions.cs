@@ -4,6 +4,7 @@ using ISC.AI.Abstractions.Corpus;
 using ISC.AI.Persistence.Audit;
 using ISC.AI.Persistence.BackgroundTasks;
 using ISC.AI.Persistence.Corpus;
+using ISC.AI.Persistence.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -45,6 +46,9 @@ public static class CorePersistenceServiceCollectionExtensions
 
         // Персист статусов фоновых задач (Э4-20, §5.1.4.5): переживает перезапуск, восстановление осиротевших.
         services.AddSingleton<IBackgroundTaskStore, EfBackgroundTaskStore>();
+
+        // Per-op чтение допуска (Э3-08, ТБ-012/016): без кэша — отзыв действует немедленно.
+        services.AddScoped<ClearanceAccessReader>();
 
         return services;
     }

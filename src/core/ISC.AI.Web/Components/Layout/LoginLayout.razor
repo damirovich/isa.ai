@@ -1,0 +1,11 @@
+@inherits LayoutComponentBase
+@using ISC.AI.Web.Common
+
+@* Минимальная оболочка страницы входа: без меню и шапки, форма по центру, та же тёмная тема. *@
+
+<MudThemeProvider Theme="IscTheme.Default" IsDarkMode="true" />
+<MudPopoverProvider />
+
+<div class="d-flex align-center justify-center" style="min-height:100vh; background:#0b1220;">
+    @Body
+</div>

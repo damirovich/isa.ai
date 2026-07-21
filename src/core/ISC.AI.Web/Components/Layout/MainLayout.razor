@@ -1,10 +1,11 @@
 @inherits LayoutComponentBase
 @inject IProfile Profile
+@using ISC.AI.Web.Common
 
 @* Оболочка хоста: тема, шапка, боковое меню. Доменно-нейтральна — название, подзаголовок и состав
    меню берутся из манифеста профиля (ТС-003, ТС-007). Хост не знает слова «инспекция». *@
 
-<MudThemeProvider Theme="_theme" IsDarkMode="_isDarkMode" />
+<MudThemeProvider Theme="IscTheme.Default" IsDarkMode="_isDarkMode" />
 <MudPopoverProvider />
 <MudDialogProvider />
 <MudSnackbarProvider />
@@ -23,6 +24,24 @@
         <MudText Typo="Typo.body2" Class="mud-text-secondary mr-2 d-none d-sm-flex">@DateTime.Now.ToString("dd.MM.yyyy")</MudText>
         <MudIconButton Icon="@(_isDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
                        Color="Color.Inherit" OnClick="ToggleTheme" aria-label="Переключить тему" />
+
+        @* Текущий субъект и выход (Э3-08, ТБ-010/014). Выход — обычный POST вне circuit'а. *@
+        <AuthorizeView>
+            <Authorized>
+                @if (context.User.Identity?.AuthenticationType != "Dev")
+                {
+                    <MudText Typo="Typo.body2" Class="ml-2 mr-1 d-none d-sm-flex">
+                        @(context.User.FindFirst(ISC.AI.Web.Security.AuthClaims.DisplayName)?.Value
+                            ?? context.User.Identity?.Name)
+                    </MudText>
+                    <form method="post" action="/auth/logout" class="d-flex ma-0">
+                        <AntiforgeryToken />
+                        <MudIconButton Icon="@Icons.Material.Filled.Logout" ButtonType="ButtonType.Submit"
+                                       Color="Color.Inherit" aria-label="Выйти" />
+                    </form>
+                }
+            </Authorized>
+        </AuthorizeView>
     </MudAppBar>
 
     <MudDrawer @bind-Open="_drawerOpen" Elevation="0" Variant="DrawerVariant.Responsive"
@@ -31,22 +50,36 @@
             <div class="d-flex align-center gap-2">
                 <MudIcon Icon="@Icons.Material.Filled.Shield" Color="Color.Primary" Size="Size.Medium" />
                 <div>
-                    <MudText Typo="Typo.h6" Style="line-height:1.15;">@Profile.DisplayName</MudText>
-                    @if (!string.IsNullOrWhiteSpace(Profile.Subtitle))
-                    {
-                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@Profile.Subtitle</MudText>
-                    }
+                    <MudText Typo="Typo.h6" Style="line-height:1.15;">ISC.AI</MudText>
                 </div>
             </div>
         </MudDrawerHeader>
 
-        <NavMenu />
+        @* Состав модулей и наименование профиля — раскрываются ТОЛЬКО аутентифицированному (ТБ-010):
+           анонимные страницы (/not-found, /access-denied, /Error используют этот же layout как
+           DefaultLayout) не должны выдавать структуру режимной системы до входа. *@
+        <AuthorizeView>
+            <Authorized>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary px-4 d-block mb-2">
+                    @Profile.DisplayName
+                    @if (!string.IsNullOrWhiteSpace(Profile.Subtitle))
+                    {
+                        <text> · @Profile.Subtitle</text>
+                    }
+                </MudText>
 
-        <MudSpacer />
-        <div class="pa-3">
-            <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined"
-                     Icon="@Icons.Material.Filled.AutoAwesome" Class="ma-0">ДЕМО · ИИ активен</MudChip>
-        </div>
+                <NavMenu />
+
+                <MudSpacer />
+                <div class="pa-3">
+                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined"
+                             Icon="@Icons.Material.Filled.AutoAwesome" Class="ma-0">ДЕМО · ИИ активен</MudChip>
+                </div>
+            </Authorized>
+            <NotAuthorized>
+                <MudSpacer />
+            </NotAuthorized>
+        </AuthorizeView>
     </MudDrawer>
 
     <MudMainContent Class="pt-4">
@@ -69,38 +102,4 @@
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
 
     private void ToggleTheme() => _isDarkMode = !_isDarkMode;
-
-    // Тёмная палитра оболочки (тон прототипа: глубокий сине-графитовый фон, синий акцент).
-    private readonly MudTheme _theme = new()
-    {
-        PaletteDark = new PaletteDark
-        {
-            Primary = "#3b82f6",
-            Secondary = "#22d3ee",
-            Info = "#3b82f6",
-            Success = "#22c55e",
-            Warning = "#eab308",
-            Error = "#ef4444",
-            Background = "#0b1220",
-            BackgroundGray = "#0b1220",
-            Surface = "#111c33",
-            DrawerBackground = "#0a1020",
-            DrawerText = "#cbd5e1",
-            DrawerIcon = "#94a3b8",
-            AppbarBackground = "#0b1220",
-            AppbarText = "#e2e8f0",
-            TextPrimary = "#e2e8f0",
-            TextSecondary = "#94a3b8",
-            ActionDefault = "#94a3b8",
-            Divider = "#1e293b",
-            DividerLight = "#1e293b",
-            LinesDefault = "#1e293b",
-            TableLines = "#1e293b",
-        },
-        LayoutProperties = new LayoutProperties
-        {
-            DrawerWidthLeft = "260px",
-            DefaultBorderRadius = "8px",
-        },
-    };
 }

@@ -4,7 +4,13 @@
         AdditionalAssemblies="ModuleAssemblies"
         NotFoundPage="typeof(Pages.NotFound)">
     <Found Context="routeData">
-        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+        @* Авторизующий рендер (Э3-08, ТБ-010): неаутентифицированный переход — на форму входа.
+           HTTP-уровень дополнительно закрыт фолбэк-политикой «только аутентифицированные». *@
+        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+            <NotAuthorized>
+                <RedirectToLogin />
+            </NotAuthorized>
+        </AuthorizeRouteView>
         <FocusOnNavigate RouteData="routeData" Selector="h1" />
     </Found>
 </Router>

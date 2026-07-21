@@ -67,10 +67,19 @@ public sealed class AuditBehavior<TMessage, TResponse>(
     private async Task WriteAuditAsync(TMessage message, CancellationToken cancellationToken)
     {
         short subjectCeiling;
+        int? subjectId = null;
         try
         {
             var access = await accessContextProvider.GetCurrentAsync(cancellationToken);
             subjectCeiling = access.MaxClassification;
+
+            // Субъект записи (ТБ-030 «кто»): числовой SubjectId — локальный id пользователя (Э3-08);
+            // нечисловой (dev-заглушка и т.п.) в колонку субъекта не пишется.
+            if (int.TryParse(access.SubjectId, System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out var parsedSubject))
+            {
+                subjectId = parsedSubject;
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -83,7 +92,8 @@ public sealed class AuditBehavior<TMessage, TResponse>(
         var classification = Math.Max(subjectCeiling, message.AuditClassification ?? (short)0);
 
         await auditWriter.WriteAsync(
-            new AuditEntry(message.AuditAction, classification, PayloadSensitive: message.AuditSummary),
+            new AuditEntry(message.AuditAction, classification, SubjectId: subjectId,
+                PayloadSensitive: message.AuditSummary),
             cancellationToken);
     }
 }

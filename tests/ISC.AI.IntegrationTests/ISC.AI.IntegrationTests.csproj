@@ -6,6 +6,7 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="Pgvector" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
 
   <ItemGroup>
@@ -14,6 +15,7 @@
     <ProjectReference Include="..\..\src\profiles\inspector\ISC.AI.Profile.Inspector.Data\ISC.AI.Profile.Inspector.Data.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.AI\ISC.AI.AI.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.Ingestion\ISC.AI.Ingestion.csproj" />
+    <ProjectReference Include="..\..\src\core\ISC.AI.Web\ISC.AI.Web.csproj" />
   </ItemGroup>
 
 </Project>
