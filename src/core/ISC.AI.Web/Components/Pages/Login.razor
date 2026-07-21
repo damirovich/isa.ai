@@ -1,0 +1,68 @@
+@page "/login"
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@layout Layout.LoginLayout
+@inject ISC.AI.Abstractions.Profiles.IProfile Profile
+
+@* Страница входа (Э3-08, ТБ-010): анонимно доступна ТОЛЬКО она — остальное закрыто фолбэк-политикой.
+   Форма постится обычным POST на /auth/login (вне circuit'а): иначе cookie сессии не установить.
+   Причина отказа не раскрывается (единое сообщение) — ТД-003. *@
+
+<PageTitle>Вход — @Profile.DisplayName</PageTitle>
+
+<MudPaper Class="pa-8" Outlined="true" Style="width:420px; max-width:92vw;">
+    <div class="d-flex align-center gap-3 mb-6">
+        <MudIcon Icon="@Icons.Material.Filled.Shield" Color="Color.Primary" Size="Size.Large" />
+        <div>
+            <MudText Typo="Typo.h5" Style="line-height:1.2;">@Profile.DisplayName</MudText>
+            @if (!string.IsNullOrWhiteSpace(Profile.Subtitle))
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">@Profile.Subtitle</MudText>
+            }
+        </div>
+    </div>
+
+    @if (Error == "unavailable")
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-4">
+            Служба идентификации временно недоступна. Попробуйте войти чуть позже.
+        </MudAlert>
+    }
+    else if (!string.IsNullOrEmpty(Error))
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-4">
+            Неверное имя входа или пароль, либо доступ запрещён.
+        </MudAlert>
+    }
+
+    <form method="post" action="/auth/login">
+        <AntiforgeryToken />
+        <input type="hidden" name="returnUrl" value="@(ReturnUrl ?? "/")" />
+
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-1">Имя входа</MudText>
+        <input name="login" required autofocus autocomplete="username" style="@InputStyle" class="mb-4" />
+
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-1">Пароль</MudText>
+        <input type="password" name="password" required autocomplete="current-password" style="@InputStyle" class="mb-6" />
+
+        <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary"
+                   FullWidth="true" StartIcon="@Icons.Material.Filled.Login">Войти</MudButton>
+    </form>
+
+    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-4 text-center">
+        Вход по учётной записи СКИД · доступ к материалам определяется допуском
+    </MudText>
+</MudPaper>
+
+@code {
+    private const string InputStyle =
+        "display:block; width:100%; padding:10px 12px; border-radius:8px; border:1px solid #1e293b;"
+        + " background:#0b1220; color:#e2e8f0; font-size:0.95rem; outline:none;";
+
+    /// <summary>Признак неудачной попытки входа (из строки запроса).</summary>
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    /// <summary>Куда вернуть пользователя после входа (только локальный путь).</summary>
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+}

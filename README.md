@@ -22,7 +22,25 @@ dotnet user-secrets set "Database:Password" "<пароль>" --project src/core/
 ```
 Проверить: `dotnet user-secrets list --project src/core/ISC.AI.Web`
 
-**Сервер (прод):** вместо user-secrets — переменная окружения `Database__Password=<пароль>`
+**Пароль БД СКИД (Э3-08, вход по учёткам СКИД):** отдельный per-name секрет — общий пароль на неё
+**никогда** не подмешивается, даже молча (без секрета — явный отказ на старте, а не утечка пароля
+`ISC_AI` на сервер СКИД):
+```powershell
+dotnet user-secrets set "Database:Passwords:Skid" "<пароль read-only учётки СКИД>" --project src/core/ISC.AI.Web
+```
+Учётная запись подключения к БД СКИД (`ConnectionStrings:Skid`, по умолчанию `iscai_ro`) должна иметь
+**только** `GRANT SELECT` на `public.users`/`public.departments` — выдаёт администратор СКИД; ISC.AI
+никогда не пишет в эту БД (проверено на уровне кода: контекст переопределяет `SaveChanges` отказом).
+
+Чтобы запустить каркас БЕЗ входа и БД СКИД (dev-заглушка доступа) — в
+`appsettings.Development.json` поставить `"Auth": { "Mode": "Dev" }`.
+
+**За обратным прокси контура** (если он есть) — заполнить `ForwardedHeaders:KnownProxies` реальными
+IP прокси в `appsettings.json`, иначе троттлинг входа увидит IP прокси у всех запросов, а не клиента.
+Без прокси — ничего настраивать не нужно, поведение не меняется.
+
+**Сервер (прод):** вместо user-secrets — переменные окружения `Database__Password=<пароль>` и
+`Database__Passwords__Skid=<пароль БД СКИД>`
 (либо полная строка в `ConnectionStrings__Core` / `ConnectionStrings__Inspector`).
 
 ### 2. Применение миграций БД

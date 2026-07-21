@@ -1,8 +1,11 @@
 using System.Globalization;
+using System.Net;
 using System.Reflection;
+using System.Threading.RateLimiting;
 using ISC.AI.Abstractions.Profiles;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.AI.Audit;
+using ISC.AI.Identity.Skid;
 using ISC.AI.AI.BackgroundTasks;
 using ISC.AI.AI.Grounding;
 using ISC.AI.AI.Models;
@@ -16,6 +19,11 @@ using ISC.AI.Web.Security;
 using ISC.AI.Profile.Inspector;
 using ISC.AI.Web.Components;
 using Mediator;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
 using MudBlazor.Services;
 using Serilog;
 using Serilog.Events;
@@ -84,12 +92,6 @@ try
     // управляемой деградацией; при старте — восстановление осиротевших задач. Store — из AddCorePersistence.
     builder.Services.AddCoreBackgroundTasks();
 
-    // DEV-заглушка контекста доступа (заменяется внешним SSO на Э3-08). Только в Development.
-    if (builder.Environment.IsDevelopment())
-    {
-        builder.Services.AddScoped<IAccessContextProvider, DevAccessContextProvider>();
-    }
-
     // --- Точка композиции профиля (ТО-прог-05/06). Только хост знает о конкретном профиле. ---
     var profile = new InspectorProfile();
     builder.Services.AddSingleton<IProfile>(profile);
@@ -100,10 +102,107 @@ try
         contributor.Register(builder.Services, builder.Configuration);
     }
 
-    // Авторизация. ВНИМАНИЕ: аутентификация и разграничение по допуску (ТБ-010..016)
-    // подключаются вместе со слоем идентификации на этапе Э3; до этого фолбэк-политика
-    // «только аутентифицированные» не включается, чтобы каркас был запускаем в разработке.
-    builder.Services.AddAuthorization();
+    // --- Аутентификация и авторизация (Э3-08, ТБ-010..016) — последний шаг композиции (ТО-прог-05). ---
+    // Auth:Mode=Dev (только Development) — прежняя dev-заглушка без входа, чтобы каркас был запускаем
+    // без БД идентичности; боевой режим — вход по учёткам внешней системы (СКИД), допуск — локально.
+    var devAuth = builder.Environment.IsDevelopment()
+        && string.Equals(builder.Configuration["Auth:Mode"], "Dev", StringComparison.OrdinalIgnoreCase);
+
+    builder.Services.AddCascadingAuthenticationState();
+
+    if (devAuth)
+    {
+        builder.Services.AddScoped<IAccessContextProvider, DevAccessContextProvider>();
+        builder.Services.AddScoped<AuthenticationStateProvider, DevAuthenticationStateProvider>();
+        builder.Services.AddAuthorization(); // без фолбэк-политики: dev-режим запускаем без входа
+    }
+    else
+    {
+        // Cookie-сессия: HttpOnly, скользящий таймаут неактивности (ТБ-014). Cookie несёт ТОЛЬКО
+        // идентификацию — допуск читается из БД на каждую операцию (ТБ-016, ClearanceAccessContextProvider).
+        var idleMinutes = int.TryParse(builder.Configuration["Auth:SessionIdleMinutes"], out var idle) && idle > 0
+            ? idle
+            : 30;
+        builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+            .AddCookie(options =>
+            {
+                options.LoginPath = "/login";
+                options.AccessDeniedPath = "/access-denied";
+                options.SlidingExpiration = true;
+                options.ExpireTimeSpan = TimeSpan.FromMinutes(idleMinutes);
+                options.Cookie.Name = ".ISC.AI.Auth";
+                options.Cookie.HttpOnly = true;
+                options.Cookie.SameSite = SameSiteMode.Lax;
+                options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest; // HTTPS внутри контура — ТБ-010
+                // Вторая, независимая от Blazor-circuit'а линия ревалидации (ТБ-014/016): без неё
+                // блокировка/смена пароля во внешней системе не гасит уже выданную cookie — перезагрузка
+                // страницы поднимает новый circuit со своим окном ревалидации, продлевая доступ
+                // заблокированного пользователя. См. CookiePrincipalValidator.
+                options.Events.OnValidatePrincipal = CookiePrincipalValidator.ValidateAsync;
+            });
+
+        // Адаптер идентичности СКИД: read-only чтение пользователей чужой БД. ResolveExternal (не
+        // Resolve!) — сторонний секрет обязателен явно (Database:Passwords:Skid), общий пароль ядровой
+        // БД сюда НИКОГДА не подставляется молча (Э4-10, ТБ-013): забытый секрет — явный отказ на старте,
+        // а не утечка пароля ISC_AI на сервер СКИД.
+        builder.Services.AddSkidIdentity(ConnectionStringResolver.ResolveExternal(builder.Configuration, "Skid"));
+
+        builder.Services.AddHttpContextAccessor();
+        builder.Services.AddScoped<LoginService>();
+        builder.Services.AddScoped<ExternalIdentityRevalidator>();
+        builder.Services.AddScoped<AuthenticationStateProvider, StampRevalidatingAuthenticationStateProvider>();
+
+        // За обратным прокси/TLS-терминатором внутри контура RemoteIpAddress иначе указывал бы на сам
+        // прокси для ВСЕХ запросов — троттлинг входа (ниже) делил бы один лимит на всю организацию.
+        // Без настройки KnownProxies поведение НЕ меняется (заголовку не доверяют) — это включатель,
+        // не обязательный шаг: заполняется при реальном развёртывании за прокси.
+        var knownProxies = builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? [];
+        if (knownProxies.Length > 0)
+        {
+            builder.Services.Configure<ForwardedHeadersOptions>(options =>
+            {
+                options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+                foreach (var proxy in knownProxies)
+                {
+                    if (IPAddress.TryParse(proxy, out var address))
+                    {
+                        options.KnownProxies.Add(address);
+                    }
+                }
+            });
+        }
+
+        // Боевой контекст доступа: допуск из core.clearance на каждую операцию, fail-closed (ТБ-012/016/021).
+        builder.Services.AddScoped<IAccessContextProvider, ClearanceAccessContextProvider>();
+
+        // Троттлинг входа: защита от перебора паролей (в СКИД её нет — добавляем на своей стороне).
+        builder.Services.AddRateLimiter(options =>
+        {
+            options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.AddPolicy(AuthEndpoints.LoginRateLimitPolicy, context =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 5,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    }));
+        });
+
+        // Запрет анонимного доступа (ТБ-010): фолбэк-политика «только аутентифицированные» + именованные
+        // политики модулей из манифеста профиля (IModule.RequiredPolicy — данные, не типы: ядро профиль не знает).
+        builder.Services.AddAuthorization(options =>
+        {
+            options.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build();
+            foreach (var policy in profile.Modules.Select(m => m.RequiredPolicy)
+                         .Where(p => !string.IsNullOrWhiteSpace(p))
+                         .Distinct(StringComparer.Ordinal))
+            {
+                options.AddPolicy(policy, b => b.RequireAuthenticatedUser());
+            }
+        });
+    }
 
     var app = builder.Build();
 
@@ -116,9 +215,24 @@ try
     app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
     app.UseHttpsRedirection();
     app.UseSerilogRequestLogging();
+
+    if (!devAuth)
+    {
+        app.UseForwardedHeaders(); // до троттлинга — иначе он видит IP прокси, а не клиента (см. регистрацию выше)
+        app.UseRateLimiter();
+        app.UseAuthentication(); // до антифорджери и авторизации: токен и политика привязаны к субъекту
+    }
+
     app.UseAntiforgery();
     app.UseAuthorization();
-    app.MapStaticAssets();
+
+    // Статика (css/js/шрифты) доступна и на странице входа — анонимно.
+    app.MapStaticAssets().AllowAnonymous();
+
+    if (!devAuth)
+    {
+        app.MapAuthEndpoints();
+    }
 
     // Сборки, содержащие страницы модулей профиля, — для маршрутизации хоста.
     Assembly[] moduleAssemblies = [.. profile.Modules.Select(m => m.ComponentType.Assembly).Distinct()];

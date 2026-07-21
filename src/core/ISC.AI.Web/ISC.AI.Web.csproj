@@ -9,6 +9,8 @@
        (единственное допустимое исключение из правила «ядро не знает профиль»). -->
   <ItemGroup>
     <ProjectReference Include="..\..\profiles\inspector\ISC.AI.Profile.Inspector\ISC.AI.Profile.Inspector.csproj" />
+    <!-- Адаптер идентичности СКИД (Э3-08): подключает ТОЛЬКО хост; ядро о СКИД не знает. -->
+    <ProjectReference Include="..\..\integrations\ISC.AI.Identity.Skid\ISC.AI.Identity.Skid.csproj" />
     <ProjectReference Include="..\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
     <ProjectReference Include="..\ISC.AI.AI\ISC.AI.AI.csproj" />
     <ProjectReference Include="..\ISC.AI.Documents\ISC.AI.Documents.csproj" />
@@ -23,6 +25,13 @@
     <PackageReference Include="Serilog.Sinks.Console" />
     <PackageReference Include="Mediator.SourceGenerator" />
     <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
+    <!-- Только для инструментов EF (dotnet ef / Update-Database), в рантайме не участвует.
+         Даёт `-StartupProject ISC.AI.Web`: миграции идут через НАСТОЯЩУЮ конфигурацию хоста
+         (appsettings.json + user-secrets), а не через отдельную строку в ISCAI_CORE_CONNECTION. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 
 </Project>

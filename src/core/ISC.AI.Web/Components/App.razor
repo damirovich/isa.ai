@@ -10,11 +10,18 @@
     <link rel="stylesheet" href="@Assets["ISC.AI.Web.styles.css"]" />
     <link rel="stylesheet" href="_content/MudBlazor/MudBlazor.min.css" />
     <ImportMap />
-    <HeadOutlet @rendermode="InteractiveServer" />
+    @* ВНИМАНИЕ (Э3-08): рендер-режим НЕ задаётся здесь глобально. Если задать InteractiveServer на
+       Routes/HeadOutlet, ВСЕ страницы (включая анонимные /login, /access-denied, /Error, /not-found)
+       попадут внутрь интерактивного circuit'а — а фолбэк-политика «только аутентифицированные» блокирует
+       анонимный SignalR-негошиейт (/_blazor), давая бесконечные 401-ретраи на странице входа
+       (см. https://learn.microsoft.com/aspnet/core/blazor/security, «global fallback policy» + Blazor
+       circuit). Режим задаётся ПОКОМПОНЕНТНО — на каждой защищённой странице своим `@rendermode` (см.
+       Home.razor и страницы модулей профиля); анонимные страницы намеренно остаются статичными (SSR). *@
+    <HeadOutlet />
 </head>
 
 <body>
-    <Routes @rendermode="InteractiveServer" />
+    <Routes />
     <ReconnectModal />
     <script src="@Assets["_framework/blazor.web.js"]"></script>
     <script src="_content/MudBlazor/MudBlazor.min.js"></script>

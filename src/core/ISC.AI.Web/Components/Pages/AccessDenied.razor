@@ -1,0 +1,16 @@
+@page "/access-denied"
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+
+@* Отказ в доступе (ТБ-011): аутентифицирован, но не авторизован для запрошенного действия. *@
+
+<PageTitle>Доступ запрещён — ISC.AI</PageTitle>
+
+<MudPaper Class="pa-8 d-flex flex-column align-center text-center mt-8" Outlined="true">
+    <MudIcon Icon="@Icons.Material.Filled.Block" Color="Color.Error" Style="font-size:3rem;" Class="mb-3" />
+    <MudText Typo="Typo.h6" GutterBottom="true">Доступ запрещён</MudText>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-4" Style="max-width:520px;">
+        У вашей учётной записи нет прав на это действие. Доступ к материалам определяется допуском
+        и назначается администратором.
+    </MudText>
+    <MudButton Href="/" Variant="Variant.Outlined" Color="Color.Primary">На главную</MudButton>
+</MudPaper>
