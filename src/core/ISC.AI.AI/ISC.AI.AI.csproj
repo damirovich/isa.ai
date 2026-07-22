@@ -22,4 +22,9 @@
     <PackageReference Include="Scriban" />
   </ItemGroup>
 
+  <!-- Промпты — файлы-шаблоны (ТО-лнг-03), не хардкод в C#: см. Grounding/Prompts. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Grounding\Prompts\*.scriban" />
+  </ItemGroup>
+
 </Project>
