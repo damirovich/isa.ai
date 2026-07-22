@@ -17,10 +17,16 @@ namespace ISC.AI.AI.Models;
 /// Канал — локальный OpenAI-совместимый сервер инференса (llama-server) ВНУТРИ контура; авторизации
 /// нет (ключ-заглушка), внешних обращений быть не должно (ТБ-044, air-gap). Эмбеддинги — ОТДЕЛЬНАЯ
 /// модель/инстанс (роль <see cref="ModelRole.Embeddings"/>, ADR-0011). Длинные вызовы стримятся
-/// штатно через <c>IChatClient.GetStreamingResponseAsync</c>.
+/// штатно через <c>IChatClient.GetStreamingResponseAsync</c>. Каждый keyed-клиент обёрнут повтором,
+/// таймаутом и circuit breaker (ТН-003, ТНД-001) — см. <see cref="ResilientChatClient"/>,
+/// <see cref="ResilientEmbeddingGenerator"/>.
 /// </remarks>
 public static class CoreAiModelsServiceCollectionExtensions
 {
+    // Таймаут одного вызова (ТН-003): генерация (черновик/анализ) может быть долгой, эмбеддинг — короткий.
+    private static readonly TimeSpan ChatCallTimeout = TimeSpan.FromSeconds(120);
+    private static readonly TimeSpan EmbeddingCallTimeout = TimeSpan.FromSeconds(30);
+
     /// <summary>Регистрирует keyed-клиенты ролей draft/analysis (чат) и embeddings из конфигурации.</summary>
     public static IServiceCollection AddCoreAiModels(this IServiceCollection services, IConfiguration configuration)
     {
@@ -38,11 +44,14 @@ public static class CoreAiModelsServiceCollectionExtensions
         }
 
         services.AddKeyedSingleton<IChatClient>(role, (_, _) =>
-            new OpenAIClient(
+        {
+            IChatClient client = new OpenAIClient(
                     new ApiKeyCredential(apiKey),
                     new OpenAIClientOptions { Endpoint = new Uri(endpoint) })
                 .GetChatClient(model)
-                .AsIChatClient());
+                .AsIChatClient();
+            return new ResilientChatClient(client, role, ChatCallTimeout);
+        });
     }
 
     private static void TryAddEmbeddingModel(IServiceCollection services, IConfiguration configuration, ModelRole role)
@@ -53,11 +62,14 @@ public static class CoreAiModelsServiceCollectionExtensions
         }
 
         services.AddKeyedSingleton<IEmbeddingGenerator<string, Embedding<float>>>(role, (_, _) =>
-            new OpenAIClient(
+        {
+            IEmbeddingGenerator<string, Embedding<float>> client = new OpenAIClient(
                     new ApiKeyCredential(apiKey),
                     new OpenAIClientOptions { Endpoint = new Uri(endpoint) })
                 .GetEmbeddingClient(model)
-                .AsIEmbeddingGenerator());
+                .AsIEmbeddingGenerator();
+            return new ResilientEmbeddingGenerator(client, role, EmbeddingCallTimeout);
+        });
     }
 
     // Адрес/модель/ключ роли — из секции Llm:Models:{role}. У локального сервера авторизации нет → ключ-заглушка.
