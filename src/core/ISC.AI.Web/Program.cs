@@ -73,8 +73,9 @@ try
     // Локальные модели за IChatClient/IEmbeddingGenerator, keyed по роли (ADR-0004, ТО-прог-02/03, ТБ-044).
     builder.Services.AddCoreAiModels(builder.Configuration);
 
-    // RAG-извлечение с обязательным фильтром доступа на стороне БД (ADR-0007, ТБ-020, GATE-1).
-    builder.Services.AddCoreRetrieval();
+    // RAG-извлечение с обязательным фильтром доступа на стороне БД (ADR-0007, ТБ-020, GATE-1) и
+    // конфигурируемым порогом релевантности (ТО-мат-04).
+    builder.Services.AddCoreRetrieval(builder.Configuration);
 
     // Грунтовка: ссылки только из извлечённых фрагментов; «по памяти» запрещено (ТБ-040, GATE-2).
     builder.Services.AddCoreGrounding();

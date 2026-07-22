@@ -1,6 +1,5 @@
 using ISC.AI.AI.Retrieval;
 using ISC.AI.AI.Security;
-using ISC.AI.Abstractions.Retrieval;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Persistence;
 using ISC.AI.Persistence.Entities;
@@ -14,17 +13,18 @@ using Testcontainers.PostgreSql;
 namespace ISC.AI.IntegrationTests.Persistence;
 
 /// <summary>
-/// GATE-3 (КИ-02, ТЭ-003, ADR-0013): версионность редакций. Утратившая силу редакция
-/// (<c>IsCurrent = false</c>) НЕ выдаётся как действующая по умолчанию (КИ-02 — доля
-/// «устаревшее-как-актуальное» = 0); неактуальные источники включаются ТОЛЬКО явным
-/// <see cref="RetrievalFilter.IncludeSuperseded"/> — для показа с пометкой «утратила силу» (ТЭ-003).
+/// ТО-мат-04: порог отсечения по релевантности (<see cref="RetrievalOptions.MaxDistance"/>) исключает
+/// фрагменты, косинусное расстояние которых до запроса больше настроенного порога, даже если <c>topK</c>
+/// ещё не исчерпан. Без порога (<see cref="RetrievalOptions.None"/>) поведение прежнее — top-K как есть.
 /// Реальный PostgreSQL+pgvector через Testcontainers.
 /// </summary>
 /// <remarks>
-/// Требуется Docker. Эмбеддер — фиксированный фейк (тест проверяет ВИДИМОСТЬ ПО РЕДАКЦИИ, не качество векторов).
+/// Требуется Docker. Эмбеддер запроса — фиксированный фейк; у фрагментов — заранее известные векторы
+/// (совпадающий и ортогональный запросу), чтобы расстояние было детерминированным (0 и 1), а не зависело
+/// от качества реальной модели эмбеддингов.
 /// </remarks>
 [Trait("Category", "Gate")]
-public sealed class Gate3RevisionVisibilityTests : IAsyncLifetime
+public sealed class RetrievalRelevanceThresholdTests : IAsyncLifetime
 {
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16").Build();
 
@@ -32,8 +32,8 @@ public sealed class Gate3RevisionVisibilityTests : IAsyncLifetime
 
     public Task DisposeAsync() => _postgres.DisposeAsync().AsTask();
 
-    [Fact(DisplayName = "GATE-3: утратившая силу не выдаётся как действующая; видна только при IncludeSuperseded")]
-    public async Task Superseded_revision_is_not_served_as_current()
+    [Fact(DisplayName = "ТО-мат-04: MaxDistance отсекает дальний фрагмент; без порога отдаются оба")]
+    public async Task MaxDistance_excludes_far_fragment_only_when_configured()
     {
         var factory = new TestContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
@@ -42,54 +42,52 @@ public sealed class Gate3RevisionVisibilityTests : IAsyncLifetime
             await SeedAsync(db);
         }
 
-        var retriever = new PgVectorRetriever(
-            factory,
-            new FixedEmbeddingGenerator(EmbeddingEntity.Dimensions),
-            new AllowAllAccessPolicy(),
-            RetrievalOptions.None);
-
         var access = new AccessContext("u1", MaxClassification: 0, AllowedDivisions: [7]);
+        var embeddingGenerator = new FixedEmbeddingGenerator(EmbeddingEntity.Dimensions);
 
-        // По умолчанию: только действующая редакция (КИ-02 — устаревшее как актуальное не выдаётся).
-        var current = await retriever.RetrieveAsync("любой запрос", access, topK: 50);
-        current.Count.ShouldBe(1);
-        current.ShouldAllBe(c => c.IsCurrent);
+        // Строгий порог (< 1): отсекает ортогональный фрагмент (расстояние 1), оставляет совпадающий (0).
+        var strict = new PgVectorRetriever(
+            factory, embeddingGenerator, new AllowAllAccessPolicy(), new RetrievalOptions(MaxDistance: 0.5));
+        var strictResults = await strict.RetrieveAsync("любой запрос", access, topK: 50);
+        strictResults.Count.ShouldBe(1);
+        strictResults[0].Text.ShouldBe("релевантный");
 
-        // Явный показ утративших силу (ТЭ-003): обе редакции; неактуальная помечена IsCurrent=false.
-        var withStale = await retriever.RetrieveAsync(
-            "любой запрос", access, topK: 50, filter: new RetrievalFilter(IncludeSuperseded: true));
-        withStale.Count.ShouldBe(2);
-        withStale.ShouldContain(c => c.IsCurrent);
-        withStale.ShouldContain(c => !c.IsCurrent);
+        // Без порога (дефолт) — фильтрации по расстоянию нет, topK не урезан заранее обоими фрагментами.
+        var unbounded = new PgVectorRetriever(
+            factory, embeddingGenerator, new AllowAllAccessPolicy(), RetrievalOptions.None);
+        var unboundedResults = await unbounded.RetrieveAsync("любой запрос", access, topK: 50);
+        unboundedResults.Count.ShouldBe(2);
     }
 
     private static async Task SeedAsync(CoreDbContext db)
     {
-        var doc = new DocumentEntity { DocType = "положение", Title = "Положение о порядке", Classification = 0, DivisionId = 7 };
+        var doc = new DocumentEntity { DocType = "приказ", Title = "Тест", Classification = 0, DivisionId = 7 };
         db.Documents.Add(doc);
         await db.SaveChangesAsync();
 
-        // Две редакции одного материала: действующая и утратившая силу (тот же вектор).
-        await AddChunkWithEmbeddingAsync(db, doc.Id, ordinal: 0, isCurrent: true);
-        await AddChunkWithEmbeddingAsync(db, doc.Id, ordinal: 1, isCurrent: false);
+        // Совпадает с вектором запроса (values[0]=1) — косинусное расстояние 0.
+        await AddChunkWithEmbeddingAsync(db, doc.Id, ordinal: 0, text: "релевантный", axis: 0);
+        // Ортогонален вектору запроса (values[1]=1) — косинусное расстояние 1.
+        await AddChunkWithEmbeddingAsync(db, doc.Id, ordinal: 1, text: "нерелевантный", axis: 1);
     }
 
-    private static async Task AddChunkWithEmbeddingAsync(CoreDbContext db, int documentId, int ordinal, bool isCurrent)
+    private static async Task AddChunkWithEmbeddingAsync(
+        CoreDbContext db, int documentId, int ordinal, string text, int axis)
     {
         var chunk = new ChunkEntity
         {
             DocumentId = documentId,
             Ordinal = ordinal,
-            Text = $"редакция {ordinal}",
+            Text = text,
             Classification = 0,
             DivisionId = 7,
-            IsCurrent = isCurrent,
+            IsCurrent = true,
         };
         db.Chunks.Add(chunk);
         await db.SaveChangesAsync();
 
         var values = new float[EmbeddingEntity.Dimensions];
-        values[0] = 1f; // ненулевой вектор — косинусное расстояние определено
+        values[axis] = 1f;
         db.Embeddings.Add(new EmbeddingEntity
         {
             ChunkId = chunk.Id,
@@ -97,7 +95,7 @@ public sealed class Gate3RevisionVisibilityTests : IAsyncLifetime
             ModelKey = "test",
             Classification = 0,
             DivisionId = 7,
-            IsCurrent = isCurrent,
+            IsCurrent = true,
         });
         await db.SaveChangesAsync();
     }
@@ -116,7 +114,7 @@ public sealed class Gate3RevisionVisibilityTests : IAsyncLifetime
                 .Options);
     }
 
-    // Фейковый эмбеддер: всегда один и тот же вектор (тест проверяет видимость по редакции, не качество поиска).
+    // Фейковый эмбеддер запроса: всегда вектор values[0]=1 — совпадает с «релевантным» фрагментом.
     private sealed class FixedEmbeddingGenerator(int dimensions) : IEmbeddingGenerator<string, Embedding<float>>
     {
         private readonly ReadOnlyMemory<float> _vector = BuildVector(dimensions);
