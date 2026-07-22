@@ -19,7 +19,8 @@ public sealed class RetrieverFailClosedTests
         var retriever = new PgVectorRetriever(
             Substitute.For<IDbContextFactory<CoreDbContext>>(),
             Substitute.For<IEmbeddingGenerator<string, Embedding<float>>>(),
-            Substitute.For<IAccessPolicy>());
+            Substitute.For<IAccessPolicy>(),
+            RetrievalOptions.None);
 
         // Отказ происходит до обращения к модели/БД — мокам поведение не нужно.
         await Should.ThrowAsync<AccessContextRequiredException>(

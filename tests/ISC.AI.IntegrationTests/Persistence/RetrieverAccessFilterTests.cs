@@ -43,7 +43,8 @@ public sealed class RetrieverAccessFilterTests : IAsyncLifetime
         var retriever = new PgVectorRetriever(
             factory,
             new FixedEmbeddingGenerator(EmbeddingEntity.Dimensions),
-            new AllowAllAccessPolicy());
+            new AllowAllAccessPolicy(),
+            RetrievalOptions.None);
 
         // Субъект: допуск гриф ≤ 1, подразделение 7.
         var access = new AccessContext("u1", MaxClassification: 1, AllowedDivisions: [7]);

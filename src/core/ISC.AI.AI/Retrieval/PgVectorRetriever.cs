@@ -28,7 +28,8 @@ namespace ISC.AI.AI.Retrieval;
 public sealed class PgVectorRetriever(
     IDbContextFactory<CoreDbContext> contextFactory,
     [FromKeyedServices(ModelRole.Embeddings)] IEmbeddingGenerator<string, Embedding<float>> embeddingGenerator,
-    IAccessPolicy accessPolicy) : IRetriever
+    IAccessPolicy accessPolicy,
+    RetrievalOptions options) : IRetriever
 {
     /// <inheritdoc />
     public async Task<IReadOnlyList<RetrievedChunk>> RetrieveAsync(
@@ -61,6 +62,13 @@ public sealed class PgVectorRetriever(
         if (filter is null || !filter.IncludeSuperseded)
         {
             candidates = candidates.Where(e => e.IsCurrent);
+        }
+
+        // Порог отсечения по релевантности (ТО-мат-04) — ПОСЛЕ фильтра доступа, не вместо него: сужает
+        // выдачу по качеству совпадения, topK может быть не исчерпан. Не задан — отсечения нет.
+        if (options.MaxDistance is { } maxDistance)
+        {
+            candidates = candidates.Where(e => e.Embedding.CosineDistance(queryVector) <= maxDistance);
         }
 
         return await candidates
