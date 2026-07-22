@@ -1,3 +1,6 @@
+using System.Reflection;
+using Scriban;
+
 namespace ISC.AI.AI.Grounding;
 
 /// <summary>
@@ -7,10 +10,22 @@ namespace ISC.AI.AI.Grounding;
 /// </summary>
 public static class GroundingPrompt
 {
+    // Текст — файл-шаблон Scriban (ТО-лнг-03: "промпты хранятся файлами-шаблонами... подставляются
+    // шаблонизатором"), встроенный ресурс сборки (см. Grounding/Prompts/grounding-system-rule.scriban).
+    // Переменных в этом правиле нет, но грузится тем же путём, что и задачные промпты профиля
+    // (ScribanReferencePromptRenderer) — единообразие важнее, чем экономия на Template.Render() без модели.
+    private static readonly Lazy<string> RenderedSystemRule = new(LoadSystemRule);
+
     /// <summary>Текст системного правила грунтовки (ставится первым system-сообщением).</summary>
-    public const string SystemRule =
-        "Отвечай ТОЛЬКО на основе предоставленных фрагментов. Любая ссылка на документ или норму " +
-        "должна дословно опираться на эти фрагменты. ЗАПРЕЩЕНО ссылаться на источники «по памяти» " +
-        "или придумывать реквизиты. Не используй источники, помеченные как утратившие силу или " +
-        "неактуальные. Если подтверждающего фрагмента нет — прямо укажи это, не выдумывая ссылку.";
+    public static string SystemRule => RenderedSystemRule.Value;
+
+    private static string LoadSystemRule()
+    {
+        var assembly = typeof(GroundingPrompt).Assembly;
+        var resourceName = assembly.GetManifestResourceNames()
+            .Single(name => name.EndsWith("grounding-system-rule.scriban", StringComparison.Ordinal));
+        using var stream = assembly.GetManifestResourceStream(resourceName)!;
+        using var reader = new StreamReader(stream);
+        return Template.Parse(reader.ReadToEnd()).Render();
+    }
 }
