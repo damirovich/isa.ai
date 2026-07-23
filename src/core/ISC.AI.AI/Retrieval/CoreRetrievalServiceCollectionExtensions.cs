@@ -25,12 +25,19 @@ public static class CoreRetrievalServiceCollectionExtensions
         return services;
     }
 
-    // Порог — из Retrieval:MaxDistance. Не задан/не парсится → отсечения нет (см. RetrievalOptions.None).
+    // Порог и метрика ранжирования — из секции Retrieval (ТО-мат-04). MaxDistance не задан/не парсится →
+    // отсечения нет; Metric не задан/не парсится → Cosine (совпадает с HNSW-индексом).
     private static RetrievalOptions ReadRetrievalOptions(IConfiguration configuration)
     {
-        var raw = configuration["Retrieval:MaxDistance"];
-        return double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var maxDistance)
-            ? new RetrievalOptions(maxDistance)
-            : RetrievalOptions.None;
+        double? maxDistance = double.TryParse(
+            configuration["Retrieval:MaxDistance"], NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : null;
+
+        var metric = Enum.TryParse<RetrievalMetric>(configuration["Retrieval:Metric"], ignoreCase: true, out var m)
+            ? m
+            : RetrievalMetric.Cosine;
+
+        return new RetrievalOptions(maxDistance, metric);
     }
 }

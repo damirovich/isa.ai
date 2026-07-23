@@ -64,24 +64,36 @@ public sealed class PgVectorRetriever(
             candidates = candidates.Where(e => e.IsCurrent);
         }
 
+        // Дистанция ВЫБРАННОЙ метрикой (ТО-мат-04: ранжирование задаётся конфигурацией) — вычисляется ОДИН
+        // раз проекцией, чтобы порог, сортировка и Score использовали одну метрику. По умолчанию Cosine
+        // (совпадает с HNSW-индексом); иная метрика ранжирует корректно, но индекс к ней не подходит.
+        var scored = options.Metric switch
+        {
+            RetrievalMetric.Euclidean =>
+                candidates.Select(e => new { Embedding = e, Distance = e.Embedding.L2Distance(queryVector) }),
+            RetrievalMetric.NegativeInnerProduct =>
+                candidates.Select(e => new { Embedding = e, Distance = e.Embedding.MaxInnerProduct(queryVector) }),
+            _ => candidates.Select(e => new { Embedding = e, Distance = e.Embedding.CosineDistance(queryVector) }),
+        };
+
         // Порог отсечения по релевантности (ТО-мат-04) — ПОСЛЕ фильтра доступа, не вместо него: сужает
-        // выдачу по качеству совпадения, topK может быть не исчерпан. Не задан — отсечения нет.
+        // выдачу по качеству совпадения (в единицах метрики), topK может быть не исчерпан. Не задан — нет отсечения.
         if (options.MaxDistance is { } maxDistance)
         {
-            candidates = candidates.Where(e => e.Embedding.CosineDistance(queryVector) <= maxDistance);
+            scored = scored.Where(s => s.Distance <= maxDistance);
         }
 
-        return await candidates
-            .OrderBy(e => e.Embedding.CosineDistance(queryVector))
+        return await scored
+            .OrderBy(s => s.Distance)
             .Take(topK)
-            .Select(e => new RetrievedChunk(
-                e.ChunkId,
-                e.Chunk!.DocumentId,
-                e.Chunk.Text,
-                e.Classification,
-                e.DivisionId,
-                e.IsCurrent,
-                e.Embedding.CosineDistance(queryVector)))
+            .Select(s => new RetrievedChunk(
+                s.Embedding.ChunkId,
+                s.Embedding.Chunk!.DocumentId,
+                s.Embedding.Chunk.Text,
+                s.Embedding.Classification,
+                s.Embedding.DivisionId,
+                s.Embedding.IsCurrent,
+                s.Distance))
             .ToListAsync(cancellationToken);
     }
 }

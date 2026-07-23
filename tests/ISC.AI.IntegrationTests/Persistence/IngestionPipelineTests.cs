@@ -69,6 +69,35 @@ public sealed class IngestionPipelineTests : IAsyncLifetime
         }
     }
 
+    [Fact(DisplayName = "ТНД-002: конкурентный импорт одного содержимого создаёт РОВНО один документ (уникальный индекс)")]
+    public async Task Concurrent_ingestion_of_same_content_creates_single_document()
+    {
+        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+        }
+
+        var port = new IngestionPort(factory, new FixedEmbeddingGenerator(768), new SimpleTextChunker());
+        var request = new IngestionRequest(
+            "приказ", "Одновременная загрузка", "Один и тот же текст.", Classification: 1, DivisionId: 7);
+
+        // Два ПАРАЛЛЕЛЬНЫХ импорта одинакового содержимого (каждый вызов — свой контекст/транзакция).
+        var results = await Task.WhenAll(port.IngestAsync(request), port.IngestAsync(request));
+
+        // Инвариант ТНД-002: физически создан РОВНО один документ, несмотря на гонку check-then-insert —
+        // уникальный индекс content_hash отклонил дубль, а порт вернул «дубликат» вместо исключения.
+        await using (var db = factory.CreateDbContext())
+        {
+            (await db.Documents.CountAsync()).ShouldBe(1);
+        }
+
+        // Оба вызова завершились без исключения: ровно один проиндексировал (чанки > 0), второй — дубликат (0).
+        results.ShouldAllBe(r => r.Accepted);
+        results.Count(r => r.ChunkCount > 0).ShouldBe(1);
+        results.Count(r => r.ChunkCount == 0).ShouldBe(1);
+    }
+
     private sealed class TestContextFactory(string connectionString) : IDbContextFactory<CoreDbContext>
     {
         public CoreDbContext CreateDbContext() =>

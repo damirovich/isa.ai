@@ -39,7 +39,10 @@ public sealed class AuditWriter(IDbContextFactory<CoreDbContext> contextFactory)
 
         var record = new AuditRecordEntity
         {
-            OccurredAt = DateTime.UtcNow,
+            // Усечение до микросекунд: колонка timestamp хранит µs (6 знаков), а DateTime.UtcNow — 100 нс
+            // (7 знаков). Хешируем и сохраняем ОДНО И ТО ЖЕ µs-значение — иначе запись хеша по 100-нс биту,
+            // которого нет в persisted значении, ломает пересчёт record_hash из БД (ложная «подмена», ТБ-031).
+            OccurredAt = TruncateToMicroseconds(DateTime.UtcNow),
             SubjectId = entry.SubjectId,
             Action = entry.Action,
             ObjectRef = entry.ObjectRef,
@@ -55,8 +58,14 @@ public sealed class AuditWriter(IDbContextFactory<CoreDbContext> contextFactory)
         await transaction.CommitAsync(cancellationToken);
     }
 
+    // Микросекундная точность записи времени: 1 µs = 10 тиков (100 нс). Отбрасываем sub-µs остаток,
+    // чтобы значение совпадало с тем, что физически хранит PostgreSQL timestamp (µs).
+    private static DateTime TruncateToMicroseconds(DateTime value) =>
+        new(value.Ticks - (value.Ticks % TimeSpan.TicksPerMicrosecond), value.Kind);
+
     // record_hash = SHA-256(prev_hash || канонические поля записи). Подмена любого поля рвёт цепочку.
-    private static byte[] ComputeRecordHash(byte[] previousHash, AuditRecordEntity record)
+    // internal: тест обнаружения подмены пересчитывает хеш из ПРОЧИТАННЫХ из БД полей той же логикой.
+    internal static byte[] ComputeRecordHash(byte[] previousHash, AuditRecordEntity record)
     {
         var canonical = string.Join('|',
             record.OccurredAt.ToString("O", CultureInfo.InvariantCulture),

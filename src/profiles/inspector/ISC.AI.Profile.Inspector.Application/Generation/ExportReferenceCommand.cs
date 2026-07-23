@@ -1,6 +1,7 @@
 using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.Documents;
+using ISC.AI.Abstractions.Security;
 using ISC.AI.Profile.Inspector.Application.Common;
 using Mediator;
 
@@ -32,7 +33,7 @@ public sealed record ExportReferenceCommand(string Title, string Body, short Cla
     /// Обработчик: гриф → текстовая маркировка → рендер <c>.docx</c> с грифом в теле и метаданных →
     /// байты файла в конверте. Аудит экспорта (<see cref="AuditAction.Export"/>) пишет сквозное AuditBehavior (Э4-11).
     /// </summary>
-    public sealed class Handler(IDocumentExporter exporter)
+    public sealed class Handler(IDocumentExporter exporter, IAccessContextProvider accessContextProvider)
         : IRequestHandler<ExportReferenceCommand, ResModel>
     {
         private const string DocxContentType =
@@ -45,11 +46,17 @@ public sealed record ExportReferenceCommand(string Title, string Body, short Cla
 
             var marking = ClassificationMarking.For(command.Classification);
 
+            // Исполнитель (ТБ-033 «кто изготовил») — текущий субъект. Учётный номер (регистрационный)
+            // не передаётся: системы регистрации на MVP нет → экспортёр помечает «не присвоен» (присвоение
+            // реальных номеров реальных ДСП-справок — процесс/режим-гейт ТБ-063, не код).
+            var access = await accessContextProvider.GetCurrentAsync(cancellationToken);
+
             var bytes = await exporter.ExportToDocxAsync(
                 new DocumentExportRequest(
                     Title: command.Title,
                     Body: command.Body,
                     ClassificationMarking: marking,
+                    Executor: access.SubjectId,
                     DraftNotice: "ЧЕРНОВИК — требует проверки человеком (HITL, ТБ-042)."),
                 cancellationToken);
 

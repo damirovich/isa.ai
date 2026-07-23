@@ -6,11 +6,16 @@ using ISC.AI.Abstractions.Documents;
 namespace ISC.AI.Documents.Export;
 
 /// <summary>
-/// Экспорт в <c>.docx</c> через OpenXml. Маркировка грифа (ТБ-033) проставляется ОБЯЗАТЕЛЬНО:
-/// видимой строкой в теле (верх, справа, жирным) и в метаданных файла (Category/Keywords).
+/// Экспорт в <c>.docx</c> через OpenXml. Учётные реквизиты ТБ-033 проставляются ОБЯЗАТЕЛЬНО и в теле, и в
+/// метаданных файла: гриф (в теле — верх справа жирным; в метаданных — Category/Keywords), учётный номер
+/// (в теле; в метаданных — Identifier) и исполнитель (в теле; в метаданных — Creator). Отсутствующее
+/// значение — явный плейсхолдер, чтобы маркировка была структурно полной.
 /// </summary>
 public sealed class DocxDocumentExporter : IDocumentExporter
 {
+    private const string ReferenceUnset = "не присвоен";
+    private const string ExecutorUnset = "не указан";
+
     /// <inheritdoc />
     public Task<byte[]> ExportToDocxAsync(DocumentExportRequest request, CancellationToken cancellationToken = default)
     {
@@ -22,8 +27,13 @@ public sealed class DocxDocumentExporter : IDocumentExporter
             var main = document.AddMainDocumentPart();
             var body = new Body();
 
-            // Гриф — В ТЕЛЕ (верх, справа, жирным): обязательная маркировка (ТБ-033).
+            var reference = string.IsNullOrWhiteSpace(request.Reference) ? ReferenceUnset : request.Reference;
+            var executor = string.IsNullOrWhiteSpace(request.Executor) ? ExecutorUnset : request.Executor;
+
+            // Учётные реквизиты — В ТЕЛЕ (обязательная маркировка ТБ-033): гриф (верх, справа, жирным),
+            // учётный номер под ним; исполнитель — в конце (официальная практика оформления).
             body.Append(Marking(request.ClassificationMarking));
+            body.Append(Text($"Учётный номер: {reference}"));
 
             if (!string.IsNullOrWhiteSpace(request.DraftNotice))
             {
@@ -32,23 +42,23 @@ public sealed class DocxDocumentExporter : IDocumentExporter
 
             body.Append(Title(request.Title));
 
-            if (!string.IsNullOrWhiteSpace(request.Reference))
-            {
-                body.Append(Text(request.Reference));
-            }
-
             foreach (var line in (request.Body ?? string.Empty).Split('\n'))
             {
                 body.Append(Text(line));
             }
 
+            body.Append(Text($"Исполнитель: {executor}"));
+
             main.Document = new Document(body);
             main.Document.Save();
 
-            // Гриф — В МЕТАДАННЫХ файла.
+            // Учётные реквизиты — В МЕТАДАННЫХ файла (ТБ-033): гриф (Category/Keywords), исполнитель
+            // (Creator — «кто изготовил»), учётный номер (Identifier — уникальный идентификатор ресурса).
             document.PackageProperties.Title = request.Title;
             document.PackageProperties.Category = request.ClassificationMarking;
             document.PackageProperties.Keywords = request.ClassificationMarking;
+            document.PackageProperties.Creator = executor;
+            document.PackageProperties.Identifier = reference;
         }
 
         return Task.FromResult(stream.ToArray());
