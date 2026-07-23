@@ -73,13 +73,10 @@ public sealed class AuditBehavior<TMessage, TResponse>(
             var access = await accessContextProvider.GetCurrentAsync(cancellationToken);
             subjectCeiling = access.MaxClassification;
 
-            // Субъект записи (ТБ-030 «кто»): числовой SubjectId — локальный id пользователя (Э3-08);
-            // нечисловой (dev-заглушка и т.п.) в колонку субъекта не пишется.
-            if (int.TryParse(access.SubjectId, System.Globalization.NumberStyles.Integer,
-                    System.Globalization.CultureInfo.InvariantCulture, out var parsedSubject))
-            {
-                subjectId = parsedSubject;
-            }
+            // Субъект записи (ТБ-030 «кто»): числовой id пользователя (Э3-08); нечисловой (dev-заглушка
+            // и т.п.) в колонку субъекта не пишется. Правило — в AccessContext.NumericSubjectId (едино с
+            // прямой записью аудита генерации).
+            subjectId = access.NumericSubjectId;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

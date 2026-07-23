@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace ISC.AI.Abstractions.Security;
 
 /// <summary>
@@ -8,4 +10,14 @@ namespace ISC.AI.Abstractions.Security;
 public sealed record AccessContext(
     string SubjectId,
     short MaxClassification,
-    IReadOnlyCollection<int> AllowedDivisions);
+    IReadOnlyCollection<int> AllowedDivisions)
+{
+    /// <summary>
+    /// Числовой идентификатор субъекта для колонки «кто» неизменяемого журнала (ТБ-030): локальный id
+    /// пользователя (Э3-08). Нечисловой <see cref="SubjectId"/> (dev-заглушка и т.п.) в аудит не пишется —
+    /// здесь <see langword="null"/>. Единая точка правила: используется и сквозным <c>AuditBehavior</c>,
+    /// и прямой записью аудита генерации (<c>GroundedGenerator</c>), чтобы разбор не расходился.
+    /// </summary>
+    public int? NumericSubjectId =>
+        int.TryParse(SubjectId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) ? id : null;
+}

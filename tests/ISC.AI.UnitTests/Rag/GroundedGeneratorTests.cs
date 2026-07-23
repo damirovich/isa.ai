@@ -50,7 +50,7 @@ public sealed class GroundedGeneratorTests
             .BuildServiceProvider();
 
         var generator = new GroundedGenerator(retriever, grounding, audit, provider);
-        var access = new AccessContext("u1", MaxClassification: 2, AllowedDivisions: [7]);
+        var access = new AccessContext("42", MaxClassification: 2, AllowedDivisions: [7]);
 
         var response = await generator.GenerateAsync(new GroundedRequest("вопрос"), access);
 
@@ -66,8 +66,15 @@ public sealed class GroundedGeneratorTests
         // Грунтовка вызвана на выводе модели.
         grounding.Received(1).Validate("ответ модели", Arg.Any<IReadOnlyList<RetrievedChunk>>());
 
-        // Генерация аудирована (ТБ-030).
-        await audit.Received(1).WriteAsync(Arg.Is<AuditEntry>(e => e.Action == AuditAction.Generate), Arg.Any<CancellationToken>());
+        // Генерация аудирована (ТБ-030 «кто/что/когда»): действие Generate, субъект из контекста доступа,
+        // гриф = max грифов фрагментов, id использованных фрагментов зафиксированы.
+        await audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e =>
+                e.Action == AuditAction.Generate &&
+                e.SubjectId == 42 &&
+                e.Classification == 2 &&
+                e.ObjectRef == "10,11"),
+            Arg.Any<CancellationToken>());
 
         // Наследование грифа: итог = максимум грифов фрагментов.
         response.ResultClassification.ShouldBe<short>(2);

@@ -59,12 +59,15 @@ public sealed class GroundedGenerator(
             }
         }
 
-        // Аудит генерации (ТБ-030): метаданные (id фрагментов) отдельно от чувствительного (запрос/ответ, ТБ-032).
+        // Аудит генерации (ТБ-030 «кто/что/когда»): субъект — из контекста доступа (единственная запись
+        // события; команда намеренно не IAuditableRequest, чтобы не задвоить журнал). Метаданные (id
+        // фрагментов) отдельно от чувствительного (запрос/ответ, ТБ-032).
         var usedChunkIds = string.Join(",", fragments.Select(f => f.ChunkId));
         await auditWriter.WriteAsync(
             new AuditEntry(
                 AuditAction.Generate,
                 resultClassification,
+                SubjectId: access.NumericSubjectId,
                 ObjectRef: usedChunkIds,
                 PayloadSensitive: $"Запрос: {request.Query}\nОтвет: {answer}"),
             cancellationToken);
