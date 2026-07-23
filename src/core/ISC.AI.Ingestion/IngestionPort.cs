@@ -76,7 +76,28 @@ public sealed class IngestionPort(
             DivisionId = divisionId,
         };
         db.Documents.Add(document);
-        await db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // Гонка дедупликации (ТНД-002): параллельный импорт того же содержимого выиграл вставку —
+            // уникальный индекс content_hash отклонил дубль. Откатываемся и возвращаем «дубликат», как при
+            // обычном дедупе (идемпотентность держится и под конкуренцией). Если документа с таким хешем
+            // всё же нет — это иное нарушение целостности, не глотаем.
+            await transaction.RollbackAsync(cancellationToken);
+            var winnerId = await db.Documents.AsNoTracking()
+                .Where(d => d.ContentHash == contentHash)
+                .Select(d => (int?)d.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (winnerId is { } raceWinnerId)
+            {
+                return IngestionResult.Duplicate(raceWinnerId);
+            }
+
+            throw;
+        }
 
         // Замена версии (Э4-14): ПЕРЕД добавлением новых чанков гасим прежнюю версию (hide-first) — её
         // чанки и эмбеддинги становятся неактуальными в ЭТОЙ ЖЕ транзакции (атомарно, опора GATE-3:

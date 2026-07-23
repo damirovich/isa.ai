@@ -19,6 +19,12 @@ public class DocumentEntityConfiguration : IEntityTypeConfiguration<DocumentEnti
 
         // Индекс под фильтр доступа на извлечении (ТБ-020).
         builder.HasIndex(e => new { e.Classification, e.DivisionId });
-        builder.HasIndex(e => e.ContentHash); // дедупликация (ТНД-002)
+
+        // Дедупликация (ТНД-002) — УНИКАЛЬНЫЙ частичный индекс: БД сама отклоняет повторную загрузку того
+        // же содержимого, поэтому идемпотентность держится и под КОНКУРЕНТНЫМ импортом (не только при
+        // последовательном check-then-insert). Частичный (IS NOT NULL): документы без хеша не конфликтуют.
+        builder.HasIndex(e => e.ContentHash)
+               .IsUnique()
+               .HasFilter("content_hash IS NOT NULL");
     }
 }
