@@ -11,8 +11,13 @@ namespace ISC.AI.Abstractions.Harvesting;
 /// <param name="Text">Извлечённый текст.</param>
 /// <param name="DocType">Тип документа (свободная строка: «закон», «положение», «web»…).</param>
 /// <param name="ContentHash">Хеш содержимого (для дедупа/идемпотентности при импорте).</param>
-/// <param name="Classification">Гриф (для открытого корпуса — 0; декларируется, не авто-детект).</param>
-/// <param name="DivisionId">Подразделение (из конфига оператора).</param>
+/// <param name="Classification">
+/// Гриф (для открытого корпуса — явный 0; декларируется, не авто-детект). <see langword="null"/> —
+/// поле НЕ задано в пакете → импорт отклоняет документ (fail-closed, ТБ-024). Nullable НАМЕРЕННО: пакет
+/// приходит из-за контура от недоверенного производителя (ТБ-001), «поле отсутствует» обязано быть
+/// представимо и отличимо от явного 0 — иначе пропущенное поле молча индексировалось бы как открытое.
+/// </param>
+/// <param name="DivisionId">Подразделение (из конфига оператора). <see langword="null"/> — не задано → отказ (ТБ-024).</param>
 /// <param name="Language">Язык (ru/ky/…), если определён.</param>
 /// <param name="Metadata">Источник-специфичные поля (номер/дата/статус редакции и т. п.).</param>
 public sealed record HarvestedDocument(
@@ -21,7 +26,7 @@ public sealed record HarvestedDocument(
     string Text,
     string DocType,
     string ContentHash,
-    short Classification,
-    int DivisionId,
+    short? Classification,
+    int? DivisionId,
     string? Language = null,
     IReadOnlyDictionary<string, string>? Metadata = null);

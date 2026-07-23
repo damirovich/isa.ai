@@ -54,4 +54,48 @@ public sealed class BundleImporterTests
             }
         }
     }
+
+    [Fact(DisplayName = "ТБ-024: документ без поля грифа в пакете уходит в порт как null (→ отказ), а не как открытый 0")]
+    public async Task Missing_classification_field_maps_to_null_not_open_zero()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "harvester-import-" + Guid.NewGuid().ToString("N"));
+        var manifestPath = Path.Combine(directory, "manifest.json");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            // Пакет от НЕдоверенного производителя (ТБ-001): у второго документа поле classification ОТСУТСТВУЕТ.
+            // До правки не-nullable short давал бы 0 (открытый гриф) и молча индексировался; теперь → null.
+            await File.WriteAllTextAsync(manifestPath, """
+                [
+                  {"sourceUrl":"http://e/1","title":"С грифом","text":"т","docType":"закон","contentHash":"H1","classification":1,"divisionId":7},
+                  {"sourceUrl":"http://e/2","title":"Без грифа","text":"т","docType":"закон","contentHash":"H2","divisionId":7}
+                ]
+                """);
+
+            var captured = new List<IngestionRequest>();
+            var port = Substitute.For<IIngestionPort>();
+            // Имитируем реальный fail-closed порта: null-гриф → отказ, иначе — принято.
+            port.IngestAsync(Arg.Do<IngestionRequest>(captured.Add), Arg.Any<CancellationToken>())
+                .Returns(ci => ci.Arg<IngestionRequest>().Classification is null
+                    ? IngestionResult.Reject("нет грифа")
+                    : IngestionResult.Ok(documentId: 1, chunkCount: 3));
+
+            var result = await new BundleImporter(port).ImportAsync(manifestPath);
+
+            // Документ с явным грифом принят, документ без поля грифа — ОТКЛОНЁН (не проиндексирован).
+            result.Imported.ShouldBe(1);
+            result.Rejected.ShouldBe(1);
+
+            // Ключевое: пропущенное поле доехало до порта как null, а НЕ как 0 (открытый гриф).
+            captured[0].Classification.ShouldBe((short?)1);
+            captured[1].Classification.ShouldBeNull();
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
 }

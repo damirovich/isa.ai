@@ -27,7 +27,7 @@ public sealed class GenericUrlConnectorTests
         docs[0].Title.ShouldBe("Док");
         docs[0].Text.ShouldContain("Текст НПА.");
         docs[0].DocType.ShouldBe("положение");
-        docs[0].Classification.ShouldBe<short>(0);
+        docs[0].Classification.ShouldBe((short?)0);
         docs[0].DivisionId.ShouldBe(7);
         docs[0].SourceUrl.ShouldBe("http://example/doc");
         docs[0].ContentHash.ShouldNotBeNullOrWhiteSpace();
