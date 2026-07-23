@@ -1,4 +1,5 @@
 using ISC.AI.Abstractions.Documents;
+using ISC.AI.Abstractions.Security;
 using ISC.AI.Profile.Inspector.Application.Generation;
 using NSubstitute;
 using Shouldly;
@@ -18,13 +19,19 @@ public sealed class ExportReferenceHandlerTests
         var exporter = Substitute.For<IDocumentExporter>();
         exporter.ExportToDocxAsync(Arg.Do<DocumentExportRequest>(r => captured = r), Arg.Any<CancellationToken>())
             .Returns([1, 2, 3]);
-        var response = await new ExportReferenceCommand.Handler(exporter)
+
+        var accessProvider = Substitute.For<IAccessContextProvider>();
+        accessProvider.GetCurrentAsync(Arg.Any<CancellationToken>())
+            .Returns(new AccessContext("insp-42", MaxClassification: 2, AllowedDivisions: [7]));
+
+        var response = await new ExportReferenceCommand.Handler(exporter, accessProvider)
             .Handle(new ExportReferenceCommand("Справка по режиму", "тело справки", Classification: 1), CancellationToken.None);
 
-        // Гриф 1 → маркировка «ДСП», заголовок проброшен.
+        // Гриф 1 → маркировка «ДСП», заголовок проброшен, исполнитель = текущий субъект (ТБ-033).
         captured.ShouldNotBeNull();
         captured!.ClassificationMarking.ShouldBe("ДСП");
         captured.Title.ShouldBe("Справка по режиму");
+        captured.Executor.ShouldBe("insp-42");
 
         // Конверт: Ok + файл .docx.
         response.Status.ShouldBeTrue();
