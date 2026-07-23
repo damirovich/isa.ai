@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+using System.Text;
 using ISC.AI.AI.Grounding;
 using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.Grounding;
@@ -46,6 +48,54 @@ public sealed class GroundedGenerator(
         var modelResponse = await chatClient.GetResponseAsync(messages, options: null, cancellationToken);
         var answer = modelResponse.Text ?? string.Empty;
 
+        // 6–7 + аудит: грунтовка на полном тексте, наследование грифа, запись в журнал (общий хвост).
+        return await FinalizeAsync(request, fragments, answer, access, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async IAsyncEnumerable<GroundedStreamUpdate> GenerateStreamingAsync(
+        GroundedRequest request,
+        AccessContext access,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(access);
+
+        // 1–3. Извлечение с ОБЯЗАТЕЛЬНЫМ фильтром доступа (ТБ-020, fail-closed) — как и в блокирующем пути.
+        var fragments = await retriever.RetrieveAsync(request.Query, access, request.TopK, filter: null, cancellationToken);
+
+        // 4. Тот же промпт: системный (грунтовка) ПЕРВЫМ + задачный + фрагменты (ТБ-041).
+        var chatClient = serviceProvider.GetRequiredKeyedService<IChatClient>(request.Role);
+        var messages = BuildMessages(request, fragments);
+
+        // 5. Стриминг СЫРОГО черновика: отдаём токены по мере генерации, параллельно копим полный текст.
+        //    Грунтовка на промежуточных токенах НЕ выполняется — только на собранном тексте (ТБ-040).
+        var assembled = new StringBuilder();
+        await foreach (var update in chatClient.GetStreamingResponseAsync(messages, options: null, cancellationToken))
+        {
+            var delta = update.Text;
+            if (!string.IsNullOrEmpty(delta))
+            {
+                assembled.Append(delta);
+                yield return new GroundedStreamUpdate(TextDelta: delta, Final: null);
+            }
+        }
+
+        // 6–7 + аудит: грунтовка на ПОЛНОМ тексте, наследование грифа, запись в журнал — итог ОДНИМ
+        //    последним обновлением (только он несёт вердикт грунтовки и подтверждённые ссылки).
+        var final = await FinalizeAsync(request, fragments, assembled.ToString(), access, cancellationToken);
+        yield return new GroundedStreamUpdate(TextDelta: null, Final: final);
+    }
+
+    // Общий «хвост» обоих путей: грунтовка вывода (ТБ-040), наследование грифа (ТБ-032/033) и запись
+    // единственного аудита генерации (ТБ-030). Вынесен, чтобы блокирующий и потоковый пути не расходились.
+    private async Task<GroundedResponse> FinalizeAsync(
+        GroundedRequest request,
+        IReadOnlyList<RetrievedChunk> fragments,
+        string answer,
+        AccessContext access,
+        CancellationToken cancellationToken)
+    {
         // 6. Грунтовка вывода против извлечённых фрагментов (ТБ-040, GATE-2).
         var grounding = groundingValidator.Validate(answer, fragments);
 

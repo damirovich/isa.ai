@@ -14,8 +14,20 @@ namespace ISC.AI.Abstractions.Rag;
 /// </remarks>
 public interface IGroundedGenerator
 {
-    /// <summary>Выполняет RAG-конвейер для запроса в контексте доступа субъекта.</summary>
+    /// <summary>Выполняет RAG-конвейер для запроса в контексте доступа субъекта (блокирующе, ответ целиком).</summary>
     Task<GroundedResponse> GenerateAsync(
+        GroundedRequest request,
+        AccessContext access,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Потоковый вариант конвейера (ТО-прог-01): отдаёт черновик по мере генерации
+    /// (<see cref="GroundedStreamUpdate.TextDelta"/>), затем ОДНИМ последним обновлением — итог с грунтовкой
+    /// (<see cref="GroundedStreamUpdate.Final"/>). Инварианты те же: фильтр доступа ДО модели (ТБ-020),
+    /// грунтовка на СОБРАННОМ полном тексте (ТБ-040), аудит генерации (ТБ-030). Промежуточный текст —
+    /// НЕпроверенный черновик (см. <see cref="GroundedStreamUpdate"/>).
+    /// </summary>
+    IAsyncEnumerable<GroundedStreamUpdate> GenerateStreamingAsync(
         GroundedRequest request,
         AccessContext access,
         CancellationToken cancellationToken = default);

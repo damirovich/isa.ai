@@ -94,4 +94,67 @@ public sealed class GroundedGeneratorTests
         await Should.ThrowAsync<ArgumentNullException>(
             () => generator.GenerateAsync(new GroundedRequest("вопрос"), access: null!));
     }
+
+    [Fact(DisplayName = "Стриминг: черновик отдаётся по токенам; грунтовка — на СОБРАННОМ полном тексте; итог одним Final")]
+    public async Task Streaming_yields_draft_deltas_then_final_grounded_on_full_text()
+    {
+        var fragments = new List<RetrievedChunk> { Chunk(10, "текст A", 1), Chunk(11, "текст B", 2) };
+
+        var retriever = Substitute.For<IRetriever>();
+        retriever.RetrieveAsync(Arg.Any<string>(), Arg.Any<AccessContext>(), Arg.Any<int>(), Arg.Any<RetrievalFilter?>(), Arg.Any<CancellationToken>())
+            .Returns(fragments);
+
+        var chatClient = Substitute.For<IChatClient>();
+        chatClient.GetStreamingResponseAsync(
+                Arg.Any<IEnumerable<ChatMessage>>(), Arg.Any<ChatOptions?>(), Arg.Any<CancellationToken>())
+            .Returns(_ => StreamParts("Служебная ", "справка."));
+
+        string? groundedOn = null;
+        var grounding = Substitute.For<IGroundingValidator>();
+        grounding.Validate(Arg.Do<string>(t => groundedOn = t), Arg.Any<IReadOnlyList<RetrievedChunk>>())
+            .Returns(new GroundingResult([], AllConfirmed: true));
+
+        var audit = Substitute.For<IAuditWriter>();
+
+        var provider = new ServiceCollection()
+            .AddKeyedSingleton<IChatClient>(ModelRole.Analysis, chatClient)
+            .BuildServiceProvider();
+
+        var generator = new GroundedGenerator(retriever, grounding, audit, provider);
+        var access = new AccessContext("42", MaxClassification: 2, AllowedDivisions: [7]);
+
+        var updates = new List<GroundedStreamUpdate>();
+        await foreach (var update in generator.GenerateStreamingAsync(new GroundedRequest("вопрос"), access))
+        {
+            updates.Add(update);
+        }
+
+        // Промежуточные обновления — сырой черновик по частям, БЕЗ Final.
+        var deltas = updates.Where(u => u.Final is null).ToList();
+        deltas.Select(u => u.TextDelta).ShouldBe(["Служебная ", "справка."]);
+
+        // Ровно одно терминальное обновление с Final; текст черновика в нём НЕ дублируется.
+        var terminal = updates.Single(u => u.Final is not null);
+        terminal.TextDelta.ShouldBeNull();
+
+        // Грунтовка выполнена на СОБРАННОМ полном тексте (а не на отдельном токене) — ключевой инвариант.
+        groundedOn.ShouldBe("Служебная справка.");
+        terminal.Final!.Answer.ShouldBe("Служебная справка.");
+
+        // Наследование грифа и единственная запись аудита с субъектом — как в блокирующем пути.
+        terminal.Final.ResultClassification.ShouldBe<short>(2);
+        await audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.Action == AuditAction.Generate && e.SubjectId == 42 && e.Classification == 2),
+            Arg.Any<CancellationToken>());
+    }
+
+    private static async IAsyncEnumerable<ChatResponseUpdate> StreamParts(params string[] parts)
+    {
+        foreach (var part in parts)
+        {
+            yield return new ChatResponseUpdate(ChatRole.Assistant, part);
+        }
+
+        await Task.CompletedTask;
+    }
 }
