@@ -11,7 +11,10 @@
 <MudSnackbarProvider />
 
 <MudLayout>
-    <MudAppBar Elevation="0" Dense="true" Color="Color.Transparent">
+    @* Шапка ЗАКРЕПЛЕНА сверху, контент прокручивается под ней — фон обязан быть непрозрачным,
+       иначе текст страницы просвечивает сквозь метки шапки (ДЕМО/контур/дата). Color.Default берёт
+       AppbarBackground темы (#0b1220) — тот же тон, что и фон страницы: визуально плоско, но плотно. *@
+    <MudAppBar Elevation="0" Dense="true" Color="Color.Default">
         <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
                        OnClick="ToggleDrawer" aria-label="Меню" />
         <MudSpacer />
