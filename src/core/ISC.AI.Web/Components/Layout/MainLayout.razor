@@ -85,8 +85,12 @@
         </AuthorizeView>
     </MudDrawer>
 
-    <MudMainContent Class="pt-4">
-        <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pb-8">
+    @* НЕ ставить pt-* на MudMainContent: утилита отступа идёт с !important и перебивает правило
+       MudBlazor «.mud-appbar-dense ~ .mud-main-content { padding-top: высота шапки }», из-за чего
+       контент уезжает ПОД закреплённую шапку. Отступ под шапку оставляем MudBlazor; «воздух» сверху
+       задаём на внутреннем контейнере — он не main-content и клиренс шапки не ломает. *@
+    <MudMainContent>
+        <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pt-4 pb-8">
             @Body
         </MudContainer>
     </MudMainContent>
