@@ -58,6 +58,38 @@ public sealed class AuditImmutabilityTests : IAsyncLifetime
         records[1].PrevHash.ShouldBe(records[0].RecordHash);    // звено цепочки
     }
 
+    [Fact(DisplayName = "Аудит: record_hash пересчитывается из ПРОЧИТАННЫХ из БД полей и совпадает (обнаружение подмены, ТБ-031)")]
+    public async Task Record_hash_recomputes_from_persisted_fields()
+    {
+        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+        }
+
+        var writer = new AuditWriter(factory);
+        await writer.WriteAsync(new AuditEntry(AuditAction.Search, Classification: 1, SubjectId: 7, ObjectRef: "q1"));
+        await writer.WriteAsync(
+            new AuditEntry(AuditAction.Generate, Classification: 2, SubjectId: 7, ObjectRef: "doc1",
+                DivisionId: 5, PayloadSensitive: "запрос/ответ"));
+
+        await using var read = factory.CreateDbContext();
+        var records = await read.AuditRecords.OrderBy(r => r.Id).ToListAsync();
+
+        // Обнаружение подмены (ТБ-031): пересчёт record_hash из значений, ВЕРНУВШИХСЯ ИЗ БД, должен совпасть
+        // с сохранённым. Ловит рассинхрон точности времени (µs в БД vs 100 нс в DateTime) — до фикса не сходилось.
+        var previousHash = new byte[32];
+        foreach (var record in records)
+        {
+            record.PrevHash.ShouldBe(previousHash);
+            AuditWriter.ComputeRecordHash(previousHash, record).ShouldBe(record.RecordHash);
+            previousHash = record.RecordHash;
+        }
+
+        // Контроль: точность времени в БД — микросекунды (нет sub-µs остатка), значит хеш воспроизводим.
+        records.ShouldAllBe(r => r.OccurredAt.Ticks % TimeSpan.TicksPerMicrosecond == 0);
+    }
+
     [Fact(DisplayName = "Аудит append-only: UPDATE и DELETE проваливаются (ТБ-031)")]
     public async Task Audit_is_append_only()
     {
