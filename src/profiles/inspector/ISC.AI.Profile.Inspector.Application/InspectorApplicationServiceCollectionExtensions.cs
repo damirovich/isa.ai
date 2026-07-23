@@ -1,4 +1,5 @@
 using FluentValidation;
+using ISC.AI.Abstractions.AI;
 using ISC.AI.Abstractions.Grounding;
 using ISC.AI.Abstractions.Ingestion;
 using ISC.AI.Profile.Inspector.Application.Generation;
@@ -17,6 +18,10 @@ public static class InspectorApplicationServiceCollectionExtensions
     /// <summary>Регистрирует промпт-рендереры, валидаторы и профильные реализации грунтовки/чанкинга НПА.</summary>
     public static IServiceCollection AddInspectorApplication(this IServiceCollection services)
     {
+        // Провайдер задачных промптов (ТО-прог-04): грузит файлы-шаблоны .scriban ПО КЛЮЧУ из этой сборки.
+        // Рендерер справки берёт шаблон через него, а не прямым чтением ресурса (ТО-лнг-03).
+        services.AddSingleton<IPromptProvider>(
+            new EmbeddedScribanPromptProvider(typeof(InspectorApplicationServiceCollectionExtensions).Assembly));
         services.AddSingleton<IReferencePromptRenderer, ScribanReferencePromptRenderer>();
 
         // Детерминированный расчёт риска подразделения (Э5-01 шаг 2, Приложение §2) — код, не ИИ.
