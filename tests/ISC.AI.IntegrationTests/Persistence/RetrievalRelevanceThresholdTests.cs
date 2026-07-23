@@ -59,6 +59,50 @@ public sealed class RetrievalRelevanceThresholdTests : IAsyncLifetime
         unboundedResults.Count.ShouldBe(2);
     }
 
+    [Fact(DisplayName = "ТО-мат-04: метрика ранжирования из конфигурации применяется (Euclidean ≠ Cosine на тех же данных)")]
+    public async Task Configured_metric_is_applied_to_ranking()
+    {
+        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+
+            var doc = new DocumentEntity { DocType = "приказ", Title = "Тест", Classification = 0, DivisionId = 7 };
+            db.Documents.Add(doc);
+            await db.SaveChangesAsync();
+
+            var chunk = new ChunkEntity
+            {
+                DocumentId = doc.Id, Ordinal = 0, Text = "фрагмент", Classification = 0, DivisionId = 7, IsCurrent = true,
+            };
+            db.Chunks.Add(chunk);
+            await db.SaveChangesAsync();
+
+            // Та же НАПРАВЛЕННОСТЬ, что и вектор запроса [1,0,…], но втрое длиннее: cosine-дистанция 0, L2 = |3−1| = 2.
+            var values = new float[EmbeddingEntity.Dimensions];
+            values[0] = 3f;
+            db.Embeddings.Add(new EmbeddingEntity
+            {
+                ChunkId = chunk.Id, Embedding = new Vector(values), ModelKey = "test",
+                Classification = 0, DivisionId = 7, IsCurrent = true,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var access = new AccessContext("u1", MaxClassification: 0, AllowedDivisions: [7]);
+        var embeddingGenerator = new FixedEmbeddingGenerator(EmbeddingEntity.Dimensions); // вектор запроса [1,0,…]
+
+        // Cosine (по умолчанию): совпадение по направлению → расстояние ≈ 0.
+        var cosine = new PgVectorRetriever(
+            factory, embeddingGenerator, new AllowAllAccessPolicy(), new RetrievalOptions(Metric: RetrievalMetric.Cosine));
+        (await cosine.RetrieveAsync("запрос", access, topK: 1))[0].Score.ShouldBe(0.0, tolerance: 1e-4);
+
+        // Euclidean (из конфигурации): та же пара даёт L2 = 2 — метрика реально применена, а не зашита.
+        var euclidean = new PgVectorRetriever(
+            factory, embeddingGenerator, new AllowAllAccessPolicy(), new RetrievalOptions(Metric: RetrievalMetric.Euclidean));
+        (await euclidean.RetrieveAsync("запрос", access, topK: 1))[0].Score.ShouldBe(2.0, tolerance: 1e-4);
+    }
+
     private static async Task SeedAsync(CoreDbContext db)
     {
         var doc = new DocumentEntity { DocType = "приказ", Title = "Тест", Classification = 0, DivisionId = 7 };
