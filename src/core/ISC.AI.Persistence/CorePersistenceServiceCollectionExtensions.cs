@@ -44,6 +44,9 @@ public static class CorePersistenceServiceCollectionExtensions
         // Материализация флага годности чанков (Э4-02, ADR-0013): профиль ставит видимость по редакциям.
         services.AddScoped<IChunkCurrencyPort, ChunkCurrencyPort>();
 
+        // Гарантированное удаление документа и всех производных (ТБ-064), физически, с записью в аудит.
+        services.AddScoped<IDocumentPurger, DocumentPurger>();
+
         // Персист статусов фоновых задач (Э4-20, §5.1.4.5): переживает перезапуск, восстановление осиротевших.
         services.AddSingleton<IBackgroundTaskStore, EfBackgroundTaskStore>();
 

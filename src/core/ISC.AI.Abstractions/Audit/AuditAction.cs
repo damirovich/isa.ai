@@ -26,4 +26,7 @@ public enum AuditAction
 
     /// <summary>Загрузка/индексация в корпус.</summary>
     Ingest = 6,
+
+    /// <summary>Гарантированное удаление документа и всех производных из корпуса (ТБ-064).</summary>
+    Purge = 7,
 }
