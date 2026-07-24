@@ -86,7 +86,13 @@ public sealed class BundleImporter(IIngestionPort port) : IBundleImporter
             var shardPath = Path.Combine(directory, shard);
             if (!File.Exists(shardPath))
             {
-                continue;
+                // Явный отказ, НЕ молчаливый пропуск (ТНД-002, принцип «явный отказ» — ср. CompositeTextExtractor,
+                // FileIngestionService): пропущенный шард = НЕПОЛНЫЙ корпус. Пакет от недоверенного производителя,
+                // перенос через зазор (ТБ-001/051) — шард мог быть потерян/повреждён. Оператор обязан узнать,
+                // а не увидеть ложный «успех» с молча урезанным Total. Импорт идемпотентен → повтор после
+                // исправления пакета безопасен (дедуп по content_hash).
+                throw new FileNotFoundException(
+                    $"Шард пакета не найден: «{shard}». Пакет неполон — импорт прерван (ТНД-002).", shardPath);
             }
 
             await foreach (var document in ReadArrayAsync(shardPath, cancellationToken))

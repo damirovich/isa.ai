@@ -125,22 +125,8 @@ try
             ? idle
             : 30;
         builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-            .AddCookie(options =>
-            {
-                options.LoginPath = "/login";
-                options.AccessDeniedPath = "/access-denied";
-                options.SlidingExpiration = true;
-                options.ExpireTimeSpan = TimeSpan.FromMinutes(idleMinutes);
-                options.Cookie.Name = ".ISC.AI.Auth";
-                options.Cookie.HttpOnly = true;
-                options.Cookie.SameSite = SameSiteMode.Lax;
-                options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest; // HTTPS внутри контура — ТБ-010
-                // Вторая, независимая от Blazor-circuit'а линия ревалидации (ТБ-014/016): без неё
-                // блокировка/смена пароля во внешней системе не гасит уже выданную cookie — перезагрузка
-                // страницы поднимает новый circuit со своим окном ревалидации, продлевая доступ
-                // заблокированного пользователя. См. CookiePrincipalValidator.
-                options.Events.OnValidatePrincipal = CookiePrincipalValidator.ValidateAsync;
-            });
+            .AddCookie(options => AuthCookieConfiguration.Configure(
+                options, idleMinutes, builder.Environment.IsDevelopment())); // режимные настройки — ТБ-010/014
 
         // Адаптер идентичности СКИД: read-only чтение пользователей чужой БД. ResolveExternal (не
         // Resolve!) — сторонний секрет обязателен явно (Database:Passwords:Skid), общий пароль ядровой

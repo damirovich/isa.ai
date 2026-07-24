@@ -40,6 +40,14 @@ public class DocumentEntity : AuditableEntity, IClassified
     /// </summary>
     public int? SupersededByDocumentId { get; set; }
 
+    /// <summary>
+    /// Доменный «багаж» профиля (ТО-инф-03): источник-специфичные метаданные — для НПА идентификатор нормы,
+    /// номер, статус редакции и т. п. Ядро хранит их НЕПРОЗРАЧНО (jsonb), не интерпретируя; смысл придаёт
+    /// профиль (ТО-инф-06). <see langword="null"/> — метаданных нет. Так данные из пакета (<c>IngestionRequest.Metadata</c>)
+    /// не теряются молча.
+    /// </summary>
+    public Dictionary<string, string>? Metadata { get; set; }
+
     /// <summary>Фрагменты документа.</summary>
     public ICollection<ChunkEntity> Chunks { get; set; } = [];
 }

@@ -8,6 +8,7 @@ using ISC.AI.Abstractions.Security;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 using Shouldly;
 
 namespace ISC.AI.UnitTests.Rag;
@@ -145,6 +146,42 @@ public sealed class GroundedGeneratorTests
         terminal.Final.ResultClassification.ShouldBe<short>(2);
         await audit.Received(1).WriteAsync(
             Arg.Is<AuditEntry>(e => e.Action == AuditAction.Generate && e.SubjectId == 42 && e.Classification == 2),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "ТБ-030: сбой модели — попытка генерации зафиксирована в аудите (ДСП извлечён), исключение проброшено")]
+    public async Task Failed_generation_is_audited_and_rethrows()
+    {
+        var fragments = new List<RetrievedChunk> { Chunk(10, "текст A", 1), Chunk(11, "текст B", 2) };
+
+        var retriever = Substitute.For<IRetriever>();
+        retriever.RetrieveAsync(Arg.Any<string>(), Arg.Any<AccessContext>(), Arg.Any<int>(), Arg.Any<RetrievalFilter?>(), Arg.Any<CancellationToken>())
+            .Returns(fragments);
+
+        var chatClient = Substitute.For<IChatClient>();
+        chatClient.GetResponseAsync(Arg.Any<IEnumerable<ChatMessage>>(), Arg.Any<ChatOptions?>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("сервер модели недоступен"));
+
+        var audit = Substitute.For<IAuditWriter>();
+        var provider = new ServiceCollection()
+            .AddKeyedSingleton<IChatClient>(ModelRole.Analysis, chatClient)
+            .BuildServiceProvider();
+
+        var generator = new GroundedGenerator(retriever, Substitute.For<IGroundingValidator>(), audit, provider);
+        var access = new AccessContext("42", MaxClassification: 2, AllowedDivisions: [7]);
+
+        // Модель падает → исключение проброшено вызывающему.
+        await Should.ThrowAsync<InvalidOperationException>(
+            () => generator.GenerateAsync(new GroundedRequest("вопрос"), access));
+
+        // Но обращение к защищённым фрагментам зафиксировано (ТБ-030): действие Generate, субъект,
+        // гриф = max(1,2) = 2, id использованных фрагментов — как «попытка», даже без ответа модели.
+        await audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e =>
+                e.Action == AuditAction.Generate &&
+                e.SubjectId == 42 &&
+                e.Classification == 2 &&
+                e.ObjectRef == "10,11"),
             Arg.Any<CancellationToken>());
     }
 

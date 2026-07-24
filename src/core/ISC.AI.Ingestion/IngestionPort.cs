@@ -74,6 +74,9 @@ public sealed class IngestionPort(
             ContentHash = contentHash,
             Classification = classification,
             DivisionId = divisionId,
+            // Доменный «багаж» профиля (ТО-инф-03): идентификатор нормы/номер/статус редакции из пакета —
+            // хранить, а не терять молча. Ядро держит непрозрачно (jsonb), смысл придаёт профиль.
+            Metadata = request.Metadata?.ToDictionary(pair => pair.Key, pair => pair.Value),
         };
         db.Documents.Add(document);
         try
