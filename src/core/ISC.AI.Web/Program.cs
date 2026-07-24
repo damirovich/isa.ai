@@ -125,7 +125,8 @@ try
             ? idle
             : 30;
         builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-            .AddCookie(options => AuthCookieConfiguration.Configure(options, idleMinutes)); // режимные настройки — ТБ-010/014
+            .AddCookie(options => AuthCookieConfiguration.Configure(
+                options, idleMinutes, builder.Environment.IsDevelopment())); // режимные настройки — ТБ-010/014
 
         // Адаптер идентичности СКИД: read-only чтение пользователей чужой БД. ResolveExternal (не
         // Resolve!) — сторонний секрет обязателен явно (Database:Passwords:Skid), общий пароль ядровой

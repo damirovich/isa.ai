@@ -9,8 +9,12 @@ namespace ISC.AI.Web.Security;
 /// </summary>
 internal static class AuthCookieConfiguration
 {
-    /// <summary>Настраивает cookie схемы аутентификации: имя, HttpOnly, SameSite, Secure=Always, idle-таймаут, ревалидация.</summary>
-    public static void Configure(CookieAuthenticationOptions options, int idleMinutes)
+    /// <summary>
+    /// Настраивает cookie схемы аутентификации: имя, HttpOnly, SameSite, Secure (по среде), idle-таймаут,
+    /// ревалидация. <paramref name="isDevelopment"/> = <see langword="true"/> — dev по http localhost
+    /// (Secure=SameAsRequest, иначе браузер не вернёт cookie по http и вход сломается); прод — Secure=Always.
+    /// </summary>
+    public static void Configure(CookieAuthenticationOptions options, int idleMinutes, bool isDevelopment)
     {
         options.LoginPath = "/login";
         options.AccessDeniedPath = "/access-denied";
@@ -20,11 +24,13 @@ internal static class AuthCookieConfiguration
         options.Cookie.HttpOnly = true;
         options.Cookie.SameSite = SameSiteMode.Lax;
 
-        // ВСЕГДА Secure (ТБ-010): в контуре HTTPS обязателен. За TLS-терминирующим прокси бэкенд видит
+        // ПРОД: ВСЕГДА Secure (ТБ-010): в контуре HTTPS обязателен. За TLS-терминирующим прокси бэкенд видит
         // запрос как HTTP (X-Forwarded-Proto обрабатывается только при заданном KnownProxies), поэтому
         // SameAsRequest НЕ проставил бы флаг Secure — режимная cookie ушла бы в открытом виде. Always —
         // безусловно, независимо от схемы бэкенд-хопа.
-        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        // DEV: SameAsRequest — локальный запуск по http://localhost не режим; Always там сломал бы вход
+        // (Secure-cookie не шлётся по http).
+        options.Cookie.SecurePolicy = isDevelopment ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
 
         // Вторая, независимая от Blazor-circuit'а линия ревалидации (ТБ-014/016): без неё блокировка/смена
         // пароля во внешней системе не гасит уже выданную cookie — перезагрузка страницы поднимает новый
