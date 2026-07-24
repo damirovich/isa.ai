@@ -16,10 +16,11 @@ namespace ISC.AI.AI.Models;
 /// <remarks>
 /// Канал — локальный OpenAI-совместимый сервер инференса (llama-server) ВНУТРИ контура; авторизации
 /// нет (ключ-заглушка), внешних обращений быть не должно (ТБ-044, air-gap). Эмбеддинги — ОТДЕЛЬНАЯ
-/// модель/инстанс (роль <see cref="ModelRole.Embeddings"/>, ADR-0011). Длинные вызовы стримятся
-/// штатно через <c>IChatClient.GetStreamingResponseAsync</c>. Каждый keyed-клиент обёрнут повтором,
+/// модель/инстанс (роль <see cref="ModelRole.Embeddings"/>, ADR-0011). Каждый keyed-клиент обёрнут
 /// таймаутом и circuit breaker (ТН-003, ТНД-001) — см. <see cref="ResilientChatClient"/>,
-/// <see cref="ResilientEmbeddingGenerator"/>.
+/// <see cref="ResilientEmbeddingGenerator"/>; блокирующие вызовы — ещё и повтором транзиентных сбоев.
+/// Потоковый путь (<c>IChatClient.GetStreamingResponseAsync</c>) защищён circuit breaker и таймаутом
+/// бездействия между чанками, но БЕЗ повтора (частично отданный поток перезапускать нельзя).
 /// </remarks>
 public static class CoreAiModelsServiceCollectionExtensions
 {

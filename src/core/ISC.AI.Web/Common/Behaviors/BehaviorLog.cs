@@ -16,4 +16,9 @@ internal static partial class BehaviorLog
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Mediator: необработанная ошибка в {Request}")]
     public static partial void UnhandledError(ILogger logger, Exception exception, string request);
+
+    // Управляемая деградация (ТН-003/ТНД-001): недоступность модели — ожидаемое временное состояние,
+    // не дефект приложения, поэтому Warning, а не Error, и БЕЗ полного стека в проде.
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Mediator: модель недоступна при выполнении {Request}")]
+    public static partial void ModelUnavailable(ILogger logger, Exception exception, string request);
 }

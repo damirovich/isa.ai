@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using ISC.AI.Abstractions.AI;
 using ISC.AI.Abstractions.Enums;
 using ISC.AI.AI.Models;
@@ -92,5 +93,113 @@ public sealed class ModelCallResilienceTests
         // Третий вызов: circuit открыт — отказ мгновенно, делегат вообще не вызывается.
         await Should.ThrowAsync<ModelUnavailableException>(() => resilience.ExecuteAsync(Failing, CancellationToken.None));
         calls.ShouldBe(2);
+    }
+
+    [Fact(DisplayName = "Потоковый вызов: успешный поток проходит насквозь без изменений")]
+    public async Task Streaming_passes_items_through_on_success()
+    {
+        var resilience = new ModelCallResilience(ModelRole.Draft, TimeSpan.FromSeconds(5));
+        var received = new List<int>();
+
+        await foreach (var i in resilience.ExecuteStreamingAsync(ct => Stream([1, 2, 3], ct), CancellationToken.None))
+        {
+            received.Add(i);
+        }
+
+        received.ShouldBe([1, 2, 3]);
+    }
+
+    [Fact(DisplayName = "Потоковый вызов: при открытом circuit breaker — отказ ДО обращения к серверу")]
+    public async Task Streaming_fails_fast_when_circuit_open()
+    {
+        var resilience = new ModelCallResilience(
+            ModelRole.Draft, TimeSpan.FromSeconds(5), maxAttempts: 1, consecutiveFailuresToOpen: 1);
+        // Открываем circuit одним сбоем блокирующего вызова.
+        await Should.ThrowAsync<ModelUnavailableException>(
+            () => resilience.ExecuteAsync<string>(_ => throw new InvalidOperationException("лёг"), CancellationToken.None));
+
+        var started = false;
+        await Should.ThrowAsync<ModelUnavailableException>(async () =>
+        {
+            await foreach (var _ in resilience.ExecuteStreamingAsync(ct => Stream([1], ct), CancellationToken.None))
+            {
+                started = true;
+            }
+        });
+
+        started.ShouldBeFalse(); // ни одного чанка не отдано — отказ до начала потока
+    }
+
+    [Fact(DisplayName = "Потоковый вызов: сбой посреди потока → ModelUnavailableException, отданные чанки сохранены")]
+    public async Task Streaming_midstream_failure_wrapped_as_ModelUnavailable()
+    {
+        var resilience = new ModelCallResilience(ModelRole.Analysis, TimeSpan.FromSeconds(5));
+        var received = new List<int>();
+
+        var thrown = await Should.ThrowAsync<ModelUnavailableException>(async () =>
+        {
+            await foreach (var i in resilience.ExecuteStreamingAsync(ct => FailingStream(ct), CancellationToken.None))
+            {
+                received.Add(i);
+            }
+        });
+
+        thrown.Role.ShouldBe(ModelRole.Analysis);
+        received.ShouldBe([1]); // то, что успели получить до обрыва
+    }
+
+    [Fact(DisplayName = "Потоковый вызов: отмена вызывающим — OperationCanceledException, не оборачивается")]
+    public async Task Streaming_caller_cancellation_not_wrapped()
+    {
+        var resilience = new ModelCallResilience(ModelRole.Draft, TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource();
+
+        await Should.ThrowAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (var _ in resilience.ExecuteStreamingAsync(ct => Stream([1, 2, 3], ct), cts.Token))
+            {
+                cts.Cancel(); // отмена во время перечисления
+            }
+        });
+    }
+
+    [Fact(DisplayName = "Потоковый вызов: сервер завис (нет чанка дольше таймаута) → ModelUnavailableException")]
+    public async Task Streaming_inactivity_timeout_fails()
+    {
+        var resilience = new ModelCallResilience(ModelRole.Draft, TimeSpan.FromMilliseconds(50));
+
+        var thrown = await Should.ThrowAsync<ModelUnavailableException>(async () =>
+        {
+            await foreach (var _ in resilience.ExecuteStreamingAsync(ct => HangingStream(ct), CancellationToken.None))
+            {
+            }
+        });
+
+        thrown.Role.ShouldBe(ModelRole.Draft);
+    }
+
+    private static async IAsyncEnumerable<int> Stream(
+        IEnumerable<int> items, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        foreach (var i in items)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return i;
+            await Task.Yield();
+        }
+    }
+
+    private static async IAsyncEnumerable<int> FailingStream([EnumeratorCancellation] CancellationToken ct = default)
+    {
+        yield return 1;
+        await Task.Yield();
+        ct.ThrowIfCancellationRequested();
+        throw new InvalidOperationException("поток оборвался");
+    }
+
+    private static async IAsyncEnumerable<int> HangingStream([EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(30), ct); // «зависший» сервер: молчит дольше таймаута бездействия
+        yield return 1;
     }
 }
