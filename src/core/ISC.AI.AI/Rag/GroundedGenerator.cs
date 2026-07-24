@@ -8,6 +8,7 @@ using ISC.AI.Abstractions.Retrieval;
 using ISC.AI.Abstractions.Security;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace ISC.AI.AI.Rag;
 
@@ -26,7 +27,9 @@ public sealed class GroundedGenerator(
     IRetriever retriever,
     IGroundingValidator groundingValidator,
     IAuditWriter auditWriter,
-    IServiceProvider serviceProvider) : IGroundedGenerator
+    IServiceProvider serviceProvider,
+    GenerationOptions generation,
+    ILogger<GroundedGenerator> logger) : IGroundedGenerator
 {
     /// <inheritdoc />
     public async Task<GroundedResponse> GenerateAsync(
@@ -40,29 +43,33 @@ public sealed class GroundedGenerator(
         // 1–3. Извлечение с ОБЯЗАТЕЛЬНЫМ фильтром доступа (ТБ-020, fail-closed) + только актуальные.
         var fragments = await retriever.RetrieveAsync(request.Query, access, request.TopK, filter: null, cancellationToken);
 
+        // Гвард бюджета токенов: в промпт (и в грунтовку) идут ТОЛЬКО фрагменты, реально уместившиеся в окно.
+        var included = SelectWithinBudget(request, fragments);
+
         // 4. Промпт: системный (ядро, грунтовка) ПЕРВЫМ + задачный (профиль) + фрагменты + запрос (ТБ-041).
         var chatClient = serviceProvider.GetRequiredKeyedService<IChatClient>(request.Role);
-        var messages = BuildMessages(request, fragments);
+        var messages = BuildMessages(request, included);
 
-        // 5. Генерация. Модель получает только то, что вернул фильтрованный retriever.
+        // 5. Генерация с детерминированными параметрами (temperature/max_tokens/seed из конфига).
+        //    Модель получает только то, что вошло в бюджет из фильтрованного retriever.
         ChatResponse modelResponse;
         try
         {
-            modelResponse = await chatClient.GetResponseAsync(messages, options: null, cancellationToken);
+            modelResponse = await chatClient.GetResponseAsync(messages, BuildChatOptions(), cancellationToken);
         }
         catch (Exception exception)
         {
             // ТБ-030: retrieval уже прочитал защищённые фрагменты под допуском субъекта — фиксируем ПОПЫТКУ
             // в неизменяемом журнале даже при сбое/отмене модели («данные могли быть уже извлечены»), затем
             // пробрасываем. Иначе обращение к ДСП внутри упавшей генерации осталось бы вне журнала.
-            await AuditFailedAttemptAsync(request, fragments, access, exception.GetType().Name);
+            await AuditFailedAttemptAsync(request, included, access, exception.GetType().Name);
             throw;
         }
 
         var answer = modelResponse.Text ?? string.Empty;
 
-        // 6–7 + аудит: грунтовка на полном тексте, наследование грифа, запись в журнал (общий хвост).
-        return await FinalizeAsync(request, fragments, answer, access, cancellationToken);
+        // 6–7 + аудит: грунтовка по ФАКТИЧЕСКИ отправленным фрагментам, наследование грифа, журнал (общий хвост).
+        return await FinalizeAsync(request, included, answer, access, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -77,9 +84,12 @@ public sealed class GroundedGenerator(
         // 1–3. Извлечение с ОБЯЗАТЕЛЬНЫМ фильтром доступа (ТБ-020, fail-closed) — как и в блокирующем пути.
         var fragments = await retriever.RetrieveAsync(request.Query, access, request.TopK, filter: null, cancellationToken);
 
+        // Гвард бюджета токенов — как в блокирующем пути: грунтовка идёт по фактически отправленным фрагментам.
+        var included = SelectWithinBudget(request, fragments);
+
         // 4. Тот же промпт: системный (грунтовка) ПЕРВЫМ + задачный + фрагменты (ТБ-041).
         var chatClient = serviceProvider.GetRequiredKeyedService<IChatClient>(request.Role);
-        var messages = BuildMessages(request, fragments);
+        var messages = BuildMessages(request, included);
 
         // 5. Стриминг СЫРОГО черновика: отдаём токены по мере генерации, параллельно копим полный текст.
         //    Грунтовка на промежуточных токенах НЕ выполняется — только на собранном тексте (ТБ-040).
@@ -87,7 +97,7 @@ public sealed class GroundedGenerator(
         var finalized = false;
         try
         {
-            await foreach (var update in chatClient.GetStreamingResponseAsync(messages, options: null, cancellationToken))
+            await foreach (var update in chatClient.GetStreamingResponseAsync(messages, BuildChatOptions(), cancellationToken))
             {
                 var delta = update.Text;
                 if (!string.IsNullOrEmpty(delta))
@@ -99,7 +109,7 @@ public sealed class GroundedGenerator(
 
             // 6–7 + аудит: грунтовка на ПОЛНОМ тексте, наследование грифа, запись в журнал — итог ОДНИМ
             //    последним обновлением (только он несёт вердикт грунтовки и подтверждённые ссылки).
-            var final = await FinalizeAsync(request, fragments, assembled.ToString(), access, cancellationToken);
+            var final = await FinalizeAsync(request, included, assembled.ToString(), access, cancellationToken);
             finalized = true;
             yield return new GroundedStreamUpdate(TextDelta: null, Final: final);
         }
@@ -110,10 +120,58 @@ public sealed class GroundedGenerator(
             // недопустим, поэтому исключение здесь недоступно — пишем нейтральную причину. finalized → успех уже записан.
             if (!finalized)
             {
-                await AuditFailedAttemptAsync(request, fragments, access, "поток прерван до завершения");
+                await AuditFailedAttemptAsync(request, included, access, "поток прерван до завершения");
             }
         }
     }
+
+    // Параметры генерации из конфига (детерминизм и границы вывода — зрелость ТН-003, аудируемость).
+    private ChatOptions BuildChatOptions() => new()
+    {
+        Temperature = generation.Temperature,
+        TopP = generation.TopP,
+        MaxOutputTokens = generation.MaxOutputTokens,
+        Seed = generation.Seed,
+    };
+
+    // Гвард бюджета токенов: фрагменты отсортированы по релевантности (лучшие первыми); берём префикс,
+    // умещающийся в бюджет промпта, ОЦЕНОЧНО (без реального токенизатора). Хотя бы один фрагмент оставляем —
+    // иначе грунтовать нечего. Усечение НЕ тихое: пишется предупреждение. Пусто/нет бюджета → без изменений.
+    private IReadOnlyList<RetrievedChunk> SelectWithinBudget(
+        GroundedRequest request, IReadOnlyList<RetrievedChunk> fragments)
+    {
+        if (generation.PromptTokenBudget is not { } budget || fragments.Count == 0)
+        {
+            return fragments;
+        }
+
+        // Фиксированная часть: системное правило + задачный промпт + запрос + накладные на разметку.
+        var runningChars = GroundingPrompt.SystemRule.Length
+            + (request.TaskPrompt?.Length ?? 0)
+            + request.Query.Length
+            + 64;
+
+        var included = new List<RetrievedChunk>(fragments.Count);
+        foreach (var fragment in fragments)
+        {
+            runningChars += (fragment.Text?.Length ?? 0) + 24; // + разметка «[Фрагмент N]»
+            if (EstimateTokens(runningChars) > budget && included.Count > 0)
+            {
+                break;
+            }
+
+            included.Add(fragment);
+        }
+
+        if (included.Count < fragments.Count)
+        {
+            GroundedGeneratorLog.ContextTruncated(logger, included.Count, fragments.Count, budget);
+        }
+
+        return included;
+    }
+
+    private int EstimateTokens(int chars) => (int)Math.Ceiling(chars / generation.CharsPerToken);
 
     // Общий «хвост» обоих путей: грунтовка вывода (ТБ-040), наследование грифа (ТБ-032/033) и запись
     // единственного аудита генерации (ТБ-030). Вынесен, чтобы блокирующий и потоковый пути не расходились.

@@ -87,7 +87,7 @@ try
     builder.Services.AddCoreIngestion();
 
     // RAG-оркестратор: запрос → retriever (фильтр доступа) → промпт+модель → грунтовка → ответ (ТО-мат-01).
-    builder.Services.AddCoreRag();
+    builder.Services.AddCoreRag(builder.Configuration);
 
     // Очередь фоновых ИИ-задач (Э4-20, §5.1.3): интеллектуальные операции — асинхронно, со статусом и
     // управляемой деградацией; при старте — восстановление осиротевших задач. Store — из AddCorePersistence.

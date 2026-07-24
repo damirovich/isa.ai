@@ -8,10 +8,10 @@ namespace ISC.AI.AI.Models;
 /// вокруг вызовов сервера эмбеддингов (ТН-003, ТНД-001) — см. <see cref="ModelCallResilience"/>.
 /// </summary>
 internal sealed class ResilientEmbeddingGenerator(
-    IEmbeddingGenerator<string, Embedding<float>> inner, ModelRole role, TimeSpan callTimeout)
+    IEmbeddingGenerator<string, Embedding<float>> inner, ModelRole role, TimeSpan callTimeout, int maxConcurrency)
     : IEmbeddingGenerator<string, Embedding<float>>
 {
-    private readonly ModelCallResilience _resilience = new(role, callTimeout);
+    private readonly ModelCallResilience _resilience = new(role, callTimeout, maxConcurrency: maxConcurrency);
 
     public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
         IEnumerable<string> values,

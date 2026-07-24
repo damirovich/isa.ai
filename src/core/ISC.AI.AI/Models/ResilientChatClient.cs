@@ -13,9 +13,10 @@ namespace ISC.AI.AI.Models;
 /// circuit breaker + таймаут бездействия между чанками, но БЕЗ повтора — безопасно перезапустить частично
 /// отданный поток нельзя (возобновление потока — отдельная задача, ТО-прог-01).
 /// </remarks>
-internal sealed class ResilientChatClient(IChatClient inner, ModelRole role, TimeSpan callTimeout) : IChatClient
+internal sealed class ResilientChatClient(
+    IChatClient inner, ModelRole role, TimeSpan callTimeout, int maxConcurrency) : IChatClient
 {
-    private readonly ModelCallResilience _resilience = new(role, callTimeout);
+    private readonly ModelCallResilience _resilience = new(role, callTimeout, maxConcurrency: maxConcurrency);
 
     public Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>

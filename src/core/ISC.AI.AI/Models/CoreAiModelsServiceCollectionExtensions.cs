@@ -28,16 +28,26 @@ public static class CoreAiModelsServiceCollectionExtensions
     private static readonly TimeSpan ChatCallTimeout = TimeSpan.FromSeconds(120);
     private static readonly TimeSpan EmbeddingCallTimeout = TimeSpan.FromSeconds(30);
 
+    // Bulkhead по умолчанию: не больше N одновременных вызовов на роль к общему серверу инференса.
+    private const int DefaultMaxConcurrencyPerRole = 4;
+
     /// <summary>Регистрирует keyed-клиенты ролей draft/analysis (чат) и embeddings из конфигурации.</summary>
     public static IServiceCollection AddCoreAiModels(this IServiceCollection services, IConfiguration configuration)
     {
-        TryAddChatModel(services, configuration, ModelRole.Draft);
-        TryAddChatModel(services, configuration, ModelRole.Analysis);
-        TryAddEmbeddingModel(services, configuration, ModelRole.Embeddings);
+        // Лимит параллелизма к серверу инференса (Llm:MaxConcurrencyPerRole) — общий для ролей; защита GPU-сервера.
+        // Чтение через индексатор (как и адреса моделей): не задано/пусто/некорректно → безопасный дефолт.
+        var maxConcurrency = int.TryParse(configuration["Llm:MaxConcurrencyPerRole"], out var configured) && configured > 0
+            ? configured
+            : DefaultMaxConcurrencyPerRole;
+
+        TryAddChatModel(services, configuration, ModelRole.Draft, maxConcurrency);
+        TryAddChatModel(services, configuration, ModelRole.Analysis, maxConcurrency);
+        TryAddEmbeddingModel(services, configuration, ModelRole.Embeddings, maxConcurrency);
         return services;
     }
 
-    private static void TryAddChatModel(IServiceCollection services, IConfiguration configuration, ModelRole role)
+    private static void TryAddChatModel(
+        IServiceCollection services, IConfiguration configuration, ModelRole role, int maxConcurrency)
     {
         if (!TryReadModel(configuration, role, out var endpoint, out var model, out var apiKey))
         {
@@ -55,11 +65,12 @@ public static class CoreAiModelsServiceCollectionExtensions
                     new OpenAIClientOptions { Endpoint = endpointUri })
                 .GetChatClient(model)
                 .AsIChatClient();
-            return new ResilientChatClient(client, role, ChatCallTimeout);
+            return new ResilientChatClient(client, role, ChatCallTimeout, maxConcurrency);
         });
     }
 
-    private static void TryAddEmbeddingModel(IServiceCollection services, IConfiguration configuration, ModelRole role)
+    private static void TryAddEmbeddingModel(
+        IServiceCollection services, IConfiguration configuration, ModelRole role, int maxConcurrency)
     {
         if (!TryReadModel(configuration, role, out var endpoint, out var model, out var apiKey))
         {
@@ -77,7 +88,7 @@ public static class CoreAiModelsServiceCollectionExtensions
                     new OpenAIClientOptions { Endpoint = endpointUri })
                 .GetEmbeddingClient(model)
                 .AsIEmbeddingGenerator();
-            return new ResilientEmbeddingGenerator(client, role, EmbeddingCallTimeout);
+            return new ResilientEmbeddingGenerator(client, role, EmbeddingCallTimeout, maxConcurrency);
         });
     }
 

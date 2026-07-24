@@ -75,7 +75,9 @@ public sealed class ModelCallResilienceTests
                 ct => { calls++; ct.ThrowIfCancellationRequested(); return Task.FromResult("unreachable"); },
                 cts.Token));
 
-        calls.ShouldBe(1);
+        // Отмена НЕ повторяется: делегат вызван не больше одного раза (при отмене ДО занятия слота bulkhead
+        // короткозамыкает на WaitAsync и делегат не вызывается вовсе — это корректно: незачем идти к серверу).
+        calls.ShouldBeLessThanOrEqualTo(1);
     }
 
     [Fact(DisplayName = "Circuit breaker открывается после подряд идущих сбоев и отказывает быстро, без вызова")]
@@ -176,6 +178,54 @@ public sealed class ModelCallResilienceTests
         });
 
         thrown.Role.ShouldBe(ModelRole.Draft);
+    }
+
+    [Fact(DisplayName = "Bulkhead: одновременных вызовов к серверу не больше maxConcurrency")]
+    public async Task Limits_concurrent_calls_to_max_concurrency()
+    {
+        var resilience = new ModelCallResilience(
+            ModelRole.Draft, TimeSpan.FromSeconds(5), maxAttempts: 1, maxConcurrency: 2);
+
+        var lockObj = new object();
+        var current = 0;
+        var maxObserved = 0;
+        var gate = new TaskCompletionSource();
+
+        async Task<string> Call(CancellationToken _)
+        {
+            lock (lockObj)
+            {
+                current++;
+                if (current > maxObserved)
+                {
+                    maxObserved = current;
+                }
+            }
+
+            await gate.Task; // держим слот занятым, пока не отпустим
+            lock (lockObj)
+            {
+                current--;
+            }
+
+            return "ok";
+        }
+
+        var tasks = new Task<string>[4];
+        for (var i = 0; i < tasks.Length; i++)
+        {
+            tasks[i] = resilience.ExecuteAsync(Call, CancellationToken.None);
+        }
+
+        await Task.Delay(100); // даём войти тем, кому хватило слотов
+        lock (lockObj)
+        {
+            maxObserved.ShouldBeLessThanOrEqualTo(2); // третий/четвёртый ждут семафор, не сервер
+        }
+
+        gate.SetResult(); // отпускаем — остальные проходят по мере освобождения слотов
+        await Task.WhenAll(tasks);
+        maxObserved.ShouldBe(2); // лимит реально достигался (иначе bulkhead не работает)
     }
 
     private static async IAsyncEnumerable<int> Stream(

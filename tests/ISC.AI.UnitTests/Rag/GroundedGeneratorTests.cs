@@ -7,6 +7,7 @@ using ISC.AI.Abstractions.Retrieval;
 using ISC.AI.Abstractions.Security;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Shouldly;
@@ -50,7 +51,8 @@ public sealed class GroundedGeneratorTests
             .AddKeyedSingleton<IChatClient>(ModelRole.Analysis, chatClient)
             .BuildServiceProvider();
 
-        var generator = new GroundedGenerator(retriever, grounding, audit, provider);
+        var generator = new GroundedGenerator(
+            retriever, grounding, audit, provider, GenerationOptions.Default, NullLogger<GroundedGenerator>.Instance);
         var access = new AccessContext("42", MaxClassification: 2, AllowedDivisions: [7]);
 
         var response = await generator.GenerateAsync(new GroundedRequest("вопрос"), access);
@@ -90,7 +92,9 @@ public sealed class GroundedGeneratorTests
             Substitute.For<IRetriever>(),
             Substitute.For<IGroundingValidator>(),
             Substitute.For<IAuditWriter>(),
-            new ServiceCollection().BuildServiceProvider());
+            new ServiceCollection().BuildServiceProvider(),
+            GenerationOptions.Default,
+            NullLogger<GroundedGenerator>.Instance);
 
         await Should.ThrowAsync<ArgumentNullException>(
             () => generator.GenerateAsync(new GroundedRequest("вопрос"), access: null!));
@@ -121,7 +125,8 @@ public sealed class GroundedGeneratorTests
             .AddKeyedSingleton<IChatClient>(ModelRole.Analysis, chatClient)
             .BuildServiceProvider();
 
-        var generator = new GroundedGenerator(retriever, grounding, audit, provider);
+        var generator = new GroundedGenerator(
+            retriever, grounding, audit, provider, GenerationOptions.Default, NullLogger<GroundedGenerator>.Instance);
         var access = new AccessContext("42", MaxClassification: 2, AllowedDivisions: [7]);
 
         var updates = new List<GroundedStreamUpdate>();
@@ -167,7 +172,9 @@ public sealed class GroundedGeneratorTests
             .AddKeyedSingleton<IChatClient>(ModelRole.Analysis, chatClient)
             .BuildServiceProvider();
 
-        var generator = new GroundedGenerator(retriever, Substitute.For<IGroundingValidator>(), audit, provider);
+        var generator = new GroundedGenerator(
+            retriever, Substitute.For<IGroundingValidator>(), audit, provider,
+            GenerationOptions.Default, NullLogger<GroundedGenerator>.Instance);
         var access = new AccessContext("42", MaxClassification: 2, AllowedDivisions: [7]);
 
         // Модель падает → исключение проброшено вызывающему.
@@ -183,6 +190,75 @@ public sealed class GroundedGeneratorTests
                 e.Classification == 2 &&
                 e.ObjectRef == "10,11"),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "Параметры генерации из конфига (temperature/max_tokens/seed) передаются модели")]
+    public async Task Generation_options_are_passed_to_model()
+    {
+        var retriever = Substitute.For<IRetriever>();
+        retriever.RetrieveAsync(Arg.Any<string>(), Arg.Any<AccessContext>(), Arg.Any<int>(), Arg.Any<RetrievalFilter?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<RetrievedChunk> { Chunk(10, "текст", 1) });
+
+        ChatOptions? sentOptions = null;
+        var chatClient = Substitute.For<IChatClient>();
+        chatClient.GetResponseAsync(Arg.Any<IEnumerable<ChatMessage>>(), Arg.Do<ChatOptions?>(o => sentOptions = o), Arg.Any<CancellationToken>())
+            .Returns(new ChatResponse(new ChatMessage(ChatRole.Assistant, "ответ")));
+
+        var grounding = Substitute.For<IGroundingValidator>();
+        grounding.Validate(Arg.Any<string>(), Arg.Any<IReadOnlyList<RetrievedChunk>>()).Returns(new GroundingResult([], AllConfirmed: true));
+
+        var provider = new ServiceCollection().AddKeyedSingleton<IChatClient>(ModelRole.Analysis, chatClient).BuildServiceProvider();
+        var options = new GenerationOptions(Temperature: 0.1f, MaxOutputTokens: 1234, Seed: 42);
+        var generator = new GroundedGenerator(
+            retriever, grounding, Substitute.For<IAuditWriter>(), provider, options, NullLogger<GroundedGenerator>.Instance);
+
+        await generator.GenerateAsync(new GroundedRequest("вопрос"), new AccessContext("1", MaxClassification: 2, AllowedDivisions: [7]));
+
+        sentOptions.ShouldNotBeNull();
+        sentOptions!.Temperature.ShouldBe(0.1f);
+        sentOptions.MaxOutputTokens.ShouldBe(1234);
+        sentOptions.Seed.ShouldBe(42);
+    }
+
+    [Fact(DisplayName = "Бюджет токенов: лишние фрагменты отброшены; грунтовка — по ФАКТИЧЕСКИ отправленным")]
+    public async Task Token_budget_truncates_fragments_and_grounds_on_included()
+    {
+        // Три больших фрагмента (лучший первым); крошечный бюджет вместит НЕ все.
+        var fragments = new List<RetrievedChunk>
+        {
+            Chunk(10, new string('а', 400), 1),
+            Chunk(11, new string('б', 400), 1),
+            Chunk(12, new string('в', 400), 1),
+        };
+        var retriever = Substitute.For<IRetriever>();
+        retriever.RetrieveAsync(Arg.Any<string>(), Arg.Any<AccessContext>(), Arg.Any<int>(), Arg.Any<RetrievalFilter?>(), Arg.Any<CancellationToken>())
+            .Returns(fragments);
+
+        List<ChatMessage>? sent = null;
+        var chatClient = Substitute.For<IChatClient>();
+        chatClient.GetResponseAsync(Arg.Do<IEnumerable<ChatMessage>>(m => sent = m.ToList()), Arg.Any<ChatOptions?>(), Arg.Any<CancellationToken>())
+            .Returns(new ChatResponse(new ChatMessage(ChatRole.Assistant, "ответ")));
+
+        IReadOnlyList<RetrievedChunk>? groundedOn = null;
+        var grounding = Substitute.For<IGroundingValidator>();
+        grounding.Validate(Arg.Any<string>(), Arg.Do<IReadOnlyList<RetrievedChunk>>(f => groundedOn = f)).Returns(new GroundingResult([], AllConfirmed: true));
+
+        var provider = new ServiceCollection().AddKeyedSingleton<IChatClient>(ModelRole.Analysis, chatClient).BuildServiceProvider();
+        var options = new GenerationOptions(PromptTokenBudget: 400, CharsPerToken: 2.5);
+        var generator = new GroundedGenerator(
+            retriever, grounding, Substitute.For<IAuditWriter>(), provider, options, NullLogger<GroundedGenerator>.Instance);
+
+        var response = await generator.GenerateAsync(new GroundedRequest("вопрос"), new AccessContext("1", MaxClassification: 2, AllowedDivisions: [7]));
+
+        // Отправлено меньше, чем извлечено (но хотя бы один); грунтовка и результат — по ОТПРАВЛЕННЫМ.
+        response.UsedFragments.Count.ShouldBeLessThan(3);
+        response.UsedFragments.Count.ShouldBeGreaterThan(0);
+        groundedOn!.Count.ShouldBe(response.UsedFragments.Count);
+
+        // В промпт вошёл лучший фрагмент, но не худший (отброшен по бюджету).
+        var userText = sent!.Last().Text ?? string.Empty;
+        userText.ShouldContain(new string('а', 400));
+        userText.ShouldNotContain(new string('в', 400));
     }
 
     private static async IAsyncEnumerable<ChatResponseUpdate> StreamParts(params string[] parts)
