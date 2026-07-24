@@ -6,10 +6,9 @@
     <ProjectReference Include="..\ISC.AI.Persistence\ISC.AI.Persistence.csproj" />
   </ItemGroup>
 
-  <!-- Конвейер загрузки: OCR (Tesseract) → парсинг (.docx) → чанкинг → эмбеддинги.
+  <!-- Конвейер загрузки: извлечение текста (в ISC.AI.Documents: .docx/.txt/OCR) → чанкинг → эмбеддинги.
        Фоновый сервис запускается хостом (Hosting.Abstractions). -->
   <ItemGroup>
-    <PackageReference Include="Tesseract" />
     <PackageReference Include="DocumentFormat.OpenXml" />
     <PackageReference Include="Microsoft.Extensions.AI.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />

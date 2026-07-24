@@ -80,8 +80,8 @@ try
     // Грунтовка: ссылки только из извлечённых фрагментов; «по памяти» запрещено (ТБ-040, GATE-2).
     builder.Services.AddCoreGrounding();
 
-    // Движок документов: извлечение текста из файлов (.txt/.docx; OCR — далее) для загрузки корпуса (Э4-01).
-    builder.Services.AddCoreDocuments();
+    // Движок документов: извлечение текста из файлов (.txt/.docx/OCR сканов) для загрузки корпуса (Э4-01, ПОДГ-02).
+    builder.Services.AddCoreDocuments(builder.Configuration);
 
     // Загрузка в корпус: fail-closed (без грифа/подразделения — отказ), идемпотентно (ТБ-024, ТНД-002).
     builder.Services.AddCoreIngestion();

@@ -4,11 +4,15 @@
     <ProjectReference Include="..\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
   </ItemGroup>
 
-  <!-- Движок документов: извлечение текста (.docx), связывание шаблонов, экспорт в .docx. -->
+  <!-- Движок документов: извлечение текста (.docx, OCR сканов), связывание шаблонов, экспорт в .docx. -->
   <ItemGroup>
     <PackageReference Include="DocumentFormat.OpenXml" />
     <PackageReference Include="Scriban" />
+    <!-- OCR сканов (ПОДГ-02): движок и native-либы. Файлы {язык}.traineddata — офлайн-ассеты оператора
+         (изолированный контур), путь и языки задаются конфигурацией. Лицензия Apache-2.0. -->
+    <PackageReference Include="Tesseract" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
   </ItemGroup>
 
 </Project>
