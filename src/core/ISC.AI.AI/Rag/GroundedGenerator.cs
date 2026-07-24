@@ -45,7 +45,20 @@ public sealed class GroundedGenerator(
         var messages = BuildMessages(request, fragments);
 
         // 5. Генерация. Модель получает только то, что вернул фильтрованный retriever.
-        var modelResponse = await chatClient.GetResponseAsync(messages, options: null, cancellationToken);
+        ChatResponse modelResponse;
+        try
+        {
+            modelResponse = await chatClient.GetResponseAsync(messages, options: null, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            // ТБ-030: retrieval уже прочитал защищённые фрагменты под допуском субъекта — фиксируем ПОПЫТКУ
+            // в неизменяемом журнале даже при сбое/отмене модели («данные могли быть уже извлечены»), затем
+            // пробрасываем. Иначе обращение к ДСП внутри упавшей генерации осталось бы вне журнала.
+            await AuditFailedAttemptAsync(request, fragments, access, exception.GetType().Name);
+            throw;
+        }
+
         var answer = modelResponse.Text ?? string.Empty;
 
         // 6–7 + аудит: грунтовка на полном тексте, наследование грифа, запись в журнал (общий хвост).
@@ -71,20 +84,35 @@ public sealed class GroundedGenerator(
         // 5. Стриминг СЫРОГО черновика: отдаём токены по мере генерации, параллельно копим полный текст.
         //    Грунтовка на промежуточных токенах НЕ выполняется — только на собранном тексте (ТБ-040).
         var assembled = new StringBuilder();
-        await foreach (var update in chatClient.GetStreamingResponseAsync(messages, options: null, cancellationToken))
+        var finalized = false;
+        try
         {
-            var delta = update.Text;
-            if (!string.IsNullOrEmpty(delta))
+            await foreach (var update in chatClient.GetStreamingResponseAsync(messages, options: null, cancellationToken))
             {
-                assembled.Append(delta);
-                yield return new GroundedStreamUpdate(TextDelta: delta, Final: null);
+                var delta = update.Text;
+                if (!string.IsNullOrEmpty(delta))
+                {
+                    assembled.Append(delta);
+                    yield return new GroundedStreamUpdate(TextDelta: delta, Final: null);
+                }
+            }
+
+            // 6–7 + аудит: грунтовка на ПОЛНОМ тексте, наследование грифа, запись в журнал — итог ОДНИМ
+            //    последним обновлением (только он несёт вердикт грунтовки и подтверждённые ссылки).
+            var final = await FinalizeAsync(request, fragments, assembled.ToString(), access, cancellationToken);
+            finalized = true;
+            yield return new GroundedStreamUpdate(TextDelta: null, Final: final);
+        }
+        finally
+        {
+            // ТБ-030: если поток прервался ДО финализации (сбой/отмена модели или ранний выход потребителя),
+            // успешный аудит FinalizeAsync не достигнут — фиксируем попытку (ДСП уже извлечён). yield с catch
+            // недопустим, поэтому исключение здесь недоступно — пишем нейтральную причину. finalized → успех уже записан.
+            if (!finalized)
+            {
+                await AuditFailedAttemptAsync(request, fragments, access, "поток прерван до завершения");
             }
         }
-
-        // 6–7 + аудит: грунтовка на ПОЛНОМ тексте, наследование грифа, запись в журнал — итог ОДНИМ
-        //    последним обновлением (только он несёт вердикт грунтовки и подтверждённые ссылки).
-        var final = await FinalizeAsync(request, fragments, assembled.ToString(), access, cancellationToken);
-        yield return new GroundedStreamUpdate(TextDelta: null, Final: final);
     }
 
     // Общий «хвост» обоих путей: грунтовка вывода (ТБ-040), наследование грифа (ТБ-032/033) и запись
@@ -100,14 +128,7 @@ public sealed class GroundedGenerator(
         var grounding = groundingValidator.Validate(answer, fragments);
 
         // 7. Итоговый гриф = максимум грифов использованных фрагментов (наследование, ТБ-032/033).
-        short resultClassification = 0;
-        foreach (var fragment in fragments)
-        {
-            if (fragment.Classification > resultClassification)
-            {
-                resultClassification = fragment.Classification;
-            }
-        }
+        var resultClassification = MaxClassification(fragments);
 
         // Аудит генерации (ТБ-030 «кто/что/когда»): субъект — из контекста доступа (единственная запись
         // события; команда намеренно не IAuditableRequest, чтобы не задвоить журнал). Метаданные (id
@@ -124,6 +145,34 @@ public sealed class GroundedGenerator(
 
         return new GroundedResponse(answer, grounding, fragments, resultClassification);
     }
+
+    // Итоговый гриф результата = максимум грифов использованных фрагментов (наследование, ТБ-032/033).
+    private static short MaxClassification(IReadOnlyList<RetrievedChunk> fragments)
+    {
+        short max = 0;
+        foreach (var fragment in fragments)
+        {
+            if (fragment.Classification > max)
+            {
+                max = fragment.Classification;
+            }
+        }
+
+        return max;
+    }
+
+    // ТБ-030: запись ПОПЫТКИ генерации в неизменяемый журнал при сбое/отмене (retrieval уже прочитал ДСП).
+    // CancellationToken.None: запись обязана появиться даже когда исходный вызов отменён.
+    private Task AuditFailedAttemptAsync(
+        GroundedRequest request, IReadOnlyList<RetrievedChunk> fragments, AccessContext access, string reason) =>
+        auditWriter.WriteAsync(
+            new AuditEntry(
+                AuditAction.Generate,
+                MaxClassification(fragments),
+                SubjectId: access.NumericSubjectId,
+                ObjectRef: string.Join(",", fragments.Select(f => f.ChunkId)),
+                PayloadSensitive: $"Генерация НЕ завершена: {reason}. Запрос: {request.Query}"),
+            CancellationToken.None);
 
     private static List<ChatMessage> BuildMessages(GroundedRequest request, IReadOnlyList<RetrievedChunk> fragments)
     {
