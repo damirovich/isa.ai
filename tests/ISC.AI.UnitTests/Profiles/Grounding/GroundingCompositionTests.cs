@@ -32,4 +32,19 @@ public sealed class GroundingCompositionTests
         provider.GetRequiredService<ICitationNormalizer>().ShouldBeOfType<NpaCitationNormalizer>();
         provider.GetRequiredService<ITextChunker>().ShouldBeOfType<NpaStructuralChunker>();
     }
+
+    [Fact(DisplayName = "Инвариант №1: профиль НЕ подменяет сам валидатор грунтовки ядра (ТБ-041)")]
+    public void Profile_does_not_replace_core_grounding_validator()
+    {
+        // Профиль может переопределить доменные extractor/normalizer, но НЕ сам инвариант грунтовки.
+        // Регресс (профиль случайно Replace(IGroundingValidator)) должен ловиться сборкой, а не ревью.
+        var services = new ServiceCollection();
+        services.AddCoreGrounding();
+        services.AddCoreIngestion();
+        services.AddInspectorApplication();
+
+        using var provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<IGroundingValidator>().ShouldBeOfType<GroundingValidator>();
+    }
 }
