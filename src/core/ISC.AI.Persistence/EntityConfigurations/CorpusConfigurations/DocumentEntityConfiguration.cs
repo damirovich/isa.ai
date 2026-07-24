@@ -1,3 +1,6 @@
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+
 namespace ISC.AI.Persistence.EntityConfigurations.CorpusConfigurations;
 
 /// <summary>Конфигурация таблицы документов (<c>core.document</c>).</summary>
@@ -12,6 +15,19 @@ public class DocumentEntityConfiguration : IEntityTypeConfiguration<DocumentEnti
         builder.Property(e => e.DocType).HasMaxLength(100).IsRequired();
         builder.Property(e => e.Title).HasMaxLength(1000).IsRequired();
         builder.Property(e => e.Source).HasMaxLength(700);
+
+        // Доменный «багаж» профиля (ТО-инф-03) — НЕПРОЗРАЧНЫЙ jsonb: ядро хранит, профиль интерпретирует.
+        // EF сам обрабатывает null (SQL NULL), поэтому конвертер вызывается только для непустого словаря.
+        builder.Property(e => e.Metadata)
+               .HasColumnType("jsonb")
+               .HasConversion(
+                   value => JsonSerializer.Serialize(value, (JsonSerializerOptions?)null),
+                   value => JsonSerializer.Deserialize<Dictionary<string, string>>(value, (JsonSerializerOptions?)null)!,
+                   new ValueComparer<Dictionary<string, string>>(
+                       (left, right) => JsonSerializer.Serialize(left, (JsonSerializerOptions?)null)
+                                        == JsonSerializer.Serialize(right, (JsonSerializerOptions?)null),
+                       value => JsonSerializer.Serialize(value, (JsonSerializerOptions?)null).GetHashCode(StringComparison.Ordinal),
+                       value => value));
 
         // Режимные метаданные NOT NULL — опора fail-closed фильтра доступа (ТБ-024/021).
         builder.Property(e => e.Classification).IsRequired();

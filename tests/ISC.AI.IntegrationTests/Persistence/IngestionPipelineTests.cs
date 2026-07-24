@@ -98,6 +98,33 @@ public sealed class IngestionPipelineTests : IAsyncLifetime
         results.Count(r => r.ChunkCount == 0).ShouldBe(1);
     }
 
+    [Fact(DisplayName = "ТО-инф-03: доменные метаданные пакета (идентификатор нормы, статус редакции) сохраняются, а не теряются")]
+    public async Task Ingestion_persists_document_metadata()
+    {
+        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+        }
+
+        var port = new IngestionPort(factory, new FixedEmbeddingGenerator(768), new SimpleTextChunker());
+        var metadata = new Dictionary<string, string> { ["normId"] = "ЗКР-123", ["edition"] = "действующая" };
+        var request = new IngestionRequest(
+            "нпа", "Закон", "текст закона", Classification: 1, DivisionId: 7, Metadata: metadata);
+
+        var result = await port.IngestAsync(request);
+        result.Accepted.ShouldBeTrue();
+
+        // Доменный «багаж» профиля дошёл до БД (jsonb) и читается обратно — не отброшен молча.
+        await using (var db = factory.CreateDbContext())
+        {
+            var document = await db.Documents.SingleAsync();
+            document.Metadata.ShouldNotBeNull();
+            document.Metadata!["normId"].ShouldBe("ЗКР-123");
+            document.Metadata["edition"].ShouldBe("действующая");
+        }
+    }
+
     private sealed class TestContextFactory(string connectionString) : IDbContextFactory<CoreDbContext>
     {
         public CoreDbContext CreateDbContext() =>

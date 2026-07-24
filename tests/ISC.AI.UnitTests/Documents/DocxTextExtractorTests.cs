@@ -21,6 +21,19 @@ public sealed class DocxTextExtractorTests
         result.Title.ShouldBe("Тестовый документ");
     }
 
+    [Fact(DisplayName = "ТО-мат-03: абзацы .docx разделены пустой строкой (\\n\\n) — чанкер видит границы, а не один абзац")]
+    public async Task Paragraphs_separated_by_blank_line_so_chunker_sees_boundaries()
+    {
+        using var docx = BuildDocx(["Первый абзац.", "Второй абзац.", "Третий абзац."], title: "Док");
+
+        var result = await new DocxTextExtractor().ExtractAsync(docx);
+
+        // Ключевое: вывод экстрактора разложится на 3 абзаца по границе чанкера (\n\n). До фикса (одинарный
+        // \n) это был бы ОДИН абзац → слепой рез по смещению.
+        var paragraphs = result.Text.Split(["\r\n\r\n", "\n\n"], StringSplitOptions.RemoveEmptyEntries);
+        paragraphs.Length.ShouldBe(3);
+    }
+
     private static MemoryStream BuildDocx(string[] paragraphs, string title)
     {
         var ms = new MemoryStream();

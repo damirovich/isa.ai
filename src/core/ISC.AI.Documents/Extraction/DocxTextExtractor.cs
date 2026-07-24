@@ -6,8 +6,10 @@ using ISC.AI.Abstractions.Documents;
 namespace ISC.AI.Documents.Extraction;
 
 /// <summary>
-/// Извлекатель текста из .docx (OpenXml). Параграфы соединяются переводами строк —
-/// это опора последующего чанкинга по структуре.
+/// Извлекатель текста из .docx (OpenXml). Абзацы разделяются ПУСТОЙ СТРОКОЙ (<c>\n\n</c>) — именно её
+/// чанкеры (<c>SimpleTextChunker</c>/<c>NpaStructuralChunker</c>) считают границей абзаца (ТО-мат-03).
+/// Одинарный перевод строки они за границу не принимают, поэтому склейка через <c>\n</c> сделала бы весь
+/// документ одним абзацем и привела бы к слепому резу посреди предложения.
 /// </summary>
 public sealed class DocxTextExtractor : IFormatTextExtractor
 {
@@ -29,7 +31,8 @@ public sealed class DocxTextExtractor : IFormatTextExtractor
             .Descendants<Paragraph>()
             .Select(p => p.InnerText)
             .Where(t => !string.IsNullOrWhiteSpace(t)) ?? [];
-        var text = string.Join('\n', paragraphs).Trim();
+        // Разделитель абзацев — ПУСТАЯ строка (\n\n): её распознают чанкеры как границу абзаца (ТО-мат-03).
+        var text = string.Join("\n\n", paragraphs).Trim();
 
         var title = document.PackageProperties.Title;
         return new ExtractedDocument(text, string.IsNullOrWhiteSpace(title) ? null : title);
