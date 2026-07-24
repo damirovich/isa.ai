@@ -44,11 +44,15 @@ public static class CoreAiModelsServiceCollectionExtensions
             return; // роль не сконфигурирована — пропускаем (модель добавляется конфигом, без изменения кода)
         }
 
+        // Air-gap (инвариант №2, ТБ-044): адрес модели обязан быть внутри контура — проверяем при старте.
+        var endpointUri = new Uri(endpoint);
+        AirGapEndpointGuard.EnsureWithinPerimeter(endpointUri, role);
+
         services.AddKeyedSingleton<IChatClient>(role, (_, _) =>
         {
             IChatClient client = new OpenAIClient(
                     new ApiKeyCredential(apiKey),
-                    new OpenAIClientOptions { Endpoint = new Uri(endpoint) })
+                    new OpenAIClientOptions { Endpoint = endpointUri })
                 .GetChatClient(model)
                 .AsIChatClient();
             return new ResilientChatClient(client, role, ChatCallTimeout);
@@ -62,11 +66,15 @@ public static class CoreAiModelsServiceCollectionExtensions
             return;
         }
 
+        // Air-gap (инвариант №2, ТБ-044): адрес эмбеддера обязан быть внутри контура — проверяем при старте.
+        var endpointUri = new Uri(endpoint);
+        AirGapEndpointGuard.EnsureWithinPerimeter(endpointUri, role);
+
         services.AddKeyedSingleton<IEmbeddingGenerator<string, Embedding<float>>>(role, (_, _) =>
         {
             IEmbeddingGenerator<string, Embedding<float>> client = new OpenAIClient(
                     new ApiKeyCredential(apiKey),
-                    new OpenAIClientOptions { Endpoint = new Uri(endpoint) })
+                    new OpenAIClientOptions { Endpoint = endpointUri })
                 .GetEmbeddingClient(model)
                 .AsIEmbeddingGenerator();
             return new ResilientEmbeddingGenerator(client, role, EmbeddingCallTimeout);
