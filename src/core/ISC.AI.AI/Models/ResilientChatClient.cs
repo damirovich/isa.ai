@@ -8,9 +8,10 @@ namespace ISC.AI.AI.Models;
 /// инференса (ТН-003, ТНД-001) — см. <see cref="ModelCallResilience"/>.
 /// </summary>
 /// <remarks>
-/// <see cref="GetStreamingResponseAsync"/> НЕ оборачивается: безопасный повтор частично полученного
-/// потока — отдельная задача (требует буферизации/семантики возобновления), сейчас этот метод в конвейере
-/// не используется (ТО-прог-01 — генератор стримить ещё не умеет).
+/// И блокирующий <see cref="GetResponseAsync"/>, и потоковый <see cref="GetStreamingResponseAsync"/> идут
+/// через <see cref="ModelCallResilience"/>. У потока СВОЯ семантика (см. <c>ExecuteStreamingAsync</c>):
+/// circuit breaker + таймаут бездействия между чанками, но БЕЗ повтора — безопасно перезапустить частично
+/// отданный поток нельзя (возобновление потока — отдельная задача, ТО-прог-01).
 /// </remarks>
 internal sealed class ResilientChatClient(IChatClient inner, ModelRole role, TimeSpan callTimeout) : IChatClient
 {
@@ -22,7 +23,7 @@ internal sealed class ResilientChatClient(IChatClient inner, ModelRole role, Tim
 
     public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
         IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
-        inner.GetStreamingResponseAsync(messages, options, cancellationToken);
+        _resilience.ExecuteStreamingAsync(ct => inner.GetStreamingResponseAsync(messages, options, ct), cancellationToken);
 
     public object? GetService(Type serviceType, object? serviceKey = null) => inner.GetService(serviceType, serviceKey);
 

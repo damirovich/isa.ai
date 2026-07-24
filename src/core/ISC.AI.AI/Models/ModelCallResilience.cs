@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using ISC.AI.Abstractions.AI;
 using ISC.AI.Abstractions.Enums;
 
@@ -72,19 +73,91 @@ internal sealed class ModelCallResilience(
             }
             catch (Exception ex)
             {
-                lock (_gate)
-                {
-                    _consecutiveFailures++;
-                    if (_consecutiveFailures >= consecutiveFailuresToOpen)
-                    {
-                        _openUntil = DateTimeOffset.UtcNow.Add(_openDuration);
-                    }
-                }
-
+                RegisterFailure();
                 throw new ModelUnavailableException(role, ex);
             }
         }
 
         throw new UnreachableException();
+    }
+
+    /// <summary>
+    /// Обёртка ПОТОКОВОГО вызова (ТН-003/ТНД-001): circuit breaker на старте (как у блокирующего пути) и
+    /// таймаут БЕЗДЕЙСТВИЯ между чанками — сервер принял запрос, но «завис» и не отдаёт очередной токен —
+    /// с учётом сбоя в circuit breaker. Повтора здесь НЕТ: часть токенов уже могла уйти наружу, безопасно
+    /// перезапустить поток нельзя (возобновление частично отданного потока — отдельная семантика, ТО-прог-01).
+    /// Ошибка/таймаут потока пробрасывается типизированным <see cref="ModelUnavailableException"/>; отмена
+    /// самим вызывающим — как есть.
+    /// </summary>
+    public async IAsyncEnumerable<T> ExecuteStreamingAsync<T>(
+        Func<CancellationToken, IAsyncEnumerable<T>> call,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            if (DateTimeOffset.UtcNow < _openUntil)
+            {
+                throw new ModelUnavailableException(role, innerException: null);
+            }
+        }
+
+        // Отдельный таймаут-источник, залинкованный в токен перечислителя: CancelAfter перед ожиданием
+        // очередного чанка задаёт дедлайн на его ПРИХОД; после получения дедлайн снимается на время передачи
+        // чанка потребителю (медленный потребитель не должен считаться «зависшим сервером»). Ретрая нет,
+        // поэтому единый источник переиспользуется на весь поток.
+        using var timeoutCts = new CancellationTokenSource();
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+
+        await using var enumerator = call(linkedCts.Token).GetAsyncEnumerator(linkedCts.Token);
+
+        while (true)
+        {
+            bool hasNext;
+            timeoutCts.CancelAfter(callTimeout); // (пере)взводим таймаут бездействия перед ожиданием чанка
+            try
+            {
+                hasNext = await enumerator.MoveNextAsync();
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw; // отмена самим вызывающим — не сбой сервера, не оборачиваем
+            }
+            catch (Exception ex)
+            {
+                RegisterFailure();
+                // Таймаут бездействия приходит как отмена по timeoutCts (не по вызывающему) — отделяем причиной.
+                var reason = timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested
+                    ? new TimeoutException($"Сервер модели не отдал очередной фрагмент потока за {callTimeout}.", ex)
+                    : ex;
+                throw new ModelUnavailableException(role, reason);
+            }
+
+            timeoutCts.CancelAfter(Timeout.InfiniteTimeSpan); // снимаем дедлайн на время передачи чанка потребителю
+
+            if (!hasNext)
+            {
+                break;
+            }
+
+            yield return enumerator.Current;
+        }
+
+        lock (_gate)
+        {
+            _consecutiveFailures = 0; // поток дошёл до конца без сбоя
+        }
+    }
+
+    // Учёт последовательного сбоя обращения к модели; после порога — «открываем» circuit breaker на время.
+    private void RegisterFailure()
+    {
+        lock (_gate)
+        {
+            _consecutiveFailures++;
+            if (_consecutiveFailures >= consecutiveFailuresToOpen)
+            {
+                _openUntil = DateTimeOffset.UtcNow.Add(_openDuration);
+            }
+        }
     }
 }
