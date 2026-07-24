@@ -20,17 +20,33 @@ public sealed class DependencyRulesTests
     private const string Persistence = "ISC.AI.Persistence";
     private const string Host = "ISC.AI.Web";
 
-    /// <summary>Проекты-библиотеки ядра (без хоста <c>Web</c>): им запрещено ссылаться на профиль.</summary>
-    private static readonly string[] CoreLibraries =
-    [
-        "ISC.AI.Abstractions", "ISC.AI.AI", "ISC.AI.Ingestion", "ISC.AI.Documents", "ISC.AI.Persistence",
-    ];
+    /// <summary>
+    /// Проекты-библиотеки ядра (без хоста <c>Web</c>): им запрещено ссылаться на профиль. Список НЕ
+    /// захардкожен — вычисляется из фактического содержимого <c>src/core</c>, поэтому НОВЫЙ ядровой проект
+    /// попадает под запрет автоматически (без правки теста).
+    /// </summary>
+    private static readonly string[] CoreLibraries = DiscoverCoreLibraries();
 
     private static readonly IReadOnlyDictionary<string, string[]> Graph = LoadProjectGraph();
+
+    // Ядровые библиотеки — все *.csproj из src/core, кроме хоста Web (хосту профиль подключать МОЖНО).
+    private static string[] DiscoverCoreLibraries()
+    {
+        var coreDir = Path.Combine(FindRepoRoot(), "src", "core");
+        return Directory.GetFiles(coreDir, "*.csproj", SearchOption.AllDirectories)
+            .Select(Path.GetFileNameWithoutExtension)
+            .Where(name => name is not null && name != Host)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray()!;
+    }
 
     [Fact(DisplayName = "Ядро не ссылается на профиль")]
     public void Core_does_not_reference_profile()
     {
+        // Страховка от «пустого» списка (битый путь → тест прошёл бы вхолостую): ядро точно не пустое.
+        CoreLibraries.ShouldNotBeEmpty("Не найдено ни одной ядровой библиотеки в src/core — проверь путь обнаружения.");
+        CoreLibraries.ShouldContain(Abstractions);
+
         foreach (var core in CoreLibraries)
         {
             var toProfile = Graph[core].Where(IsProfileProject).ToArray();

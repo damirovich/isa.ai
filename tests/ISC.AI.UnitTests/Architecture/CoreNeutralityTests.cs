@@ -36,6 +36,7 @@ public sealed class CoreNeutralityTests
             foreach (var type in SafeGetTypes(assembly))
             {
                 CheckName($"{assemblyName}: тип {type.Name}", type.Name, offenders);
+                CheckName($"{assemblyName}: пространство {type.Namespace}", type.Namespace ?? string.Empty, offenders);
 
                 const BindingFlags memberFlags = BindingFlags.Public | BindingFlags.NonPublic |
                     BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
@@ -63,6 +64,30 @@ public sealed class CoreNeutralityTests
         offenders.ShouldBeEmpty(
             "В сборках ядра найдены доменные НПА-идентификаторы (должны жить в профиле, схема inspector): "
             + string.Join("; ", offenders));
+    }
+
+    [Fact(DisplayName = "Сборки ядра не ссылаются на сборки профиля (нейтральность на уровне метаданных)")]
+    public void Core_assemblies_do_not_reference_profile_assemblies()
+    {
+        var coreAssemblies = LoadCoreAssemblies();
+        coreAssemblies.ShouldNotBeEmpty("Не найдено ни одной сборки ядра для проверки.");
+
+        var offenders = new List<string>();
+        foreach (var assembly in coreAssemblies)
+        {
+            var profileRefs = assembly.GetReferencedAssemblies()
+                .Select(a => a.Name)
+                .Where(n => n is not null && n.StartsWith("ISC.AI.Profile.", StringComparison.Ordinal))
+                .ToArray();
+            if (profileRefs.Length > 0)
+            {
+                offenders.Add($"{assembly.GetName().Name} → {string.Join(", ", profileRefs)}");
+            }
+        }
+
+        // Дополняет структурный DependencyRulesTests (граф .csproj) проверкой уже СКОМПИЛИРОВАННЫХ метаданных:
+        // ловит и транзитивную/случайную ссылку ядра на профиль, а не только прямую в csproj.
+        offenders.ShouldBeEmpty("Сборка ядра ссылается на профиль (нарушение нейтральности): " + string.Join("; ", offenders));
     }
 
     [Fact(DisplayName = "Доменная модель НПА перенесена в профиль (Inspector.Domain)")]
