@@ -8,6 +8,14 @@
     <Project Path="src/core/ISC.AI.Persistence/ISC.AI.Persistence.csproj" Id="065788bd-f3d2-4fe1-be00-2b9e7033131c" />
     <Project Path="src/core/ISC.AI.Web/ISC.AI.Web.csproj" Id="4e1b5082-ddb3-4d56-a277-a84a52cd5a6f" />
   </Folder>
+  <Folder Name="/src/modules/" />
+  <Folder Name="/src/modules/docflow/">
+    <Project Path="src/modules/docflow/ISC.AI.Modules.DocFlow.Application/ISC.AI.Modules.DocFlow.Application.csproj" />
+    <Project Path="src/modules/docflow/ISC.AI.Modules.DocFlow.Data/ISC.AI.Modules.DocFlow.Data.csproj" />
+    <Project Path="src/modules/docflow/ISC.AI.Modules.DocFlow.Domain/ISC.AI.Modules.DocFlow.Domain.csproj" />
+    <Project Path="src/modules/docflow/ISC.AI.Modules.DocFlow.UI/ISC.AI.Modules.DocFlow.UI.csproj" />
+    <Project Path="src/modules/docflow/ISC.AI.Modules.DocFlow/ISC.AI.Modules.DocFlow.csproj" />
+  </Folder>
   <Folder Name="/src/profiles/" />
   <Folder Name="/src/profiles/erp/">
     <Project Path="src/profiles/erp/ISC.AI.Profile.ERP.Application/ISC.AI.Profile.ERP.Application.csproj" />

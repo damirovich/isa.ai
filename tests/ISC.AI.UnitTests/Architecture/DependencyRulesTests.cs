@@ -13,6 +13,12 @@ namespace ISC.AI.UnitTests.Architecture;
 /// (в) профиль зависит «внутрь» (к <c>Abstractions</c>), а единственная его связь с конкретным проектом
 /// ядра — <c>&lt;Профиль&gt;.Data → Persistence</c>. Правило структурное и действует для ЛЮБОГО профиля
 /// (Inspector, ERP, …), а не для конкретного имени. Нарушение любого из них — провал сборки в CI.
+///
+/// Пакеты модулей <c>src/modules/*</c> (ADR-0017) — третий уровень между ядром и профилем:
+/// (г) ядро не ссылается и на модуль; (д) модуль НЕ зависит ни от одного профиля и ни от хоста — иначе
+/// теряется его переиспользуемость другими профилями (ровно ради неё документооборот вынесен из профиля);
+/// (е) модуль зависит «внутрь» по тому же правилу, что и профиль (<c>&lt;Модуль&gt;.Data → Persistence</c>).
+/// Ссылка «профиль → модуль» разрешена и является единственным направлением связи между ними.
 /// </remarks>
 public sealed class DependencyRulesTests
 {
@@ -55,6 +61,20 @@ public sealed class DependencyRulesTests
         }
     }
 
+    [Fact(DisplayName = "Ядро не ссылается на модуль")]
+    public void Core_does_not_reference_module()
+    {
+        // Та же страховка от «пустого» списка, что и в проверке профиля.
+        CoreLibraries.ShouldNotBeEmpty("Не найдено ни одной ядровой библиотеки в src/core — проверь путь обнаружения.");
+
+        foreach (var core in CoreLibraries)
+        {
+            var toModule = Graph[core].Where(IsModuleProject).ToArray();
+            toModule.ShouldBeEmpty(
+                $"Проект ядра «{core}» не должен ссылаться на пакет модулей, но ссылается на: {string.Join(", ", toModule)}");
+        }
+    }
+
     [Fact(DisplayName = "Хост подключает ровно один профиль")]
     public void Host_references_exactly_one_profile()
     {
@@ -83,6 +103,43 @@ public sealed class DependencyRulesTests
         }
     }
 
+    [Fact(DisplayName = "Модуль не зависит от профиля и хоста (иначе теряется переиспользуемость)")]
+    public void Module_does_not_reference_profile_or_host()
+    {
+        var modules = Graph.Keys.Where(IsModuleProject).ToArray();
+
+        // Страховка от вхолостую прошедшего теста: пакет модулей в решении есть (src/modules/docflow).
+        modules.ShouldNotBeEmpty("Не найдено ни одного пакета модулей в src/modules — проверь путь обнаружения.");
+
+        foreach (var project in modules)
+        {
+            var toProfile = Graph[project].Where(IsProfileProject).ToArray();
+            toProfile.ShouldBeEmpty(
+                $"Модуль «{project}» не должен зависеть от профиля (ссылается на: {string.Join(", ", toProfile)}). "
+                + "Связь допустима ТОЛЬКО в обратную сторону: профиль подключает модуль (ADR-0017).");
+
+            Graph[project].ShouldNotContain(Host,
+                $"Модуль «{project}» не должен ссылаться на хост «{Host}».");
+        }
+    }
+
+    [Fact(DisplayName = "Модуль зависит внутрь; на Persistence ссылается только <Модуль>.Data")]
+    public void Module_depends_inward_and_only_module_data_references_Persistence()
+    {
+        foreach (var (project, references) in Graph.Where(kv => IsModuleProject(kv.Key)))
+        {
+            foreach (var reference in references.Where(IsCoreLibrary))
+            {
+                // То же структурное правило, что и для профиля: слой данных ЛЮБОГО модуля может ссылаться
+                // на Persistence ради общего EF-слоя; всем остальным проектам модуля — только Abstractions.
+                var allowed = reference == Abstractions
+                    || (reference == Persistence && IsModuleDataProject(project));
+                allowed.ShouldBeTrue(
+                    $"Модуль «{project}» ссылается на ядро «{reference}»: разрешено только Abstractions (всем) и Persistence (только слою данных модуля «*.Data»).");
+            }
+        }
+    }
+
     [Fact(DisplayName = "Каждый проект зависит от Abstractions")]
     public void Every_project_depends_on_Abstractions()
     {
@@ -95,6 +152,14 @@ public sealed class DependencyRulesTests
 
     private static bool IsProfileProject(string name) =>
         name.StartsWith("ISC.AI.Profile.", StringComparison.Ordinal);
+
+    // Пакет модулей (src/modules/*, ADR-0017): переиспользуемая вертикаль, подключаемая профилем.
+    private static bool IsModuleProject(string name) =>
+        name.StartsWith("ISC.AI.Modules.", StringComparison.Ordinal);
+
+    // Слой данных модуля: «ISC.AI.Modules.<Имя>.Data» — единственное место модуля, которому разрешён Persistence.
+    private static bool IsModuleDataProject(string name) =>
+        IsModuleProject(name) && name.EndsWith(".Data", StringComparison.Ordinal);
 
     private static bool IsCoreLibrary(string name) => CoreLibraries.Contains(name);
 

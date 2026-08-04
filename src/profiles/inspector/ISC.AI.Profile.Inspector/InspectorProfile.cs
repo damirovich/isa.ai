@@ -1,6 +1,7 @@
 using ISC.AI.Abstractions.AI;
 using ISC.AI.Abstractions.Modules;
 using ISC.AI.Abstractions.Profiles;
+using ISC.AI.Modules.DocFlow;
 using ISC.AI.Profile.Inspector.Application;
 using ISC.AI.Profile.Inspector.Data;
 using ISC.AI.Profile.Inspector.UI;
@@ -74,6 +75,10 @@ public sealed class InspectorProfile : IProfile
             Icons.Material.Filled.AccountTree, typeof(TerritorialDivisions), ReadPolicy, GroupDivisions),
         new ModuleDescriptor("divisions-linear", "/divisions/linear", "Линейные",
             Icons.Material.Filled.Business, typeof(LinearDivisions), ReadPolicy, GroupDivisions),
+
+        // --- Секция «Документооборот»: подключаемый пакет модулей docflow (ADR-0017, Э4-35) ---
+        // Страницы объявляет САМ модуль; профиль лишь включает их в свой реестр. Пока пусто (скелет, этап 0).
+        .. DocFlowModule.Modules,
     ];
 
     /// <inheritdoc />
@@ -84,6 +89,9 @@ public sealed class InspectorProfile : IProfile
     {
         // Сценарии профиля: промпт-рендереры, валидаторы, доменные швы грунтовки/чанкинга, расчёт риска.
         services.AddInspectorApplication();
+
+        // Прикладные сервисы подключённых пакетов модулей (ADR-0017).
+        DocFlowModule.RegisterServices(services);
     }
 
     /// <inheritdoc />
@@ -91,5 +99,8 @@ public sealed class InspectorProfile : IProfile
     {
         // Доменный контекст профиля (схема inspector) через фабрику (ТС-008, ТО-инф-01, ADR-0003).
         services.AddInspectorPersistence(configuration);
+
+        // Контексты данных подключённых пакетов модулей — своя схема и своя история миграций (ADR-0017).
+        DocFlowModule.RegisterDataContexts(services, configuration);
     }
 }
