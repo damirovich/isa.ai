@@ -26,6 +26,8 @@ public class CoreDbContext(DbContextOptions<CoreDbContext> options) : AuditedDbC
     public DbSet<IndexingJobEntity> IndexingJobs { get; set; } = null!;
     public DbSet<AuditRecordEntity> AuditRecords { get; set; } = null!;
     public DbSet<BackgroundTaskEntity> BackgroundTasks { get; set; } = null!;
+    public DbSet<ConversationEntity> Conversations { get; set; } = null!;
+    public DbSet<ConversationMessageEntity> ConversationMessages { get; set; } = null!;
 
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)

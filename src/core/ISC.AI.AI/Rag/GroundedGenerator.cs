@@ -2,6 +2,8 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using ISC.AI.AI.Grounding;
 using ISC.AI.Abstractions.Audit;
+using ISC.AI.Abstractions.Conversations;
+using ISC.AI.Abstractions.Enums;
 using ISC.AI.Abstractions.Grounding;
 using ISC.AI.Abstractions.Rag;
 using ISC.AI.Abstractions.Retrieval;
@@ -243,6 +245,17 @@ public sealed class GroundedGenerator(
         if (!string.IsNullOrWhiteSpace(request.TaskPrompt))
         {
             messages.Add(new ChatMessage(ChatRole.System, request.TaskPrompt));
+        }
+
+        // История диалога (многоходовое общение): предыдущие реплики — ПОСЛЕ системных правил и ДО текущего
+        // запроса с фрагментами. Инвариант не нарушается: грунтовка нового ответа идёт по свежим фрагментам.
+        if (request.History is { Count: > 0 })
+        {
+            foreach (var turn in request.History)
+            {
+                var role = turn.Role == ConversationMessageRole.User ? ChatRole.User : ChatRole.Assistant;
+                messages.Add(new ChatMessage(role, turn.Text));
+            }
         }
 
         var context = string.Join(

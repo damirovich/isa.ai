@@ -1,3 +1,5 @@
+using ISC.AI.AI.Chat;
+using ISC.AI.Abstractions.Conversations;
 using ISC.AI.Abstractions.Rag;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,6 +19,9 @@ public static class CoreRagServiceCollectionExtensions
     {
         services.AddSingleton(ReadGenerationOptions(configuration));
         services.AddScoped<IGroundedGenerator, GroundedGenerator>();
+
+        // Грунтованный многоходовый ассистент чата (история диалога + грунтованная генерация).
+        services.AddScoped<IChatService, ChatService>();
         return services;
     }
 

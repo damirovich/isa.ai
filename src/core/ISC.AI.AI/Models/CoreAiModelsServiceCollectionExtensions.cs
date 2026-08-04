@@ -1,4 +1,5 @@
 using System.ClientModel;
+using System.Text.Json;
 using ISC.AI.Abstractions.Enums;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
@@ -49,9 +50,9 @@ public static class CoreAiModelsServiceCollectionExtensions
     private static void TryAddChatModel(
         IServiceCollection services, IConfiguration configuration, ModelRole role, int maxConcurrency)
     {
-        if (!TryReadModel(configuration, role, out var endpoint, out var model, out var apiKey))
+        if (!TryReadModel(configuration, role, out var endpoint, out var configuredModel, out var apiKey))
         {
-            return; // роль не сконфигурирована — пропускаем (модель добавляется конфигом, без изменения кода)
+            return; // роль не сконфигурирована (нет адреса) — пропускаем
         }
 
         // Air-gap (инвариант №2, ТБ-044): адрес модели обязан быть внутри контура — проверяем при старте.
@@ -60,6 +61,8 @@ public static class CoreAiModelsServiceCollectionExtensions
 
         services.AddKeyedSingleton<IChatClient>(role, (_, _) =>
         {
+            // Имя модели: явное из конфига, иначе — авто-определение из /v1/models (первый ход, кешируется в singleton).
+            var model = ResolveModelName(endpoint, configuredModel, role);
             IChatClient client = new OpenAIClient(
                     new ApiKeyCredential(apiKey),
                     new OpenAIClientOptions { Endpoint = endpointUri })
@@ -72,7 +75,7 @@ public static class CoreAiModelsServiceCollectionExtensions
     private static void TryAddEmbeddingModel(
         IServiceCollection services, IConfiguration configuration, ModelRole role, int maxConcurrency)
     {
-        if (!TryReadModel(configuration, role, out var endpoint, out var model, out var apiKey))
+        if (!TryReadModel(configuration, role, out var endpoint, out var configuredModel, out var apiKey))
         {
             return;
         }
@@ -83,6 +86,7 @@ public static class CoreAiModelsServiceCollectionExtensions
 
         services.AddKeyedSingleton<IEmbeddingGenerator<string, Embedding<float>>>(role, (_, _) =>
         {
+            var model = ResolveModelName(endpoint, configuredModel, role);
             IEmbeddingGenerator<string, Embedding<float>> client = new OpenAIClient(
                     new ApiKeyCredential(apiKey),
                     new OpenAIClientOptions { Endpoint = endpointUri })
@@ -93,6 +97,7 @@ public static class CoreAiModelsServiceCollectionExtensions
     }
 
     // Адрес/модель/ключ роли — из секции Llm:Models:{role}. У локального сервера авторизации нет → ключ-заглушка.
+    // Роль считается сконфигурированной по наличию АДРЕСА; имя модели может быть пустым → авто-определение.
     private static bool TryReadModel(
         IConfiguration configuration, ModelRole role,
         out string endpoint, out string model, out string apiKey)
@@ -101,6 +106,43 @@ public static class CoreAiModelsServiceCollectionExtensions
         endpoint = configuration[$"{section}:Endpoint"] ?? string.Empty;
         model = configuration[$"{section}:Model"] ?? string.Empty;
         apiKey = configuration[$"{section}:ApiKey"] is { Length: > 0 } key ? key : "no-key-needed";
-        return !string.IsNullOrWhiteSpace(endpoint) && !string.IsNullOrWhiteSpace(model);
+        return !string.IsNullOrWhiteSpace(endpoint);
+    }
+
+    /// <summary>
+    /// Имя модели для запроса: ЯВНОЕ из конфигурации (уважается как есть, для строгих контуров с фиксированной
+    /// моделью), иначе — АВТО-ОПРЕДЕЛЕНИЕ из <c>{endpoint}/models</c> локального сервера (берётся первый
+    /// загруженный id). Убирает рассинхрон «в конфиге одно имя, а на сервере загружен другой id» — сервер сам
+    /// сообщает, что у него загружено. Обращение к <c>/models</c> идёт на ТОТ ЖЕ адрес внутри контура, что и
+    /// инференс (air-gap не нарушается — адрес уже проверен <see cref="AirGapEndpointGuard"/>).
+    /// </summary>
+    internal static string ResolveModelName(string endpoint, string configuredModel, ModelRole role)
+    {
+        if (!string.IsNullOrWhiteSpace(configuredModel))
+        {
+            return configuredModel;
+        }
+
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+            var json = http.GetStringAsync($"{endpoint.TrimEnd('/')}/models").GetAwaiter().GetResult();
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.TryGetProperty("data", out var data) && data.GetArrayLength() > 0
+                && data[0].TryGetProperty("id", out var id) && id.GetString() is { Length: > 0 } modelId)
+            {
+                return modelId;
+            }
+
+            throw new InvalidOperationException($"Сервер «{endpoint}/models» не вернул ни одной модели.");
+        }
+        catch (Exception exception) when (exception is not InvalidOperationException)
+        {
+            throw new InvalidOperationException(
+                $"Не удалось определить модель роли «{role}» из «{endpoint}/models», и имя не задано в конфигурации "
+                + $"(Llm:Models:{role}:Model). Проверьте, что сервер инференса запущен, либо укажите имя модели явно. "
+                + exception.Message,
+                exception);
+        }
     }
 }

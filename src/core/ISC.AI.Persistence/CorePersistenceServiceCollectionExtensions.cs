@@ -1,8 +1,10 @@
 using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.BackgroundTasks;
+using ISC.AI.Abstractions.Conversations;
 using ISC.AI.Abstractions.Corpus;
 using ISC.AI.Persistence.Audit;
 using ISC.AI.Persistence.BackgroundTasks;
+using ISC.AI.Persistence.Conversations;
 using ISC.AI.Persistence.Corpus;
 using ISC.AI.Persistence.Security;
 using Microsoft.EntityFrameworkCore;
@@ -52,6 +54,9 @@ public static class CorePersistenceServiceCollectionExtensions
 
         // Per-op чтение допуска (Э3-08, ТБ-012/016): без кэша — отзыв действует немедленно.
         services.AddScoped<ClearanceAccessReader>();
+
+        // Хранилище диалогов чата (сохранение истории общения), разграничение по владельцу-субъекту.
+        services.AddScoped<IConversationStore, ConversationStore>();
 
         return services;
     }
