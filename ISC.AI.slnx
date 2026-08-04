@@ -17,13 +17,6 @@
     <Project Path="src/modules/docflow/ISC.AI.Modules.DocFlow/ISC.AI.Modules.DocFlow.csproj" />
   </Folder>
   <Folder Name="/src/profiles/" />
-  <Folder Name="/src/profiles/erp/">
-    <Project Path="src/profiles/erp/ISC.AI.Profile.ERP.Application/ISC.AI.Profile.ERP.Application.csproj" />
-    <Project Path="src/profiles/erp/ISC.AI.Profile.ERP.Data/ISC.AI.Profile.ERP.Data.csproj" />
-    <Project Path="src/profiles/erp/ISC.AI.Profile.ERP.Domain/ISC.AI.Profile.ERP.Domain.csproj" />
-    <Project Path="src/profiles/erp/ISC.AI.Profile.ERP.UI/ISC.AI.Profile.ERP.UI.csproj" />
-    <Project Path="src/profiles/erp/ISC.AI.Profile.ERP/ISC.AI.Profile.ERP.csproj" />
-  </Folder>
   <Folder Name="/src/profiles/inspector/">
     <Project Path="src/profiles/inspector/ISC.AI.Profile.Inspector.Application/ISC.AI.Profile.Inspector.Application.csproj" Id="bc718037-f85a-434f-82eb-6903528f2700" />
     <Project Path="src/profiles/inspector/ISC.AI.Profile.Inspector.Data/ISC.AI.Profile.Inspector.Data.csproj" Id="1bc4ea50-6fa4-4fdc-bc30-686f284068c2" />

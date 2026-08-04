@@ -12,7 +12,7 @@ namespace ISC.AI.UnitTests.Architecture;
 /// (а) ядро никогда не ссылается на профиль; (б) хост подключает ровно один профиль;
 /// (в) профиль зависит «внутрь» (к <c>Abstractions</c>), а единственная его связь с конкретным проектом
 /// ядра — <c>&lt;Профиль&gt;.Data → Persistence</c>. Правило структурное и действует для ЛЮБОГО профиля
-/// (Inspector, ERP, …), а не для конкретного имени. Нарушение любого из них — провал сборки в CI.
+/// (Inspector и любого будущего), а не для конкретного имени. Нарушение любого из них — провал сборки в CI.
 ///
 /// Пакеты модулей <c>src/modules/*</c> (ADR-0017) — третий уровень между ядром и профилем:
 /// (г) ядро не ссылается и на модуль; (д) модуль НЕ зависит ни от одного профиля и ни от хоста — иначе
@@ -93,8 +93,8 @@ public sealed class DependencyRulesTests
 
             foreach (var reference in references.Where(IsCoreLibrary))
             {
-                // Правило структурное, а не по имени профиля: слой данных ЛЮБОГО профиля (Inspector.Data,
-                // ERP.Data, …) может ссылаться на Persistence; всем остальным проектам профиля — только Abstractions.
+                // Правило структурное, а не по имени профиля: слой данных ЛЮБОГО профиля («<Профиль>.Data»)
+                // может ссылаться на Persistence; всем остальным проектам профиля — только Abstractions.
                 var allowed = reference == Abstractions
                     || (reference == Persistence && IsProfileDataProject(project));
                 allowed.ShouldBeTrue(
