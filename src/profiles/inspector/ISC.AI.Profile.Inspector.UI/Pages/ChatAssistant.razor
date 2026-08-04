@@ -20,8 +20,9 @@
     <MudPaper Outlined="true" Class="pa-2 d-flex flex-column" Style="width:280px; min-width:230px;">
         <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
                    StartIcon="@Icons.Material.Filled.Add" OnClick="NewChat" Class="mb-2">Новый чат</MudButton>
-        <MudDivider Class="mb-2" />
-        <div style="overflow-y:auto; flex:1;">
+        @* flex:0 0 auto — иначе .mud-divider-fullwidth (flex-grow:1) растягивается и сдвигает список диалогов в середину. *@
+        <MudDivider Class="mb-2" Style="flex:0 0 auto;" />
+        <div style="overflow-y:auto; flex:1 1 0; min-height:0;">
             @if (_conversations.Count == 0)
             {
                 <MudText Typo="Typo.caption" Class="mud-text-secondary pa-2 d-block">Диалогов пока нет</MudText>
@@ -66,8 +67,7 @@
             </MudText>
         </div>
 
-        <div class="mb-2"
-             style="flex:1 1 0; min-height:0; overflow-y:auto; display:flex; flex-direction:column; align-items:stretch;">
+        <div style="overflow-y:auto; flex:1;" class="mb-2">
             @if (_messages.Count == 0 && !_busy)
             {
                 <EmptyState Icon="@Icons.Material.Filled.Forum" MinHeight="300">
