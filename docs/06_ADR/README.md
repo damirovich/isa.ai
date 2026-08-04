@@ -42,7 +42,7 @@
 | ADR-0013 | Нейтральный флаг годности источника в грунтовке | Принято | ТБ-040, ТО-инф-04 (также ТС-003, ADR-0002/0005/0008, GATE-2/3, КИ-02) | [ADR-0013-neytralnyy-flag-godnosti-v-gruntovke.md](ADR-0013-neytralnyy-flag-godnosti-v-gruntovke.md) |
 | ADR-0014 | Режим как подключаемая политика доступа (floor ядра + IAccessPolicy) | Принято | ТБ-020/021/002 (также ТС-003, ADR-0005/0013, GATE-1) | [ADR-0014-rezhim-podklyuchaemaya-politika-dostupa.md](ADR-0014-rezhim-podklyuchaemaya-politika-dostupa.md) |
 | ADR-0015 | Универсальный сборщик корпуса: нейтральный движок + подключаемые коннекторы (вне контура) | Принято | ТФ-НПА, ТБ-режим/air-gap (также ТБ-024, ADR-0002/0013, ПОДГ-02) | [ADR-0015-universalnyy-sborshchik-dvizhok-i-konnektory.md](ADR-0015-universalnyy-sborshchik-dvizhok-i-konnektory.md) |
-| ADR-0016 | СКИД — источник идентичности; допуск — локально в ядре | Принято | ТБ-010..016, ТБ-020/021, ТО-инф-06 (также Э3-08, ADR-0014) | [ADR-0016-skid-istochnik-identichnosti-dopusk-lokalno.md](ADR-0016-skid-istochnik-identichnosti-dopusk-lokalno.md) |
+| ADR-0016 | СКИД — источник идентичности; допуск — локально в ядре | Принято; частично заменяется ADR-0017 (идентичность переезжает при слиянии; допуск и default-deny остаются) | ТБ-010..016, ТБ-020/021, ТО-инф-06 (также Э3-08, ADR-0014) | [ADR-0016-skid-istochnik-identichnosti-dopusk-lokalno.md](ADR-0016-skid-istochnik-identichnosti-dopusk-lokalno.md) |
 | ADR-0017 | СКИД — пакет модулей документооборота, а не второй профиль | Принято | ТС-002/003/004/006/007, ТО-инф-01, ТБ-012/020/021, ТСТ-001 (также ADR-0002/0003/0016) | [ADR-0017-skid-modul-dokumentooborota-ne-profil.md](ADR-0017-skid-modul-dokumentooborota-ne-profil.md) |
 
 ### Предложенные (требуют решения на Э1)
