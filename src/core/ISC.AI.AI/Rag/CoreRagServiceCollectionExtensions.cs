@@ -20,7 +20,10 @@ public static class CoreRagServiceCollectionExtensions
         services.AddSingleton(ReadGenerationOptions(configuration));
         services.AddScoped<IGroundedGenerator, GroundedGenerator>();
 
-        // Грунтованный многоходовый ассистент чата (история диалога + грунтованная генерация).
+        // Свободный режим чата (общение/помощь без грунтовки; правило запрещает юр-утверждения).
+        services.AddScoped<IConversationalGenerator, ConversationalGenerator>();
+
+        // Многоходовый ассистент чата: свободный + грунтованный режимы, история диалога.
         services.AddScoped<IChatService, ChatService>();
         return services;
     }

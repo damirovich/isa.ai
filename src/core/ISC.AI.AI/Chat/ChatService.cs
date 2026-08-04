@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
 using ISC.AI.Abstractions.Conversations;
 using ISC.AI.Abstractions.Enums;
@@ -8,11 +9,15 @@ using ISC.AI.Abstractions.Security;
 namespace ISC.AI.AI.Chat;
 
 /// <summary>
-/// Грунтованный многоходовый ассистент (<see cref="IChatService"/>): загружает историю диалога, вызывает
-/// грунтованную генерацию с контекстом и сохраняет обе реплики. Режимные инварианты внутри генератора:
-/// фильтр доступа, обязательная грунтовка, аудит генерации — чат их не обходит.
+/// Многоходовый ассистент чата (<see cref="IChatService"/>) с двумя режимами: СВОБОДНЫЙ
+/// (<see cref="ChatMode.Free"/> — общение/помощь без грунтовки, но и без юр-утверждений) и ГРУНТОВАННЫЙ
+/// (<see cref="ChatMode.Grounded"/> — по НПА/документ: фильтр доступа → грунтовка → аудит). Загружает историю,
+/// сохраняет обе реплики. Режимные инварианты грунтованного пути внутри генератора — чат их не обходит.
 /// </summary>
-public sealed class ChatService(IGroundedGenerator generator, IConversationStore conversations) : IChatService
+public sealed class ChatService(
+    IGroundedGenerator generator,
+    IConversationalGenerator conversationalGenerator,
+    IConversationStore conversations) : IChatService
 {
     /// <inheritdoc />
     public async Task<ChatReply> SendAsync(
@@ -83,7 +88,29 @@ public sealed class ChatService(IGroundedGenerator generator, IConversationStore
             throw new InvalidOperationException("Диалог не найден или недоступен.");
         }
 
-        // Стриминг черновика по кускам; грунтовка/аудит — внутри генератора на СОБРАННОМ полном тексте (Final).
+        // СВОБОДНЫЙ режим: обычный ассистент без извлечения/грунтовки (правило запрещает юр-утверждения).
+        if (request.Mode == ChatMode.Free)
+        {
+            var freeText = new StringBuilder();
+            await foreach (var delta in conversationalGenerator.GenerateStreamingAsync(
+                request.Text, history, access, request.Role, cancellationToken))
+            {
+                freeText.Append(delta);
+                yield return new ChatStreamUpdate(delta, Final: null);
+            }
+
+            var answer = freeText.ToString();
+            // Ответ без грунтовки (гриф 0) — в историю; в терминале Grounding=null («не сверено с НПА»).
+            await conversations.AppendMessageAsync(
+                conversationId, subjectId, ConversationMessageRole.Assistant, answer,
+                classification: 0, groundingJson: null, cancellationToken);
+
+            yield return new ChatStreamUpdate(
+                TextDelta: null, Final: new ChatReply(conversationId, answer, Grounding: null, Classification: 0));
+            yield break;
+        }
+
+        // ГРУНТОВАННЫЙ режим. Стриминг черновика по кускам; грунтовка/аудит — на СОБРАННОМ полном тексте (Final).
         GroundedResponse? final = null;
         await foreach (var update in generator.GenerateStreamingAsync(
             new GroundedRequest(request.Text, request.Role, request.TopK, request.TaskPrompt, history),

@@ -1,7 +1,7 @@
 @namespace ISC.AI.Profile.Inspector.UI
-@* Модуль «Чат-ассистент» (Э4-34): грунтованный многоходовый помощник по НПА с сохранением истории.
-   Интерфейс как у ChatGPT — боковая панель диалогов + лента сообщений + поле ввода. Ответ формируется
-   ТОЛЬКО из найденных фрагментов (грунтовка ТБ-040); история и разграничение по владельцу — в ядре. *@
+@* Модуль «Чат-ассистент» (Э4-34): многоходовый ассистент инспектора с историей. Два режима — свободное
+   общение и грунтованный (по документам: справки/акты/заключения + правовая база). Интерфейс как у ChatGPT.
+   В грунтованном режиме ответ формируется ТОЛЬКО из найденных фрагментов (грунтовка ТБ-040). *@
 @page "/chat"
 @rendermode InteractiveServer
 @implements IDisposable
@@ -11,7 +11,7 @@
 @using ISC.AI.Abstractions.Grounding
 @using ISC.AI.Profile.Inspector.Application.Chat
 
-<PageHeader Title="Чат-ассистент" Subtitle="Грунтованный помощник по НПА · история диалогов"
+<PageHeader Title="Чат-ассистент" Subtitle="Ассистент инспектора · история диалогов"
             Icon="@Icons.Material.Filled.Forum" />
 
 <div class="d-flex" style="gap:16px; height: calc(100vh - 230px); min-height: 460px;">
@@ -53,12 +53,25 @@
 
     @* ================= Лента диалога + ввод ================= *@
     <MudPaper Outlined="true" Class="pa-3 d-flex flex-column flex-grow-1" Style="min-width:0;">
+        @* --- Переключатель режима --- *@
+        <div class="d-flex align-center gap-2 mb-2 flex-wrap">
+            <MudToggleGroup T="bool" @bind-Value="_grounded" Color="Color.Primary" Size="Size.Small" CheckMark="false" Dense="true">
+                <MudToggleItem T="bool" Value="false" Text="Свободный чат" />
+                <MudToggleItem T="bool" Value="true" Text="По документам" />
+            </MudToggleGroup>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                @(_grounded
+                    ? "Ответ строится и проверяется по извлечённым документам (грунтовка со ссылками)"
+                    : "Свободное общение и помощь — ответ общий, БЕЗ проверки по документам")
+            </MudText>
+        </div>
+
         <div style="overflow-y:auto; flex:1;" class="mb-2">
             @if (_messages.Count == 0 && !_busy)
             {
                 <EmptyState Icon="@Icons.Material.Filled.Forum" MinHeight="300">
-                    Задайте вопрос по нормативной базе.<br />
-                    Ответ формируется ТОЛЬКО из найденных фрагментов НПА.
+                    Свободно общайтесь или переключитесь на «По документам».<br />
+                    В режиме «По документам» ответ формируется ТОЛЬКО из найденных фрагментов.
                 </EmptyState>
             }
             @foreach (var message in _messages)
@@ -75,7 +88,7 @@
                 <div class="d-flex mb-2" style="justify-content:flex-start;">
                     <MudPaper Class="pa-2 d-flex align-center gap-2" Elevation="0" Style="@BubbleStyle(ConversationMessageRole.Assistant)">
                         <MudProgressCircular Size="Size.Small" Indeterminate="true" />
-                        <MudText Typo="Typo.caption">Извлекаю нормы по допуску и формирую ответ…</MudText>
+                        <MudText Typo="Typo.caption">Извлекаю документы по допуску и формирую ответ…</MudText>
                     </MudPaper>
                 </div>
             }
@@ -88,12 +101,12 @@
         @if (_lastGrounding is { AllConfirmed: false })
         {
             <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-2">
-                Не все ссылки подтверждены извлечёнными нормами (GATE-2) — проверьте вручную.
+                Не все ссылки подтверждены извлечёнными документами (GATE-2) — проверьте вручную.
             </MudAlert>
         }
 
         <div class="d-flex gap-2 align-end">
-            <MudTextField @bind-Value="_input" Placeholder="Спросите по НПА…" Variant="Variant.Outlined"
+            <MudTextField @bind-Value="_input" Placeholder="Ваш вопрос или задача…" Variant="Variant.Outlined"
                           Lines="1" AutoGrow="true" MaxLines="6" Immediate="true" Disabled="_busy"
                           Class="flex-grow-1" />
             <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SendAsync"
@@ -102,7 +115,7 @@
             </MudButton>
         </div>
         <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1 d-block">
-            Ответы грунтуются: ссылки на НПА проверяются против найденных фрагментов; результат — черновик, требует проверки (HITL).
+            В режиме «По документам» ссылки проверяются против найденных фрагментов; результат — черновик, требует проверки (HITL).
         </MudText>
     </MudPaper>
 </div>
@@ -121,6 +134,7 @@
     private int? _conversationId;
     private string _input = string.Empty;
     private bool _busy;
+    private bool _grounded; // false = свободный режим (по умолчанию), true = грунтованный (по документам)
     private string? _error;
     private GroundingResult? _lastGrounding;
 
@@ -192,7 +206,8 @@
         try
         {
             // Потоковый вывод: черновик печатается по кускам, итог грунтовки — в терминальном обновлении.
-            await foreach (var update in Dispatcher.CreateStream(new SendChatMessageStreamCommand(_conversationId, text), _cts.Token))
+            var mode = _grounded ? ChatMode.Grounded : ChatMode.Free;
+            await foreach (var update in Dispatcher.CreateStream(new SendChatMessageStreamCommand(_conversationId, text, mode), _cts.Token))
             {
                 if (update.TextDelta is { } delta)
                 {

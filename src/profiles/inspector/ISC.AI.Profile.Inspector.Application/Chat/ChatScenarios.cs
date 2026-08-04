@@ -32,10 +32,11 @@ public sealed record SendChatMessageCommand(int? ConversationId, string Text) : 
     }
 }
 
-/// <summary>Потоковая отправка реплики (печать ответа по кускам). Новый диалог при <c>ConversationId = null</c>.</summary>
-public sealed record SendChatMessageStreamCommand(int? ConversationId, string Text) : IStreamRequest<ChatStreamUpdate>
+/// <summary>Потоковая отправка реплики (печать по кускам). Новый диалог при <c>ConversationId = null</c>.</summary>
+public sealed record SendChatMessageStreamCommand(int? ConversationId, string Text, ChatMode Mode)
+    : IStreamRequest<ChatStreamUpdate>
 {
-    /// <summary>Резолвит доступ и прокидывает потоковый ответ грунтованного ассистента.</summary>
+    /// <summary>Резолвит доступ и прокидывает потоковый ответ ассистента (свободный или грунтованный режим).</summary>
     public sealed class Handler(IChatService chatService, IAccessContextProvider accessProvider)
         : IStreamRequestHandler<SendChatMessageStreamCommand, ChatStreamUpdate>
     {
@@ -46,7 +47,7 @@ public sealed record SendChatMessageStreamCommand(int? ConversationId, string Te
             ArgumentNullException.ThrowIfNull(command);
             var access = await accessProvider.GetCurrentAsync(cancellationToken);
             await foreach (var update in chatService.SendStreamingAsync(
-                new ChatMessageRequest(command.ConversationId, command.Text), access, cancellationToken))
+                new ChatMessageRequest(command.ConversationId, command.Text, command.Mode), access, cancellationToken))
             {
                 yield return update;
             }

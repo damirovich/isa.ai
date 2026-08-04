@@ -25,6 +25,7 @@
   <!-- Промпты — файлы-шаблоны (ТО-лнг-03), не хардкод в C#: см. Grounding/Prompts. -->
   <ItemGroup>
     <EmbeddedResource Include="Grounding\Prompts\*.scriban" />
+    <EmbeddedResource Include="Chat\Prompts\*.scriban" />
   </ItemGroup>
 
 </Project>

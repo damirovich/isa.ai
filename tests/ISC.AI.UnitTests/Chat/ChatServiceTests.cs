@@ -33,7 +33,7 @@ public sealed class ChatServiceTests
         generator.GenerateAsync(Arg.Any<GroundedRequest>(), Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
             .Returns(Response("ответ", classification: 2));
 
-        var service = new ChatService(generator, store);
+        var service = new ChatService(generator, Substitute.For<IConversationalGenerator>(), store);
 
         var reply = await service.SendAsync(new ChatMessageRequest(null, "вопрос"), new AccessContext("42", 2, [7]));
 
@@ -58,7 +58,7 @@ public sealed class ChatServiceTests
         generator.GenerateAsync(Arg.Do<GroundedRequest>(r => captured = r), Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
             .Returns(Response("ответ", 0));
 
-        var service = new ChatService(generator, store);
+        var service = new ChatService(generator, Substitute.For<IConversationalGenerator>(), store);
 
         await service.SendAsync(new ChatMessageRequest(5, "новый вопрос"), new AccessContext("42", 2, [7]));
 
@@ -77,7 +77,7 @@ public sealed class ChatServiceTests
             .Returns(false); // диалог субъекту не принадлежит
 
         var generator = Substitute.For<IGroundedGenerator>();
-        var service = new ChatService(generator, store);
+        var service = new ChatService(generator, Substitute.For<IConversationalGenerator>(), store);
 
         await Should.ThrowAsync<InvalidOperationException>(
             () => service.SendAsync(new ChatMessageRequest(999, "вопрос"), new AccessContext("42", 2, [7])));
@@ -88,7 +88,8 @@ public sealed class ChatServiceTests
     [Fact(DisplayName = "Чат: без числового субъекта — отказ (диалог требует владельца)")]
     public async Task Send_requires_numeric_subject()
     {
-        var service = new ChatService(Substitute.For<IGroundedGenerator>(), Substitute.For<IConversationStore>());
+        var service = new ChatService(
+            Substitute.For<IGroundedGenerator>(), Substitute.For<IConversationalGenerator>(), Substitute.For<IConversationStore>());
 
         await Should.ThrowAsync<InvalidOperationException>(
             () => service.SendAsync(new ChatMessageRequest(null, "вопрос"), new AccessContext("dev", 0, [])));
@@ -107,7 +108,7 @@ public sealed class ChatServiceTests
         generator.GenerateStreamingAsync(Arg.Any<GroundedRequest>(), Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
             .Returns(_ => DraftStream());
 
-        var service = new ChatService(generator, store);
+        var service = new ChatService(generator, Substitute.For<IConversationalGenerator>(), store);
 
         var deltas = new List<string>();
         ChatReply? final = null;
@@ -131,6 +132,53 @@ public sealed class ChatServiceTests
 
         await store.Received(1).AppendMessageAsync(7, 42, ConversationMessageRole.User, "вопрос", Arg.Any<short>(), null, Arg.Any<CancellationToken>());
         await store.Received(1).AppendMessageAsync(7, 42, ConversationMessageRole.Assistant, "Служебная", (short)2, Arg.Any<string?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "Чат-стриминг СВОБОДНЫЙ режим: из свободного генератора, без грунтовки (Grounding=null), гриф 0")]
+    public async Task SendStreaming_free_mode_uses_conversational_generator_without_grounding()
+    {
+        var store = Substitute.For<IConversationStore>();
+        store.CreateAsync(42, Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(7);
+        store.GetHistoryAsync(7, 42, Arg.Any<CancellationToken>()).Returns(new List<ChatTurn>());
+        store.AppendMessageAsync(7, 42, Arg.Any<ConversationMessageRole>(), Arg.Any<string>(), Arg.Any<short>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        var grounded = Substitute.For<IGroundedGenerator>();
+        var conversational = Substitute.For<IConversationalGenerator>();
+        conversational.GenerateStreamingAsync(Arg.Any<string>(), Arg.Any<IReadOnlyList<ChatTurn>>(), Arg.Any<AccessContext>(), Arg.Any<ModelRole>(), Arg.Any<CancellationToken>())
+            .Returns(_ => FreeStream());
+
+        var service = new ChatService(grounded, conversational, store);
+
+        var deltas = new List<string>();
+        ChatReply? final = null;
+        await foreach (var update in service.SendStreamingAsync(new ChatMessageRequest(null, "привет", ChatMode.Free), new AccessContext("42", 2, [7])))
+        {
+            if (update.TextDelta is { } delta)
+            {
+                deltas.Add(delta);
+            }
+            else if (update.Final is { } reply)
+            {
+                final = reply;
+            }
+        }
+
+        deltas.ShouldBe(["При", "вет!"]);
+        final.ShouldNotBeNull();
+        final!.Answer.ShouldBe("Привет!");
+        final.Grounding.ShouldBeNull();          // свободный режим — не сверялось с НПА
+        final.Classification.ShouldBe<short>(0); // обращения к ДСП нет
+
+        _ = grounded.DidNotReceive().GenerateStreamingAsync(Arg.Any<GroundedRequest>(), Arg.Any<AccessContext>(), Arg.Any<CancellationToken>());
+        await store.Received(1).AppendMessageAsync(7, 42, ConversationMessageRole.Assistant, "Привет!", (short)0, null, Arg.Any<CancellationToken>());
+    }
+
+    private static async IAsyncEnumerable<string> FreeStream()
+    {
+        yield return "При";
+        yield return "вет!";
+        await Task.Yield();
     }
 
     private static async IAsyncEnumerable<GroundedStreamUpdate> DraftStream()

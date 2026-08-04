@@ -7,12 +7,14 @@ namespace ISC.AI.Abstractions.Conversations;
 /// <summary>Запрос реплики в чат.</summary>
 /// <param name="ConversationId">Идентификатор диалога; <see langword="null"/> — начать НОВЫЙ диалог.</param>
 /// <param name="Text">Текст реплики пользователя.</param>
+/// <param name="Mode">Режим: <see cref="ChatMode.Free"/> — свободное общение; <see cref="ChatMode.Grounded"/> — по НПА/документ.</param>
 /// <param name="Role">Роль модели генерации.</param>
-/// <param name="TopK">Сколько фрагментов извлекать (после фильтра доступа).</param>
+/// <param name="TopK">Сколько фрагментов извлекать (после фильтра доступа; только в грунтованном режиме).</param>
 /// <param name="TaskPrompt">Задачный промпт профиля (не отменяет системное правило грунтовки — ТБ-041).</param>
 public sealed record ChatMessageRequest(
     int? ConversationId,
     string Text,
+    ChatMode Mode = ChatMode.Grounded,
     ModelRole Role = ModelRole.Analysis,
     int TopK = 10,
     string? TaskPrompt = null);
@@ -20,12 +22,12 @@ public sealed record ChatMessageRequest(
 /// <summary>Ответ ассистента в диалоге.</summary>
 /// <param name="ConversationId">Идентификатор диалога (для нового — присвоенный).</param>
 /// <param name="Answer">Текст ответа.</param>
-/// <param name="Grounding">Итог грунтовки (статусы ссылок на НПА).</param>
-/// <param name="Classification">Гриф ответа (максимум грифов использованных фрагментов).</param>
+/// <param name="Grounding">Итог грунтовки (статусы ссылок на НПА); <see langword="null"/> в свободном режиме (не сверялось).</param>
+/// <param name="Classification">Гриф ответа (максимум грифов использованных фрагментов; 0 в свободном режиме).</param>
 public sealed record ChatReply(
     int ConversationId,
     string Answer,
-    GroundingResult Grounding,
+    GroundingResult? Grounding,
     short Classification);
 
 /// <summary>
