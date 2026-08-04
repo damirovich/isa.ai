@@ -1,3 +1,5 @@
+using ISC.AI.AI.Chat;
+using ISC.AI.Abstractions.Conversations;
 using ISC.AI.Abstractions.Rag;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,6 +19,12 @@ public static class CoreRagServiceCollectionExtensions
     {
         services.AddSingleton(ReadGenerationOptions(configuration));
         services.AddScoped<IGroundedGenerator, GroundedGenerator>();
+
+        // Свободный режим чата (общение/помощь без грунтовки; правило запрещает юр-утверждения).
+        services.AddScoped<IConversationalGenerator, ConversationalGenerator>();
+
+        // Многоходовый ассистент чата: свободный + грунтованный режимы, история диалога.
+        services.AddScoped<IChatService, ChatService>();
         return services;
     }
 

@@ -1,5 +1,6 @@
 using ISC.AI.AI.Rag;
 using ISC.AI.Abstractions.Audit;
+using ISC.AI.Abstractions.Conversations;
 using ISC.AI.Abstractions.Enums;
 using ISC.AI.Abstractions.Grounding;
 using ISC.AI.Abstractions.Rag;
@@ -259,6 +260,46 @@ public sealed class GroundedGeneratorTests
         var userText = sent!.Last().Text ?? string.Empty;
         userText.ShouldContain(new string('а', 400));
         userText.ShouldNotContain(new string('в', 400));
+    }
+
+    [Fact(DisplayName = "Многоходовость: история диалога передаётся модели ПОСЛЕ системных правил и ДО текущего запроса")]
+    public async Task Conversation_history_is_included_in_prompt()
+    {
+        var retriever = Substitute.For<IRetriever>();
+        retriever.RetrieveAsync(Arg.Any<string>(), Arg.Any<AccessContext>(), Arg.Any<int>(), Arg.Any<RetrievalFilter?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<RetrievedChunk> { Chunk(10, "фрагмент", 1) });
+
+        List<ChatMessage>? sent = null;
+        var chatClient = Substitute.For<IChatClient>();
+        chatClient.GetResponseAsync(Arg.Do<IEnumerable<ChatMessage>>(m => sent = m.ToList()), Arg.Any<ChatOptions?>(), Arg.Any<CancellationToken>())
+            .Returns(new ChatResponse(new ChatMessage(ChatRole.Assistant, "ответ")));
+
+        var grounding = Substitute.For<IGroundingValidator>();
+        grounding.Validate(Arg.Any<string>(), Arg.Any<IReadOnlyList<RetrievedChunk>>()).Returns(new GroundingResult([], AllConfirmed: true));
+
+        var provider = new ServiceCollection().AddKeyedSingleton<IChatClient>(ModelRole.Analysis, chatClient).BuildServiceProvider();
+        var generator = new GroundedGenerator(
+            retriever, grounding, Substitute.For<IAuditWriter>(), provider, GenerationOptions.Default, NullLogger<GroundedGenerator>.Instance);
+
+        var history = new List<ChatTurn>
+        {
+            new(ConversationMessageRole.User, "первый вопрос"),
+            new(ConversationMessageRole.Assistant, "первый ответ"),
+        };
+
+        await generator.GenerateAsync(
+            new GroundedRequest("второй вопрос", History: history), new AccessContext("1", MaxClassification: 2, AllowedDivisions: [7]));
+
+        sent.ShouldNotBeNull();
+        sent![0].Role.ShouldBe(ChatRole.System); // системное правило грунтовки — по-прежнему первым
+        sent.ShouldContain(m => m.Role == ChatRole.User && (m.Text ?? string.Empty).Contains("первый вопрос"));
+        sent.ShouldContain(m => m.Role == ChatRole.Assistant && (m.Text ?? string.Empty).Contains("первый ответ"));
+
+        // История идёт ДО текущего запроса (последнее user-сообщение с фрагментами).
+        var idxHistory = sent.FindIndex(m => (m.Text ?? string.Empty).Contains("первый ответ"));
+        var idxCurrent = sent.FindIndex(m => (m.Text ?? string.Empty).Contains("второй вопрос"));
+        idxHistory.ShouldBeGreaterThanOrEqualTo(0);
+        idxHistory.ShouldBeLessThan(idxCurrent);
     }
 
     private static async IAsyncEnumerable<ChatResponseUpdate> StreamParts(params string[] parts)

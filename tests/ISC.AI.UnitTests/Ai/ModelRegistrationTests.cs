@@ -46,4 +46,23 @@ public sealed class ModelRegistrationTests
 
         provider.GetKeyedService<IChatClient>(ModelRole.Draft).ShouldBeNull();
     }
+
+    [Fact(DisplayName = "Имя модели: явное из конфигурации используется как есть (без обращения к серверу)")]
+    public void Explicit_model_name_is_used_as_is()
+    {
+        // Модель задана явно → авто-определение НЕ выполняется (адрес заведомо недоступен — обращения быть не должно).
+        var model = CoreAiModelsServiceCollectionExtensions.ResolveModelName(
+            "http://127.0.0.1:1/v1", "явно-заданная-модель", ModelRole.Analysis);
+
+        model.ShouldBe("явно-заданная-модель");
+    }
+
+    [Fact(DisplayName = "Имя модели: пусто + сервер недоступен → понятная ошибка «имя не задано и не определить»")]
+    public void Blank_model_with_unreachable_server_throws_clear_error()
+    {
+        var exception = Should.Throw<InvalidOperationException>(
+            () => CoreAiModelsServiceCollectionExtensions.ResolveModelName("http://127.0.0.1:1/v1", "", ModelRole.Draft));
+
+        exception.Message.ShouldContain("не задано");
+    }
 }

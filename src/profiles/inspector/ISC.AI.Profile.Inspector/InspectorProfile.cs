@@ -42,6 +42,8 @@ public sealed class InspectorProfile : IProfile
             typeof(Dashboard), ReadPolicy, GroupMain),
         new ModuleDescriptor("generator", "/generator", "Генератор", Icons.Material.Filled.AutoAwesome,
             typeof(Generator), ReadPolicy, GroupMain),
+        new ModuleDescriptor("chat", "/chat", "Чат-ассистент", Icons.Material.Filled.Forum,
+            typeof(ChatAssistant), ReadPolicy, GroupMain),
         new ModuleDescriptor("npa-search", "/npa", "База НПА", Icons.Material.Filled.Gavel,
             typeof(NpaSearch), ReadPolicy, GroupMain),
 

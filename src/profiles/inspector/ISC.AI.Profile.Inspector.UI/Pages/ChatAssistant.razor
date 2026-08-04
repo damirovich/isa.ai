@@ -1,0 +1,278 @@
+@namespace ISC.AI.Profile.Inspector.UI
+@* Модуль «Чат-ассистент» (Э4-34): многоходовый ассистент инспектора с историей. Два режима — свободное
+   общение и грунтованный (по документам: справки/акты/заключения + правовая база). Интерфейс как у ChatGPT.
+   В грунтованном режиме ответ формируется ТОЛЬКО из найденных фрагментов (грунтовка ТБ-040). *@
+@page "/chat"
+@rendermode InteractiveServer
+@implements IDisposable
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Abstractions.Conversations
+@using ISC.AI.Abstractions.Enums
+@using ISC.AI.Abstractions.Grounding
+@using ISC.AI.Profile.Inspector.Application.Chat
+
+<PageHeader Title="Чат-ассистент" Subtitle="Ассистент инспектора · история диалогов"
+            Icon="@Icons.Material.Filled.Forum" />
+
+<div class="d-flex" style="gap:16px; height: calc(100vh - 230px); min-height: 460px;">
+
+    @* ================= Боковая панель: список диалогов ================= *@
+    <MudPaper Outlined="true" Class="pa-2 d-flex flex-column" Style="width:280px; min-width:230px;">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                   StartIcon="@Icons.Material.Filled.Add" OnClick="NewChat" Class="mb-2">Новый чат</MudButton>
+        @* flex:0 0 auto — иначе .mud-divider-fullwidth (flex-grow:1) растягивается и сдвигает список диалогов в середину. *@
+        <MudDivider Class="mb-2" Style="flex:0 0 auto;" />
+        <div style="overflow-y:auto; flex:1 1 0; min-height:0;">
+            @if (_conversations.Count == 0)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary pa-2 d-block">Диалогов пока нет</MudText>
+            }
+            @foreach (var conversation in _conversations)
+            {
+                <MudPaper Outlined="true" Class="pa-2 mb-1 cursor-pointer" Style="@ConversationStyle(conversation)"
+                          @onclick="@(() => SelectAsync(conversation.Id))">
+                    <div class="d-flex align-center justify-space-between">
+                        <MudText Typo="Typo.body2" Style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                            @conversation.Title
+                        </MudText>
+                        <span @onclick:stopPropagation="true">
+                            <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Dense="true">
+                                <MudMenuItem OnClick="@(() => RenameAsync(conversation))">Переименовать</MudMenuItem>
+                                <MudMenuItem OnClick="@(() => DeleteAsync(conversation.Id))">Удалить</MudMenuItem>
+                            </MudMenu>
+                        </span>
+                    </div>
+                    @if (conversation.Classification > 0)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text"
+                                 Class="ma-0 pa-0">гриф @conversation.Classification</MudChip>
+                    }
+                </MudPaper>
+            }
+        </div>
+    </MudPaper>
+
+    @* ================= Лента диалога + ввод ================= *@
+    <MudPaper Outlined="true" Class="pa-3 d-flex flex-column flex-grow-1" Style="min-width:0;">
+        @* --- Переключатель режима --- *@
+        <div class="d-flex align-center gap-2 mb-2 flex-wrap">
+            <MudToggleGroup T="bool" @bind-Value="_grounded" Color="Color.Primary" Size="Size.Small" CheckMark="false" Dense="true">
+                <MudToggleItem T="bool" Value="false" Text="Свободный чат" />
+                <MudToggleItem T="bool" Value="true" Text="По документам" />
+            </MudToggleGroup>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                @(_grounded
+                    ? "Ответ строится и проверяется по извлечённым документам (грунтовка со ссылками)"
+                    : "Свободное общение и помощь — ответ общий, БЕЗ проверки по документам")
+            </MudText>
+        </div>
+
+        <div style="overflow-y:auto; flex:1;" class="mb-2">
+            @if (_messages.Count == 0 && !_busy)
+            {
+                <EmptyState Icon="@Icons.Material.Filled.Forum" MinHeight="300">
+                    Свободно общайтесь или переключитесь на «По документам».<br />
+                    В режиме «По документам» ответ формируется ТОЛЬКО из найденных фрагментов.
+                </EmptyState>
+            }
+            @foreach (var message in _messages)
+            {
+                <div class="d-flex mb-2"
+                     style="@(message.Role == ConversationMessageRole.User ? "justify-content:flex-end;" : "justify-content:flex-start;")">
+                    <MudPaper Class="pa-2" Elevation="0" Style="@BubbleStyle(message.Role)">
+                        <MudText Typo="Typo.body2" Style="white-space:pre-wrap;">@message.Text</MudText>
+                    </MudPaper>
+                </div>
+            }
+            @if (_busy)
+            {
+                <div class="d-flex mb-2" style="justify-content:flex-start;">
+                    <MudPaper Class="pa-2 d-flex align-center gap-2" Elevation="0" Style="@BubbleStyle(ConversationMessageRole.Assistant)">
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+                        <MudText Typo="Typo.caption">Извлекаю документы по допуску и формирую ответ…</MudText>
+                    </MudPaper>
+                </div>
+            }
+        </div>
+
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-2">@_error</MudAlert>
+        }
+        @if (_lastGrounding is { AllConfirmed: false })
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-2">
+                Не все ссылки подтверждены извлечёнными документами (GATE-2) — проверьте вручную.
+            </MudAlert>
+        }
+
+        <div class="d-flex gap-2 align-end">
+            <MudTextField @bind-Value="_input" Placeholder="Ваш вопрос или задача…" Variant="Variant.Outlined"
+                          Lines="1" AutoGrow="true" MaxLines="6" Immediate="true" Disabled="_busy"
+                          Class="flex-grow-1" />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SendAsync"
+                       Disabled="@(_busy || string.IsNullOrWhiteSpace(_input))" StartIcon="@Icons.Material.Filled.Send">
+                Отправить
+            </MudButton>
+        </div>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1 d-block">
+            В режиме «По документам» ссылки проверяются против найденных фрагментов; результат — черновик, требует проверки (HITL).
+        </MudText>
+    </MudPaper>
+</div>
+
+@code {
+    // Класс (не record): текст ассистента дописывается по мере прихода кусков потока.
+    private sealed class Msg(ConversationMessageRole role, string text)
+    {
+        public ConversationMessageRole Role { get; } = role;
+        public string Text { get; set; } = text;
+    }
+
+    private readonly List<ConversationSummary> _conversations = [];
+    private readonly List<Msg> _messages = [];
+    private readonly CancellationTokenSource _cts = new();
+    private int? _conversationId;
+    private string _input = string.Empty;
+    private bool _busy;
+    private bool _grounded; // false = свободный режим (по умолчанию), true = грунтованный (по документам)
+    private string? _error;
+    private GroundingResult? _lastGrounding;
+
+    protected override async Task OnInitializedAsync() => await ReloadConversationsAsync();
+
+    private async Task ReloadConversationsAsync()
+    {
+        try
+        {
+            var response = await Dispatcher.Send(new ListConversationsQuery());
+            _conversations.Clear();
+            if (response is { Status: true, Data: { } list })
+            {
+                _conversations.AddRange(list);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private void NewChat()
+    {
+        _conversationId = null;
+        _messages.Clear();
+        _lastGrounding = null;
+        _error = null;
+    }
+
+    private async Task SelectAsync(int id)
+    {
+        _conversationId = id;
+        _messages.Clear();
+        _lastGrounding = null;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new GetConversationHistoryQuery(id));
+            if (response is { Status: true, Data: { } turns })
+            {
+                foreach (var turn in turns)
+                {
+                    _messages.Add(new Msg(turn.Role, turn.Text));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task SendAsync()
+    {
+        var text = _input.Trim();
+        if (string.IsNullOrWhiteSpace(text) || _busy)
+        {
+            return;
+        }
+
+        _input = string.Empty;
+        _error = null;
+        _lastGrounding = null;
+        _messages.Add(new Msg(ConversationMessageRole.User, text));
+        var assistant = new Msg(ConversationMessageRole.Assistant, string.Empty);
+        _messages.Add(assistant);
+        _busy = true;
+        try
+        {
+            // Потоковый вывод: черновик печатается по кускам, итог грунтовки — в терминальном обновлении.
+            var mode = _grounded ? ChatMode.Grounded : ChatMode.Free;
+            await foreach (var update in Dispatcher.CreateStream(new SendChatMessageStreamCommand(_conversationId, text, mode), _cts.Token))
+            {
+                if (update.TextDelta is { } delta)
+                {
+                    assistant.Text += delta;
+                    StateHasChanged();
+                }
+                else if (update.Final is { } reply)
+                {
+                    _conversationId = reply.ConversationId;
+                    _lastGrounding = reply.Grounding;
+                    assistant.Text = reply.Answer; // финальный полный текст (на случай расхождений)
+                    await ReloadConversationsAsync();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка: {ex.Message}";
+            if (string.IsNullOrEmpty(assistant.Text))
+            {
+                _messages.Remove(assistant); // убрать пустой пузырь ассистента при раннем сбое
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>Отменяет активный поток при уходе со страницы (освобождает слот к серверу инференса).</summary>
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+
+    private async Task RenameAsync(ConversationSummary conversation)
+    {
+        var title = await JS.InvokeAsync<string?>("prompt", "Новое название диалога:", conversation.Title);
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            await Dispatcher.Send(new RenameConversationCommand(conversation.Id, title));
+            await ReloadConversationsAsync();
+        }
+    }
+
+    private async Task DeleteAsync(int id)
+    {
+        await Dispatcher.Send(new DeleteConversationCommand(id));
+        if (_conversationId == id)
+        {
+            NewChat();
+        }
+
+        await ReloadConversationsAsync();
+    }
+
+    private string ConversationStyle(ConversationSummary conversation) =>
+        _conversationId == conversation.Id
+            ? "border-color: var(--mud-palette-primary); border-left:3px solid var(--mud-palette-primary);"
+            : string.Empty;
+
+    private static string BubbleStyle(ConversationMessageRole role) =>
+        role == ConversationMessageRole.User
+            ? "max-width:78%; background: var(--mud-palette-primary); color: var(--mud-palette-primary-text);"
+            : "max-width:78%; background: var(--mud-palette-background-grey);";
+}
