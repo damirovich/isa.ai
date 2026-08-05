@@ -17,7 +17,7 @@ public class AssignmentStatusHistoryConfiguration : IEntityTypeConfiguration<Ass
         builder.Property(h => h.Comment).HasMaxLength(2000);
 
         // Удаление назначения (вместе с документом) удаляет его историю.
-        builder.HasOne<DocumentAssignment>().WithMany()
+        builder.HasOne(h => h.Assignment).WithMany()
             .HasForeignKey(h => h.AssignmentId).OnDelete(DeleteBehavior.Cascade);
 
         builder.HasIndex(h => h.AssignmentId);

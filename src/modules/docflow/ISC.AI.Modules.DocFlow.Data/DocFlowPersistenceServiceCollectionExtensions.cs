@@ -26,6 +26,7 @@ public static class DocFlowPersistenceServiceCollectionExtensions
 
         // Порты домена модуля → реализации слоя данных (та же слоистость, что у профиля).
         services.AddScoped<Domain.Services.IDocumentTypeStore, DocumentTypeStore>();
+        services.AddScoped<Domain.Services.IDocumentStore, DocumentStore>();
 
         return services;
     }

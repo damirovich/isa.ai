@@ -12,6 +12,9 @@ public class AssignmentStatusHistory : AuditableEntity
     /// <summary>Назначение (FK внутри схемы).</summary>
     public int AssignmentId { get; set; }
 
+    /// <summary>Навигация к назначению (для записи истории до присвоения идентификатора).</summary>
+    public DocumentAssignment? Assignment { get; set; }
+
     /// <summary>Из какого статуса (<see langword="null"/> — создание назначения).</summary>
     public AssignmentStatus? FromStatus { get; set; }
 
