@@ -105,7 +105,8 @@ public sealed record DocumentDetails(
     DocumentAggregatedStatus AggregatedStatus,
     short Classification,
     int DivisionId,
-    IReadOnlyList<AssignmentDetails> Assignments);
+    IReadOnlyList<AssignmentDetails> Assignments,
+    DateTime? IndexedAt);
 
 /// <summary>
 /// Порт хранилища документов и назначений (ТЗ СКИД §3–4). Порт — в домене модуля, реализация — в слое

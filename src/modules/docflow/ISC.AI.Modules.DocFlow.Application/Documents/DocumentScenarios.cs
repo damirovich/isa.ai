@@ -1,9 +1,11 @@
 using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Audit;
+using ISC.AI.Abstractions.BackgroundTasks;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 using ISC.AI.Modules.DocFlow.Domain.Services;
 using Mediator;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ISC.AI.Modules.DocFlow.Application.Documents;
 
@@ -44,7 +46,8 @@ public sealed record RegisterDocumentCommand(
     public short? AuditClassification => Classification;
 
     /// <inheritdoc cref="RegisterDocumentCommand" />
-    public sealed class Handler(IDocumentStore store, IAccessContextProvider accessProvider)
+    public sealed class Handler(
+        IDocumentStore store, IAccessContextProvider accessProvider, IBackgroundTaskQueue taskQueue)
         : IRequestHandler<RegisterDocumentCommand, ResponseDto<int>>
     {
         /// <inheritdoc />
@@ -71,6 +74,17 @@ public sealed record RegisterDocumentCommand(
 
             var result = await store.CreateAsync(
                 draft, command.Assignments, command.UseCommonDeadline, command.CommonDeadline, cancellationToken);
+
+            if (result.Status == DocumentWriteStatus.Ok)
+            {
+                // Индексация в корпус — ФОНОМ (этап 7 Э4-35): регистрация не ждёт эмбеддинги.
+                // Делегат получает свежий scope; сервисы резолвятся из него, не захватываются.
+                var documentId = result.DocumentId;
+                await taskQueue.EnqueueAsync(
+                    "Индексация документа в корпус ИИ",
+                    async (sp, ct) => await sp.GetRequiredService<IDocumentIndexer>().IndexAsync(documentId, ct),
+                    cancellationToken);
+            }
 
             return result.Status switch
             {
@@ -110,6 +124,32 @@ public sealed record ListDocumentsQuery(
                     query.RegDateFrom, query.RegDateTo),
                 cancellationToken);
             return ResponseDto<IReadOnlyList<DocumentListItem>>.Ok(items, items.Count);
+        }
+    }
+}
+
+/// <summary>
+/// Переиндексировать документ в корпусе (этап 7 Э4-35): вручную с карточки — после сбоя фоновой
+/// задачи (делегаты не переживают перезапуск) либо для обновления корпуса после правок.
+/// Сама индексация аудируется индексатором (<c>Ingest</c>) — команда лишь ставит задачу.
+/// </summary>
+public sealed record ReindexDocumentCommand(int DocumentId) : IRequest<ResponseDto<bool>>
+{
+    /// <inheritdoc cref="ReindexDocumentCommand" />
+    public sealed class Handler(IBackgroundTaskQueue taskQueue)
+        : IRequestHandler<ReindexDocumentCommand, ResponseDto<bool>>
+    {
+        /// <inheritdoc />
+        public async ValueTask<ResponseDto<bool>> Handle(
+            ReindexDocumentCommand command, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(command);
+            var documentId = command.DocumentId;
+            await taskQueue.EnqueueAsync(
+                "Индексация документа в корпус ИИ",
+                async (sp, ct) => await sp.GetRequiredService<IDocumentIndexer>().IndexAsync(documentId, ct),
+                cancellationToken);
+            return ResponseDto<bool>.Ok(true, "Индексация поставлена в очередь.");
         }
     }
 }

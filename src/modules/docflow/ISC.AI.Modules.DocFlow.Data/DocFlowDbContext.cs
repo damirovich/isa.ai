@@ -50,6 +50,9 @@ public class DocFlowDbContext(DbContextOptions<DocFlowDbContext> options) : Audi
     /// <summary>Файлы-обоснования продлений (§4.6).</summary>
     public DbSet<DeadlineExtensionFile> DeadlineExtensionFiles { get; set; } = null!;
 
+    /// <summary>Мостики «документ ↔ корпус ядра» (этап 7 Э4-35, ADR-0017 п.6).</summary>
+    public DbSet<DocumentIndexLink> DocumentIndexLinks { get; set; } = null!;
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -41,6 +41,23 @@ else
             {
                 <MudChip T="string" Color="Color.Warning" Variant="Variant.Text">гриф @_details.Classification</MudChip>
             }
+            @* Этап 7 Э4-35: документ в корпусе ИИ — чат может отвечать по нему (грунтованный режим). *@
+            @if (_details.IndexedAt is { } indexedAt)
+            {
+                <MudTooltip Text="@($"Проиндексирован {indexedAt.ToLocalTime():dd.MM.yyyy HH:mm} — доступен ИИ-ассистенту")">
+                    <MudChip T="string" Color="Color.Success" Variant="Variant.Text"
+                             Icon="@Icons.Material.Filled.AutoAwesome">в корпусе ИИ</MudChip>
+                </MudTooltip>
+            }
+            else
+            {
+                <MudTooltip Text="Индексация выполняется фоном после регистрации; можно запустить вручную">
+                    <MudChip T="string" Color="Color.Default" Variant="Variant.Text">не в корпусе</MudChip>
+                </MudTooltip>
+            }
+            <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true">
+                <MudMenuItem OnClick="ReindexAsync">Переиндексировать в корпусе ИИ</MudMenuItem>
+            </MudMenu>
             <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack"
                        OnClick="@(() => Navigation.NavigateTo("/docflow/documents"))">К списку</MudButton>
         </div>
@@ -243,6 +260,19 @@ else
             _error = response.StatusMessage;
         }
 
+        await ReloadAsync();
+    }
+
+    private async Task ReindexAsync()
+    {
+        _error = null;
+        var response = await Dispatcher.Send(new ReindexDocumentCommand(Id));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        // Индексация фоновая — карточка обновит чип при следующем открытии/перезагрузке.
         await ReloadAsync();
     }
 

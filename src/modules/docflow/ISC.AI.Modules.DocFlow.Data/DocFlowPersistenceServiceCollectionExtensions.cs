@@ -36,6 +36,9 @@ public static class DocFlowPersistenceServiceCollectionExtensions
         services.AddSingleton<Domain.Services.IDocFlowClock, DocFlowClock>();
         services.AddHostedService<DeadlineCheckerJob>();
 
+        // Индексация документов в корпус ядра (этап 7 Э4-35): вызывается очередью фоновых задач.
+        services.AddScoped<Domain.Services.IDocumentIndexer, DocFlowDocumentIndexer>();
+
         return services;
     }
 }

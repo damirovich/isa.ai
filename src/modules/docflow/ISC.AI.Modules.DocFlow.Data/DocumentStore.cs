@@ -195,7 +195,9 @@ public sealed class DocumentStore(IDbContextFactory<DocFlowDbContext> contextFac
                 d.Classification,
                 d.DivisionId,
                 d.Assignments.OrderBy(a => a.Id).Select(a => new AssignmentDetails(
-                    a.Id, a.DivisionId, a.AssigneeUserId, a.Status, a.Deadline, a.ControllerUserId)).ToList()))
+                    a.Id, a.DivisionId, a.AssigneeUserId, a.Status, a.Deadline, a.ControllerUserId)).ToList(),
+                db.DocumentIndexLinks.Where(l => l.DocumentId == d.Id)
+                    .Select(l => (DateTime?)l.IndexedAt).FirstOrDefault()))
             .FirstOrDefaultAsync(cancellationToken);
     }
 

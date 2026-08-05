@@ -221,6 +221,10 @@
                     .ToList()
                 : [];
 
+            // «Единый срок» имеет смысл только для «Исполнения»: у «Хранения» скрытый чекбокс
+            // не должен требовать срок (найдено живой проверкой формы).
+            var useCommonDeadline = IsExecution && _useCommonDeadline;
+
             var response = await Dispatcher.Send(new RegisterDocumentCommand(
                 string.IsNullOrWhiteSpace(_regNumber) ? null : _regNumber,
                 DateOnly.FromDateTime(regDate),
@@ -235,8 +239,8 @@
                 _classification,
                 divisionId,
                 assignments,
-                _useCommonDeadline,
-                _commonDeadline is { } common ? DateOnly.FromDateTime(common) : null));
+                useCommonDeadline,
+                useCommonDeadline && _commonDeadline is { } common ? DateOnly.FromDateTime(common) : null));
 
             if (response is { Status: true })
             {
