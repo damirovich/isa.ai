@@ -1,6 +1,7 @@
 using ISC.AI.Modules.DocFlow.Domain.Entities;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 using ISC.AI.Modules.DocFlow.Domain.Services;
+using Microsoft.EntityFrameworkCore;
 
 namespace ISC.AI.Modules.DocFlow.Data;
 
@@ -86,10 +87,13 @@ public sealed class DocumentTypeStore(IDbContextFactory<DocFlowDbContext> contex
             return DocumentTypeWriteResult.NotFound;
         }
 
-        // ИНВАРИАНТ (ТЗ СКИД §3.1): смена группы запрещена при наличии документов типа. Сущность
-        // «Документ» переносится на этапе 2 Э4-35 — до неё документов не существует физически, условие
-        // соблюдено тривиально. ПРИ ПЕРЕНОСЕ Documents сюда ОБЯЗАТЕЛЬНА проверка AnyAsync по типу
-        // (+ интеграционный тест на отказ HasDocuments) — см. чек-лист этапа 2.
+        // ИНВАРИАНТ (ТЗ СКИД §3.1): смена группы запрещена при наличии документов типа — иначе у
+        // зарегистрированных документов «задним числом» поменялось бы поведение (назначения/статусы).
+        if (await db.Documents.AnyAsync(d => d.TypeId == id, cancellationToken))
+        {
+            return DocumentTypeWriteResult.HasDocuments;
+        }
+
         entity.Group = newGroup;
         await db.SaveChangesAsync(cancellationToken);
         return DocumentTypeWriteResult.Ok;

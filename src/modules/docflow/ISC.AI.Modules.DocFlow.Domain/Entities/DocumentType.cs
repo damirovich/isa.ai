@@ -1,3 +1,4 @@
+using ISC.AI.Abstractions.Entities;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 
 namespace ISC.AI.Modules.DocFlow.Domain.Entities;

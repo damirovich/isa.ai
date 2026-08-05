@@ -1,4 +1,6 @@
 using ISC.AI.Modules.DocFlow.Domain.Entities;
+using ISC.AI.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace ISC.AI.Modules.DocFlow.Data;
 
@@ -23,6 +25,30 @@ public class DocFlowDbContext(DbContextOptions<DocFlowDbContext> options) : Audi
 
     /// <summary>Справочник типов документов (ТЗ СКИД §3.1).</summary>
     public DbSet<DocumentType> DocumentTypes { get; set; } = null!;
+
+    /// <summary>Документы (ТЗ СКИД §3.2). НЕ путать с <c>core.document</c> — индексом корпуса.</summary>
+    public DbSet<Document> Documents { get; set; } = null!;
+
+    /// <summary>Версионируемые файлы документов (§3.3).</summary>
+    public DbSet<DocumentFile> DocumentFiles { get; set; } = null!;
+
+    /// <summary>Сопутствующие файлы документов.</summary>
+    public DbSet<DocumentAttachment> DocumentAttachments { get; set; } = null!;
+
+    /// <summary>Назначения по подразделениям (§4.1).</summary>
+    public DbSet<DocumentAssignment> DocumentAssignments { get; set; } = null!;
+
+    /// <summary>История переходов статусов назначений (§4.8).</summary>
+    public DbSet<AssignmentStatusHistory> AssignmentStatusHistories { get; set; } = null!;
+
+    /// <summary>Файлы к переходам статусов (§4.2).</summary>
+    public DbSet<StatusHistoryFile> StatusHistoryFiles { get; set; } = null!;
+
+    /// <summary>Продления сроков назначений (§4.6).</summary>
+    public DbSet<DeadlineExtension> DeadlineExtensions { get; set; } = null!;
+
+    /// <summary>Файлы-обоснования продлений (§4.6).</summary>
+    public DbSet<DeadlineExtensionFile> DeadlineExtensionFiles { get; set; } = null!;
 
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)

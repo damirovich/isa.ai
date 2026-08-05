@@ -1,4 +1,5 @@
 using ISC.AI.Modules.DocFlow.Domain.Entities;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace ISC.AI.Modules.DocFlow.Data.EntityConfigurations;

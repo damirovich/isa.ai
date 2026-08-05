@@ -1,4 +1,5 @@
 using ISC.AI.Modules.DocFlow.Data;
+using ISC.AI.Modules.DocFlow.Domain.Entities;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 using ISC.AI.Modules.DocFlow.Domain.Services;
 using Microsoft.EntityFrameworkCore;
@@ -61,6 +62,40 @@ public sealed class DocumentTypeStoreTests : IAsyncLifetime
         (await store.ChangeGroupAsync(9999, DocumentGroup.Storage))
             .ShouldBe(DocumentTypeWriteResult.NotFound);
         (await store.ListAsync(group: DocumentGroup.Execution)).Count.ShouldBe(2);
+    }
+
+    [Fact(DisplayName = "Смена группы запрещена при наличии документов типа (ТЗ СКИД §3.1)")]
+    public async Task Group_change_rejected_when_documents_exist()
+    {
+        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+        }
+
+        var store = new DocumentTypeStore(factory);
+        var typeId = await store.CreateAsync("Поручение", DocumentGroup.Execution, isActive: true);
+        typeId.ShouldNotBeNull();
+
+        // Документ этого типа (регистрация «в лоб» через контекст — сценарии регистрации появятся на этапе 3).
+        await using (var db = factory.CreateDbContext())
+        {
+            db.Documents.Add(new Document
+            {
+                TypeId = typeId.Value,
+                RegDate = new DateOnly(2026, 8, 5),
+                DirectionFlag = DocumentDirection.Incoming,
+                ShortContent = "Тестовое поручение",
+                Classification = 0,
+                DivisionId = 10,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // Инвариант §3.1: у типа есть документы — смена группы отклоняется, группа не изменилась.
+        (await store.ChangeGroupAsync(typeId.Value, DocumentGroup.Storage))
+            .ShouldBe(DocumentTypeWriteResult.HasDocuments);
+        (await store.ListAsync(group: DocumentGroup.Execution)).ShouldHaveSingleItem();
     }
 
     // Контекст с теми же опциями, что в проде (snake_case + история миграций в схеме docflow).
