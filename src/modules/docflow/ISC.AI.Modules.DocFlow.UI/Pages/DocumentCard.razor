@@ -139,8 +139,7 @@ else
                     <MudText Typo="Typo.caption" Class="mud-text-secondary">
                         @FormatSize(file.FileSize) · @file.UploadedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
                     </MudText>
-                    @* §3.3: просмотр без скачивания — PDF-копия, если DOCX сконвертирован, иначе оригинал. *@
-                    <MudLink Href="@FileUrl(FileCategories.Documents, file.PdfCopyStoredFileName ?? file.StoredFileName)"
+                    <MudLink Href="@FileUrl(FileCategories.Documents, file.StoredFileName)"
                              Target="_blank" Typo="Typo.caption">Просмотр</MudLink>
                     <MudLink Href="@FileUrl(FileCategories.Documents, file.StoredFileName, download: true)"
                              Typo="Typo.caption">Скачать</MudLink>

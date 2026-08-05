@@ -34,9 +34,8 @@ public sealed class DocumentFileAccessResolver(IDbContextFactory<DocFlowDbContex
         DocFlowDbContext db, int documentId, string storedFileName, CancellationToken cancellationToken)
     {
         var row = await db.DocumentFiles.AsNoTracking()
-            .Where(f => f.DocumentId == documentId
-                && (f.StoredFileName == storedFileName || f.PdfCopyStoredFileName == storedFileName))
-            .Select(f => new { f.StoredFileName, f.PdfCopyStoredFileName, f.ContentType, f.FileName, f.DocumentId })
+            .Where(f => f.DocumentId == documentId && f.StoredFileName == storedFileName)
+            .Select(f => new { f.ContentType, f.FileName, f.DocumentId })
             .FirstOrDefaultAsync(cancellationToken);
         if (row is null)
         {
@@ -49,12 +48,9 @@ public sealed class DocumentFileAccessResolver(IDbContextFactory<DocFlowDbContex
             return null;
         }
 
-        var isPdfCopy = string.Equals(row.PdfCopyStoredFileName, storedFileName, StringComparison.Ordinal);
         return new ResolvedFile(
-            storedFileName, SubPath(row.DocumentId),
-            isPdfCopy ? "application/pdf" : row.ContentType,
-            isPdfCopy ? Path.ChangeExtension(row.FileName, ".pdf") : row.FileName,
-            access.Value.Classification, access.Value.DivisionId, isPdfCopy);
+            storedFileName, SubPath(row.DocumentId), row.ContentType, row.FileName,
+            access.Value.Classification, access.Value.DivisionId);
     }
 
     private static async Task<ResolvedFile?> ResolveAttachmentAsync(
@@ -77,7 +73,7 @@ public sealed class DocumentFileAccessResolver(IDbContextFactory<DocFlowDbContex
 
         return new ResolvedFile(
             storedFileName, SubPath(row.DocumentId), row.ContentType, row.FileName,
-            access.Value.Classification, access.Value.DivisionId, IsPdfCopy: false);
+            access.Value.Classification, access.Value.DivisionId);
     }
 
     private static async Task<ResolvedFile?> ResolveStatusHistoryFileAsync(
@@ -111,7 +107,7 @@ public sealed class DocumentFileAccessResolver(IDbContextFactory<DocFlowDbContex
 
         return new ResolvedFile(
             storedFileName, SubPath(assignmentId), fileRow.ContentType, fileRow.FileName,
-            access.Value.Classification, access.Value.DivisionId, IsPdfCopy: false);
+            access.Value.Classification, access.Value.DivisionId);
     }
 
     private static async Task<ResolvedFile?> ResolveDeadlineExtensionFileAsync(
@@ -143,7 +139,7 @@ public sealed class DocumentFileAccessResolver(IDbContextFactory<DocFlowDbContex
 
         return new ResolvedFile(
             storedFileName, SubPath(assignmentId), fileRow.ContentType, fileRow.FileName,
-            access.Value.Classification, access.Value.DivisionId, IsPdfCopy: false);
+            access.Value.Classification, access.Value.DivisionId);
     }
 
     private static async Task<(short Classification, int DivisionId)?> ResolveDocumentAccessAsync(

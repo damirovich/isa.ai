@@ -22,7 +22,6 @@ public class DocumentFileConfiguration : IEntityTypeConfiguration<DocumentFile>
 
         // Быстрый доступ к актуальной версии (§3.3: история версий + текущая).
         builder.HasIndex(f => new { f.DocumentId, f.IsLatest });
-        builder.Property(f => f.PdfCopyStoredFileName).HasMaxLength(500);
     }
 
     /// <summary>Общие ограничения файловых колонок (имена/тип; вызывается каждой конфигурацией).</summary>

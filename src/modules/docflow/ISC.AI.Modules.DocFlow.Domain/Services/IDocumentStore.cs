@@ -88,12 +88,12 @@ public sealed record AssignmentDetails(
     int? ControllerUserId);
 
 /// <summary>
-/// Файл документа в карточке (§3.3): версия, актуальность, язык. <see cref="StoredFileName"/> и
-/// <see cref="PdfCopyStoredFileName"/> — для построения ссылки просмотра/скачивания (этап 4.3).
+/// Файл документа в карточке (§3.3): версия, актуальность, язык. <see cref="StoredFileName"/> —
+/// для построения ссылки просмотра/скачивания (этап 4.3).
 /// </summary>
 public sealed record DocumentFileItem(
     int Id, string FileName, DocumentLanguage Language, int Version, bool IsLatest,
-    long FileSize, DateTime UploadedAt, string StoredFileName, string? PdfCopyStoredFileName);
+    long FileSize, DateTime UploadedAt, string StoredFileName);
 
 /// <summary>Сопутствующий файл в карточке.</summary>
 public sealed record AttachmentItem(int Id, string FileName, long FileSize, DateTime UploadedAt, string StoredFileName);

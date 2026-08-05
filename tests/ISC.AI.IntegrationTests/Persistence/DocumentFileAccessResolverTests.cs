@@ -32,7 +32,7 @@ public sealed class DocumentFileAccessResolverTests : IAsyncLifetime
 
         var storage = new TempFileStorage();
         var typeStore = new DocumentTypeStore(factory);
-        var documentStore = new DocumentStore(factory, storage, Substitute.For<IDocumentConverter>());
+        var documentStore = new DocumentStore(factory, storage);
         var resolver = new DocumentFileAccessResolver(factory);
 
         var typeId = await typeStore.CreateAsync("Поручение", DocumentGroup.Execution, isActive: true);
@@ -94,13 +94,6 @@ public sealed class DocumentFileAccessResolverTests : IAsyncLifetime
         // Неизвестная категория / несуществующее имя — тоже null, не исключение.
         (await resolver.ResolveAsync("unknown", doc.DocumentId, documentFileName)).ShouldBeNull();
         (await resolver.ResolveAsync(FileCategories.Documents, doc.DocumentId, "нет-такого.docx")).ShouldBeNull();
-    }
-
-    private sealed class NullDocumentConverter : IDocumentConverter
-    {
-        public Task<string?> ConvertToPdfAsync(
-            string storedFileName, string category, string subPath, CancellationToken cancellationToken = default) =>
-            Task.FromResult<string?>(null);
     }
 
     private sealed class TempFileStorage : IDocFlowFileStorage

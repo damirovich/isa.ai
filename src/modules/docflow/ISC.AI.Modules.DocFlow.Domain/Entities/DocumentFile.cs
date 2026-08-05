@@ -34,9 +34,6 @@ public class DocumentFile : AuditableEntity
     /// <summary>Актуальная ли версия.</summary>
     public bool IsLatest { get; set; }
 
-    /// <summary>Имя PDF-копии в хранилище (DOCX→PDF конвертером; для просмотра), если создана.</summary>
-    public string? PdfCopyStoredFileName { get; set; }
-
     /// <summary>Кто загрузил — слабая ссылка на <c>core.app_user</c> (ТО-инф-06).</summary>
     public int UploadedByUserId { get; set; }
 }

@@ -6,7 +6,7 @@ namespace ISC.AI.Modules.DocFlow.Domain.Services;
 /// </summary>
 public sealed record ResolvedFile(
     string StoredFileName, string SubPath, string ContentType, string FileName,
-    short Classification, int DivisionId, bool IsPdfCopy);
+    short Classification, int DivisionId);
 
 /// <summary>
 /// Резолвинг файла по маршруту раздачи (этап 4.3 Э4-35, §3.3): связывает публичный URL

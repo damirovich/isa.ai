@@ -42,10 +42,8 @@ public static class DocFlowPersistenceServiceCollectionExtensions
         // Файловое хранилище модуля (этап 4.2, §3.3): локальная ФС контура, путь — DocFlow:Storage:BasePath.
         services.AddSingleton<Domain.Services.IDocFlowFileStorage, LocalDocFlowFileStorage>();
 
-        // Просмотр файлов без скачивания (этап 4.3, §3.3): резолвинг для эндпоинта раздачи +
-        // best-effort DOCX→PDF (LibreOffice, отсутствие процесса не блокирует загрузку).
+        // Просмотр файлов без скачивания (этап 4.3, §3.3): резолвинг для эндпоинта раздачи.
         services.AddScoped<Domain.Services.IDocumentFileAccess, DocumentFileAccessResolver>();
-        services.AddSingleton<Domain.Services.IDocumentConverter, LibreOfficeDocumentConverter>();
 
         return services;
     }
