@@ -1,0 +1,275 @@
+@namespace ISC.AI.Modules.DocFlow.UI
+@* Карточка документа (ТЗ СКИД §3.2, §4.1–4.6): атрибуты, назначения со статусами, смена статуса по
+   матрице §4.5 и продление срока §4.6. Файлы и таймлайн истории — этап 4/3.x Э4-35. *@
+@page "/docflow/documents/{Id:int}"
+@rendermode InteractiveServer
+@inject NavigationManager Navigation
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Modules.DocFlow.Application.Documents
+@using ISC.AI.Modules.DocFlow.Domain.Enums
+@using ISC.AI.Modules.DocFlow.Domain.Services
+
+@if (_details is null)
+{
+    <MudText Typo="Typo.h5">Документ</MudText>
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3">@_error</MudAlert>
+    }
+    else
+    {
+        <MudProgressLinear Indeterminate="true" Class="my-4" />
+    }
+}
+else
+{
+    <div class="d-flex align-center justify-space-between flex-wrap gap-2">
+        <div>
+            <MudText Typo="Typo.h5">
+                @(_details.RegNumber is { } number ? $"Документ {number}" : "Документ (без номера)")
+            </MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                @_details.TypeName · @_details.Group.Label() · @_details.Direction.Label() ·
+                зарегистрирован @_details.RegDate.ToString("dd.MM.yyyy")
+            </MudText>
+        </div>
+        <div class="d-flex align-center gap-2">
+            <MudChip T="string" Variant="Variant.Text" Color="@_details.AggregatedStatus.ChipColor()">
+                @_details.AggregatedStatus.Label()
+            </MudChip>
+            @if (_details.Classification > 0)
+            {
+                <MudChip T="string" Color="Color.Warning" Variant="Variant.Text">гриф @_details.Classification</MudChip>
+            }
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack"
+                       OnClick="@(() => Navigation.NavigateTo("/docflow/documents"))">К списку</MudButton>
+        </div>
+    </div>
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+    }
+
+    <MudPaper Outlined="true" Class="pa-4 my-4">
+        <MudText Typo="Typo.subtitle1" Class="mb-2">Содержание</MudText>
+        <MudText Typo="Typo.body1" Style="white-space:pre-wrap;">@_details.ShortContent</MudText>
+        @if (!string.IsNullOrWhiteSpace(_details.FullText))
+        {
+            <MudDivider Class="my-3" />
+            <MudText Typo="Typo.body2" Style="white-space:pre-wrap;">@_details.FullText</MudText>
+        }
+        <div class="d-flex gap-4 flex-wrap mt-3">
+            @if (_details.Source is { } source)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Источник: @source</MudText>
+            }
+            @if (_details.Priority is { } priority)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Приоритет: @priority.Label()</MudText>
+            }
+            @if (_details.InspectorUserId is { } inspector)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Инспектор: @UserName(inspector)</MudText>
+            }
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">Подразделение: @DivisionName(_details.DivisionId)</MudText>
+            @if (_details.Notes is { } notes)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Примечания: @notes</MudText>
+            }
+        </div>
+    </MudPaper>
+
+    @if (_details.Group == DocumentGroup.Execution)
+    {
+        <MudText Typo="Typo.subtitle1" Class="mb-2">Назначения (§4.1) — каждое исполняется независимо</MudText>
+        <MudTable T="AssignmentDetails" Items="_details.Assignments" Dense="true" Outlined="true" Hover="true">
+            <HeaderContent>
+                <MudTh>Подразделение</MudTh>
+                <MudTh>Исполнитель</MudTh>
+                <MudTh>Срок</MudTh>
+                <MudTh>Статус</MudTh>
+                <MudTh Style="width:1%;"></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Подразделение">@DivisionName(context.DivisionId)</MudTd>
+                <MudTd DataLabel="Исполнитель">@(context.AssigneeUserId is { } assignee ? UserName(assignee) : "—")</MudTd>
+                <MudTd DataLabel="Срок">@(context.Deadline?.ToString("dd.MM.yyyy") ?? "—")</MudTd>
+                <MudTd DataLabel="Статус">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@context.Status.ChipColor()">
+                        @context.Status.Label()
+                    </MudChip>
+                    @if (context.Status == AssignmentStatus.InControl && context.ControllerUserId is { } controller)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">контролёр: @UserName(controller)</MudText>
+                    }
+                </MudTd>
+                <MudTd>
+                    <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Dense="true">
+                        @foreach (var next in StatusTransitionMatrix.AllowedFrom(context.Status))
+                        {
+                            <MudMenuItem OnClick="@(() => OpenStatusDialog(context, next))">→ @next.Label()</MudMenuItem>
+                        }
+                        @if (context.Status != AssignmentStatus.Closed && context.Deadline is not null)
+                        {
+                            <MudMenuItem OnClick="@(() => OpenExtendDialog(context))">Продлить срок (§4.6)</MudMenuItem>
+                        }
+                    </MudMenu>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+}
+
+@* --- Диалог смены статуса (§4.2: комментарий на переходе) --- *@
+<MudDialog @bind-Visible="_statusDialogOpen" Options="DialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Переход: @(_statusTarget?.Status.Label()) → @(_statusNext?.Label())</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_statusComment" Label="Комментарий к переходу (опц.)" Variant="Variant.Outlined"
+                      MaxLength="2000" Lines="2" AutoGrow="true" AutoFocus="true" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _statusDialogOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="ConfirmStatusAsync">Сменить статус</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* --- Диалог продления срока (§4.6: основание обязательно) --- *@
+<MudDialog @bind-Visible="_extendDialogOpen" Options="DialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Продление срока назначения</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudDatePicker @bind-Date="_extendDate" Label="Новый срок *" Variant="Variant.Outlined" Class="mb-2" />
+        <MudTextField @bind-Value="_extendReason" Label="Основание продления *" Variant="Variant.Outlined"
+                      MaxLength="2000" Lines="2" AutoGrow="true" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _extendDialogOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@(_extendDate is null || string.IsNullOrWhiteSpace(_extendReason))"
+                   OnClick="ConfirmExtendAsync">Продлить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    /// <summary>Идентификатор документа из маршрута.</summary>
+    [Parameter]
+    public int Id { get; set; }
+
+    private static readonly DialogOptions DialogOptions =
+        new() { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, CloseOnEscapeKey = true };
+
+    private DocumentDetails? _details;
+    private readonly Dictionary<int, string> _divisionNames = [];
+    private readonly Dictionary<int, string> _userNames = [];
+    private string? _error;
+
+    private bool _statusDialogOpen;
+    private AssignmentDetails? _statusTarget;
+    private AssignmentStatus? _statusNext;
+    private string? _statusComment;
+
+    private bool _extendDialogOpen;
+    private AssignmentDetails? _extendTarget;
+    private DateTime? _extendDate;
+    private string? _extendReason;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var divisions = await Dispatcher.Send(new ListDivisionsQuery());
+        if (divisions is { Status: true, Data: { } divisionList })
+        {
+            foreach (var division in divisionList)
+            {
+                _divisionNames[division.Id] = division.Name;
+            }
+        }
+
+        var users = await Dispatcher.Send(new ListUsersQuery());
+        if (users is { Status: true, Data: { } userList })
+        {
+            foreach (var user in userList)
+            {
+                _userNames[user.Id] = user.Name;
+            }
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        var response = await Dispatcher.Send(new GetDocumentQuery(Id));
+        if (response is { Status: true, Data: { } details })
+        {
+            _details = details;
+        }
+        else
+        {
+            _error = response.StatusMessage;
+        }
+    }
+
+    private string DivisionName(int id) =>
+        _divisionNames.TryGetValue(id, out var name) ? name : $"подразделение №{id}";
+
+    private string UserName(int id) =>
+        _userNames.TryGetValue(id, out var name) ? name : $"пользователь №{id}";
+
+    private void OpenStatusDialog(AssignmentDetails assignment, AssignmentStatus next)
+    {
+        _statusTarget = assignment;
+        _statusNext = next;
+        _statusComment = null;
+        _statusDialogOpen = true;
+    }
+
+    private async Task ConfirmStatusAsync()
+    {
+        if (_statusTarget is not { } target || _statusNext is not { } next)
+        {
+            return;
+        }
+
+        _statusDialogOpen = false;
+        _error = null;
+        var response = await Dispatcher.Send(new ChangeAssignmentStatusCommand(target.Id, next, _statusComment));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+
+    private void OpenExtendDialog(AssignmentDetails assignment)
+    {
+        _extendTarget = assignment;
+        _extendDate = null;
+        _extendReason = null;
+        _extendDialogOpen = true;
+    }
+
+    private async Task ConfirmExtendAsync()
+    {
+        if (_extendTarget is not { } target || _extendDate is not { } date || string.IsNullOrWhiteSpace(_extendReason))
+        {
+            return;
+        }
+
+        _extendDialogOpen = false;
+        _error = null;
+        var response = await Dispatcher.Send(new ExtendAssignmentDeadlineCommand(
+            target.Id, DateOnly.FromDateTime(date), _extendReason));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+}

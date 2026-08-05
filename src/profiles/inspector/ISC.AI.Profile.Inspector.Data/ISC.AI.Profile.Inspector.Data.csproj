@@ -6,6 +6,9 @@
     <ProjectReference Include="..\..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
     <ProjectReference Include="..\ISC.AI.Profile.Inspector.Domain\ISC.AI.Profile.Inspector.Domain.csproj" />
     <ProjectReference Include="..\..\..\core\ISC.AI.Persistence\ISC.AI.Persistence.csproj" />
+    <!-- Профиль реализует порт справочника подразделений модуля документооборота (вопрос 3 Э4-35):
+         направление «профиль → модуль» разрешено (ADR-0017), обратное запрещает арх-тест. -->
+    <ProjectReference Include="..\..\..\modules\docflow\ISC.AI.Modules.DocFlow.Domain\ISC.AI.Modules.DocFlow.Domain.csproj" />
   </ItemGroup>
 
   <ItemGroup>

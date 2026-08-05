@@ -38,6 +38,8 @@ public static class DocFlowModule
     /// </summary>
     public static IReadOnlyList<IModule> Modules { get; } =
     [
+        new ModuleDescriptor("docflow-documents", "/docflow/documents", "Документы",
+            Icons.Material.Filled.Description, typeof(Documents), ReadPolicy, MenuGroup),
         new ModuleDescriptor("docflow-types", "/docflow/types", "Типы документов",
             Icons.Material.Filled.Category, typeof(DocumentTypes), ReadPolicy, MenuGroup),
     ];

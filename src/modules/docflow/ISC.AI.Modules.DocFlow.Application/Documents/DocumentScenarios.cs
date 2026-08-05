@@ -114,6 +114,26 @@ public sealed record ListDocumentsQuery(
     }
 }
 
+/// <summary>Карточка документа с назначениями (§3.2, §4.8).</summary>
+public sealed record GetDocumentQuery(int DocumentId) : IRequest<ResponseDto<DocumentDetails>>
+{
+    /// <inheritdoc cref="GetDocumentQuery" />
+    public sealed class Handler(IDocumentStore store)
+        : IRequestHandler<GetDocumentQuery, ResponseDto<DocumentDetails>>
+    {
+        /// <inheritdoc />
+        public async ValueTask<ResponseDto<DocumentDetails>> Handle(
+            GetDocumentQuery query, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(query);
+            var details = await store.GetAsync(query.DocumentId, cancellationToken);
+            return details is null
+                ? ResponseDto<DocumentDetails>.NotFound("Документ не найден.")
+                : ResponseDto<DocumentDetails>.Ok(details);
+        }
+    }
+}
+
 /// <summary>
 /// Сменить статус назначения (§4.2): матрица §4.5, «Просрочено» — только система, вход/выход
 /// «Контроля» фиксирует/сбрасывает контролёра, переход пишется в историю, агрегат пересчитывается.

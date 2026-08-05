@@ -171,6 +171,35 @@ public sealed class DocumentStore(IDbContextFactory<DocFlowDbContext> contextFac
     }
 
     /// <inheritdoc />
+    public async Task<DocumentDetails?> GetAsync(int documentId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        return await db.Documents.AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Select(d => new DocumentDetails(
+                d.Id,
+                d.RegNumber,
+                d.RegDate,
+                d.TypeId,
+                d.Type!.Name,
+                d.Type!.Group,
+                d.DirectionFlag,
+                d.Source,
+                d.ShortContent,
+                d.FullText,
+                d.Notes,
+                d.Priority,
+                d.InspectorUserId,
+                d.AggregatedStatus,
+                d.Classification,
+                d.DivisionId,
+                d.Assignments.OrderBy(a => a.Id).Select(a => new AssignmentDetails(
+                    a.Id, a.DivisionId, a.AssigneeUserId, a.Status, a.Deadline, a.ControllerUserId)).ToList()))
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
     public async Task<DocumentWriteStatus> ChangeAssignmentStatusAsync(
         int assignmentId,
         AssignmentStatus newStatus,

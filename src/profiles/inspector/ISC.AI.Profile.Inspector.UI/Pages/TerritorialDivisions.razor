@@ -1,9 +1,205 @@
 @namespace ISC.AI.Profile.Inspector.UI
+@* Справочник подразделений (§4.2): иерархия ТУ→РО, ведёт «ИнспекторAI». Код — ключ сопоставления с
+   плоским справочником СКИД. Этим же словарём живут решётка доступа и модуль документооборота
+   (IDivisionDirectory, вопрос 3 Э4-35). Был заглушкой ModuleStub — наполнен, чтобы разблокировать
+   допуски по подразделениям и регистрацию документов. *@
 @page "/divisions/territorial"
 @rendermode InteractiveServer
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Profile.Inspector.Application.Divisions
+@using ISC.AI.Profile.Inspector.Domain.Services
 
-<ModuleStub Title="Территориальные управления"
-            Subtitle="Объекты контроля: ТУ → районные отделы"
-            Icon="@Icons.Material.Filled.AccountTree"
-            Description="Справочник территориальных управлений с иерархией вплоть до районного отдела (РО). Иерархию ведёт «ИнспекторAI» — в справочнике подразделений СКИД она плоская; сопоставление записей — по коду. Модель данных (inspector.division) уже создана; экран наполнится вместе с реальным справочником."
-            Requirement="§4.2 · модель данных готова, нужен справочник" />
+<PageHeader Title="Подразделения" Subtitle="Справочник с иерархией ТУ → РО · код — сопоставление со СКИД"
+            Icon="@Icons.Material.Filled.AccountTree" />
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@* --- Добавление --- *@
+<MudPaper Outlined="true" Class="pa-3 mb-4">
+    <div class="d-flex gap-3 align-end flex-wrap">
+        <MudTextField @bind-Value="_newName" Label="Наименование" Variant="Variant.Outlined" MaxLength="500"
+                      Immediate="true" Style="min-width:260px;" Class="flex-grow-1" />
+        <MudTextField @bind-Value="_newCode" Label="Код (для СКИД)" Variant="Variant.Outlined" MaxLength="100"
+                      Style="width:160px;" />
+        <MudSelect T="int?" @bind-Value="_newParentId" Label="Родитель (пусто — верхний уровень)"
+                   Variant="Variant.Outlined" Clearable="true" Style="min-width:260px;">
+            @foreach (var node in _flat)
+            {
+                <MudSelectItem T="int?" Value="@node.Id">@node.Name</MudSelectItem>
+            }
+        </MudSelect>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                   Disabled="@(_busy || string.IsNullOrWhiteSpace(_newName))" OnClick="CreateAsync">
+            Добавить
+        </MudButton>
+    </div>
+</MudPaper>
+
+@* --- Дерево (плоской таблицей с отступами по уровню) --- *@
+<MudTable T="TreeRow" Items="_tree" Hover="true" Dense="true" Outlined="true" Loading="_busy">
+    <HeaderContent>
+        <MudTh>Подразделение</MudTh>
+        <MudTh>Код</MudTh>
+        <MudTh Style="width:1%;"></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Подразделение">
+            <div style="@($"padding-left:{context.Level * 24}px;")" class="d-flex align-center gap-1">
+                @if (context.Level > 0)
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.SubdirectoryArrowRight" Size="Size.Small"
+                             Class="mud-text-secondary" />
+                }
+                @context.Node.Name
+            </div>
+        </MudTd>
+        <MudTd DataLabel="Код">@(context.Node.Code ?? "—")</MudTd>
+        <MudTd>
+            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                           OnClick="@(() => OpenRename(context.Node))" />
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+            Справочник пуст — добавьте первое подразделение (например, «Главная инспекция», код «ГИ»).
+            Без него не работают допуски по подразделениям и регистрация документов.
+        </MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@* --- Диалог правки --- *@
+<MudDialog @bind-Visible="_renameOpen" Options="RenameDialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Изменить подразделение</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_renameName" Label="Наименование" Variant="Variant.Outlined" MaxLength="500"
+                      Immediate="true" AutoFocus="true" Class="mb-2" />
+        <MudTextField @bind-Value="_renameCode" Label="Код (для СКИД)" Variant="Variant.Outlined" MaxLength="100" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _renameOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@(string.IsNullOrWhiteSpace(_renameName))" OnClick="ConfirmRenameAsync">
+            Сохранить
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private sealed record TreeRow(DivisionNode Node, int Level);
+
+    private static readonly DialogOptions RenameDialogOptions =
+        new() { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, CloseOnEscapeKey = true };
+
+    private readonly List<DivisionNode> _flat = [];
+    private readonly List<TreeRow> _tree = [];
+    private string _newName = string.Empty;
+    private string? _newCode;
+    private int? _newParentId;
+    private bool _busy;
+    private string? _error;
+
+    private bool _renameOpen;
+    private DivisionNode? _renameTarget;
+    private string _renameName = string.Empty;
+    private string? _renameCode;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ListDivisionTreeQuery());
+            _flat.Clear();
+            if (response is { Status: true, Data: { } list })
+            {
+                _flat.AddRange(list);
+            }
+            else if (response is { Status: false })
+            {
+                _error = response.StatusMessage;
+            }
+
+            BuildTree();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    // Дерево обходом в глубину: корни по алфавиту, дети под родителем с отступом по уровню.
+    private void BuildTree()
+    {
+        _tree.Clear();
+        var byParent = _flat.ToLookup(n => n.ParentId);
+        void Walk(int? parentId, int level)
+        {
+            foreach (var node in byParent[parentId])
+            {
+                _tree.Add(new TreeRow(node, level));
+                Walk(node.Id, level + 1);
+            }
+        }
+
+        Walk(null, 0);
+    }
+
+    private async Task CreateAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new CreateDivisionCommand(_newName, _newCode, _newParentId));
+            if (response.Status)
+            {
+                _newName = string.Empty;
+                _newCode = null;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    private void OpenRename(DivisionNode node)
+    {
+        _renameTarget = node;
+        _renameName = node.Name;
+        _renameCode = node.Code;
+        _renameOpen = true;
+    }
+
+    private async Task ConfirmRenameAsync()
+    {
+        if (_renameTarget is not { } target || string.IsNullOrWhiteSpace(_renameName))
+        {
+            return;
+        }
+
+        _renameOpen = false;
+        _error = null;
+        var response = await Dispatcher.Send(new RenameDivisionCommand(target.Id, _renameName, _renameCode));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+}

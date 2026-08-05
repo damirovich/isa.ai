@@ -1,0 +1,151 @@
+@namespace ISC.AI.Modules.DocFlow.UI
+@* Реестр документов (ТЗ СКИД §3.2/§3.4): список с фильтрами, регистрация, переход в карточку.
+   Э4-35 этап 5.1 — перенос списка документов СКИД. Компоненты профиля не используются (ADR-0017). *@
+@page "/docflow/documents"
+@rendermode InteractiveServer
+@inject NavigationManager Navigation
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Modules.DocFlow.Application.Documents
+@using ISC.AI.Modules.DocFlow.Application.DocumentTypes
+@using ISC.AI.Modules.DocFlow.Domain.Enums
+@using ISC.AI.Modules.DocFlow.Domain.Services
+
+<div class="d-flex align-center justify-space-between flex-wrap gap-2">
+    <div>
+        <MudText Typo="Typo.h5">Документы</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            Реестр документооборота · «Исполнение» раздаётся назначениями по подразделениям
+        </MudText>
+    </div>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PostAdd"
+               OnClick="@(() => Navigation.NavigateTo("/docflow/documents/new"))">
+        Зарегистрировать
+    </MudButton>
+</div>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@* --- Фильтры (§3.4) --- *@
+<MudPaper Outlined="true" Class="pa-3 my-4">
+    <div class="d-flex gap-3 align-end flex-wrap">
+        <MudTextField @bind-Value="_filterText" Label="Рег. номер или ключевые слова" Variant="Variant.Outlined"
+                      Immediate="true" Style="min-width:260px;" Class="flex-grow-1"
+                      OnKeyDown="@(async e => { if (e.Key == "Enter") await ReloadAsync(); })" />
+        <MudSelect T="int?" @bind-Value="_filterTypeId" Label="Тип" Variant="Variant.Outlined" Clearable="true"
+                   Style="width:220px;">
+            @foreach (var type in _types)
+            {
+                <MudSelectItem T="int?" Value="@type.Id">@type.Name</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="DocumentAggregatedStatus?" @bind-Value="_filterStatus" Label="Статус" Variant="Variant.Outlined"
+                   Clearable="true" Style="width:220px;">
+            @foreach (var status in Enum.GetValues<DocumentAggregatedStatus>())
+            {
+                <MudSelectItem T="DocumentAggregatedStatus?" Value="@status">@status.Label()</MudSelectItem>
+            }
+        </MudSelect>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Search" OnClick="ReloadAsync">
+            Найти
+        </MudButton>
+    </div>
+</MudPaper>
+
+<MudTable T="DocumentListItem" Items="_items" Hover="true" Dense="true" Outlined="true" Loading="_busy"
+          LoadingProgressColor="Color.Primary" OnRowClick="@(row => OpenCard(row.Item!))" RowClass="cursor-pointer">
+    <HeaderContent>
+        <MudTh>Рег. №</MudTh>
+        <MudTh>Дата</MudTh>
+        <MudTh>Тип</MudTh>
+        <MudTh>Краткое содержание</MudTh>
+        <MudTh>Приоритет</MudTh>
+        <MudTh>Статус</MudTh>
+        <MudTh>Назнач.</MudTh>
+        <MudTh>Гриф</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Рег. №">@(context.RegNumber ?? "—")</MudTd>
+        <MudTd DataLabel="Дата">@context.RegDate.ToString("dd.MM.yyyy")</MudTd>
+        <MudTd DataLabel="Тип">
+            @context.TypeName
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">@context.Group.Label()</MudText>
+        </MudTd>
+        <MudTd DataLabel="Содержание" Style="max-width:340px;">
+            <MudText Typo="Typo.body2" Style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                @context.ShortContent
+            </MudText>
+        </MudTd>
+        <MudTd DataLabel="Приоритет">@(context.Priority?.Label() ?? "—")</MudTd>
+        <MudTd DataLabel="Статус">
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@context.AggregatedStatus.ChipColor()">
+                @context.AggregatedStatus.Label()
+            </MudChip>
+        </MudTd>
+        <MudTd DataLabel="Назнач.">@context.AssignmentsCount</MudTd>
+        <MudTd DataLabel="Гриф">
+            @if (context.Classification > 0)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text">@context.Classification</MudChip>
+            }
+            else
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">—</MudText>
+            }
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+            Документов нет — зарегистрируйте первый кнопкой выше.
+        </MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    private readonly List<DocumentListItem> _items = [];
+    private readonly List<DocumentTypeItem> _types = [];
+    private string? _filterText;
+    private int? _filterTypeId;
+    private DocumentAggregatedStatus? _filterStatus;
+    private bool _busy;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var typesResponse = await Dispatcher.Send(new ListDocumentTypesQuery());
+        if (typesResponse is { Status: true, Data: { } types })
+        {
+            _types.AddRange(types);
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ListDocumentsQuery(_filterText, _filterTypeId, _filterStatus));
+            _items.Clear();
+            if (response is { Status: true, Data: { } list })
+            {
+                _items.AddRange(list);
+            }
+            else if (response is { Status: false })
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void OpenCard(DocumentListItem item) =>
+        Navigation.NavigateTo($"/docflow/documents/{item.Id}");
+}

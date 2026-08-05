@@ -27,6 +27,9 @@ public static class DocFlowPersistenceServiceCollectionExtensions
         // Порты домена модуля → реализации слоя данных (та же слоистость, что у профиля).
         services.AddScoped<Domain.Services.IDocumentTypeStore, DocumentTypeStore>();
         services.AddScoped<Domain.Services.IDocumentStore, DocumentStore>();
+        // Пользователи — реестр ядра core.app_user (вопрос 4 Э4-35); подразделения даёт ПРОФИЛЬ
+        // (IDivisionDirectory, вопрос 3) — здесь их реализация не регистрируется намеренно.
+        services.AddScoped<Domain.Services.IUserDirectory, UserDirectory>();
 
         return services;
     }

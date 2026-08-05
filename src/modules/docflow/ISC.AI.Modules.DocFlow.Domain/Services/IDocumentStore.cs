@@ -78,6 +78,35 @@ public enum DocumentWriteStatus
 /// <summary>Итог создания документа: статус + идентификатор при успехе.</summary>
 public sealed record DocumentCreateResult(DocumentWriteStatus Status, int DocumentId = 0);
 
+/// <summary>Назначение в карточке документа (§4.1): статус, срок, ответственные.</summary>
+public sealed record AssignmentDetails(
+    int Id,
+    int DivisionId,
+    int? AssigneeUserId,
+    AssignmentStatus Status,
+    DateOnly? Deadline,
+    int? ControllerUserId);
+
+/// <summary>Карточка документа (§3.2 + §4.8): атрибуты и назначения.</summary>
+public sealed record DocumentDetails(
+    int Id,
+    string? RegNumber,
+    DateOnly RegDate,
+    int TypeId,
+    string TypeName,
+    DocumentGroup Group,
+    DocumentDirection Direction,
+    string? Source,
+    string ShortContent,
+    string? FullText,
+    string? Notes,
+    DocumentPriority? Priority,
+    int? InspectorUserId,
+    DocumentAggregatedStatus AggregatedStatus,
+    short Classification,
+    int DivisionId,
+    IReadOnlyList<AssignmentDetails> Assignments);
+
 /// <summary>
 /// Порт хранилища документов и назначений (ТЗ СКИД §3–4). Порт — в домене модуля, реализация — в слое
 /// данных (та же слоистость, что <see cref="IDocumentTypeStore"/>). Файлы переходов/продлений
@@ -100,6 +129,9 @@ public interface IDocumentStore
     /// <summary>Список документов с фильтрами (§3.4), новые первыми.</summary>
     Task<IReadOnlyList<DocumentListItem>> ListAsync(
         DocumentListFilter filter, CancellationToken cancellationToken = default);
+
+    /// <summary>Карточка документа с назначениями; <see langword="null"/> — не найден.</summary>
+    Task<DocumentDetails?> GetAsync(int documentId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Ручной переход статуса назначения (§4.2/4.5): матрица переходов, запрет ручного «Просрочено»,

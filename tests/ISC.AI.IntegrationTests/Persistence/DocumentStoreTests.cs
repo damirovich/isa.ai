@@ -131,6 +131,14 @@ public sealed class DocumentStoreTests : IAsyncLifetime
                 .AggregatedStatus.ShouldBe(DocumentAggregatedStatus.InProgress);
         }
 
+        // Карточка (§3.2): атрибуты и назначения одним запросом; несуществующий — null.
+        var details = await store.GetAsync(executionDoc.DocumentId);
+        details.ShouldNotBeNull();
+        details.TypeName.ShouldBe("Поручение");
+        details.Group.ShouldBe(DocumentGroup.Execution);
+        details.Assignments.Count.ShouldBe(2);
+        (await store.GetAsync(999_999)).ShouldBeNull();
+
         // Фильтры списка (§3.4): текст и агрегированный статус.
         (await store.ListAsync(new DocumentListFilter(Text: "приказ"))).ShouldHaveSingleItem()
             .RegNumber.ShouldBe("П-1");
