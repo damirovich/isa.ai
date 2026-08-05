@@ -293,34 +293,48 @@ else
         <MudText Typo="Typo.h6">@_filePreviewFileName</MudText>
     </TitleContent>
     <DialogContent>
-        @if (_filePreviewKind == FilePreviewKind.Pdf)
+        @if (_filePreviewStatus == FilePreviewStatus.Unavailable)
         {
-            <iframe src="@_filePreviewUrl" class="docflow-pdf-frame" title="@_filePreviewFileName"></iframe>
+            @* Единое сообщение без различения причин (ТБ-020/021, решение «404, не 403»): требуемый
+               гриф/подразделение НЕ называются — иначе сообщение само раскрывало бы режимные атрибуты. *@
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+                Файл недоступен: он не существует либо находится вне вашего допуска (гриф/подразделение).
+            </MudAlert>
+        }
+        else if (_filePreviewStatus == FilePreviewStatus.LegacyDoc)
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                Это файл старого формата Word (.doc) — предпросмотр в браузере для него недоступен.
+                Нажмите «Скачать» и откройте его в текстовом редакторе.
+            </MudAlert>
+        }
+        else if (_filePreviewStatus == FilePreviewStatus.Error)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true">
+                Не удалось отобразить предпросмотр. Попробуйте «Скачать».
+                @if (_filePreviewError is { } detail)
+                {
+                    <MudText Typo="Typo.caption" Class="d-block mt-1">Причина: @detail</MudText>
+                }
+            </MudAlert>
+        }
+        else if (_filePreviewKind == FilePreviewKind.Pdf)
+        {
+            @if (_filePreviewObjectUrl is { } pdfUrl)
+            {
+                <iframe src="@pdfUrl" class="docflow-pdf-frame" title="@_filePreviewFileName"></iframe>
+            }
         }
         else if (_filePreviewKind == FilePreviewKind.Image)
         {
-            @* <img> скрипты не исполняет (в отличие от открытия того же SVG вкладкой) — безопаснее прежнего. *@
-            <img src="@_filePreviewUrl" class="docflow-image-preview" alt="@_filePreviewFileName" />
+            @if (_filePreviewObjectUrl is { } imageUrl)
+            {
+                @* <img> скрипты не исполняет (в отличие от открытия того же SVG вкладкой) — безопаснее прежнего. *@
+                <img src="@imageUrl" class="docflow-image-preview" alt="@_filePreviewFileName" />
+            }
         }
         else
         {
-            @if (_docxPreviewStatus == DocxPreviewStatus.LegacyDoc)
-            {
-                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
-                    Это файл старого формата Word (.doc) — предпросмотр в браузере для него недоступен.
-                    Нажмите «Скачать» и откройте его в текстовом редакторе.
-                </MudAlert>
-            }
-            else if (_docxPreviewStatus == DocxPreviewStatus.Error)
-            {
-                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true">
-                    Не удалось отобразить предпросмотр. Попробуйте «Скачать».
-                    @if (_docxPreviewError is { } detail)
-                    {
-                        <MudText Typo="Typo.caption" Class="d-block mt-1">Причина: @detail</MudText>
-                    }
-                </MudAlert>
-            }
             <div class="docflow-docx-container" id="@_docxPreviewContainerId"></div>
         }
     </DialogContent>
@@ -361,23 +375,29 @@ else
 
     private enum FilePreviewKind { Docx, Pdf, Image }
 
-    private enum DocxPreviewStatus { Ok, LegacyDoc, Error }
+    private enum FilePreviewStatus { Ok, LegacyDoc, Error, Unavailable }
 
-    /// <summary>Итог рендера от JS-модуля (<c>ok</c> | <c>legacy-doc</c> | <c>error</c>).</summary>
+    /// <summary>Итог рендера DOCX от JS-модуля (<c>ok</c> | <c>legacy-doc</c> | <c>unavailable</c> | <c>error</c>).</summary>
     private sealed record DocxPreviewResult(string Status, string? Message);
 
-    // Общее состояние диалога предпросмотра (DOCX и PDF).
+    /// <summary>Итог выкачивания файла в blob-URL для iframe/img (<c>fetchFileToObjectUrl</c>).</summary>
+    private sealed record FilePreviewFetchResult(string Status, string? ObjectUrl, string? Message);
+
+    // Общее состояние диалога предпросмотра (DOCX/PDF/изображения).
     private bool _filePreviewOpen;
+    private bool _filePreviewPending;
     private FilePreviewKind _filePreviewKind;
+    private FilePreviewStatus _filePreviewStatus;
     private string? _filePreviewFileName;
     private string? _filePreviewUrl;
+    // PDF/картинки показываются НЕ по прямому URL, а по blob-URL после fetch: иначе 404 эндпоинта
+    // отрисовался бы в iframe страницей «Not Found» всей системы вместо аккуратного сообщения.
+    private string? _filePreviewObjectUrl;
+    private string? _filePreviewError;
 
-    // Состояние ветки DOCX (JS-рендер): PDF в этом не нуждается — его рисует сам браузер в iframe.
-    private bool _docxPreviewPending;
-    private DocxPreviewStatus _docxPreviewStatus;
-    private string? _docxPreviewError;
-    // Идентификатор контейнера уникален на каждое открытие: узел прошлого диалога уже удалён, но по
-    // прежнему id его можно было бы подхватить — с уникальным это исключено (см. docxPreview.js).
+    // Состояние ветки DOCX (JS-рендер в контейнер). Идентификатор контейнера уникален на каждое
+    // открытие: узел прошлого диалога уже удалён, но по прежнему id его можно было бы подхватить —
+    // с уникальным это исключено (см. docxPreview.js).
     private string _docxPreviewContainerId = "docflow-docx-preview";
     private int _docxPreviewCounter;
     private IJSObjectReference? _docxPreviewModule;
@@ -426,9 +446,9 @@ else
     private static bool HasInlinePreview(string fileName) =>
         IsWordDocument(fileName) || IsPdf(fileName) || IsImage(fileName);
 
-    // Открывает диалог; для DOCX рендер просится на следующем OnAfterRenderAsync (появление контейнера
-    // ждёт JS-сторона — диалог рисует ДРУГОЙ компонент, провайдер, его рендер с нашим не синхронен),
-    // PDF рисует сам браузер по src iframe — интероп не нужен.
+    // Открывает диалог; содержимое готовится на следующем OnAfterRenderAsync (для DOCX появление
+    // контейнера ждёт JS-сторона — диалог рисует ДРУГОЙ компонент, провайдер, его рендер с нашим
+    // не синхронен; для PDF/картинок сперва выкачивается blob и лишь потом появляется iframe/img).
     private void OpenFilePreview(string category, string storedFileName, string fileName)
     {
         _filePreviewFileName = fileName;
@@ -436,24 +456,17 @@ else
         _filePreviewKind = IsPdf(fileName) ? FilePreviewKind.Pdf
             : IsImage(fileName) ? FilePreviewKind.Image
             : FilePreviewKind.Docx;
-
-        if (_filePreviewKind == FilePreviewKind.Pdf)
-        {
-            // Просить просмотрщик открыться БЕЗ боковой панели миниатюр: navpanes=0 — Adobe/Edge,
-            // pagemode=none — pdf.js (Firefox). Это фрагмент URL: на сервер не уходит, незнающие
-            // параметров просмотрщики (встроенный Chrome) молча игнорируют.
-            _filePreviewUrl += "#navpanes=0&pagemode=none";
-        }
-
-        _filePreviewOpen = true;
+        _filePreviewStatus = FilePreviewStatus.Ok;
+        _filePreviewError = null;
+        _filePreviewObjectUrl = null;
 
         if (_filePreviewKind == FilePreviewKind.Docx)
         {
             _docxPreviewContainerId = $"docflow-docx-preview-{++_docxPreviewCounter}";
-            _docxPreviewStatus = DocxPreviewStatus.Ok;
-            _docxPreviewError = null;
-            _docxPreviewPending = true;
         }
+
+        _filePreviewOpen = true;
+        _filePreviewPending = true;
     }
 
     // Байты браузерных файлов → UploadedFile (лимит на файл — как в валидаторе; итог проверит сервер).
@@ -551,35 +564,53 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        // Ждёт только ветка DOCX: PDF отрисовывает браузер по src iframe, без интеропа.
-        if (!_docxPreviewPending || _filePreviewUrl is null)
+        if (!_filePreviewPending || _filePreviewUrl is null)
         {
             return;
         }
 
-        _docxPreviewPending = false;
+        _filePreviewPending = false;
 
         // Сбой JS-интеропа НЕЛЬЗЯ выпускать из OnAfterRenderAsync: необработанное исключение в методе
         // жизненного цикла рвёт circuit Blazor Server — страница перестаёт отвечать целиком, а не только
         // предпросмотр (лечится лишь перезагрузкой). Границу с браузером закрываем здесь.
-        DocxPreviewStatus status;
+        FilePreviewStatus status;
         try
         {
             _docxPreviewModule ??= await JS.InvokeAsync<IJSObjectReference>("import", DocxPreviewModulePath);
-            var result = await _docxPreviewModule.InvokeAsync<DocxPreviewResult>(
-                "renderDocxPreview", _docxPreviewContainerId, _filePreviewUrl);
-            status = result?.Status switch
+
+            if (_filePreviewKind == FilePreviewKind.Docx)
             {
-                "ok" => DocxPreviewStatus.Ok,
-                "legacy-doc" => DocxPreviewStatus.LegacyDoc,
-                _ => DocxPreviewStatus.Error,
-            };
-            _docxPreviewError = result?.Message;
+                var result = await _docxPreviewModule.InvokeAsync<DocxPreviewResult>(
+                    "renderDocxPreview", _docxPreviewContainerId, _filePreviewUrl);
+                status = MapPreviewStatus(result?.Status);
+                _filePreviewError = result?.Message;
+            }
+            else
+            {
+                var fetched = await _docxPreviewModule.InvokeAsync<FilePreviewFetchResult>(
+                    "fetchFileToObjectUrl", _filePreviewUrl);
+                status = MapPreviewStatus(fetched?.Status);
+                _filePreviewError = fetched?.Message;
+
+                if (status == FilePreviewStatus.Ok && fetched?.ObjectUrl is { } objectUrl)
+                {
+                    // Фрагмент управления просмотрщиком PDF (закрытая панель миниатюр: navpanes=0 —
+                    // Adobe/Edge, pagemode=none — pdf.js; незнающие игнорируют) применим и к blob-URL.
+                    _filePreviewObjectUrl = _filePreviewKind == FilePreviewKind.Pdf
+                        ? objectUrl + "#navpanes=0&pagemode=none"
+                        : objectUrl;
+                }
+                else if (status == FilePreviewStatus.Ok)
+                {
+                    status = FilePreviewStatus.Error;
+                }
+            }
         }
         catch (JSException ex)
         {
-            status = DocxPreviewStatus.Error;
-            _docxPreviewError = ex.Message;
+            status = FilePreviewStatus.Error;
+            _filePreviewError = ex.Message;
         }
         catch (JSDisconnectedException)
         {
@@ -587,12 +618,17 @@ else
             return;
         }
 
-        if (status != DocxPreviewStatus.Ok)
-        {
-            _docxPreviewStatus = status;
-            StateHasChanged();
-        }
+        _filePreviewStatus = status;
+        StateHasChanged();
     }
+
+    private static FilePreviewStatus MapPreviewStatus(string? status) => status switch
+    {
+        "ok" => FilePreviewStatus.Ok,
+        "legacy-doc" => FilePreviewStatus.LegacyDoc,
+        "unavailable" => FilePreviewStatus.Unavailable,
+        _ => FilePreviewStatus.Error,
+    };
 
     public async ValueTask DisposeAsync()
     {
@@ -600,11 +636,18 @@ else
         {
             try
             {
+                // Отзыв blob-URL предпросмотров (иначе содержимое последнего файла живёт в памяти
+                // вкладки до закрытия страницы), затем сам модуль.
+                await _docxPreviewModule.InvokeVoidAsync("cleanup");
                 await _docxPreviewModule.DisposeAsync();
             }
             catch (JSDisconnectedException)
             {
                 // Circuit уже закрыт (навигация/разрыв соединения) — освобождать на клиенте нечего.
+            }
+            catch (JSException)
+            {
+                // Сбой очистки не должен ронять уход со страницы.
             }
         }
     }

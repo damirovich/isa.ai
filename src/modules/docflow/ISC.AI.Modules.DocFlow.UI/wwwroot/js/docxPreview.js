@@ -1,6 +1,6 @@
-// Клиентский предпросмотр DOCX — ES-модуль, грузится ЛЕНИВО через IJSRuntime.InvokeAsync("import", ...)
-// только со страницы карточки документа (Blazor JS isolation) — хосту/профилю НЕ нужно знать про
-// существование этого модуля (никаких правок App.razor, ср. с CLAUDE.md: "хост держит только оболочку").
+// Клиентский предпросмотр файлов карточки документа (DOCX/PDF/изображения) — ES-модуль, грузится
+// ЛЕНИВО через IJSRuntime.InvokeAsync("import", ...) только со страницы карточки (Blazor JS isolation) —
+// хосту/профилю НЕ нужно знать про существование этого модуля (никаких правок App.razor).
 // docx-preview/jszip — UMD-сборки (не ESM), поэтому грузятся как обычные <script> при первом вызове;
 // jszip.min.js ОБЯЗАН загрузиться раньше docx-preview.min.js (последний берёт JSZip из глобала).
 const moduleBaseUrl = new URL('.', import.meta.url);
@@ -54,10 +54,23 @@ function isZipArchive(buffer) {
     return header.length === 2 && header[0] === 0x50 && header[1] === 0x4B;
 }
 
+// blob-URL прошлых предпросмотров: отзываются при каждом новом открытии и при уходе со страницы,
+// чтобы содержимое файлов не копилось в памяти вкладки.
+let objectUrls = [];
+
+function revokeObjectUrls() {
+    for (const url of objectUrls) {
+        URL.revokeObjectURL(url);
+    }
+
+    objectUrls = [];
+}
+
 /**
- * Рендерит документ в элемент с идентификатором containerId (уникальным на каждое открытие).
- * Возвращает { status, message }: 'ok' | 'legacy-doc' | 'error'. Текст ошибки отдаётся наружу
- * намеренно — в изолированном контуре у оператора нет ни консоли разработчика, ни телеметрии.
+ * Рендерит DOCX в элемент с идентификатором containerId (уникальным на каждое открытие).
+ * Возвращает { status, message }: 'ok' | 'legacy-doc' | 'unavailable' (404 — нет файла ЛИБО нет
+ * допуска, сервер их намеренно не различает) | 'error'. Текст ошибки отдаётся наружу намеренно —
+ * в изолированном контуре у оператора нет ни консоли разработчика, ни телеметрии.
  */
 export async function renderDocxPreview(containerId, fileUrl) {
     try {
@@ -71,6 +84,10 @@ export async function renderDocxPreview(containerId, fileUrl) {
         await ensureVendorScriptsLoaded();
 
         const response = await fetch(fileUrl, { credentials: 'same-origin' });
+        if (response.status === 404) {
+            return { status: 'unavailable' };
+        }
+
         if (!response.ok) {
             return { status: 'error', message: `сервер вернул ${response.status}` };
         }
@@ -85,4 +102,37 @@ export async function renderDocxPreview(containerId, fileUrl) {
     } catch (error) {
         return { status: 'error', message: error?.message ?? String(error) };
     }
+}
+
+/**
+ * Выкачивает файл и отдаёт blob-URL для iframe/img. Нужен, потому что напрямую скормленный iframe
+ * URL при 404 отрисовал бы СТРАНИЦУ «Not Found» всей системы внутри диалога — здесь же настоящий
+ * код ответа виден и превращается в аккуратное сообщение. Возвращает { status, objectUrl, message }:
+ * 'ok' | 'unavailable' | 'error'.
+ */
+export async function fetchFileToObjectUrl(fileUrl) {
+    try {
+        revokeObjectUrls();
+
+        const response = await fetch(fileUrl, { credentials: 'same-origin' });
+        if (response.status === 404) {
+            return { status: 'unavailable' };
+        }
+
+        if (!response.ok) {
+            return { status: 'error', message: `сервер вернул ${response.status}` };
+        }
+
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        objectUrls.push(objectUrl);
+        return { status: 'ok', objectUrl };
+    } catch (error) {
+        return { status: 'error', message: error?.message ?? String(error) };
+    }
+}
+
+/** Освобождение blob-URL при уходе с карточки (вызывается из DisposeAsync компонента). */
+export function cleanup() {
+    revokeObjectUrls();
 }
