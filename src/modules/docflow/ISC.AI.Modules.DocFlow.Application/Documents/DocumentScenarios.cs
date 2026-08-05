@@ -111,7 +111,7 @@ public sealed record ListDocumentsQuery(
     DateOnly? RegDateTo = null) : IRequest<ResponseDto<IReadOnlyList<DocumentListItem>>>
 {
     /// <inheritdoc cref="ListDocumentsQuery" />
-    public sealed class Handler(IDocumentStore store)
+    public sealed class Handler(IDocumentStore store, IAccessContextProvider accessProvider)
         : IRequestHandler<ListDocumentsQuery, ResponseDto<IReadOnlyList<DocumentListItem>>>
     {
         /// <inheritdoc />
@@ -119,9 +119,14 @@ public sealed record ListDocumentsQuery(
             ListDocumentsQuery query, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(query);
+
+            // Fail-closed (ТБ-020/021): без контекста допуска GetCurrentAsync бросает — список
+            // не выдаётся вовсе; решётка применяется в самом запросе хранилища (этап 6.1 Э4-35).
+            var access = await accessProvider.GetCurrentAsync(cancellationToken);
             var items = await store.ListAsync(
                 new DocumentListFilter(query.Text, query.TypeId, query.AggregatedStatus,
                     query.RegDateFrom, query.RegDateTo),
+                access,
                 cancellationToken);
             return ResponseDto<IReadOnlyList<DocumentListItem>>.Ok(items, items.Count);
         }
@@ -221,7 +226,7 @@ public sealed record ReindexDocumentCommand(int DocumentId) : IRequest<ResponseD
 public sealed record GetDocumentQuery(int DocumentId) : IRequest<ResponseDto<DocumentDetails>>
 {
     /// <inheritdoc cref="GetDocumentQuery" />
-    public sealed class Handler(IDocumentStore store)
+    public sealed class Handler(IDocumentStore store, IAccessContextProvider accessProvider)
         : IRequestHandler<GetDocumentQuery, ResponseDto<DocumentDetails>>
     {
         /// <inheritdoc />
@@ -229,7 +234,11 @@ public sealed record GetDocumentQuery(int DocumentId) : IRequest<ResponseDto<Doc
             GetDocumentQuery query, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(query);
-            var details = await store.GetAsync(query.DocumentId, cancellationToken);
+
+            // Документ вне допуска неотличим от несуществующего (ТБ-020/021, решение «404, не 403»
+            // раздачи файлов) — то же сообщение «не найден», существование не подтверждается.
+            var access = await accessProvider.GetCurrentAsync(cancellationToken);
+            var details = await store.GetAsync(query.DocumentId, access, cancellationToken);
             return details is null
                 ? ResponseDto<DocumentDetails>.NotFound("Документ не найден.")
                 : ResponseDto<DocumentDetails>.Ok(details);

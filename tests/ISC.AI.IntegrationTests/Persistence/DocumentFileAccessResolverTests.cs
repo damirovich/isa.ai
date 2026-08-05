@@ -1,8 +1,8 @@
+using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.DocFlow.Data;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 using ISC.AI.Modules.DocFlow.Domain.Services;
 using Microsoft.EntityFrameworkCore;
-using NSubstitute;
 using Shouldly;
 using Testcontainers.PostgreSql;
 
@@ -43,7 +43,9 @@ public sealed class DocumentFileAccessResolverTests : IAsyncLifetime
             useCommonDeadline: false, commonDeadline: null);
         doc.Status.ShouldBe(DocumentWriteStatus.Ok);
 
-        var assignmentId = (await documentStore.GetAsync(doc.DocumentId))!.Assignments.Single().Id;
+        // Полный допуск: тесту резолвера нужна карточка, решётка GetAsync здесь не предмет проверки.
+        var fullAccess = new AccessContext("42", MaxClassification: 10, AllowedDivisions: [20]);
+        var assignmentId = (await documentStore.GetAsync(doc.DocumentId, fullAccess))!.Assignments.Single().Id;
 
         // Документ + вложение.
         (await documentStore.AddDocumentFileAsync(doc.DocumentId,
@@ -61,7 +63,7 @@ public sealed class DocumentFileAccessResolverTests : IAsyncLifetime
             [new UploadedFile("обоснование.pdf", "application/pdf", [8, 9])]))
             .ShouldBe(DocumentWriteStatus.Ok);
 
-        var details = await documentStore.GetAsync(doc.DocumentId);
+        var details = await documentStore.GetAsync(doc.DocumentId, fullAccess);
         var documentFileName = details!.Files.Single().StoredFileName;
         var attachmentFileName = details.Attachments.Single().StoredFileName;
 

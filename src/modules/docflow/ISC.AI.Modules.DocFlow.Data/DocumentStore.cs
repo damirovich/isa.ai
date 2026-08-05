@@ -1,3 +1,4 @@
+using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.DocFlow.Domain.Entities;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 using ISC.AI.Modules.DocFlow.Domain.Services;
@@ -211,13 +212,20 @@ public sealed class DocumentStore(
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<DocumentListItem>> ListAsync(
-        DocumentListFilter filter, CancellationToken cancellationToken = default)
+        DocumentListFilter filter, AccessContext access, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(filter);
+        ArgumentNullException.ThrowIfNull(access);
 
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
 
-        var query = db.Documents.AsNoTracking();
+        // Решётка доступа В ЗАПРОСЕ, не пост-фильтром (инвариант 3, ТБ-020/021): гриф ≤ допуск И
+        // подразделение ∈ разрешённых — тот же предикат, что у floor'а ядра (BaselineAccess) и
+        // раздачи файлов (этап 4.3). Пустой список подразделений ⇒ пустая выдача (fail-closed).
+        var allowedDivisions = access.AllowedDivisions;
+        var query = db.Documents.AsNoTracking()
+            .Where(d => d.Classification <= access.MaxClassification
+                && allowedDivisions.Contains(d.DivisionId));
 
         if (!string.IsNullOrWhiteSpace(filter.Text))
         {
@@ -267,12 +275,20 @@ public sealed class DocumentStore(
     }
 
     /// <inheritdoc />
-    public async Task<DocumentDetails?> GetAsync(int documentId, CancellationToken cancellationToken = default)
+    public async Task<DocumentDetails?> GetAsync(
+        int documentId, AccessContext access, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(access);
+
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
 
+        // Допуск — в самом запросе: документ вне допуска даёт null, неотличимый от «не найден»
+        // (сам факт существования не подтверждается — то же решение, что 404 у раздачи файлов).
+        var allowedDivisions = access.AllowedDivisions;
         return await db.Documents.AsNoTracking()
-            .Where(d => d.Id == documentId)
+            .Where(d => d.Id == documentId
+                && d.Classification <= access.MaxClassification
+                && allowedDivisions.Contains(d.DivisionId))
             .Select(d => new DocumentDetails(
                 d.Id,
                 d.RegNumber,

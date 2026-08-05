@@ -1,3 +1,4 @@
+using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.DocFlow.Data;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 using ISC.AI.Modules.DocFlow.Domain.Services;
@@ -13,6 +14,9 @@ namespace ISC.AI.IntegrationTests.Persistence;
 /// </summary>
 public sealed class DocumentStoreTests : IAsyncLifetime
 {
+    // Полный допуск тестового субъекта: покрывает грифы (≤10) и подразделения всех тестовых документов.
+    private static readonly AccessContext FullAccess = new("42", 10, [10, 20, 30]);
+
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16").Build();
 
     public Task InitializeAsync() => _postgres.StartAsync();
@@ -40,7 +44,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
                 null, "Справка о результатах", null, null, DocumentPriority.High, 77, 0, 10, 42),
             [], useCommonDeadline: false, commonDeadline: null);
         storageDoc.Status.ShouldBe(DocumentWriteStatus.Ok);
-        var storageItem = (await store.ListAsync(new DocumentListFilter(TypeId: storageType.Value))).ShouldHaveSingleItem();
+        var storageItem = (await store.ListAsync(new DocumentListFilter(TypeId: storageType.Value), FullAccess)).ShouldHaveSingleItem();
         storageItem.AggregatedStatus.ShouldBe(DocumentAggregatedStatus.NotApplicable);
         storageItem.Priority.ShouldBeNull();
         storageItem.AssignmentsCount.ShouldBe(0);
@@ -132,17 +136,17 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         }
 
         // Карточка (§3.2): атрибуты и назначения одним запросом; несуществующий — null.
-        var details = await store.GetAsync(executionDoc.DocumentId);
+        var details = await store.GetAsync(executionDoc.DocumentId, FullAccess);
         details.ShouldNotBeNull();
         details.TypeName.ShouldBe("Поручение");
         details.Group.ShouldBe(DocumentGroup.Execution);
         details.Assignments.Count.ShouldBe(2);
-        (await store.GetAsync(999_999)).ShouldBeNull();
+        (await store.GetAsync(999_999, FullAccess)).ShouldBeNull();
 
         // Фильтры списка (§3.4): текст и агрегированный статус.
-        (await store.ListAsync(new DocumentListFilter(Text: "приказ"))).ShouldHaveSingleItem()
+        (await store.ListAsync(new DocumentListFilter(Text: "приказ"), FullAccess)).ShouldHaveSingleItem()
             .RegNumber.ShouldBe("П-1");
-        (await store.ListAsync(new DocumentListFilter(AggregatedStatus: DocumentAggregatedStatus.InProgress)))
+        (await store.ListAsync(new DocumentListFilter(AggregatedStatus: DocumentAggregatedStatus.InProgress), FullAccess))
             .ShouldHaveSingleItem().AssignmentsCount.ShouldBe(2);
     }
 
@@ -245,7 +249,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         (await store.AddDocumentFileAsync(999_999, v1, DocumentLanguage.Russian, 42))
             .ShouldBe(DocumentWriteStatus.NotFound);
 
-        var details = await store.GetAsync(created.DocumentId);
+        var details = await store.GetAsync(created.DocumentId, FullAccess);
         details.ShouldNotBeNull();
         details.Files.Count.ShouldBe(2);
         var latest = details.Files.Single(f => f.IsLatest);
@@ -253,6 +257,51 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         latest.FileName.ShouldBe("справка-испр.docx");
         details.Files.Single(f => !f.IsLatest).Version.ShouldBe(1);
         details.Attachments.ShouldHaveSingleItem().FileName.ShouldBe("приложение.pdf");
+    }
+
+    [Fact(DisplayName = "Решётка доступа (6.1, ТБ-020/021): чужой гриф/подразделение не выдаются ни списком, ни карточкой")]
+    public async Task List_and_get_enforce_classification_and_division()
+    {
+        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+        }
+
+        var typeStore = new DocumentTypeStore(factory);
+        var store = new DocumentStore(factory, new TempFileStorage());
+        var typeId = await typeStore.CreateAsync("Справка", DocumentGroup.Storage, isActive: true);
+
+        // Три документа: доступный (гриф 3, подр. 10), выше грифа (7, подр. 10), чужое подразделение (3, подр. 99).
+        async Task<int> CreateAsync(string regNumber, short classification, int divisionId)
+        {
+            var created = await store.CreateAsync(
+                new DocumentDraft(regNumber, new DateOnly(2026, 8, 1), typeId!.Value, DocumentDirection.Internal,
+                    null, $"Документ {regNumber}", null, null, null, null, classification, divisionId, 42),
+                [], useCommonDeadline: false, commonDeadline: null);
+            created.Status.ShouldBe(DocumentWriteStatus.Ok);
+            return created.DocumentId;
+        }
+
+        var visibleId = await CreateAsync("Д-1", classification: 3, divisionId: 10);
+        var aboveClearanceId = await CreateAsync("Д-2", classification: 7, divisionId: 10);
+        var foreignDivisionId = await CreateAsync("Д-3", classification: 3, divisionId: 99);
+
+        var subject = new AccessContext("42", MaxClassification: 5, AllowedDivisions: [10]);
+
+        // Список: только документ в пределах грифа И из разрешённого подразделения.
+        (await store.ListAsync(new DocumentListFilter(), subject))
+            .ShouldHaveSingleItem().Id.ShouldBe(visibleId);
+
+        // Карточка: недоступный неотличим от несуществующего (null, существование не подтверждается).
+        (await store.GetAsync(visibleId, subject)).ShouldNotBeNull();
+        (await store.GetAsync(aboveClearanceId, subject)).ShouldBeNull();
+        (await store.GetAsync(foreignDivisionId, subject)).ShouldBeNull();
+
+        // Fail-closed: пустой список разрешённых подразделений — пустая выдача, а не «все».
+        var noDivisions = new AccessContext("42", MaxClassification: 10, AllowedDivisions: []);
+        (await store.ListAsync(new DocumentListFilter(), noDivisions)).ShouldBeEmpty();
+        (await store.GetAsync(visibleId, noDivisions)).ShouldBeNull();
     }
 
     // Временное файловое хранилище: настоящие байты на диске, каталог убирается после теста.

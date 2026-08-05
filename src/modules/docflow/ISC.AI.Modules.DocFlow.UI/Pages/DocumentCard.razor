@@ -142,10 +142,10 @@ else
                     <MudText Typo="Typo.caption" Class="mud-text-secondary">
                         @FormatSize(file.FileSize) · @file.UploadedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
                     </MudText>
-                    @if (IsWordDocument(file.FileName))
+                    @if (HasInlinePreview(file.FileName))
                     {
                         <MudLink Typo="Typo.caption" Style="cursor:pointer;"
-                                 OnClick="@(() => OpenDocxPreview(FileCategories.Documents, file.StoredFileName, file.FileName))">Просмотр</MudLink>
+                                 OnClick="@(() => OpenFilePreview(FileCategories.Documents, file.StoredFileName, file.FileName))">Просмотр</MudLink>
                     }
                     else
                     {
@@ -180,10 +180,10 @@ else
                     <MudIcon Icon="@Icons.Material.Filled.AttachFile" Size="Size.Small" />
                     <MudText Typo="Typo.body2">@attachment.FileName</MudText>
                     <MudText Typo="Typo.caption" Class="mud-text-secondary">@FormatSize(attachment.FileSize)</MudText>
-                    @if (IsWordDocument(attachment.FileName))
+                    @if (HasInlinePreview(attachment.FileName))
                     {
                         <MudLink Typo="Typo.caption" Style="cursor:pointer;"
-                                 OnClick="@(() => OpenDocxPreview(FileCategories.Attachments, attachment.StoredFileName, attachment.FileName))">Просмотр</MudLink>
+                                 OnClick="@(() => OpenFilePreview(FileCategories.Attachments, attachment.StoredFileName, attachment.FileName))">Просмотр</MudLink>
                     }
                     else
                     {
@@ -285,34 +285,47 @@ else
     </DialogActions>
 </MudDialog>
 
-@* --- Предпросмотр DOCX (docx-preview, клиентский рендер — замена убранной серверной конвертации
-   LibreOffice, этап 4.3): контейнер получает содержимое через JS-интероп в OnAfterRenderAsync. --- *@
-<MudDialog @bind-Visible="_docxPreviewOpen" Options="DocxPreviewDialogOptions">
+@* --- Предпросмотр файла в диалоге (§3.3 «просмотр без скачивания», этап 4.3): DOCX — клиентский
+   рендер docx-preview (JS-интероп в OnAfterRenderAsync), PDF — встроенный просмотрщик браузера
+   (iframe на тот же защищённый URL — допуск проверяет сервер, ТБ-020/021). --- *@
+<MudDialog @bind-Visible="_filePreviewOpen" Options="FilePreviewDialogOptions">
     <TitleContent>
-        <MudText Typo="Typo.h6">@_docxPreviewFileName</MudText>
+        <MudText Typo="Typo.h6">@_filePreviewFileName</MudText>
     </TitleContent>
     <DialogContent>
-        @if (_docxPreviewStatus == DocxPreviewStatus.LegacyDoc)
+        @if (_filePreviewKind == FilePreviewKind.Pdf)
         {
-            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
-                Это файл старого формата Word (.doc) — предпросмотр в браузере для него недоступен.
-                Нажмите «Скачать» и откройте его в текстовом редакторе.
-            </MudAlert>
+            <iframe src="@_filePreviewUrl" class="docflow-pdf-frame" title="@_filePreviewFileName"></iframe>
         }
-        else if (_docxPreviewStatus == DocxPreviewStatus.Error)
+        else if (_filePreviewKind == FilePreviewKind.Image)
         {
-            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true">
-                Не удалось отобразить предпросмотр. Попробуйте «Скачать».
-                @if (_docxPreviewError is { } detail)
-                {
-                    <MudText Typo="Typo.caption" Class="d-block mt-1">Причина: @detail</MudText>
-                }
-            </MudAlert>
+            @* <img> скрипты не исполняет (в отличие от открытия того же SVG вкладкой) — безопаснее прежнего. *@
+            <img src="@_filePreviewUrl" class="docflow-image-preview" alt="@_filePreviewFileName" />
         }
-        <div class="docflow-docx-container" id="@_docxPreviewContainerId"></div>
+        else
+        {
+            @if (_docxPreviewStatus == DocxPreviewStatus.LegacyDoc)
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                    Это файл старого формата Word (.doc) — предпросмотр в браузере для него недоступен.
+                    Нажмите «Скачать» и откройте его в текстовом редакторе.
+                </MudAlert>
+            }
+            else if (_docxPreviewStatus == DocxPreviewStatus.Error)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true">
+                    Не удалось отобразить предпросмотр. Попробуйте «Скачать».
+                    @if (_docxPreviewError is { } detail)
+                    {
+                        <MudText Typo="Typo.caption" Class="d-block mt-1">Причина: @detail</MudText>
+                    }
+                </MudAlert>
+            }
+            <div class="docflow-docx-container" id="@_docxPreviewContainerId"></div>
+        }
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="@(() => _docxPreviewOpen = false)">Закрыть</MudButton>
+        <MudButton OnClick="@(() => _filePreviewOpen = false)">Закрыть</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -324,7 +337,7 @@ else
     private static readonly DialogOptions DialogOptions =
         new() { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, CloseOnEscapeKey = true };
 
-    private static readonly DialogOptions DocxPreviewDialogOptions =
+    private static readonly DialogOptions FilePreviewDialogOptions =
         new() { MaxWidth = MaxWidth.Large, FullWidth = true, CloseOnEscapeKey = true };
 
     private DocumentDetails? _details;
@@ -346,16 +359,22 @@ else
 
     private const string DocxPreviewModulePath = "./_content/ISC.AI.Modules.DocFlow.UI/js/docxPreview.js";
 
+    private enum FilePreviewKind { Docx, Pdf, Image }
+
     private enum DocxPreviewStatus { Ok, LegacyDoc, Error }
 
     /// <summary>Итог рендера от JS-модуля (<c>ok</c> | <c>legacy-doc</c> | <c>error</c>).</summary>
     private sealed record DocxPreviewResult(string Status, string? Message);
 
-    private bool _docxPreviewOpen;
+    // Общее состояние диалога предпросмотра (DOCX и PDF).
+    private bool _filePreviewOpen;
+    private FilePreviewKind _filePreviewKind;
+    private string? _filePreviewFileName;
+    private string? _filePreviewUrl;
+
+    // Состояние ветки DOCX (JS-рендер): PDF в этом не нуждается — его рисует сам браузер в iframe.
     private bool _docxPreviewPending;
     private DocxPreviewStatus _docxPreviewStatus;
-    private string? _docxPreviewFileName;
-    private string? _docxPreviewUrl;
     private string? _docxPreviewError;
     // Идентификатор контейнера уникален на каждое открытие: узел прошлого диалога уже удалён, но по
     // прежнему id его можно было бы подхватить — с уникальным это исключено (см. docxPreview.js).
@@ -395,17 +414,46 @@ else
         fileName.EndsWith(".docx", StringComparison.OrdinalIgnoreCase)
         || fileName.EndsWith(".doc", StringComparison.OrdinalIgnoreCase);
 
-    // Открывает диалог и просит рендер на следующем OnAfterRenderAsync; появление самого контейнера
-    // ждёт уже JS-сторона — диалог рисует ДРУГОЙ компонент (провайдер), его рендер с нашим не синхронен.
-    private void OpenDocxPreview(string category, string storedFileName, string fileName)
+    private static bool IsPdf(string fileName) => fileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase);
+
+    // Растровые/векторные форматы, которые браузер отображает в <img> (tiff намеренно нет — не умеет).
+    private static readonly string[] ImageExtensions = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg"];
+
+    private static bool IsImage(string fileName) =>
+        ImageExtensions.Any(extension => fileName.EndsWith(extension, StringComparison.OrdinalIgnoreCase));
+
+    // Форматы, открываемые в диалоге; остальные («иное») — прежней ссылкой в новой вкладке.
+    private static bool HasInlinePreview(string fileName) =>
+        IsWordDocument(fileName) || IsPdf(fileName) || IsImage(fileName);
+
+    // Открывает диалог; для DOCX рендер просится на следующем OnAfterRenderAsync (появление контейнера
+    // ждёт JS-сторона — диалог рисует ДРУГОЙ компонент, провайдер, его рендер с нашим не синхронен),
+    // PDF рисует сам браузер по src iframe — интероп не нужен.
+    private void OpenFilePreview(string category, string storedFileName, string fileName)
     {
-        _docxPreviewFileName = fileName;
-        _docxPreviewUrl = FileUrl(category, storedFileName);
-        _docxPreviewContainerId = $"docflow-docx-preview-{++_docxPreviewCounter}";
-        _docxPreviewStatus = DocxPreviewStatus.Ok;
-        _docxPreviewError = null;
-        _docxPreviewOpen = true;
-        _docxPreviewPending = true;
+        _filePreviewFileName = fileName;
+        _filePreviewUrl = FileUrl(category, storedFileName);
+        _filePreviewKind = IsPdf(fileName) ? FilePreviewKind.Pdf
+            : IsImage(fileName) ? FilePreviewKind.Image
+            : FilePreviewKind.Docx;
+
+        if (_filePreviewKind == FilePreviewKind.Pdf)
+        {
+            // Просить просмотрщик открыться БЕЗ боковой панели миниатюр: navpanes=0 — Adobe/Edge,
+            // pagemode=none — pdf.js (Firefox). Это фрагмент URL: на сервер не уходит, незнающие
+            // параметров просмотрщики (встроенный Chrome) молча игнорируют.
+            _filePreviewUrl += "#navpanes=0&pagemode=none";
+        }
+
+        _filePreviewOpen = true;
+
+        if (_filePreviewKind == FilePreviewKind.Docx)
+        {
+            _docxPreviewContainerId = $"docflow-docx-preview-{++_docxPreviewCounter}";
+            _docxPreviewStatus = DocxPreviewStatus.Ok;
+            _docxPreviewError = null;
+            _docxPreviewPending = true;
+        }
     }
 
     // Байты браузерных файлов → UploadedFile (лимит на файл — как в валидаторе; итог проверит сервер).
@@ -503,7 +551,8 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!_docxPreviewPending || _docxPreviewUrl is null)
+        // Ждёт только ветка DOCX: PDF отрисовывает браузер по src iframe, без интеропа.
+        if (!_docxPreviewPending || _filePreviewUrl is null)
         {
             return;
         }
@@ -518,7 +567,7 @@ else
         {
             _docxPreviewModule ??= await JS.InvokeAsync<IJSObjectReference>("import", DocxPreviewModulePath);
             var result = await _docxPreviewModule.InvokeAsync<DocxPreviewResult>(
-                "renderDocxPreview", _docxPreviewContainerId, _docxPreviewUrl);
+                "renderDocxPreview", _docxPreviewContainerId, _filePreviewUrl);
             status = result?.Status switch
             {
                 "ok" => DocxPreviewStatus.Ok,

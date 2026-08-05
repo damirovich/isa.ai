@@ -1,3 +1,4 @@
+using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 
 namespace ISC.AI.Modules.DocFlow.Domain.Services;
@@ -140,12 +141,22 @@ public interface IDocumentStore
         DateOnly? commonDeadline,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Список документов с фильтрами (§3.4), новые первыми.</summary>
+    /// <summary>
+    /// Список документов с фильтрами (§3.4), новые первыми. Разграничение — НА ЭТАПЕ ВЫБОРКИ
+    /// (инвариант 3, ТБ-020/021): выдаются только документы с грифом не выше допуска субъекта
+    /// <paramref name="access"/> и из разрешённых ему подразделений; fail-closed — пустой список
+    /// разрешённых подразделений даёт пустую выдачу, а не «все».
+    /// </summary>
     Task<IReadOnlyList<DocumentListItem>> ListAsync(
-        DocumentListFilter filter, CancellationToken cancellationToken = default);
+        DocumentListFilter filter, AccessContext access, CancellationToken cancellationToken = default);
 
-    /// <summary>Карточка документа с назначениями; <see langword="null"/> — не найден.</summary>
-    Task<DocumentDetails?> GetAsync(int documentId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Карточка документа с назначениями; <see langword="null"/> — не найден. Документ вне допуска
+    /// субъекта <paramref name="access"/> НЕ отличается от несуществующего (то же решение, что 404
+    /// у раздачи файлов — сам факт существования не подтверждается, ТБ-020/021).
+    /// </summary>
+    Task<DocumentDetails?> GetAsync(
+        int documentId, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Ручной переход статуса назначения (§4.2/4.5): матрица переходов, запрет ручного «Просрочено»,
