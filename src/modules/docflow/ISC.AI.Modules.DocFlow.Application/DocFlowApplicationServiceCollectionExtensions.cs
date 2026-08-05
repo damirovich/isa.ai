@@ -1,3 +1,4 @@
+using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ISC.AI.Modules.DocFlow.Application;
@@ -9,9 +10,8 @@ namespace ISC.AI.Modules.DocFlow.Application;
 public static class DocFlowApplicationServiceCollectionExtensions
 {
     /// <summary>
-    /// Регистрирует сценарии и валидаторы документооборота.
-    /// СКЕЛЕТ (этап 0 задачи Э4-35): регистрировать пока нечего — сервисы появятся вместе с переносом
-    /// сценариев из СКИД (этап 3). Метод объявлен сразу, чтобы шов композиции был собран и проверен.
+    /// Регистрирует валидаторы сценариев модуля (сквозной <c>ValidationBehavior</c> хоста берёт их из DI).
     /// </summary>
-    public static IServiceCollection AddDocFlowApplication(this IServiceCollection services) => services;
+    public static IServiceCollection AddDocFlowApplication(this IServiceCollection services) =>
+        services.AddValidatorsFromAssembly(typeof(DocFlowApplicationServiceCollectionExtensions).Assembly);
 }

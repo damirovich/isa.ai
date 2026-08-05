@@ -1,0 +1,222 @@
+@namespace ISC.AI.Modules.DocFlow.UI
+@* Справочник типов документов (ТЗ СКИД §3.1, §9): наименование + группа (Хранение/Исполнение) + активность.
+   Калибровочный модуль Э4-35 (этап 1) — перенос DocumentTypesListPage СКИД на стек ISC.AI.
+   По ТЗ §2.1 справочник ведёт Администратор; ролевые политики — этап 6 Э4-35.
+   Компоненты профиля (PageHeader и т.п.) НЕ используются намеренно: модуль не зависит от профиля (ADR-0017). *@
+@page "/docflow/types"
+@rendermode InteractiveServer
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Modules.DocFlow.Application.DocumentTypes
+@using ISC.AI.Modules.DocFlow.Domain.Enums
+@using ISC.AI.Modules.DocFlow.Domain.Services
+
+<MudText Typo="Typo.h5">Типы документов</MudText>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-4">
+    Справочник документооборота · группа определяет поведение: «Хранение» — регистрация и хранение,
+    «Исполнение» — назначения по подразделениям со сроками
+</MudText>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@* --- Добавление типа --- *@
+<MudPaper Outlined="true" Class="pa-3 mb-4">
+    <div class="d-flex gap-3 align-end flex-wrap">
+        <MudTextField @bind-Value="_newName" Label="Наименование типа" Variant="Variant.Outlined"
+                      MaxLength="200" Immediate="true" Style="min-width:280px;" Class="flex-grow-1" />
+        <MudSelect T="DocumentGroup" @bind-Value="_newGroup" Label="Группа" Variant="Variant.Outlined"
+                   Style="width:200px;">
+            <MudSelectItem T="DocumentGroup" Value="DocumentGroup.Storage">Хранение</MudSelectItem>
+            <MudSelectItem T="DocumentGroup" Value="DocumentGroup.Execution">Исполнение</MudSelectItem>
+        </MudSelect>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                   Disabled="@(_busy || string.IsNullOrWhiteSpace(_newName))" OnClick="CreateAsync">
+            Добавить
+        </MudButton>
+    </div>
+</MudPaper>
+
+@* --- Список --- *@
+<MudTable T="DocumentTypeItem" Items="_items" Hover="true" Dense="true" Outlined="true"
+          Loading="_busy" LoadingProgressColor="Color.Primary">
+    <HeaderContent>
+        <MudTh>Наименование</MudTh>
+        <MudTh>Группа</MudTh>
+        <MudTh>Активен</MudTh>
+        <MudTh Style="width:1%;"></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Наименование">@context.Name</MudTd>
+        <MudTd DataLabel="Группа">
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                     Color="@(context.Group == DocumentGroup.Execution ? Color.Warning : Color.Info)">
+                @(context.Group == DocumentGroup.Execution ? "Исполнение" : "Хранение")
+            </MudChip>
+        </MudTd>
+        <MudTd DataLabel="Активен">
+            @* Деактивация вместо удаления (§3.1): неактивный тип не предлагается при регистрации. *@
+            <MudSwitch T="bool" Value="@context.IsActive" Color="Color.Primary" Disabled="_busy"
+                       ValueChanged="@(active => ToggleActiveAsync(context, active))" />
+        </MudTd>
+        <MudTd>
+            <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Dense="true">
+                <MudMenuItem OnClick="@(() => RenameAsync(context))">Переименовать</MudMenuItem>
+                <MudMenuItem OnClick="@(() => ChangeGroupAsync(context))">
+                    Сменить группу на «@(context.Group == DocumentGroup.Execution ? "Хранение" : "Исполнение")»
+                </MudMenuItem>
+            </MudMenu>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+            Типов пока нет — добавьте первый: например, «Поручение» (Исполнение) или «Справка» (Хранение).
+        </MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@* --- Диалог переименования (вместо браузерного prompt) --- *@
+<MudDialog @bind-Visible="_renameOpen" Options="RenameDialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.DriveFileRenameOutline" Class="mr-2 mb-n1" />Переименовать тип
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_renameName" Label="Наименование типа" Variant="Variant.Outlined"
+                      MaxLength="200" Immediate="true" AutoFocus="true"
+                      OnKeyDown="RenameKeyDownAsync" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _renameOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@(string.IsNullOrWhiteSpace(_renameName))" OnClick="ConfirmRenameAsync">
+            Сохранить
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private readonly List<DocumentTypeItem> _items = [];
+    private string _newName = string.Empty;
+    private DocumentGroup _newGroup = DocumentGroup.Execution;
+    private bool _busy;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ListDocumentTypesQuery());
+            _items.Clear();
+            if (response is { Status: true, Data: { } list })
+            {
+                _items.AddRange(list);
+            }
+            else if (response is { Status: false })
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new CreateDocumentTypeCommand(_newName, _newGroup));
+            if (response.Status)
+            {
+                _newName = string.Empty;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task ToggleActiveAsync(DocumentTypeItem item, bool active)
+    {
+        _error = null;
+        var response = await Dispatcher.Send(new UpdateDocumentTypeCommand(item.Id, item.Name, active));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+
+    // Компактный диалог по центру; ESC закрывает без сохранения.
+    private static readonly DialogOptions RenameDialogOptions =
+        new() { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, CloseOnEscapeKey = true };
+
+    private bool _renameOpen;
+    private string _renameName = string.Empty;
+    private DocumentTypeItem? _renameTarget;
+
+    private void RenameAsync(DocumentTypeItem item)
+    {
+        _renameTarget = item;
+        _renameName = item.Name;
+        _renameOpen = true;
+    }
+
+    private async Task ConfirmRenameAsync()
+    {
+        if (_renameTarget is not { } target || string.IsNullOrWhiteSpace(_renameName))
+        {
+            return;
+        }
+
+        _renameOpen = false;
+        _error = null;
+        var response = await Dispatcher.Send(new UpdateDocumentTypeCommand(target.Id, _renameName, target.IsActive));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task RenameKeyDownAsync(KeyboardEventArgs args)
+    {
+        // Enter в поле = «Сохранить» (Immediate="true" — значение уже в _renameName).
+        if (args.Key == "Enter" && !string.IsNullOrWhiteSpace(_renameName))
+        {
+            await ConfirmRenameAsync();
+        }
+    }
+
+    private async Task ChangeGroupAsync(DocumentTypeItem item)
+    {
+        var newGroup = item.Group == DocumentGroup.Execution ? DocumentGroup.Storage : DocumentGroup.Execution;
+        _error = null;
+        var response = await Dispatcher.Send(new ChangeDocumentTypeGroupCommand(item.Id, newGroup));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage; // в т.ч. отказ §3.1 «по типу уже есть документы»
+        }
+
+        await ReloadAsync();
+    }
+}

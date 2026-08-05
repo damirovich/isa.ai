@@ -1,8 +1,10 @@
 using ISC.AI.Abstractions.Modules;
 using ISC.AI.Modules.DocFlow.Application;
 using ISC.AI.Modules.DocFlow.Data;
+using ISC.AI.Modules.DocFlow.UI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using MudBlazor;
 
 namespace ISC.AI.Modules.DocFlow;
 
@@ -24,10 +26,21 @@ public static class DocFlowModule
     public const string MenuGroup = "Документооборот";
 
     /// <summary>
-    /// Реестр страниц модуля — профиль подмешивает его в свой <c>IProfile.Modules</c>.
-    /// СКЕЛЕТ (этап 0 задачи Э4-35): пуст, дескрипторы появляются вместе со страницами (этапы 1 и 5).
+    /// Политика доступа страниц модуля. Пока — «аутентифицирован» (регистрируется хостом из реестра);
+    /// ролевое разграничение по ТЗ СКИД §2.1 (справочники — Администратор, построчные правила — через
+    /// <c>IAccessPolicy</c>) — этап 6 Э4-35.
     /// </summary>
-    public static IReadOnlyList<IModule> Modules { get; } = [];
+    public const string ReadPolicy = "docflow.read";
+
+    /// <summary>
+    /// Реестр страниц модуля — профиль подмешивает его в свой <c>IProfile.Modules</c>.
+    /// Этап 1 Э4-35: справочник типов; остальные страницы СКИД — этап 5.
+    /// </summary>
+    public static IReadOnlyList<IModule> Modules { get; } =
+    [
+        new ModuleDescriptor("docflow-types", "/docflow/types", "Типы документов",
+            Icons.Material.Filled.Category, typeof(DocumentTypes), ReadPolicy, MenuGroup),
+    ];
 
     /// <summary>Прикладные сервисы модуля — вызывается профилем в <c>IProfile.RegisterServices</c>.</summary>
     public static IServiceCollection RegisterServices(IServiceCollection services) =>

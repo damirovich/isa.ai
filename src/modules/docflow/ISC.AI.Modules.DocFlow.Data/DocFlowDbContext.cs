@@ -1,3 +1,5 @@
+using ISC.AI.Modules.DocFlow.Domain.Entities;
+
 namespace ISC.AI.Modules.DocFlow.Data;
 
 /// <summary>
@@ -12,12 +14,15 @@ namespace ISC.AI.Modules.DocFlow.Data;
 /// границу схем (ТО-инф-06), по образцу <c>inspector.norm_document_link</c>. Под Blazor Server
 /// создаётся через <c>IDbContextFactory</c> (ТС-008).
 ///
-/// СКЕЛЕТ (этап 0 задачи Э4-35): сущности переносятся из СКИД на этапе 2, поэтому контекст пока пуст.
+/// Перенесён справочник типов (этап 1 Э4-35); остальные сущности СКИД — этап 2.
 /// </remarks>
 public class DocFlowDbContext(DbContextOptions<DocFlowDbContext> options) : AuditedDbContext(options)
 {
     /// <summary>Имя схемы модуля документооборота.</summary>
     public const string Schema = "docflow";
+
+    /// <summary>Справочник типов документов (ТЗ СКИД §3.1).</summary>
+    public DbSet<DocumentType> DocumentTypes { get; set; } = null!;
 
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)

@@ -23,6 +23,8 @@
     <ProjectReference Include="..\..\src\profiles\inspector\ISC.AI.Profile.Inspector.Application\ISC.AI.Profile.Inspector.Application.csproj" />
     <ProjectReference Include="..\..\src\profiles\inspector\ISC.AI.Profile.Inspector.Domain\ISC.AI.Profile.Inspector.Domain.csproj" />
     <ProjectReference Include="..\..\src\profiles\inspector\ISC.AI.Profile.Inspector.UI\ISC.AI.Profile.Inspector.UI.csproj" />
+    <!-- Пакет модулей документооборота (Э4-35): валидаторы сценариев. -->
+    <ProjectReference Include="..\..\src\modules\docflow\ISC.AI.Modules.DocFlow.Application\ISC.AI.Modules.DocFlow.Application.csproj" />
   </ItemGroup>
 
 </Project>

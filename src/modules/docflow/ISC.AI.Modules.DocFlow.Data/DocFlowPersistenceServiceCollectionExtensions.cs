@@ -22,6 +22,9 @@ public static class DocFlowPersistenceServiceCollectionExtensions
                     npg.MigrationsHistoryTable("__ef_migrations_history", DocFlowDbContext.Schema))
                 .UseSnakeCaseNamingConvention());
 
+        // Порты домена модуля → реализации слоя данных (та же слоистость, что у профиля).
+        services.AddScoped<Domain.Services.IDocumentTypeStore, DocumentTypeStore>();
+
         return services;
     }
 }
