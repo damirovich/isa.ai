@@ -3,12 +3,15 @@
    матрице §4.5 и продление срока §4.6. Файлы и таймлайн истории — этап 4/3.x Э4-35. *@
 @page "/docflow/documents/{Id:int}"
 @rendermode InteractiveServer
+@implements IAsyncDisposable
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Modules.DocFlow.Application.Documents
 @using ISC.AI.Modules.DocFlow.Domain.Enums
 @using ISC.AI.Modules.DocFlow.Domain.Services
 @using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.JSInterop
 
 @if (_details is null)
 {
@@ -139,8 +142,16 @@ else
                     <MudText Typo="Typo.caption" Class="mud-text-secondary">
                         @FormatSize(file.FileSize) · @file.UploadedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
                     </MudText>
-                    <MudLink Href="@FileUrl(FileCategories.Documents, file.StoredFileName)"
-                             Target="_blank" Typo="Typo.caption">Просмотр</MudLink>
+                    @if (IsWordDocument(file.FileName))
+                    {
+                        <MudLink Typo="Typo.caption" Style="cursor:pointer;"
+                                 OnClick="@(() => OpenDocxPreview(FileCategories.Documents, file.StoredFileName, file.FileName))">Просмотр</MudLink>
+                    }
+                    else
+                    {
+                        <MudLink Href="@FileUrl(FileCategories.Documents, file.StoredFileName)"
+                                 Target="_blank" Typo="Typo.caption">Просмотр</MudLink>
+                    }
                     <MudLink Href="@FileUrl(FileCategories.Documents, file.StoredFileName, download: true)"
                              Typo="Typo.caption">Скачать</MudLink>
                 </div>
@@ -169,8 +180,16 @@ else
                     <MudIcon Icon="@Icons.Material.Filled.AttachFile" Size="Size.Small" />
                     <MudText Typo="Typo.body2">@attachment.FileName</MudText>
                     <MudText Typo="Typo.caption" Class="mud-text-secondary">@FormatSize(attachment.FileSize)</MudText>
-                    <MudLink Href="@FileUrl(FileCategories.Attachments, attachment.StoredFileName)"
-                             Target="_blank" Typo="Typo.caption">Просмотр</MudLink>
+                    @if (IsWordDocument(attachment.FileName))
+                    {
+                        <MudLink Typo="Typo.caption" Style="cursor:pointer;"
+                                 OnClick="@(() => OpenDocxPreview(FileCategories.Attachments, attachment.StoredFileName, attachment.FileName))">Просмотр</MudLink>
+                    }
+                    else
+                    {
+                        <MudLink Href="@FileUrl(FileCategories.Attachments, attachment.StoredFileName)"
+                                 Target="_blank" Typo="Typo.caption">Просмотр</MudLink>
+                    }
                     <MudLink Href="@FileUrl(FileCategories.Attachments, attachment.StoredFileName, download: true)"
                              Typo="Typo.caption">Скачать</MudLink>
                 </div>
@@ -266,6 +285,37 @@ else
     </DialogActions>
 </MudDialog>
 
+@* --- Предпросмотр DOCX (docx-preview, клиентский рендер — замена убранной серверной конвертации
+   LibreOffice, этап 4.3): контейнер получает содержимое через JS-интероп в OnAfterRenderAsync. --- *@
+<MudDialog @bind-Visible="_docxPreviewOpen" Options="DocxPreviewDialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">@_docxPreviewFileName</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_docxPreviewStatus == DocxPreviewStatus.LegacyDoc)
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                Это файл старого формата Word (.doc) — предпросмотр в браузере для него недоступен.
+                Нажмите «Скачать» и откройте его в текстовом редакторе.
+            </MudAlert>
+        }
+        else if (_docxPreviewStatus == DocxPreviewStatus.Error)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true">
+                Не удалось отобразить предпросмотр. Попробуйте «Скачать».
+                @if (_docxPreviewError is { } detail)
+                {
+                    <MudText Typo="Typo.caption" Class="d-block mt-1">Причина: @detail</MudText>
+                }
+            </MudAlert>
+        }
+        <div class="docflow-docx-container" id="@_docxPreviewContainerId"></div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _docxPreviewOpen = false)">Закрыть</MudButton>
+    </DialogActions>
+</MudDialog>
+
 @code {
     /// <summary>Идентификатор документа из маршрута.</summary>
     [Parameter]
@@ -273,6 +323,9 @@ else
 
     private static readonly DialogOptions DialogOptions =
         new() { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, CloseOnEscapeKey = true };
+
+    private static readonly DialogOptions DocxPreviewDialogOptions =
+        new() { MaxWidth = MaxWidth.Large, FullWidth = true, CloseOnEscapeKey = true };
 
     private DocumentDetails? _details;
     private readonly Dictionary<int, string> _divisionNames = [];
@@ -290,6 +343,25 @@ else
     private DateTime? _extendDate;
     private string? _extendReason;
     private IReadOnlyList<IBrowserFile>? _extendFiles;
+
+    private const string DocxPreviewModulePath = "./_content/ISC.AI.Modules.DocFlow.UI/js/docxPreview.js";
+
+    private enum DocxPreviewStatus { Ok, LegacyDoc, Error }
+
+    /// <summary>Итог рендера от JS-модуля (<c>ok</c> | <c>legacy-doc</c> | <c>error</c>).</summary>
+    private sealed record DocxPreviewResult(string Status, string? Message);
+
+    private bool _docxPreviewOpen;
+    private bool _docxPreviewPending;
+    private DocxPreviewStatus _docxPreviewStatus;
+    private string? _docxPreviewFileName;
+    private string? _docxPreviewUrl;
+    private string? _docxPreviewError;
+    // Идентификатор контейнера уникален на каждое открытие: узел прошлого диалога уже удалён, но по
+    // прежнему id его можно было бы подхватить — с уникальным это исключено (см. docxPreview.js).
+    private string _docxPreviewContainerId = "docflow-docx-preview";
+    private int _docxPreviewCounter;
+    private IJSObjectReference? _docxPreviewModule;
 
     private DocumentLanguage _uploadLanguage = DocumentLanguage.Russian;
 
@@ -316,6 +388,25 @@ else
         >= 1024 => $"{bytes / 1024.0:0.#} КБ",
         _ => $"{bytes} Б",
     };
+
+    // .doc тоже ведём в предпросмотр: расширение не гарантирует формат — переименованный OOXML
+    // отрисуется, настоящий двоичный OLE2 распознается по сигнатуре и даст точное сообщение (JS-модуль).
+    private static bool IsWordDocument(string fileName) =>
+        fileName.EndsWith(".docx", StringComparison.OrdinalIgnoreCase)
+        || fileName.EndsWith(".doc", StringComparison.OrdinalIgnoreCase);
+
+    // Открывает диалог и просит рендер на следующем OnAfterRenderAsync; появление самого контейнера
+    // ждёт уже JS-сторона — диалог рисует ДРУГОЙ компонент (провайдер), его рендер с нашим не синхронен.
+    private void OpenDocxPreview(string category, string storedFileName, string fileName)
+    {
+        _docxPreviewFileName = fileName;
+        _docxPreviewUrl = FileUrl(category, storedFileName);
+        _docxPreviewContainerId = $"docflow-docx-preview-{++_docxPreviewCounter}";
+        _docxPreviewStatus = DocxPreviewStatus.Ok;
+        _docxPreviewError = null;
+        _docxPreviewOpen = true;
+        _docxPreviewPending = true;
+    }
 
     // Байты браузерных файлов → UploadedFile (лимит на файл — как в валидаторе; итог проверит сервер).
     private static async Task<List<UploadedFile>> ReadFilesAsync(IEnumerable<IBrowserFile> files)
@@ -408,6 +499,65 @@ else
         }
 
         await ReloadAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_docxPreviewPending || _docxPreviewUrl is null)
+        {
+            return;
+        }
+
+        _docxPreviewPending = false;
+
+        // Сбой JS-интеропа НЕЛЬЗЯ выпускать из OnAfterRenderAsync: необработанное исключение в методе
+        // жизненного цикла рвёт circuit Blazor Server — страница перестаёт отвечать целиком, а не только
+        // предпросмотр (лечится лишь перезагрузкой). Границу с браузером закрываем здесь.
+        DocxPreviewStatus status;
+        try
+        {
+            _docxPreviewModule ??= await JS.InvokeAsync<IJSObjectReference>("import", DocxPreviewModulePath);
+            var result = await _docxPreviewModule.InvokeAsync<DocxPreviewResult>(
+                "renderDocxPreview", _docxPreviewContainerId, _docxPreviewUrl);
+            status = result?.Status switch
+            {
+                "ok" => DocxPreviewStatus.Ok,
+                "legacy-doc" => DocxPreviewStatus.LegacyDoc,
+                _ => DocxPreviewStatus.Error,
+            };
+            _docxPreviewError = result?.Message;
+        }
+        catch (JSException ex)
+        {
+            status = DocxPreviewStatus.Error;
+            _docxPreviewError = ex.Message;
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit уже закрыт — показывать пользователю нечего и негде.
+            return;
+        }
+
+        if (status != DocxPreviewStatus.Ok)
+        {
+            _docxPreviewStatus = status;
+            StateHasChanged();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_docxPreviewModule is not null)
+        {
+            try
+            {
+                await _docxPreviewModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit уже закрыт (навигация/разрыв соединения) — освобождать на клиенте нечего.
+            }
+        }
     }
 
     private async Task ReloadAsync()
