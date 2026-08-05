@@ -29,7 +29,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         }
 
         var typeStore = new DocumentTypeStore(factory);
-        var store = new DocumentStore(factory, new TempFileStorage());
+        var store = new DocumentStore(factory, new TempFileStorage(), new NullDocumentConverter());
 
         var storageType = await typeStore.CreateAsync("Справка", DocumentGroup.Storage, isActive: true);
         var executionType = await typeStore.CreateAsync("Поручение", DocumentGroup.Execution, isActive: true);
@@ -156,7 +156,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         }
 
         var typeStore = new DocumentTypeStore(factory);
-        var store = new DocumentStore(factory, new TempFileStorage());
+        var store = new DocumentStore(factory, new TempFileStorage(), new NullDocumentConverter());
         var executionType = await typeStore.CreateAsync("Поручение", DocumentGroup.Execution, isActive: true);
 
         // Два назначения со сроком «вчера» (одно доведём до Done) + одно со сроком «завтра».
@@ -222,7 +222,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         }
 
         var storage = new TempFileStorage();
-        var store = new DocumentStore(factory, storage);
+        var store = new DocumentStore(factory, storage, new NullDocumentConverter());
         var typeStore = new DocumentTypeStore(factory);
         var typeId = await typeStore.CreateAsync("Справка", DocumentGroup.Storage, isActive: true);
         var created = await store.CreateAsync(
@@ -253,6 +253,15 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         latest.FileName.ShouldBe("справка-испр.docx");
         details.Files.Single(f => !f.IsLatest).Version.ShouldBe(1);
         details.Attachments.ShouldHaveSingleItem().FileName.ShouldBe("приложение.pdf");
+    }
+
+    // Конвертер-заглушка: LibreOffice в тестовом окружении не установлен — best-effort всегда «недоступен»,
+    // подтверждает, что отсутствие внешнего процесса не блокирует загрузку файла (этап 4.3).
+    private sealed class NullDocumentConverter : IDocumentConverter
+    {
+        public Task<string?> ConvertToPdfAsync(
+            string storedFileName, string category, string subPath, CancellationToken cancellationToken = default) =>
+            Task.FromResult<string?>(null);
     }
 
     // Временное файловое хранилище: настоящие байты на диске, каталог убирается после теста.

@@ -2,6 +2,7 @@ using ISC.AI.Abstractions.Modules;
 using ISC.AI.Modules.DocFlow.Application;
 using ISC.AI.Modules.DocFlow.Data;
 using ISC.AI.Modules.DocFlow.UI;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using MudBlazor;
@@ -52,4 +53,14 @@ public static class DocFlowModule
     public static IServiceCollection RegisterDataContexts(
         IServiceCollection services, IConfiguration configuration) =>
         services.AddDocFlowPersistence(configuration);
+
+    /// <summary>
+    /// Сырые HTTP-эндпоинты модуля (этап 4.3 Э4-35): раздача файлов (§3.3), не Blazor-страницы —
+    /// вызывается профилем после построения приложения хостом (композиция, не DI-этап).
+    /// </summary>
+    public static IEndpointRouteBuilder MapEndpoints(IEndpointRouteBuilder endpoints)
+    {
+        endpoints.MapDocFlowFileEndpoints();
+        return endpoints;
+    }
 }

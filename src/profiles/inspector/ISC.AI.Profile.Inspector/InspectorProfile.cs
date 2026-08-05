@@ -5,6 +5,7 @@ using ISC.AI.Modules.DocFlow;
 using ISC.AI.Profile.Inspector.Application;
 using ISC.AI.Profile.Inspector.Data;
 using ISC.AI.Profile.Inspector.UI;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using MudBlazor;
@@ -103,4 +104,11 @@ public sealed class InspectorProfile : IProfile
         // Контексты данных подключённых пакетов модулей — своя схема и своя история миграций (ADR-0017).
         DocFlowModule.RegisterDataContexts(services, configuration);
     }
+
+    /// <summary>
+    /// Сырые HTTP-эндпоинты профиля (этап 4.3 Э4-35) — вызывается ХОСТОМ напрямую на конкретном типе
+    /// (не через <see cref="IProfile"/>): композиция уже знает конкретный профиль (ADR-0002), лишний
+    /// метод в тонком контракте ядра не нужен. Делегирует подключённым пакетам модулей.
+    /// </summary>
+    public void MapEndpoints(IEndpointRouteBuilder endpoints) => DocFlowModule.MapEndpoints(endpoints);
 }

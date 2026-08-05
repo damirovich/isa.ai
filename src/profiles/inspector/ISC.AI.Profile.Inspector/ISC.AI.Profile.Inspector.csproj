@@ -17,4 +17,11 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
   </ItemGroup>
 
+  <!-- MapEndpoints делегирует в docflow (файлы модуля, этап 4.3) — сигнатура несёт IEndpointRouteBuilder.
+       IProfile/Abstractions НЕ трогаем: хост уже знает конкретный тип InspectorProfile (композиция,
+       ADR-0002) — метод объявлен здесь как обычный public, не через интерфейс. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
 </Project>

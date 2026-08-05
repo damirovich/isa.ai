@@ -126,7 +126,7 @@ else
         {
             @foreach (var file in _details.Files)
             {
-                <div class="d-flex align-center gap-2 mb-1">
+                <div class="d-flex align-center gap-2 mb-1 flex-wrap">
                     <MudIcon Icon="@Icons.Material.Filled.InsertDriveFile" Size="Size.Small"
                              Color="@(file.IsLatest ? Color.Primary : Color.Default)" />
                     <MudText Typo="Typo.body2">@file.FileName</MudText>
@@ -139,6 +139,11 @@ else
                     <MudText Typo="Typo.caption" Class="mud-text-secondary">
                         @FormatSize(file.FileSize) · @file.UploadedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
                     </MudText>
+                    @* §3.3: просмотр без скачивания — PDF-копия, если DOCX сконвертирован, иначе оригинал. *@
+                    <MudLink Href="@FileUrl(FileCategories.Documents, file.PdfCopyStoredFileName ?? file.StoredFileName)"
+                             Target="_blank" Typo="Typo.caption">Просмотр</MudLink>
+                    <MudLink Href="@FileUrl(FileCategories.Documents, file.StoredFileName, download: true)"
+                             Typo="Typo.caption">Скачать</MudLink>
                 </div>
             }
         }
@@ -161,10 +166,14 @@ else
         {
             @foreach (var attachment in _details.Attachments)
             {
-                <div class="d-flex align-center gap-2 mb-1">
+                <div class="d-flex align-center gap-2 mb-1 flex-wrap">
                     <MudIcon Icon="@Icons.Material.Filled.AttachFile" Size="Size.Small" />
                     <MudText Typo="Typo.body2">@attachment.FileName</MudText>
                     <MudText Typo="Typo.caption" Class="mud-text-secondary">@FormatSize(attachment.FileSize)</MudText>
+                    <MudLink Href="@FileUrl(FileCategories.Attachments, attachment.StoredFileName)"
+                             Target="_blank" Typo="Typo.caption">Просмотр</MudLink>
+                    <MudLink Href="@FileUrl(FileCategories.Attachments, attachment.StoredFileName, download: true)"
+                             Typo="Typo.caption">Скачать</MudLink>
                 </div>
             }
         }
@@ -286,6 +295,21 @@ else
     private DocumentLanguage _uploadLanguage = DocumentLanguage.Russian;
 
     private const long MaxFileBytes = 25L * 1024 * 1024;
+
+    // FileCategories не публичен из Domain (живёт в Data) — строки здесь ТОЛЬКО отражают маршрут
+    // раздачи ("documents"/"attachments"), не завязаны на реализацию хранилища. parentId для ОБЕИХ
+    // категорий — Id документа (карточки): и файл документа, и вложение хранятся под ним (этап 4.2).
+    private string FileUrl(string category, string storedFileName, bool download = false)
+    {
+        var url = $"/docflow/files/{category}/{Id}/{storedFileName}";
+        return download ? url + "?download=true" : url;
+    }
+
+    private static class FileCategories
+    {
+        public const string Documents = "documents";
+        public const string Attachments = "attachments";
+    }
 
     private static string FormatSize(long bytes) => bytes switch
     {

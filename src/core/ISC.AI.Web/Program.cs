@@ -221,6 +221,10 @@ try
         app.MapAuthEndpoints();
     }
 
+    // Сырые HTTP-эндпоинты профиля (этап 4.3 Э4-35: раздача файлов docflow) — на конкретном типе
+    // profile (не через IProfile): композиция уже знает профиль, лишний метод в ядре не нужен.
+    profile.MapEndpoints(app);
+
     // Сборки, содержащие страницы модулей профиля, — для маршрутизации хоста.
     Assembly[] moduleAssemblies = [.. profile.Modules.Select(m => m.ComponentType.Assembly).Distinct()];
     app.MapRazorComponents<App>()

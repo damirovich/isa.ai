@@ -11,8 +11,16 @@ namespace ISC.AI.Modules.DocFlow.Data;
 /// </summary>
 public sealed class DocumentStore(
     IDbContextFactory<DocFlowDbContext> contextFactory,
-    IDocFlowFileStorage fileStorage) : IDocumentStore
+    IDocFlowFileStorage fileStorage,
+    IDocumentConverter converter) : IDocumentStore
 {
+    // MIME-типы DOCX (СКИД: IsDocxContentType) — только они уходят на конвертацию в PDF-превью.
+    private static readonly HashSet<string> DocxContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword",
+    };
+
     /// <inheritdoc />
     public async Task<DocumentWriteStatus> AddDocumentFileAsync(
         int documentId, UploadedFile file, DocumentLanguage language, int? uploadedByUserId,
@@ -47,6 +55,15 @@ public sealed class DocumentStore(
                 .Select(f => (int?)f.Version)
                 .MaxAsync(cancellationToken) ?? 0;
 
+            // §3.3 «просмотр без скачивания»: для DOCX — лучшее усилие получить PDF-превью.
+            // Отказ конвертера НЕ блокирует загрузку — оригинал сохраняется в любом случае.
+            string? pdfCopyStoredFileName = null;
+            if (DocxContentTypes.Contains(file.ContentType))
+            {
+                pdfCopyStoredFileName = await converter.ConvertToPdfAsync(
+                    storedFileName, FileCategories.Documents, subPath, cancellationToken);
+            }
+
             db.DocumentFiles.Add(new DocumentFile
             {
                 DocumentId = documentId,
@@ -57,6 +74,7 @@ public sealed class DocumentStore(
                 FileSize = file.Content.LongLength,
                 Version = maxVersion + 1,
                 IsLatest = true,
+                PdfCopyStoredFileName = pdfCopyStoredFileName,
                 UploadedByUserId = uploadedByUserId ?? 0,
             });
             await db.SaveChangesAsync(cancellationToken);
@@ -296,9 +314,10 @@ public sealed class DocumentStore(
                     .Select(l => (DateTime?)l.IndexedAt).FirstOrDefault(),
                 d.Files.OrderByDescending(f => f.IsLatest).ThenByDescending(f => f.Version)
                     .Select(f => new DocumentFileItem(
-                        f.Id, f.FileName, f.Language, f.Version, f.IsLatest, f.FileSize, f.CreatedAt)).ToList(),
+                        f.Id, f.FileName, f.Language, f.Version, f.IsLatest, f.FileSize, f.CreatedAt,
+                        f.StoredFileName, f.PdfCopyStoredFileName)).ToList(),
                 db.DocumentAttachments.Where(a => a.DocumentId == d.Id).OrderBy(a => a.Id)
-                    .Select(a => new AttachmentItem(a.Id, a.FileName, a.FileSize, a.CreatedAt)).ToList()))
+                    .Select(a => new AttachmentItem(a.Id, a.FileName, a.FileSize, a.CreatedAt, a.StoredFileName)).ToList()))
             .FirstOrDefaultAsync(cancellationToken);
     }
 
