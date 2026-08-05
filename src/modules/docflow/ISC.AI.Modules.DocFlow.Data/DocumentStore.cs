@@ -9,8 +9,104 @@ namespace ISC.AI.Modules.DocFlow.Data;
 /// Хранилище документов и назначений поверх <see cref="DocFlowDbContext"/> (ТЗ СКИД §3–4).
 /// Контекст — на операцию, через фабрику (ТС-008, Blazor Server).
 /// </summary>
-public sealed class DocumentStore(IDbContextFactory<DocFlowDbContext> contextFactory) : IDocumentStore
+public sealed class DocumentStore(
+    IDbContextFactory<DocFlowDbContext> contextFactory,
+    IDocFlowFileStorage fileStorage) : IDocumentStore
 {
+    /// <inheritdoc />
+    public async Task<DocumentWriteStatus> AddDocumentFileAsync(
+        int documentId, UploadedFile file, DocumentLanguage language, int? uploadedByUserId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        if (!await db.Documents.AnyAsync(d => d.Id == documentId, cancellationToken))
+        {
+            return DocumentWriteStatus.NotFound;
+        }
+
+        // Содержимое — в хранилище ДО записи в БД; при сбое БД файл компенсирующе удаляется (как в СКИД).
+        var subPath = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        using var content = new MemoryStream(file.Content);
+        var storedFileName = await fileStorage.SaveAsync(
+            content, Path.GetExtension(file.FileName), FileCategories.Documents, subPath, cancellationToken);
+
+        try
+        {
+            // §3.3: замена файла создаёт новую версию; прежняя того же языка теряет актуальность.
+            var latest = await db.DocumentFiles.FirstOrDefaultAsync(
+                f => f.DocumentId == documentId && f.Language == language && f.IsLatest, cancellationToken);
+            if (latest is not null)
+            {
+                latest.IsLatest = false;
+            }
+
+            var maxVersion = await db.DocumentFiles
+                .Where(f => f.DocumentId == documentId && f.Language == language)
+                .Select(f => (int?)f.Version)
+                .MaxAsync(cancellationToken) ?? 0;
+
+            db.DocumentFiles.Add(new DocumentFile
+            {
+                DocumentId = documentId,
+                Language = language,
+                FileName = file.FileName,
+                StoredFileName = storedFileName,
+                ContentType = file.ContentType,
+                FileSize = file.Content.LongLength,
+                Version = maxVersion + 1,
+                IsLatest = true,
+                UploadedByUserId = uploadedByUserId ?? 0,
+            });
+            await db.SaveChangesAsync(cancellationToken);
+            return DocumentWriteStatus.Ok;
+        }
+        catch
+        {
+            await fileStorage.DeleteAsync(storedFileName, FileCategories.Documents, subPath, CancellationToken.None);
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<DocumentWriteStatus> AddAttachmentAsync(
+        int documentId, UploadedFile file, int? uploadedByUserId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        if (!await db.Documents.AnyAsync(d => d.Id == documentId, cancellationToken))
+        {
+            return DocumentWriteStatus.NotFound;
+        }
+
+        var subPath = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        using var content = new MemoryStream(file.Content);
+        var storedFileName = await fileStorage.SaveAsync(
+            content, Path.GetExtension(file.FileName), FileCategories.Attachments, subPath, cancellationToken);
+
+        try
+        {
+            db.DocumentAttachments.Add(new DocumentAttachment
+            {
+                DocumentId = documentId,
+                FileName = file.FileName,
+                StoredFileName = storedFileName,
+                ContentType = file.ContentType,
+                FileSize = file.Content.LongLength,
+                UploadedByUserId = uploadedByUserId ?? 0,
+            });
+            await db.SaveChangesAsync(cancellationToken);
+            return DocumentWriteStatus.Ok;
+        }
+        catch
+        {
+            await fileStorage.DeleteAsync(storedFileName, FileCategories.Attachments, subPath, CancellationToken.None);
+            throw;
+        }
+    }
+
     /// <inheritdoc />
     public async Task<DocumentCreateResult> CreateAsync(
         DocumentDraft draft,
@@ -197,7 +293,12 @@ public sealed class DocumentStore(IDbContextFactory<DocFlowDbContext> contextFac
                 d.Assignments.OrderBy(a => a.Id).Select(a => new AssignmentDetails(
                     a.Id, a.DivisionId, a.AssigneeUserId, a.Status, a.Deadline, a.ControllerUserId)).ToList(),
                 db.DocumentIndexLinks.Where(l => l.DocumentId == d.Id)
-                    .Select(l => (DateTime?)l.IndexedAt).FirstOrDefault()))
+                    .Select(l => (DateTime?)l.IndexedAt).FirstOrDefault(),
+                d.Files.OrderByDescending(f => f.IsLatest).ThenByDescending(f => f.Version)
+                    .Select(f => new DocumentFileItem(
+                        f.Id, f.FileName, f.Language, f.Version, f.IsLatest, f.FileSize, f.CreatedAt)).ToList(),
+                db.DocumentAttachments.Where(a => a.DocumentId == d.Id).OrderBy(a => a.Id)
+                    .Select(a => new AttachmentItem(a.Id, a.FileName, a.FileSize, a.CreatedAt)).ToList()))
             .FirstOrDefaultAsync(cancellationToken);
     }
 
@@ -207,6 +308,7 @@ public sealed class DocumentStore(IDbContextFactory<DocFlowDbContext> contextFac
         AssignmentStatus newStatus,
         string? comment,
         int? changedByUserId,
+        IReadOnlyList<UploadedFile>? files = null,
         CancellationToken cancellationToken = default)
     {
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -242,7 +344,7 @@ public sealed class DocumentStore(IDbContextFactory<DocFlowDbContext> contextFac
             assignment.ControllerUserId = null;
         }
 
-        db.AssignmentStatusHistories.Add(new AssignmentStatusHistory
+        var historyEntry = new AssignmentStatusHistory
         {
             AssignmentId = assignment.Id,
             FromStatus = oldStatus,
@@ -250,20 +352,58 @@ public sealed class DocumentStore(IDbContextFactory<DocFlowDbContext> contextFac
             ChangedByUserId = changedByUserId,
             ChangedAt = DateTime.UtcNow,
             Comment = comment,
-        });
+        };
+        db.AssignmentStatusHistories.Add(historyEntry);
 
+        // §4.2: на каждом переходе можно приложить файлы — сохраняем ДО SaveChanges,
+        // при сбое БД компенсирующе удаляем (как в СКИД).
+        var savedFiles = new List<string>();
+        var subPath = assignment.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
         try
         {
-            // Атомарно: статус + история (один SaveChanges); конкуренцию ловит xmin назначения.
+            foreach (var file in files ?? [])
+            {
+                using var content = new MemoryStream(file.Content);
+                var storedFileName = await fileStorage.SaveAsync(
+                    content, Path.GetExtension(file.FileName), FileCategories.StatusHistory, subPath,
+                    cancellationToken);
+                savedFiles.Add(storedFileName);
+
+                db.StatusHistoryFiles.Add(new StatusHistoryFile
+                {
+                    StatusHistory = historyEntry,
+                    FileName = file.FileName,
+                    StoredFileName = storedFileName,
+                    ContentType = file.ContentType,
+                    FileSize = file.Content.LongLength,
+                    UploadedByUserId = changedByUserId ?? 0,
+                });
+            }
+
+            // Атомарно: статус + история + файлы (один SaveChanges); конкуренцию ловит xmin назначения.
             await db.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
         {
+            await CleanupFilesAsync(savedFiles, FileCategories.StatusHistory, subPath);
             return DocumentWriteStatus.Conflict;
+        }
+        catch
+        {
+            await CleanupFilesAsync(savedFiles, FileCategories.StatusHistory, subPath);
+            throw;
         }
 
         await RecalculateAggregateAsync(db, assignment.DocumentId, cancellationToken);
         return DocumentWriteStatus.Ok;
+    }
+
+    private async Task CleanupFilesAsync(List<string> storedFileNames, string category, string subPath)
+    {
+        foreach (var storedFileName in storedFileNames)
+        {
+            await fileStorage.DeleteAsync(storedFileName, category, subPath, CancellationToken.None);
+        }
     }
 
     /// <inheritdoc />
@@ -272,6 +412,7 @@ public sealed class DocumentStore(IDbContextFactory<DocFlowDbContext> contextFac
         DateOnly newDeadline,
         string reason,
         int initiatedByUserId,
+        IReadOnlyList<UploadedFile>? files = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
@@ -299,14 +440,37 @@ public sealed class DocumentStore(IDbContextFactory<DocFlowDbContext> contextFac
         var now = DateTime.UtcNow;
 
         // §4.6: продление фиксируется с обязательным основанием; количество не ограничено.
-        db.DeadlineExtensions.Add(new DeadlineExtension
+        var extension = new DeadlineExtension
         {
             AssignmentId = assignment.Id,
             OldDeadline = oldDeadline,
             NewDeadline = newDeadline,
             Reason = reason.Trim(),
             InitiatedByUserId = initiatedByUserId,
-        });
+        };
+        db.DeadlineExtensions.Add(extension);
+
+        // §4.6: к продлению можно приложить файлы-обоснования (компенсация — как у переходов).
+        var savedFiles = new List<string>();
+        var filesSubPath = assignment.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        foreach (var file in files ?? [])
+        {
+            using var content = new MemoryStream(file.Content);
+            var storedFileName = await fileStorage.SaveAsync(
+                content, Path.GetExtension(file.FileName), FileCategories.DeadlineExtensions, filesSubPath,
+                cancellationToken);
+            savedFiles.Add(storedFileName);
+
+            db.DeadlineExtensionFiles.Add(new DeadlineExtensionFile
+            {
+                Extension = extension,
+                FileName = file.FileName,
+                StoredFileName = storedFileName,
+                ContentType = file.ContentType,
+                FileSize = file.Content.LongLength,
+                UploadedByUserId = initiatedByUserId,
+            });
+        }
 
         assignment.Deadline = newDeadline;
 
@@ -330,7 +494,13 @@ public sealed class DocumentStore(IDbContextFactory<DocFlowDbContext> contextFac
         }
         catch (DbUpdateConcurrencyException)
         {
+            await CleanupFilesAsync(savedFiles, FileCategories.DeadlineExtensions, filesSubPath);
             return DocumentWriteStatus.Conflict;
+        }
+        catch
+        {
+            await CleanupFilesAsync(savedFiles, FileCategories.DeadlineExtensions, filesSubPath);
+            throw;
         }
 
         await RecalculateAggregateAsync(db, assignment.DocumentId, cancellationToken);

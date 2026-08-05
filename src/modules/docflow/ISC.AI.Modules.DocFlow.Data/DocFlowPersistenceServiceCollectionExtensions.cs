@@ -39,6 +39,9 @@ public static class DocFlowPersistenceServiceCollectionExtensions
         // Индексация документов в корпус ядра (этап 7 Э4-35): вызывается очередью фоновых задач.
         services.AddScoped<Domain.Services.IDocumentIndexer, DocFlowDocumentIndexer>();
 
+        // Файловое хранилище модуля (этап 4.2, §3.3): локальная ФС контура, путь — DocFlow:Storage:BasePath.
+        services.AddSingleton<Domain.Services.IDocFlowFileStorage, LocalDocFlowFileStorage>();
+
         return services;
     }
 }

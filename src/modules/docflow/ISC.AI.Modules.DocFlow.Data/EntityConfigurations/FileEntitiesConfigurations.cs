@@ -65,7 +65,7 @@ public class StatusHistoryFileConfiguration : IEntityTypeConfiguration<StatusHis
         DocumentFileConfiguration.ConfigureFileColumns(
             builder, f => f.FileName, f => f.StoredFileName, f => f.ContentType);
 
-        builder.HasOne<AssignmentStatusHistory>().WithMany()
+        builder.HasOne(f => f.StatusHistory).WithMany()
             .HasForeignKey(f => f.StatusHistoryId).OnDelete(DeleteBehavior.Cascade);
         builder.HasIndex(f => f.StatusHistoryId);
     }
@@ -81,7 +81,7 @@ public class DeadlineExtensionFileConfiguration : IEntityTypeConfiguration<Deadl
         DocumentFileConfiguration.ConfigureFileColumns(
             builder, f => f.FileName, f => f.StoredFileName, f => f.ContentType);
 
-        builder.HasOne<DeadlineExtension>().WithMany()
+        builder.HasOne(f => f.Extension).WithMany()
             .HasForeignKey(f => f.ExtensionId).OnDelete(DeleteBehavior.Cascade);
         builder.HasIndex(f => f.ExtensionId);
     }

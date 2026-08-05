@@ -29,7 +29,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         }
 
         var typeStore = new DocumentTypeStore(factory);
-        var store = new DocumentStore(factory);
+        var store = new DocumentStore(factory, new TempFileStorage());
 
         var storageType = await typeStore.CreateAsync("Справка", DocumentGroup.Storage, isActive: true);
         var executionType = await typeStore.CreateAsync("Поручение", DocumentGroup.Execution, isActive: true);
@@ -156,7 +156,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         }
 
         var typeStore = new DocumentTypeStore(factory);
-        var store = new DocumentStore(factory);
+        var store = new DocumentStore(factory, new TempFileStorage());
         var executionType = await typeStore.CreateAsync("Поручение", DocumentGroup.Execution, isActive: true);
 
         // Два назначения со сроком «вчера» (одно доведём до Done) + одно со сроком «завтра».
@@ -209,6 +209,84 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         {
             (await db.DocumentAssignments.SingleAsync(a => a.Id == markedId))
                 .Status.ShouldBe(AssignmentStatus.InProgress);
+        }
+    }
+
+    [Fact(DisplayName = "Файлы (§3.3): замена создаёт новую версию, прежняя теряет актуальность; вложение прикрепляется")]
+    public async Task Document_file_versioning_and_attachments()
+    {
+        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+        }
+
+        var storage = new TempFileStorage();
+        var store = new DocumentStore(factory, storage);
+        var typeStore = new DocumentTypeStore(factory);
+        var typeId = await typeStore.CreateAsync("Справка", DocumentGroup.Storage, isActive: true);
+        var created = await store.CreateAsync(
+            new DocumentDraft("Ф-1", new DateOnly(2026, 8, 3), typeId!.Value, DocumentDirection.Internal,
+                null, "Документ с файлами", null, null, null, null, 0, 10, 42),
+            [], false, null);
+
+        var v1 = new UploadedFile("справка.docx", "application/vnd.openxmlformats", [1, 2, 3]);
+        var v2 = new UploadedFile("справка-испр.docx", "application/vnd.openxmlformats", [4, 5, 6, 7]);
+
+        (await store.AddDocumentFileAsync(created.DocumentId, v1, DocumentLanguage.Russian, 42))
+            .ShouldBe(DocumentWriteStatus.Ok);
+        (await store.AddDocumentFileAsync(created.DocumentId, v2, DocumentLanguage.Russian, 42))
+            .ShouldBe(DocumentWriteStatus.Ok);
+        (await store.AddAttachmentAsync(created.DocumentId,
+            new UploadedFile("приложение.pdf", "application/pdf", [9, 9]), 42))
+            .ShouldBe(DocumentWriteStatus.Ok);
+
+        // Несуществующий документ — NotFound (и файл в хранилище не остаётся).
+        (await store.AddDocumentFileAsync(999_999, v1, DocumentLanguage.Russian, 42))
+            .ShouldBe(DocumentWriteStatus.NotFound);
+
+        var details = await store.GetAsync(created.DocumentId);
+        details.ShouldNotBeNull();
+        details.Files.Count.ShouldBe(2);
+        var latest = details.Files.Single(f => f.IsLatest);
+        latest.Version.ShouldBe(2);
+        latest.FileName.ShouldBe("справка-испр.docx");
+        details.Files.Single(f => !f.IsLatest).Version.ShouldBe(1);
+        details.Attachments.ShouldHaveSingleItem().FileName.ShouldBe("приложение.pdf");
+    }
+
+    // Временное файловое хранилище: настоящие байты на диске, каталог убирается после теста.
+    private sealed class TempFileStorage : IDocFlowFileStorage
+    {
+        private readonly string _root = Path.Combine(
+            Path.GetTempPath(), "iscai-docflow-tests", Guid.NewGuid().ToString("N"));
+
+        public async Task<string> SaveAsync(
+            Stream content, string extension, string category, string subPath,
+            CancellationToken cancellationToken = default)
+        {
+            var storedFileName = Guid.NewGuid().ToString("N") + extension;
+            var directory = Path.Combine(_root, category, subPath);
+            Directory.CreateDirectory(directory);
+            await using var fileStream = File.Create(Path.Combine(directory, storedFileName));
+            await content.CopyToAsync(fileStream, cancellationToken);
+            return storedFileName;
+        }
+
+        public Task<Stream> OpenReadAsync(
+            string storedFileName, string category, string subPath, CancellationToken cancellationToken = default) =>
+            Task.FromResult<Stream>(File.OpenRead(Path.Combine(_root, category, subPath, storedFileName)));
+
+        public Task DeleteAsync(
+            string storedFileName, string category, string subPath, CancellationToken cancellationToken = default)
+        {
+            var path = Path.Combine(_root, category, subPath, storedFileName);
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+
+            return Task.CompletedTask;
         }
     }
 

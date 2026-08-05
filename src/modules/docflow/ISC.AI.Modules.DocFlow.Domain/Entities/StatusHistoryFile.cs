@@ -8,6 +8,9 @@ public class StatusHistoryFile : AuditableEntity
     /// <summary>Переход статуса (FK внутри схемы).</summary>
     public int StatusHistoryId { get; set; }
 
+    /// <summary>Навигация к переходу (для записи файла до присвоения идентификатора перехода).</summary>
+    public AssignmentStatusHistory? StatusHistory { get; set; }
+
     /// <summary>Исходное имя файла.</summary>
     public required string FileName { get; set; }
 

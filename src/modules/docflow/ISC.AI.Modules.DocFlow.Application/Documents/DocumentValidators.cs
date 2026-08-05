@@ -48,26 +48,86 @@ public sealed class RegisterDocumentValidator : AbstractValidator<RegisterDocume
     }
 }
 
+/// <summary>Общие файловые лимиты (перенос контракта СКИД §6.1: защита от падения на MaxRequestBodySize).</summary>
+internal static class FileRules
+{
+    /// <summary>Максимум файлов на одну операцию.</summary>
+    public const int MaxCount = 10;
+
+    /// <summary>Максимальный размер одного файла (25 МБ).</summary>
+    public const long MaxFileBytes = 25L * 1024 * 1024;
+
+    /// <summary>Максимальный суммарный размер файлов операции (50 МБ).</summary>
+    public const long MaxTotalBytes = 50L * 1024 * 1024;
+
+    /// <summary>Подключает правила списка файлов к валидатору команды.</summary>
+    public static void ApplyFileListRules<T>(
+        this AbstractValidator<T> validator,
+        System.Linq.Expressions.Expression<Func<T, IReadOnlyList<Domain.Services.UploadedFile>?>> files)
+    {
+        validator.RuleFor(files)
+            .Must(list => list is null || list.Count <= MaxCount)
+                .WithMessage($"Не больше {MaxCount} файлов за одну операцию.")
+            .Must(list => list is null || list.All(f => f.Content.LongLength <= MaxFileBytes))
+                .WithMessage("Файл больше 25 МБ.")
+            .Must(list => list is null || list.Sum(f => f.Content.LongLength) <= MaxTotalBytes)
+                .WithMessage("Суммарный размер файлов больше 50 МБ.");
+    }
+}
+
+/// <inheritdoc cref="RegisterDocumentValidator" />
+public sealed class UploadDocumentFileValidator : AbstractValidator<UploadDocumentFileCommand>
+{
+    /// <summary>Правила загрузки файла документа (§3.3).</summary>
+    public UploadDocumentFileValidator()
+    {
+        RuleFor(c => c.DocumentId).GreaterThan(0);
+        RuleFor(c => c.FileName).NotEmpty().MaximumLength(500);
+        RuleFor(c => c.ContentType).NotEmpty().MaximumLength(200);
+        RuleFor(c => c.Language).IsInEnum();
+        RuleFor(c => c.Content)
+            .Must(content => content is { LongLength: > 0 and <= FileRules.MaxFileBytes })
+            .WithMessage("Файл пуст или больше 25 МБ.");
+    }
+}
+
+/// <inheritdoc cref="RegisterDocumentValidator" />
+public sealed class UploadAttachmentValidator : AbstractValidator<UploadAttachmentCommand>
+{
+    /// <summary>Правила прикрепления сопутствующего файла.</summary>
+    public UploadAttachmentValidator()
+    {
+        RuleFor(c => c.DocumentId).GreaterThan(0);
+        RuleFor(c => c.FileName).NotEmpty().MaximumLength(500);
+        RuleFor(c => c.ContentType).NotEmpty().MaximumLength(200);
+        RuleFor(c => c.Content)
+            .Must(content => content is { LongLength: > 0 and <= FileRules.MaxFileBytes })
+            .WithMessage("Файл пуст или больше 25 МБ.");
+    }
+}
+
 /// <inheritdoc cref="RegisterDocumentValidator" />
 public sealed class ChangeAssignmentStatusValidator : AbstractValidator<ChangeAssignmentStatusCommand>
 {
-    /// <summary>Правила формы §4.2.</summary>
+    /// <summary>Правила формы §4.2 (+ файловые лимиты перехода).</summary>
     public ChangeAssignmentStatusValidator()
     {
         RuleFor(c => c.AssignmentId).GreaterThan(0);
         RuleFor(c => c.NewStatus).IsInEnum();
         RuleFor(c => c.Comment).MaximumLength(2000);
+        this.ApplyFileListRules(c => c.Files);
     }
 }
 
 /// <inheritdoc cref="RegisterDocumentValidator" />
 public sealed class ExtendAssignmentDeadlineValidator : AbstractValidator<ExtendAssignmentDeadlineCommand>
 {
-    /// <summary>Правила формы §4.6 (основание обязательно).</summary>
+    /// <summary>Правила формы §4.6 (основание обязательно; + файловые лимиты).</summary>
     public ExtendAssignmentDeadlineValidator()
     {
         RuleFor(c => c.AssignmentId).GreaterThan(0);
         RuleFor(c => c.Reason).NotEmpty().WithMessage("Укажите основание продления (ТЗ §4.6).")
             .MaximumLength(2000);
+        this.ApplyFileListRules(c => c.Files);
     }
 }

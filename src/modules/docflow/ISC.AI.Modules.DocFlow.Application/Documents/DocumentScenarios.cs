@@ -128,6 +128,69 @@ public sealed record ListDocumentsQuery(
     }
 }
 
+/// <summary>Загрузить версионируемый файл документа (§3.3): замена создаёт новую версию.</summary>
+public sealed record UploadDocumentFileCommand(
+    int DocumentId, string FileName, string ContentType, byte[] Content, DocumentLanguage Language)
+    : IRequest<ResponseDto<bool>>, IAuditableRequest
+{
+    /// <inheritdoc />
+    public AuditAction AuditAction => AuditAction.Modify;
+
+    /// <inheritdoc />
+    public string? AuditSummary => $"docflow:document:{DocumentId}:file:{FileName}";
+
+    /// <inheritdoc cref="UploadDocumentFileCommand" />
+    public sealed class Handler(IDocumentStore store, IAccessContextProvider accessProvider)
+        : IRequestHandler<UploadDocumentFileCommand, ResponseDto<bool>>
+    {
+        /// <inheritdoc />
+        public async ValueTask<ResponseDto<bool>> Handle(
+            UploadDocumentFileCommand command, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(command);
+            var access = await accessProvider.GetCurrentAsync(cancellationToken);
+            var result = await store.AddDocumentFileAsync(
+                command.DocumentId,
+                new UploadedFile(command.FileName, command.ContentType, command.Content),
+                command.Language, access.NumericSubjectId, cancellationToken);
+            return result == DocumentWriteStatus.Ok
+                ? ResponseDto<bool>.Ok(true)
+                : ResponseDto<bool>.NotFound("Документ не найден.");
+        }
+    }
+}
+
+/// <summary>Прикрепить сопутствующий файл к документу.</summary>
+public sealed record UploadAttachmentCommand(int DocumentId, string FileName, string ContentType, byte[] Content)
+    : IRequest<ResponseDto<bool>>, IAuditableRequest
+{
+    /// <inheritdoc />
+    public AuditAction AuditAction => AuditAction.Modify;
+
+    /// <inheritdoc />
+    public string? AuditSummary => $"docflow:document:{DocumentId}:attachment:{FileName}";
+
+    /// <inheritdoc cref="UploadAttachmentCommand" />
+    public sealed class Handler(IDocumentStore store, IAccessContextProvider accessProvider)
+        : IRequestHandler<UploadAttachmentCommand, ResponseDto<bool>>
+    {
+        /// <inheritdoc />
+        public async ValueTask<ResponseDto<bool>> Handle(
+            UploadAttachmentCommand command, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(command);
+            var access = await accessProvider.GetCurrentAsync(cancellationToken);
+            var result = await store.AddAttachmentAsync(
+                command.DocumentId,
+                new UploadedFile(command.FileName, command.ContentType, command.Content),
+                access.NumericSubjectId, cancellationToken);
+            return result == DocumentWriteStatus.Ok
+                ? ResponseDto<bool>.Ok(true)
+                : ResponseDto<bool>.NotFound("Документ не найден.");
+        }
+    }
+}
+
 /// <summary>
 /// Переиндексировать документ в корпусе (этап 7 Э4-35): вручную с карточки — после сбоя фоновой
 /// задачи (делегаты не переживают перезапуск) либо для обновления корпуса после правок.
@@ -178,7 +241,9 @@ public sealed record GetDocumentQuery(int DocumentId) : IRequest<ResponseDto<Doc
 /// Сменить статус назначения (§4.2): матрица §4.5, «Просрочено» — только система, вход/выход
 /// «Контроля» фиксирует/сбрасывает контролёра, переход пишется в историю, агрегат пересчитывается.
 /// </summary>
-public sealed record ChangeAssignmentStatusCommand(int AssignmentId, AssignmentStatus NewStatus, string? Comment)
+public sealed record ChangeAssignmentStatusCommand(
+    int AssignmentId, AssignmentStatus NewStatus, string? Comment,
+    IReadOnlyList<UploadedFile>? Files = null)
     : IRequest<ResponseDto<bool>>, IAuditableRequest
 {
     /// <inheritdoc />
@@ -200,7 +265,7 @@ public sealed record ChangeAssignmentStatusCommand(int AssignmentId, AssignmentS
 
             var result = await store.ChangeAssignmentStatusAsync(
                 command.AssignmentId, command.NewStatus, command.Comment,
-                access.NumericSubjectId, cancellationToken);
+                access.NumericSubjectId, command.Files, cancellationToken);
 
             return result switch
             {
@@ -219,7 +284,9 @@ public sealed record ChangeAssignmentStatusCommand(int AssignmentId, AssignmentS
 }
 
 /// <summary>Продлить срок назначения (§4.6): основание обязательно, возврат «В работу» автоматический.</summary>
-public sealed record ExtendAssignmentDeadlineCommand(int AssignmentId, DateOnly NewDeadline, string Reason)
+public sealed record ExtendAssignmentDeadlineCommand(
+    int AssignmentId, DateOnly NewDeadline, string Reason,
+    IReadOnlyList<UploadedFile>? Files = null)
     : IRequest<ResponseDto<bool>>, IAuditableRequest
 {
     /// <inheritdoc />
@@ -246,7 +313,8 @@ public sealed record ExtendAssignmentDeadlineCommand(int AssignmentId, DateOnly 
             }
 
             var result = await store.ExtendDeadlineAsync(
-                command.AssignmentId, command.NewDeadline, command.Reason, initiatorId, cancellationToken);
+                command.AssignmentId, command.NewDeadline, command.Reason, initiatorId,
+                command.Files, cancellationToken);
 
             return result switch
             {

@@ -8,6 +8,9 @@ public class DeadlineExtensionFile : AuditableEntity
     /// <summary>Продление (FK внутри схемы).</summary>
     public int ExtensionId { get; set; }
 
+    /// <summary>Навигация к продлению (для записи файла до присвоения идентификатора продления).</summary>
+    public DeadlineExtension? Extension { get; set; }
+
     /// <summary>Исходное имя файла.</summary>
     public required string FileName { get; set; }
 

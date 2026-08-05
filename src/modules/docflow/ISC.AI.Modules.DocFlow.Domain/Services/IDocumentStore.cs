@@ -87,6 +87,14 @@ public sealed record AssignmentDetails(
     DateOnly? Deadline,
     int? ControllerUserId);
 
+/// <summary>Файл документа в карточке (§3.3): версия, актуальность, язык.</summary>
+public sealed record DocumentFileItem(
+    int Id, string FileName, DocumentLanguage Language, int Version, bool IsLatest,
+    long FileSize, DateTime UploadedAt);
+
+/// <summary>Сопутствующий файл в карточке.</summary>
+public sealed record AttachmentItem(int Id, string FileName, long FileSize, DateTime UploadedAt);
+
 /// <summary>Карточка документа (§3.2 + §4.8): атрибуты и назначения.</summary>
 public sealed record DocumentDetails(
     int Id,
@@ -106,7 +114,9 @@ public sealed record DocumentDetails(
     short Classification,
     int DivisionId,
     IReadOnlyList<AssignmentDetails> Assignments,
-    DateTime? IndexedAt);
+    DateTime? IndexedAt,
+    IReadOnlyList<DocumentFileItem> Files,
+    IReadOnlyList<AttachmentItem> Attachments);
 
 /// <summary>
 /// Порт хранилища документов и назначений (ТЗ СКИД §3–4). Порт — в домене модуля, реализация — в слое
@@ -143,6 +153,21 @@ public interface IDocumentStore
         AssignmentStatus newStatus,
         string? comment,
         int? changedByUserId,
+        IReadOnlyList<UploadedFile>? files = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Загружает версионируемый файл документа (§3.3): прежняя версия того же языка теряет актуальность,
+    /// новая получает <c>Version = max + 1</c> и <c>IsLatest</c>. Содержимое — в защищённое хранилище;
+    /// при сбое записи в БД сохранённый файл компенсирующе удаляется.
+    /// </summary>
+    Task<DocumentWriteStatus> AddDocumentFileAsync(
+        int documentId, UploadedFile file, DocumentLanguage language, int? uploadedByUserId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Прикрепляет сопутствующий файл (без версионирования).</summary>
+    Task<DocumentWriteStatus> AddAttachmentAsync(
+        int documentId, UploadedFile file, int? uploadedByUserId,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -162,5 +187,6 @@ public interface IDocumentStore
         DateOnly newDeadline,
         string reason,
         int initiatedByUserId,
+        IReadOnlyList<UploadedFile>? files = null,
         CancellationToken cancellationToken = default);
 }

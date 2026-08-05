@@ -8,6 +8,7 @@
 @using ISC.AI.Modules.DocFlow.Application.Documents
 @using ISC.AI.Modules.DocFlow.Domain.Enums
 @using ISC.AI.Modules.DocFlow.Domain.Services
+@using Microsoft.AspNetCore.Components.Forms
 
 @if (_details is null)
 {
@@ -98,6 +99,77 @@ else
         </div>
     </MudPaper>
 
+    @* --- Файлы (§3.3): версионируемый файл документа + сопутствующие; просмотр — этап 4.3 --- *@
+    <MudPaper Outlined="true" Class="pa-4 mb-4">
+        <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+            <MudText Typo="Typo.subtitle1">Файлы документа (§3.3 — замена создаёт новую версию)</MudText>
+            <div class="d-flex align-center gap-2">
+                <MudSelect T="DocumentLanguage" @bind-Value="_uploadLanguage" Dense="true" Style="width:150px;"
+                           Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem T="DocumentLanguage" Value="DocumentLanguage.Russian">Русский</MudSelectItem>
+                    <MudSelectItem T="DocumentLanguage" Value="DocumentLanguage.Kyrgyz">Кыргызский</MudSelectItem>
+                    <MudSelectItem T="DocumentLanguage" Value="DocumentLanguage.Unspecified">Без языка</MudSelectItem>
+                </MudSelect>
+                <MudFileUpload T="IBrowserFile" FilesChanged="UploadDocumentFileAsync">
+                    <ActivatorContent>
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                   StartIcon="@Icons.Material.Filled.UploadFile">Загрузить файл</MudButton>
+                    </ActivatorContent>
+                </MudFileUpload>
+            </div>
+        </div>
+        @if (_details.Files.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Файлов пока нет.</MudText>
+        }
+        else
+        {
+            @foreach (var file in _details.Files)
+            {
+                <div class="d-flex align-center gap-2 mb-1">
+                    <MudIcon Icon="@Icons.Material.Filled.InsertDriveFile" Size="Size.Small"
+                             Color="@(file.IsLatest ? Color.Primary : Color.Default)" />
+                    <MudText Typo="Typo.body2">@file.FileName</MudText>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                             Color="@(file.IsLatest ? Color.Primary : Color.Default)">v@(file.Version)</MudChip>
+                    @if (!file.IsLatest)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">(прежняя версия)</MudText>
+                    }
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        @FormatSize(file.FileSize) · @file.UploadedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                    </MudText>
+                </div>
+            }
+        }
+
+        <MudDivider Class="my-2" />
+        <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-1">
+            <MudText Typo="Typo.subtitle2">Сопутствующие файлы</MudText>
+            <MudFileUpload T="IBrowserFile" FilesChanged="UploadAttachmentAsync">
+                <ActivatorContent>
+                    <MudButton Variant="Variant.Text" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.AttachFile">Прикрепить</MudButton>
+                </ActivatorContent>
+            </MudFileUpload>
+        </div>
+        @if (_details.Attachments.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Вложений нет.</MudText>
+        }
+        else
+        {
+            @foreach (var attachment in _details.Attachments)
+            {
+                <div class="d-flex align-center gap-2 mb-1">
+                    <MudIcon Icon="@Icons.Material.Filled.AttachFile" Size="Size.Small" />
+                    <MudText Typo="Typo.body2">@attachment.FileName</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@FormatSize(attachment.FileSize)</MudText>
+                </div>
+            }
+        }
+    </MudPaper>
+
     @if (_details.Group == DocumentGroup.Execution)
     {
         <MudText Typo="Typo.subtitle1" Class="mb-2">Назначения (§4.1) — каждое исполняется независимо</MudText>
@@ -146,7 +218,14 @@ else
     </TitleContent>
     <DialogContent>
         <MudTextField @bind-Value="_statusComment" Label="Комментарий к переходу (опц.)" Variant="Variant.Outlined"
-                      MaxLength="2000" Lines="2" AutoGrow="true" AutoFocus="true" />
+                      MaxLength="2000" Lines="2" AutoGrow="true" AutoFocus="true" Class="mb-2" />
+        <MudFileUpload T="IReadOnlyList<IBrowserFile>" FilesChanged="@(files => _statusFiles = files)">
+            <ActivatorContent>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.AttachFile">
+                    Файлы к переходу (§4.2)@(_statusFiles is { Count: > 0 } sf ? $" — {sf.Count}" : "")
+                </MudButton>
+            </ActivatorContent>
+        </MudFileUpload>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _statusDialogOpen = false)">Отмена</MudButton>
@@ -162,7 +241,14 @@ else
     <DialogContent>
         <MudDatePicker @bind-Date="_extendDate" Label="Новый срок *" Variant="Variant.Outlined" Class="mb-2" />
         <MudTextField @bind-Value="_extendReason" Label="Основание продления *" Variant="Variant.Outlined"
-                      MaxLength="2000" Lines="2" AutoGrow="true" />
+                      MaxLength="2000" Lines="2" AutoGrow="true" Class="mb-2" />
+        <MudFileUpload T="IReadOnlyList<IBrowserFile>" FilesChanged="@(files => _extendFiles = files)">
+            <ActivatorContent>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.AttachFile">
+                    Файлы-обоснования (§4.6)@(_extendFiles is { Count: > 0 } ef ? $" — {ef.Count}" : "")
+                </MudButton>
+            </ActivatorContent>
+        </MudFileUpload>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _extendDialogOpen = false)">Отмена</MudButton>
@@ -189,11 +275,94 @@ else
     private AssignmentDetails? _statusTarget;
     private AssignmentStatus? _statusNext;
     private string? _statusComment;
+    private IReadOnlyList<IBrowserFile>? _statusFiles;
 
     private bool _extendDialogOpen;
     private AssignmentDetails? _extendTarget;
     private DateTime? _extendDate;
     private string? _extendReason;
+    private IReadOnlyList<IBrowserFile>? _extendFiles;
+
+    private DocumentLanguage _uploadLanguage = DocumentLanguage.Russian;
+
+    private const long MaxFileBytes = 25L * 1024 * 1024;
+
+    private static string FormatSize(long bytes) => bytes switch
+    {
+        >= 1024 * 1024 => $"{bytes / (1024.0 * 1024.0):0.#} МБ",
+        >= 1024 => $"{bytes / 1024.0:0.#} КБ",
+        _ => $"{bytes} Б",
+    };
+
+    // Байты браузерных файлов → UploadedFile (лимит на файл — как в валидаторе; итог проверит сервер).
+    private static async Task<List<UploadedFile>> ReadFilesAsync(IEnumerable<IBrowserFile> files)
+    {
+        var result = new List<UploadedFile>();
+        foreach (var file in files)
+        {
+            using var buffer = new MemoryStream();
+            await using (var stream = file.OpenReadStream(MaxFileBytes))
+            {
+                await stream.CopyToAsync(buffer);
+            }
+
+            result.Add(new UploadedFile(file.Name, file.ContentType, buffer.ToArray()));
+        }
+
+        return result;
+    }
+
+    private async Task UploadDocumentFileAsync(IBrowserFile? file)
+    {
+        if (file is null)
+        {
+            return;
+        }
+
+        _error = null;
+        try
+        {
+            var uploaded = (await ReadFilesAsync([file]))[0];
+            var response = await Dispatcher.Send(new UploadDocumentFileCommand(
+                Id, uploaded.FileName, uploaded.ContentType, uploaded.Content, _uploadLanguage));
+            if (!response.Status)
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка загрузки: {ex.Message}";
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task UploadAttachmentAsync(IBrowserFile? file)
+    {
+        if (file is null)
+        {
+            return;
+        }
+
+        _error = null;
+        try
+        {
+            var uploaded = (await ReadFilesAsync([file]))[0];
+            var response = await Dispatcher.Send(new UploadAttachmentCommand(
+                Id, uploaded.FileName, uploaded.ContentType, uploaded.Content));
+            if (!response.Status)
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка загрузки: {ex.Message}";
+        }
+
+        await ReloadAsync();
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -242,6 +411,7 @@ else
         _statusTarget = assignment;
         _statusNext = next;
         _statusComment = null;
+        _statusFiles = null;
         _statusDialogOpen = true;
     }
 
@@ -254,10 +424,19 @@ else
 
         _statusDialogOpen = false;
         _error = null;
-        var response = await Dispatcher.Send(new ChangeAssignmentStatusCommand(target.Id, next, _statusComment));
-        if (!response.Status)
+        try
         {
-            _error = response.StatusMessage;
+            var files = _statusFiles is { Count: > 0 } selected ? await ReadFilesAsync(selected) : null;
+            var response = await Dispatcher.Send(
+                new ChangeAssignmentStatusCommand(target.Id, next, _statusComment, files));
+            if (!response.Status)
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка: {ex.Message}";
         }
 
         await ReloadAsync();
@@ -281,6 +460,7 @@ else
         _extendTarget = assignment;
         _extendDate = null;
         _extendReason = null;
+        _extendFiles = null;
         _extendDialogOpen = true;
     }
 
@@ -293,11 +473,19 @@ else
 
         _extendDialogOpen = false;
         _error = null;
-        var response = await Dispatcher.Send(new ExtendAssignmentDeadlineCommand(
-            target.Id, DateOnly.FromDateTime(date), _extendReason));
-        if (!response.Status)
+        try
         {
-            _error = response.StatusMessage;
+            var files = _extendFiles is { Count: > 0 } selected ? await ReadFilesAsync(selected) : null;
+            var response = await Dispatcher.Send(new ExtendAssignmentDeadlineCommand(
+                target.Id, DateOnly.FromDateTime(date), _extendReason, files));
+            if (!response.Status)
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка: {ex.Message}";
         }
 
         await ReloadAsync();
