@@ -335,6 +335,72 @@ public sealed class DocumentStore(IDbContextFactory<DocFlowDbContext> contextFac
         return DocumentWriteStatus.Ok;
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<int>> MarkOverdueAsync(
+        DateOnly today, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Кандидаты read-only списком id; перевод — поштучно (перенос подхода СКИД SAD §9.3):
+        // конкурентное изменение одного назначения не должно отравить остальные.
+        var candidateIds = await db.DocumentAssignments.AsNoTracking()
+            .Where(a => a.Deadline != null && a.Deadline < today
+                && a.Status != AssignmentStatus.Done
+                && a.Status != AssignmentStatus.Closed
+                && a.Status != AssignmentStatus.Overdue)
+            .Select(a => a.Id)
+            .ToListAsync(cancellationToken);
+
+        var marked = new List<int>();
+        var affectedDocuments = new HashSet<int>();
+
+        foreach (var id in candidateIds)
+        {
+            await using var itemDb = await contextFactory.CreateDbContextAsync(cancellationToken);
+            var assignment = await itemDb.DocumentAssignments
+                .FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
+
+            // Перепроверка под трекингом: пока ждали, статус мог смениться (исполнили/сняли/продлили).
+            if (assignment is null
+                || assignment.Status is AssignmentStatus.Done or AssignmentStatus.Closed or AssignmentStatus.Overdue
+                || assignment.Deadline is null || assignment.Deadline >= today)
+            {
+                continue;
+            }
+
+            var oldStatus = assignment.Status;
+            assignment.Status = AssignmentStatus.Overdue;
+            itemDb.AssignmentStatusHistories.Add(new AssignmentStatusHistory
+            {
+                AssignmentId = assignment.Id,
+                FromStatus = oldStatus,
+                ToStatus = AssignmentStatus.Overdue,
+                ChangedByUserId = null, // системное действие (§4.2: «Просрочено» ставит система)
+                ChangedAt = DateTime.UtcNow,
+                Comment = $"Просрочено автоматически: срок {assignment.Deadline:dd.MM.yyyy} истёк",
+            });
+
+            try
+            {
+                await itemDb.SaveChangesAsync(cancellationToken);
+                marked.Add(assignment.Id);
+                affectedDocuments.Add(assignment.DocumentId);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                // Кто-то менял назначение параллельно — пропускаем, следующий тик перепроверит.
+            }
+        }
+
+        // Агрегаты — по разу на затронутый документ.
+        foreach (var documentId in affectedDocuments)
+        {
+            await RecalculateAggregateAsync(db, documentId, cancellationToken);
+        }
+
+        return marked;
+    }
+
     /// <summary>
     /// Пересчёт агрегированного статуса документа (§4.3) по чистой функции. Пишется через
     /// <c>ExecuteUpdateAsync</c> НАМЕРЕННО мимо xmin (перенос решения СКИД, их SAD §15.3):

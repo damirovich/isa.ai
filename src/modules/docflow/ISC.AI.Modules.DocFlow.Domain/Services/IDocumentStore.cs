@@ -145,6 +145,14 @@ public interface IDocumentStore
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Переводит в «Просрочено» все назначения с истёкшим сроком (§4.2: ставит ТОЛЬКО система).
+    /// Кандидаты: срок &lt; <paramref name="today"/> и статус не Done/Closed/Overdue. Каждое — отдельной
+    /// транзакцией (конкуренция одного не валит остальных); история — от системы (без пользователя);
+    /// агрегаты затронутых документов пересчитываются. Возвращает идентификаторы переведённых.
+    /// </summary>
+    Task<IReadOnlyList<int>> MarkOverdueAsync(DateOnly today, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Продление срока назначения (§4.6): фиксируется старый/новый срок и основание; назначение
     /// автоматически возвращается «В работу» (с записью истории, если статус изменился).
     /// </summary>

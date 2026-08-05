@@ -1,4 +1,5 @@
 using FluentValidation;
+using ISC.AI.Modules.DocFlow.Domain.Services;
 
 namespace ISC.AI.Modules.DocFlow.Application.Documents;
 
@@ -10,8 +11,15 @@ namespace ISC.AI.Modules.DocFlow.Application.Documents;
 public sealed class RegisterDocumentValidator : AbstractValidator<RegisterDocumentCommand>
 {
     /// <summary>Правила §3.2 + режимные поля (гриф/подразделение — fail-closed).</summary>
-    public RegisterDocumentValidator()
+    public RegisterDocumentValidator(IDocFlowClock clock)
     {
+        ArgumentNullException.ThrowIfNull(clock);
+
+        // §3.2: дата регистрации не в будущем — «сегодня» по поясу эксплуатанта (Asia/Bishkek),
+        // не по UTC сервера (обещание этапа 3.1 выполнено вместе с IDocFlowClock).
+        RuleFor(c => c.RegDate).Must(d => d <= clock.Today)
+            .WithMessage("Дата регистрации не может быть в будущем.");
+
         RuleFor(c => c.RegNumber).MaximumLength(200);
         RuleFor(c => c.ShortContent).NotEmpty().WithMessage("Укажите краткое содержание (ТЗ §3.2).")
             .MaximumLength(2000);
@@ -26,9 +34,6 @@ public sealed class RegisterDocumentValidator : AbstractValidator<RegisterDocume
             .WithMessage("Укажите гриф документа.");
         RuleFor(c => c.DivisionId).GreaterThan(0)
             .WithMessage("Укажите подразделение-владельца документа.");
-
-        // ЗАМЕЧАНИЕ: проверка «дата регистрации не в будущем» требует часового пояса эксплуатанта
-        // (СКИД: Asia/Bishkek через ITimeProvider) — переносится на этапе 4 вместе с провайдером времени.
 
         RuleFor(c => c.CommonDeadline).NotNull()
             .When(c => c.UseCommonDeadline)
