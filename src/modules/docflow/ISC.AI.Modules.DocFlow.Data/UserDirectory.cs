@@ -34,4 +34,17 @@ public sealed class UserDirectory(IDbContextFactory<CoreDbContext> contextFactor
             .Select(u => u.DisplayName ?? u.UserName)
             .FirstOrDefaultAsync(cancellationToken);
     }
+
+    /// <inheritdoc />
+    public async Task<bool> CanSeeDivisionAsync(
+        int userId, int divisionId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Глобальный фильтр мягкого удаления уже скрывает отозванные допуски; IsActive — явно.
+        // Fail-closed: нет пользователя / он отключён / допуска нет — false, а не «ну ладно».
+        return await db.Users.AsNoTracking()
+            .Where(u => u.Id == userId && u.IsActive)
+            .AnyAsync(u => u.Clearance != null && u.Clearance.DivisionScope.Contains(divisionId), cancellationToken);
+    }
 }

@@ -49,7 +49,7 @@ public sealed class DocFlowIndexerTests : IAsyncLifetime
 
         var typeStore = new DocumentTypeStore(docFlowFactory);
         var documentStore = new DocumentStore(
-            docFlowFactory, Substitute.For<IDocFlowFileStorage>(), new AllowAllAccessPolicy());
+            docFlowFactory, Substitute.For<IDocFlowFileStorage>(), new AllowAllAccessPolicy(), TestUserDirectory.AllowAll);
         var port = new IngestionPort(coreFactory, new FixedEmbeddingGenerator(768), new SimpleTextChunker());
         var indexer = new DocFlowDocumentIndexer(
             docFlowFactory, coreFactory, port, Substitute.For<IAuditWriter>());

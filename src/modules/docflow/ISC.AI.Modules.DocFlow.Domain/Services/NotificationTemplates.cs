@@ -31,6 +31,15 @@ public static class NotificationTemplates
     /// <summary>Срок назначения продлён.</summary>
     public const string DeadlineExtended = "assignment.deadline-extended";
 
+    /// <summary>Назначение переведено на получателя (§4.7).</summary>
+    public const string ReassignedToYou = "assignment.reassigned-to-you";
+
+    /// <summary>Назначение снято с получателя и передано другому (§4.7).</summary>
+    public const string ReassignedFromYou = "assignment.reassigned-from-you";
+
+    /// <summary>Исполнитель сменился (уведомление наблюдателю — инспектору документа).</summary>
+    public const string ReassignedNotice = "assignment.reassigned-notice";
+
     /// <summary>Упоминание в комментарии.</summary>
     public const string MentionedInComment = "comment.mentioned";
 
@@ -46,6 +55,9 @@ public static class NotificationTemplates
         [AssignedNotice] = "По документу {document} создано назначение. Срок: {deadline}.",
         [StatusChanged] = "Документ {document}: статус назначения — «{status}» (изменил: {actor}).",
         [DeadlineExtended] = "Документ {document}: срок продлён с {old} на {new}.",
+        [ReassignedToYou] = "Вы назначены исполнителем по документу {document}. Срок: {deadline}.",
+        [ReassignedFromYou] = "Документ {document}: исполнение передано другому исполнителю ({actor}).",
+        [ReassignedNotice] = "Документ {document}: сменился исполнитель (изменил: {actor}).",
         [MentionedInComment] = "{author} упомянул вас в комментарии к документу {document}.",
         [CommentAdded] = "{author} добавил комментарий к документу {document}.",
     };

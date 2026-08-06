@@ -13,7 +13,8 @@ namespace ISC.AI.Modules.DocFlow.Data;
 public sealed class DocumentStore(
     IDbContextFactory<DocFlowDbContext> contextFactory,
     IDocFlowFileStorage fileStorage,
-    IAccessPolicy accessPolicy) : IDocumentStore
+    IAccessPolicy accessPolicy,
+    IUserDirectory users) : IDocumentStore
 {
     // Перенос СКИД (UploadDocumentAttachmentCommandValidator, DL-057 / ТЗ §3.3.1).
     private const int MaxAttachmentsPerDocument = 10;
@@ -779,6 +780,280 @@ public sealed class DocumentStore(
                 d.InspectorUserId,
                 a.ControllerUserId))
             .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<AssignmentAddResult> AddAssignmentAsync(
+        int documentId, AssignmentDraft draft, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        ArgumentNullException.ThrowIfNull(access);
+
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Нельзя менять то, чего не видишь (WriteAccessRule).
+        if (!await IsDocumentVisibleAsync(db, documentId, access, cancellationToken))
+        {
+            return new AssignmentAddResult(DocumentWriteStatus.NotFound);
+        }
+
+        var document = await db.Documents
+            .Where(d => d.Id == documentId)
+            .Join(db.DocumentTypes, d => d.TypeId, t => t.Id, (d, t) => new { Document = d, t.Group })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (document is null)
+        {
+            return new AssignmentAddResult(DocumentWriteStatus.NotFound);
+        }
+
+        // §4.1: у «Хранения» назначений нет по построению — иначе агрегат уехал бы с «неприменимо».
+        if (document.Group != DocumentGroup.Execution)
+        {
+            return new AssignmentAddResult(DocumentWriteStatus.NotExecutionGroup);
+        }
+
+        // Запрет дубля подразделения. В СКИД он жил ТОЛЬКО в валидаторе формы — уникального индекса не
+        // было, и два одновременных запроса создавали два назначения на одно подразделение. Здесь
+        // проверка в БД, а гонку добивает уникальный индекс (см. миграцию AssignmentReassignments).
+        if (await db.DocumentAssignments
+                .AnyAsync(a => a.DocumentId == documentId && a.DivisionId == draft.DivisionId, cancellationToken))
+        {
+            return new AssignmentAddResult(DocumentWriteStatus.AssignmentDivisionTaken);
+        }
+
+        if (draft.AssigneeUserId is { } assignee
+            && !await users.CanSeeDivisionAsync(assignee, draft.DivisionId, cancellationToken))
+        {
+            return new AssignmentAddResult(DocumentWriteStatus.AssigneeOutsideDivision);
+        }
+
+        var assignment = new DocumentAssignment
+        {
+            DocumentId = documentId,
+            DivisionId = draft.DivisionId,
+            AssigneeUserId = draft.AssigneeUserId,
+            // Срок ВСЕГДА индивидуальный: «единый срок» §4.1 действует только на назначения,
+            // созданные при регистрации, и на добавленное позже не распространяется (решение СКИД).
+            Deadline = draft.Deadline,
+            UseCommonDeadline = false,
+            Status = AssignmentStatus.Registered,
+        };
+        db.DocumentAssignments.Add(assignment);
+
+        db.AssignmentStatusHistories.Add(new AssignmentStatusHistory
+        {
+            Assignment = assignment,
+            FromStatus = null,
+            ToStatus = AssignmentStatus.Registered,
+            ChangedByUserId = access.NumericSubjectId,
+            ChangedAt = DateTime.UtcNow,
+        });
+
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // Гонка по уникальному индексу (документ, подразделение) — дружелюбный отказ вместо 500.
+            return new AssignmentAddResult(DocumentWriteStatus.AssignmentDivisionTaken);
+        }
+
+        await RecalculateAggregateAsync(db, documentId, cancellationToken);
+
+        var notice = new CreatedDocumentNotice(
+            documentId,
+            DocumentTitle(document.Document.RegNumber, document.Document.ShortContent),
+            document.Document.InspectorUserId,
+            [new CreatedAssignmentNotice(assignment.Id, assignment.AssigneeUserId, assignment.Deadline)]);
+
+        return new AssignmentAddResult(DocumentWriteStatus.Ok, assignment.Id, notice);
+    }
+
+    /// <inheritdoc />
+    public async Task<AssignmentReassignResult> ReassignAssigneeAsync(
+        int assignmentId, int newAssigneeUserId, string? reason, AccessContext access,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        if (!await IsAssignmentVisibleAsync(db, assignmentId, access, cancellationToken))
+        {
+            return new AssignmentReassignResult(DocumentWriteStatus.NotFound);
+        }
+
+        var assignment = await db.DocumentAssignments
+            .FirstOrDefaultAsync(a => a.Id == assignmentId, cancellationToken);
+        if (assignment is null)
+        {
+            return new AssignmentReassignResult(DocumentWriteStatus.NotFound);
+        }
+
+        // Ужесточение против СКИД (там переназначали из ЛЮБОГО статуса): исполненное и снятое с
+        // контроля назначение переписывать нельзя — это переписывание уже состоявшегося факта.
+        // Граница та же, что у продления срока §4.6.
+        if (assignment.Status is AssignmentStatus.Done or AssignmentStatus.Closed)
+        {
+            return new AssignmentReassignResult(DocumentWriteStatus.InvalidTransition);
+        }
+
+        // Тот же исполнитель — менять нечего. В СКИД такой вызов проходил, писал в аудит «было = стало»
+        // и слал человеку «вы назначены исполнителем»; здесь операция идемпотентна и молчалива.
+        if (assignment.AssigneeUserId == newAssigneeUserId)
+        {
+            return new AssignmentReassignResult(DocumentWriteStatus.Ok);
+        }
+
+        if (!await users.CanSeeDivisionAsync(newAssigneeUserId, assignment.DivisionId, cancellationToken))
+        {
+            return new AssignmentReassignResult(DocumentWriteStatus.AssigneeOutsideDivision);
+        }
+
+        var previousAssigneeUserId = assignment.AssigneeUserId;
+        assignment.AssigneeUserId = newAssigneeUserId;
+
+        // Статус, срок и контролёр НЕ трогаем (решение СКИД): новый исполнитель наследует срок
+        // прежнего, счёт времени заново не начинается.
+        db.AssignmentReassignments.Add(new AssignmentReassignment
+        {
+            AssignmentId = assignment.Id,
+            FromUserId = previousAssigneeUserId,
+            ToUserId = newAssigneeUserId,
+            ChangedByUserId = access.NumericSubjectId,
+            ChangedAt = DateTime.UtcNow,
+            Reason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim(),
+        });
+
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return new AssignmentReassignResult(DocumentWriteStatus.Conflict);
+        }
+
+        var document = await db.Documents.AsNoTracking()
+            .Where(d => d.Id == assignment.DocumentId)
+            .Select(d => new { d.RegNumber, d.ShortContent, d.InspectorUserId })
+            .FirstAsync(cancellationToken);
+
+        return new AssignmentReassignResult(
+            DocumentWriteStatus.Ok,
+            new ReassignedNotice(
+                assignment.Id,
+                assignment.DocumentId,
+                DocumentTitle(document.RegNumber, document.ShortContent),
+                previousAssigneeUserId,
+                newAssigneeUserId,
+                assignment.Deadline,
+                document.InspectorUserId));
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<AssignmentTimelineEvent>?> GetAssignmentTimelineAsync(
+        int assignmentId, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Чтение — тот же фильтр допуска, что у карточки: недоступное неотличимо от несуществующего.
+        if (!await IsAssignmentVisibleAsync(db, assignmentId, access, cancellationToken))
+        {
+            return null;
+        }
+
+        var history = await db.AssignmentStatusHistories.AsNoTracking()
+            .Where(h => h.AssignmentId == assignmentId)
+            .Select(h => new
+            {
+                h.Id, h.FromStatus, h.ToStatus, h.ChangedByUserId, h.ChangedAt, h.Comment,
+            })
+            .ToListAsync(cancellationToken);
+
+        var historyIds = history.Select(h => h.Id).ToList();
+        var historyFiles = await db.StatusHistoryFiles.AsNoTracking()
+            .Where(f => historyIds.Contains(f.StatusHistoryId))
+            .Select(f => new
+            {
+                f.StatusHistoryId,
+                File = new AssignmentTimelineFile(
+                    f.Id, f.FileName, f.ContentType, f.FileSize, f.StoredFileName, FileCategories.StatusHistory),
+            })
+            .ToListAsync(cancellationToken);
+
+        var extensions = await db.DeadlineExtensions.AsNoTracking()
+            .Where(e => e.AssignmentId == assignmentId)
+            .Select(e => new
+            {
+                e.Id, e.OldDeadline, e.NewDeadline, e.Reason, e.InitiatedByUserId, e.CreatedAt,
+            })
+            .ToListAsync(cancellationToken);
+
+        var reassignments = await db.AssignmentReassignments.AsNoTracking()
+            .Where(r => r.AssignmentId == assignmentId)
+            .Select(r => new { r.FromUserId, r.ToUserId, r.ChangedByUserId, r.ChangedAt, r.Reason })
+            .ToListAsync(cancellationToken);
+
+        var extensionIds = extensions.Select(e => e.Id).ToList();
+        var extensionFiles = await db.DeadlineExtensionFiles.AsNoTracking()
+            .Where(f => extensionIds.Contains(f.ExtensionId))
+            .Select(f => new
+            {
+                f.ExtensionId,
+                File = new AssignmentTimelineFile(
+                    f.Id, f.FileName, f.ContentType, f.FileSize, f.StoredFileName,
+                    FileCategories.DeadlineExtensions),
+            })
+            .ToListAsync(cancellationToken);
+
+        var filesByHistory = historyFiles.GroupBy(f => f.StatusHistoryId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<AssignmentTimelineFile>)[.. g.Select(x => x.File)]);
+        var filesByExtension = extensionFiles.GroupBy(f => f.ExtensionId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<AssignmentTimelineFile>)[.. g.Select(x => x.File)]);
+
+        var events = history
+            .Select(h => new AssignmentTimelineEvent(
+                // Создание назначения отличается от смены статуса ровно отсутствием FromStatus
+                // (переход «ниоткуда» — так его и пишет CreateAsync).
+                h.FromStatus is null ? AssignmentEventKind.Created : AssignmentEventKind.StatusChanged,
+                h.ChangedAt,
+                h.ChangedByUserId,
+                h.FromStatus,
+                h.ToStatus,
+                OldDeadline: null,
+                NewDeadline: null,
+                h.Comment,
+                filesByHistory.TryGetValue(h.Id, out var hf) ? hf : []))
+            .Concat(extensions.Select(e => new AssignmentTimelineEvent(
+                AssignmentEventKind.DeadlineExtended,
+                e.CreatedAt,
+                e.InitiatedByUserId,
+                FromStatus: null,
+                ToStatus: null,
+                e.OldDeadline,
+                e.NewDeadline,
+                e.Reason,
+                filesByExtension.TryGetValue(e.Id, out var ef) ? ef : [])))
+            .Concat(reassignments.Select(r => new AssignmentTimelineEvent(
+                AssignmentEventKind.Reassigned,
+                r.ChangedAt,
+                r.ChangedByUserId,
+                FromStatus: null,
+                ToStatus: null,
+                OldDeadline: null,
+                NewDeadline: null,
+                r.Reason,
+                [],
+                r.FromUserId,
+                r.ToUserId)))
+            .OrderBy(e => e.OccurredAt)
+            .ToList();
+
+        return events;
     }
 
     /// <summary>Обозначение документа для уведомлений — общее правило домена (см. NotificationTemplates).</summary>

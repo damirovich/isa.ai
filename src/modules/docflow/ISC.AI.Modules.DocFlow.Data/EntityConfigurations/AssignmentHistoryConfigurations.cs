@@ -25,6 +25,26 @@ public class AssignmentStatusHistoryConfiguration : IEntityTypeConfiguration<Ass
 }
 
 /// <summary>
+/// Конфигурация смены исполнителя (ТЗ СКИД §4.7): таблица <c>docflow.assignment_reassignment</c>.
+/// </summary>
+public class AssignmentReassignmentConfiguration : IEntityTypeConfiguration<AssignmentReassignment>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<AssignmentReassignment> builder)
+    {
+        builder.ToTable("assignment_reassignment", DocFlowDbContext.Schema);
+
+        // Основание НЕобязательно — в отличие от продления срока (§4.6), где оно обязательно.
+        builder.Property(r => r.Reason).HasMaxLength(2000);
+
+        builder.HasOne(r => r.Assignment).WithMany()
+            .HasForeignKey(r => r.AssignmentId).OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasIndex(r => r.AssignmentId);
+    }
+}
+
+/// <summary>
 /// Конфигурация продления срока (ТЗ СКИД §4.6): таблица <c>docflow.deadline_extension</c>.
 /// </summary>
 public class DeadlineExtensionConfiguration : IEntityTypeConfiguration<DeadlineExtension>

@@ -51,7 +51,7 @@ public sealed class CommentStoreTests : IAsyncLifetime
         }
 
         var typeStore = new DocumentTypeStore(docFlowFactory);
-        var documents = new DocumentStore(docFlowFactory, new TempFileStorage(), new AllowAllAccessPolicy());
+        var documents = new DocumentStore(docFlowFactory, new TempFileStorage(), new AllowAllAccessPolicy(), TestUserDirectory.AllowAll);
         var comments = new CommentStore(docFlowFactory, coreFactory, new TempFileStorage());
 
         var typeId = await typeStore.CreateAsync("Справка", DocumentGroup.Storage, isActive: true);

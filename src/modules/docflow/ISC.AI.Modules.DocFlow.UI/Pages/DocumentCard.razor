@@ -200,7 +200,11 @@ else
 
     @if (_details.Group == DocumentGroup.Execution)
     {
-        <MudText Typo="Typo.subtitle1" Class="mb-2">Назначения (§4.1) — каждое исполняется независимо</MudText>
+        <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+            <MudText Typo="Typo.subtitle1">Назначения (§4.1) — каждое исполняется независимо</MudText>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PersonAdd"
+                       OnClick="OpenAddAssignmentDialog">Добавить назначение</MudButton>
+        </div>
         <MudTable T="AssignmentDetails" Items="_details.Assignments" Dense="true" Outlined="true" Hover="true">
             <HeaderContent>
                 <MudTh>Подразделение</MudTh>
@@ -232,6 +236,15 @@ else
                         {
                             <MudMenuItem OnClick="@(() => OpenExtendDialog(context))">Продлить срок (§4.6)</MudMenuItem>
                         }
+                        @* §4.7: исполненное и снятое переназначать нельзя — кнопку не рисуем, но
+                           решает всё равно сервер (на «кнопку не покажем» не полагаемся). *@
+                        @if (context.Status is not (AssignmentStatus.Done or AssignmentStatus.Closed))
+                        {
+                            <MudMenuItem OnClick="@(() => OpenReassignDialog(context))">
+                                Переназначить исполнителя (§4.7)
+                            </MudMenuItem>
+                        }
+                        <MudMenuItem OnClick="@(() => OpenTimelineAsync(context))">История назначения (§4.8)</MudMenuItem>
                     </MudMenu>
                 </MudTd>
             </RowTemplate>
@@ -349,6 +362,119 @@ else
         <MudButton Color="Color.Primary" Variant="Variant.Filled"
                    Disabled="@(_extendDate is null || string.IsNullOrWhiteSpace(_extendReason))"
                    OnClick="ConfirmExtendAsync">Продлить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* --- Добавление назначения к уже зарегистрированному документу (§4.1). Список подразделений
+   ПОЛНЫЙ: назначение — «кому поручено исполнить», а не поле видимости. Срок здесь всегда
+   индивидуальный — «единый срок» действует только на назначения, созданные при регистрации. --- *@
+<MudDialog @bind-Visible="_addAssignmentOpen" Options="DialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Добавить назначение</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudSelect T="int?" @bind-Value="_addDivisionId" Label="Подразделение *" Variant="Variant.Outlined"
+                   Class="mb-2">
+            @foreach (var division in _divisionNames)
+            {
+                <MudSelectItem T="int?" Value="@division.Key">@division.Value</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="int?" @bind-Value="_addAssigneeUserId" Label="Исполнитель (необязательно)"
+                   Variant="Variant.Outlined" Clearable="true" Class="mb-2">
+            @foreach (var user in _userNames)
+            {
+                <MudSelectItem T="int?" Value="@user.Key">@user.Value</MudSelectItem>
+            }
+        </MudSelect>
+        <MudDatePicker @bind-Date="_addDeadline" Label="Срок (необязательно)" Variant="Variant.Outlined" />
+        <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2 d-block">
+            Исполнителю должно быть разрешено это подразделение — иначе он не увидит порученный документ.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _addAssignmentOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_addDivisionId is null)"
+                   OnClick="ConfirmAddAssignmentAsync">Добавить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* --- Переназначение исполнителя (§4.7): срок и статус сохраняются, основание необязательно. --- *@
+<MudDialog @bind-Visible="_reassignOpen" Options="DialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Переназначить исполнителя</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudSelect T="int?" @bind-Value="_reassignUserId" Label="Новый исполнитель *" Variant="Variant.Outlined"
+                   Class="mb-2">
+            @* Текущий исполнитель из списка исключён: переназначение на него самого — не изменение
+               (в СКИД он оставался в списке, и такой выбор порождал ложное уведомление). *@
+            @foreach (var user in _userNames.Where(u => u.Key != _reassignTarget?.AssigneeUserId))
+            {
+                <MudSelectItem T="int?" Value="@user.Key">@user.Value</MudSelectItem>
+            }
+        </MudSelect>
+        <MudTextField @bind-Value="_reassignReason" Label="Основание (необязательно)" Variant="Variant.Outlined"
+                      MaxLength="2000" Lines="2" AutoGrow="true" />
+        <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2 d-block">
+            Срок и статус назначения не меняются: новый исполнитель наследует срок прежнего.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _reassignOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_reassignUserId is null)"
+                   OnClick="ConfirmReassignAsync">Переназначить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* --- История назначения (§4.8): переходы статусов и продления сроков ОДНОЙ хронологией. Данные
+   писались с этапа 3.1, но показать их было негде. Системные переходы («Просрочено» ставит фоновая
+   проверка) помечаются явно — у них нет пользователя-автора. --- *@
+<MudDialog @bind-Visible="_timelineOpen" Options="DialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">История назначения</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_timelineBusy)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (_timeline.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Событий пока нет.</MudText>
+        }
+        else
+        {
+            <MudTimeline TimelinePosition="TimelinePosition.Start">
+                @foreach (var item in _timeline)
+                {
+                    <MudTimelineItem Color="@TimelineColor(item)" Size="Size.Small">
+                        <MudText Typo="Typo.body2"><b>@TimelineTitle(item)</b></MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                            @item.OccurredAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm",
+                                System.Globalization.CultureInfo.InvariantCulture)
+                            ·
+                            @(item.ActorUserId is { } actor ? UserName(actor) : "система")
+                        </MudText>
+                        @if (!string.IsNullOrWhiteSpace(item.Comment))
+                        {
+                            <MudText Typo="Typo.body2" Class="mt-1">@item.Comment</MudText>
+                        }
+                        @foreach (var file in item.Files)
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Text"
+                                       StartIcon="@Icons.Material.Filled.AttachFile" Class="mt-1"
+                                       OnClick="@(() => OpenTimelineFile(file))">
+                                @file.FileName
+                            </MudButton>
+                        }
+                    </MudTimelineItem>
+                }
+            </MudTimeline>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _timelineOpen = false)">Закрыть</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -507,6 +633,24 @@ else
 
     private bool _extendDialogOpen;
     private AssignmentDetails? _extendTarget;
+
+    // Добавление назначения (§4.1) и переназначение исполнителя (§4.7).
+    private bool _addAssignmentOpen;
+    private int? _addDivisionId;
+    private int? _addAssigneeUserId;
+    private DateTime? _addDeadline;
+
+    private bool _reassignOpen;
+    private AssignmentDetails? _reassignTarget;
+    private int? _reassignUserId;
+    private string? _reassignReason;
+
+    // Лента событий назначения (§4.8): идентификатор нужен и для загрузки, и для ссылок на файлы —
+    // у файлов переходов/продлений родитель в маршруте раздачи именно назначение.
+    private IReadOnlyList<AssignmentTimelineEvent> _timeline = [];
+    private int _timelineAssignmentId;
+    private bool _timelineOpen;
+    private bool _timelineBusy;
     private DateTime? _extendDate;
     private string? _extendReason;
     private IReadOnlyList<IBrowserFile>? _extendFiles;
@@ -562,9 +706,14 @@ else
     // FileCategories не публичен из Domain (живёт в Data) — строки здесь ТОЛЬКО отражают маршрут
     // раздачи ("documents"/"attachments"), не завязаны на реализацию хранилища. parentId для ОБЕИХ
     // категорий — Id документа (карточки): и файл документа, и вложение хранятся под ним (этап 4.2).
-    private string FileUrl(string category, string storedFileName, bool download = false)
+    /// <summary>
+    /// Ссылка раздачи файла. <paramref name="parentId"/> по умолчанию — идентификатор ДОКУМЕНТА, но
+    /// у файлов переходов и продлений родитель в маршруте — НАЗНАЧЕНИЕ (см. DocumentFileAccessResolver):
+    /// подставить документ значило бы получить единый 404 «файла нет».
+    /// </summary>
+    private string FileUrl(string category, string storedFileName, bool download = false, int? parentId = null)
     {
-        var url = $"/docflow/files/{category}/{Id}/{storedFileName}";
+        var url = $"/docflow/files/{category}/{parentId ?? Id}/{storedFileName}";
         return download ? url + "?download=true" : url;
     }
 
@@ -623,10 +772,10 @@ else
     // Открывает диалог; содержимое готовится на следующем OnAfterRenderAsync (для DOCX появление
     // контейнера ждёт JS-сторона — диалог рисует ДРУГОЙ компонент, провайдер, его рендер с нашим
     // не синхронен; для PDF/картинок сперва выкачивается blob и лишь потом появляется iframe/img).
-    private void OpenFilePreview(string category, string storedFileName, string fileName)
+    private void OpenFilePreview(string category, string storedFileName, string fileName, int? parentId = null)
     {
         _filePreviewFileName = fileName;
-        _filePreviewUrl = FileUrl(category, storedFileName);
+        _filePreviewUrl = FileUrl(category, storedFileName, download: false, parentId);
         _filePreviewKind = IsPdf(fileName) ? FilePreviewKind.Pdf
             : IsImage(fileName) ? FilePreviewKind.Image
             : FilePreviewKind.Docx;
@@ -1032,6 +1181,134 @@ else
 
         // Индексация фоновая — карточка обновит чип при следующем открытии/перезагрузке.
         await ReloadAsync();
+    }
+
+    private void OpenAddAssignmentDialog()
+    {
+        _addDivisionId = null;
+        _addAssigneeUserId = null;
+        _addDeadline = null;
+        _addAssignmentOpen = true;
+    }
+
+    private async Task ConfirmAddAssignmentAsync()
+    {
+        if (_addDivisionId is not { } divisionId)
+        {
+            return;
+        }
+
+        _addAssignmentOpen = false;
+        _error = null;
+
+        var response = await Dispatcher.Send(new AddAssignmentCommand(
+            Id, divisionId, _addAssigneeUserId,
+            _addDeadline is { } deadline ? DateOnly.FromDateTime(deadline) : null));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+
+    private void OpenReassignDialog(AssignmentDetails assignment)
+    {
+        _reassignTarget = assignment;
+        _reassignUserId = null;
+        _reassignReason = null;
+        _reassignOpen = true;
+    }
+
+    private async Task ConfirmReassignAsync()
+    {
+        if (_reassignTarget is not { } target || _reassignUserId is not { } newAssignee)
+        {
+            return;
+        }
+
+        _reassignOpen = false;
+        _error = null;
+
+        var response = await Dispatcher.Send(new ReassignAssigneeCommand(target.Id, newAssignee, _reassignReason));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+
+    /// <summary>Открывает ленту событий назначения (§4.8) и загружает её.</summary>
+    private async Task OpenTimelineAsync(AssignmentDetails assignment)
+    {
+        _timelineAssignmentId = assignment.Id;
+        _timeline = [];
+        _timelineOpen = true;
+        _timelineBusy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new GetAssignmentTimelineQuery(assignment.Id));
+            if (response is { Status: true, Data: { } events })
+            {
+                _timeline = events;
+            }
+            else
+            {
+                _timelineOpen = false;
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _timelineBusy = false;
+        }
+    }
+
+    /// <summary>Заголовок события ленты — человеческим языком, а не именем перечисления.</summary>
+    private string TimelineTitle(AssignmentTimelineEvent item) => item.Kind switch
+    {
+        AssignmentEventKind.Created => "Назначение создано",
+        AssignmentEventKind.DeadlineExtended =>
+            $"Срок продлён: {item.OldDeadline:dd.MM.yyyy} → {item.NewDeadline:dd.MM.yyyy}",
+        AssignmentEventKind.Reassigned =>
+            $"Исполнитель: {(item.FromUserId is { } from ? UserName(from) : "не назначен")} → "
+            + $"{(item.ToUserId is { } to ? UserName(to) : "—")}",
+        _ => item.FromStatus is { } from
+            ? $"{from.Label()} → {item.ToStatus?.Label()}"
+            : item.ToStatus?.Label() ?? "Смена статуса",
+    };
+
+    // Просрочка выделяется цветом: это единственное событие, которое ставит система, и именно его
+    // ищут глазами при разборе «почему сорвали срок».
+    private static Color TimelineColor(AssignmentTimelineEvent item) => item switch
+    {
+        { ToStatus: AssignmentStatus.Overdue } => Color.Error,
+        { Kind: AssignmentEventKind.DeadlineExtended } => Color.Warning,
+        { ToStatus: AssignmentStatus.Done or AssignmentStatus.Closed } => Color.Success,
+        _ => Color.Primary,
+    };
+
+    /// <summary>
+    /// Открывает файл события ленты. Лента ЗАКРЫВАЕТСЯ: диалог поверх диалога — источник ровно тех
+    /// гонок рендера, которые уже чинились в предпросмотре (контейнер рисует другой компонент).
+    /// Родитель в ссылке — НАЗНАЧЕНИЕ, а не документ (см. FileUrl).
+    /// </summary>
+    private void OpenTimelineFile(AssignmentTimelineFile file)
+    {
+        _timelineOpen = false;
+
+        if (HasInlinePreview(file.FileName))
+        {
+            OpenFilePreview(file.Category, file.StoredFileName, file.FileName, _timelineAssignmentId);
+        }
+        else
+        {
+            // Формат без встроенного просмотра — отдаём на скачивание тем же защищённым маршрутом.
+            Navigation.NavigateTo(
+                FileUrl(file.Category, file.StoredFileName, download: true, _timelineAssignmentId),
+                forceLoad: true);
+        }
     }
 
     private void OpenExtendDialog(AssignmentDetails assignment)

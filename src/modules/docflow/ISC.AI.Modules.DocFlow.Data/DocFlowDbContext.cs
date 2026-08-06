@@ -47,6 +47,9 @@ public class DocFlowDbContext(DbContextOptions<DocFlowDbContext> options) : Audi
     /// <summary>Продления сроков назначений (§4.6).</summary>
     public DbSet<DeadlineExtension> DeadlineExtensions { get; set; } = null!;
 
+    /// <summary>Смены исполнителя назначений (§4.7).</summary>
+    public DbSet<AssignmentReassignment> AssignmentReassignments { get; set; } = null!;
+
     /// <summary>Файлы-обоснования продлений (§4.6).</summary>
     public DbSet<DeadlineExtensionFile> DeadlineExtensionFiles { get; set; } = null!;
 

@@ -41,7 +41,7 @@ public sealed class InspectorAccessPolicyTests : IAsyncLifetime
 
         var typeStore = new DocumentTypeStore(docFlowFactory);
         var policy = new InspectorAccessPolicy(inspectorFactory);
-        var store = new DocumentStore(docFlowFactory, new TempFileStorage(), policy);
+        var store = new DocumentStore(docFlowFactory, new TempFileStorage(), policy, TestUserDirectory.AllowAll);
 
         var typeId = await typeStore.CreateAsync("Поручение", DocumentGroup.Execution, isActive: true);
 
@@ -116,7 +116,9 @@ public sealed class InspectorAccessPolicyTests : IAsyncLifetime
         }
 
         var typeStore = new DocumentTypeStore(docFlowFactory);
-        var store = new DocumentStore(docFlowFactory, new TempFileStorage(), new InspectorAccessPolicy(inspectorFactory));
+        var store = new DocumentStore(
+            docFlowFactory, new TempFileStorage(), new InspectorAccessPolicy(inspectorFactory),
+            TestUserDirectory.AllowAll);
         var typeId = await typeStore.CreateAsync("Поручение", DocumentGroup.Execution, isActive: true);
 
         // Автор-Руководитель (60) заводит документ со своим назначением исполнителю 61.

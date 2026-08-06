@@ -79,6 +79,83 @@ public sealed class DocFlowEventNotifier(INotificationStore notifications, IUser
         }
     }
 
+    /// <summary>
+    /// Уведомления о смене исполнителя (§4.7): новому — «вы назначены», прежнему — «передано другому»,
+    /// инспектору документа — «сменился исполнитель».
+    /// </summary>
+    /// <remarks>
+    /// Три РАЗНЫХ текста одного вида — перенос решения СКИД. Отличия: там инициатор себя из получателей
+    /// не исключал (их DL-066) и в наблюдатели попадали ВСЕ Руководители; здесь действуют наши сквозные
+    /// правила — инициатор себя не уведомляет, один человек получает не больше одного уведомления,
+    /// а «все Руководители» недоступны модулю (список ролей ведёт профиль, ADR-0017).
+    /// </remarks>
+    public async Task AssigneeReassignedAsync(
+        ReassignedNotice notice, int? actorUserId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(notice);
+
+        var actorName = await NameOfAsync(actorUserId, cancellationToken);
+        var deadline = FormatDeadline(notice.Deadline);
+
+        var newAssignee = Exclude([notice.NewAssigneeUserId], actorUserId);
+        if (newAssignee.Count > 0)
+        {
+            await notifications.RaiseAsync(
+                new NotificationDraft(
+                    newAssignee,
+                    NotificationType.Reassigned,
+                    NotificationTemplates.ReassignedToYou,
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["document"] = notice.DocumentTitle,
+                        ["deadline"] = deadline,
+                    },
+                    notice.DocumentId,
+                    notice.AssignmentId),
+                cancellationToken);
+        }
+
+        // Прежнего исполнителя уведомляем, только если он БЫЛ и это не тот же человек: назначение
+        // могло быть «на подразделение», без лица (перенос условия СКИД).
+        var previous = Exclude([notice.PreviousAssigneeUserId], actorUserId, notice.NewAssigneeUserId);
+        if (previous.Count > 0)
+        {
+            await notifications.RaiseAsync(
+                new NotificationDraft(
+                    previous,
+                    NotificationType.Reassigned,
+                    NotificationTemplates.ReassignedFromYou,
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["document"] = notice.DocumentTitle,
+                        ["actor"] = actorName,
+                    },
+                    notice.DocumentId,
+                    notice.AssignmentId),
+                cancellationToken);
+        }
+
+        // Инспектор — наблюдатель; если он же новый или прежний исполнитель, он уже уведомлён.
+        var watchers = Exclude(
+            [notice.InspectorUserId], actorUserId, notice.NewAssigneeUserId, notice.PreviousAssigneeUserId);
+        if (watchers.Count > 0)
+        {
+            await notifications.RaiseAsync(
+                new NotificationDraft(
+                    watchers,
+                    NotificationType.Reassigned,
+                    NotificationTemplates.ReassignedNotice,
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["document"] = notice.DocumentTitle,
+                        ["actor"] = actorName,
+                    },
+                    notice.DocumentId,
+                    notice.AssignmentId),
+                cancellationToken);
+        }
+    }
+
     /// <summary>Уведомление о смене статуса назначения (§4.2): исполнителю, инспектору и контролёру.</summary>
     public async Task AssignmentStatusChangedAsync(
         AssignmentParticipants participants,

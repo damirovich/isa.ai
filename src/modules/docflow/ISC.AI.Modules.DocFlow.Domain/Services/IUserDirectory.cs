@@ -19,4 +19,19 @@ public interface IUserDirectory
     /// список активных было бы расточительно, а неактивный автор из списка вообще выпадает.
     /// </summary>
     Task<string?> GetNameAsync(int userId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Разрешено ли пользователю подразделение <paramref name="divisionId"/> — проверка перед тем, как
+    /// назначить его исполнителем (§4.1/§4.7).
+    /// </summary>
+    /// <remarks>
+    /// ЗАМЕНА ПРАВИЛА СКИД, а не его копия. Там исполнитель обязан был состоять В ТОМ ЖЕ подразделении,
+    /// что и назначение (<c>user.DepartmentId == assignment.DepartmentId</c>). У нас поля
+    /// «подразделение пользователя» НЕТ вовсе: реестр — <c>core.app_user</c> (вопрос 4), и связь
+    /// человека с подразделениями выражена ДОПУСКОМ (<c>core.clearance.division_scope</c>). Проверяем
+    /// по нему: смысл тот же и даже строже по последствиям — иначе исполнителю поручат документ,
+    /// которого он не увидит (решётка ТБ-020/021 отфильтрует его на выборке).
+    /// Неактивный пользователь и пользователь без допуска дают <see langword="false"/> (fail-closed).
+    /// </remarks>
+    Task<bool> CanSeeDivisionAsync(int userId, int divisionId, CancellationToken cancellationToken = default);
 }

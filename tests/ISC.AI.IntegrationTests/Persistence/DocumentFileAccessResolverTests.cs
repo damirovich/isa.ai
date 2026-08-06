@@ -36,7 +36,7 @@ public sealed class DocumentFileAccessResolverTests : IAsyncLifetime
 
         var storage = new TempFileStorage();
         var typeStore = new DocumentTypeStore(factory);
-        var documentStore = new DocumentStore(factory, storage, new AllowAllAccessPolicy());
+        var documentStore = new DocumentStore(factory, storage, new AllowAllAccessPolicy(), TestUserDirectory.AllowAll);
         var resolver = new DocumentFileAccessResolver(factory);
 
         var typeId = await typeStore.CreateAsync("Поручение", DocumentGroup.Execution, isActive: true);

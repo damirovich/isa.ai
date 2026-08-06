@@ -94,6 +94,24 @@ public enum DocumentWriteStatus
     /// этап 6.6): документ тут же стал бы невидим самому автору.
     /// </summary>
     DivisionOutsideClearance,
+
+    /// <summary>
+    /// Назначения возможны только у документов группы «Исполнение» (§3.2/§4.1): у «Хранения» их нет
+    /// по построению, и агрегированный статус такого документа обязан оставаться «неприменимо».
+    /// </summary>
+    NotExecutionGroup,
+
+    /// <summary>
+    /// У документа уже есть назначение на это подразделение (§4.1: одно подразделение — одно
+    /// назначение). Перенос запрета дубля из СКИД, но с проверкой в БД, а не только в форме.
+    /// </summary>
+    AssignmentDivisionTaken,
+
+    /// <summary>
+    /// Исполнителю не разрешено подразделение назначения — он не увидел бы документ, который ему
+    /// поручают (см. <see cref="IUserDirectory.CanSeeDivisionAsync"/>).
+    /// </summary>
+    AssigneeOutsideDivision,
 }
 
 /// <summary>
@@ -165,9 +183,79 @@ public sealed record CreatedDocumentNotice(
     int? InspectorUserId,
     IReadOnlyList<CreatedAssignmentNotice> Assignments);
 
+/// <summary>Вид события в ленте назначения (§4.8).</summary>
+public enum AssignmentEventKind
+{
+    /// <summary>Назначение создано (переход «ниоткуда» в «Зарегистрировано»).</summary>
+    Created,
+
+    /// <summary>Смена статуса (§4.2), в том числе системный перевод в «Просрочено».</summary>
+    StatusChanged,
+
+    /// <summary>Продление срока (§4.6).</summary>
+    DeadlineExtended,
+
+    /// <summary>Смена исполнителя (§4.7). В СКИД в ленту НЕ попадала — см. AssignmentReassignment.</summary>
+    Reassigned,
+}
+
+/// <summary>
+/// Файл события ленты. <paramref name="Category"/> нужен для ссылки просмотра/скачивания: файлы
+/// переходов и файлы-обоснования продлений лежат в РАЗНЫХ категориях хранилища.
+/// </summary>
+public sealed record AssignmentTimelineFile(
+    int Id, string FileName, string ContentType, long FileSize, string StoredFileName, string Category);
+
+/// <summary>
+/// Событие ленты назначения (§4.8): что произошло, когда, кто инициировал и с чем.
+/// </summary>
+/// <remarks>
+/// Лента СВОДИТ два источника — переходы статусов и продления сроков, — потому что для человека это
+/// одна история назначения, а не две таблицы. <see cref="ActorUserId"/> = <see langword="null"/>
+/// означает СИСТЕМУ (перевод в «Просрочено» ставит фоновая проверка, §4.2), и это не «неизвестно»:
+/// показывать такое событие надо именно как системное.
+/// </remarks>
+public sealed record AssignmentTimelineEvent(
+    AssignmentEventKind Kind,
+    DateTime OccurredAt,
+    int? ActorUserId,
+    AssignmentStatus? FromStatus,
+    AssignmentStatus? ToStatus,
+    DateOnly? OldDeadline,
+    DateOnly? NewDeadline,
+    string? Comment,
+    IReadOnlyList<AssignmentTimelineFile> Files,
+    int? FromUserId = null,
+    int? ToUserId = null);
+
 /// <summary>Итог создания документа: статус, идентификатор и данные для уведомлений при успехе.</summary>
 public sealed record DocumentCreateResult(
     DocumentWriteStatus Status, int DocumentId = 0, CreatedDocumentNotice? Notice = null);
+
+/// <summary>
+/// Итог добавления назначения к существующему документу (§4.1): статус, идентификатор и данные для
+/// уведомлений — по тем же причинам, что у <see cref="CreatedDocumentNotice"/> (право исполнителя
+/// получить уведомление не зависит от видимости документа для инициатора).
+/// </summary>
+public sealed record AssignmentAddResult(
+    DocumentWriteStatus Status, int AssignmentId = 0, CreatedDocumentNotice? Notice = null);
+
+/// <summary>Данные для уведомлений о смене исполнителя (§4.7, разд. 5).</summary>
+public sealed record ReassignedNotice(
+    int AssignmentId,
+    int DocumentId,
+    string DocumentTitle,
+    int? PreviousAssigneeUserId,
+    int NewAssigneeUserId,
+    DateOnly? Deadline,
+    int? InspectorUserId);
+
+/// <summary>
+/// Итог переназначения исполнителя. <see cref="Notice"/> = <see langword="null"/> при
+/// <see cref="DocumentWriteStatus.Ok"/> означает «менять было нечего» (назначили того же человека) —
+/// операция идемпотентна и уведомлений не порождает.
+/// </summary>
+public sealed record AssignmentReassignResult(DocumentWriteStatus Status, ReassignedNotice? Notice = null);
 
 /// <summary>Назначение в карточке документа (§4.1): статус, срок, ответственные.</summary>
 public sealed record AssignmentDetails(
@@ -301,6 +389,51 @@ public interface IDocumentStore
     /// у операций записи, см. <see cref="WriteAccessRule"/>).
     /// </summary>
     Task<AssignmentParticipants?> GetAssignmentParticipantsAsync(
+        int assignmentId, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Добавляет назначение к УЖЕ зарегистрированному документу (§4.1). Новое назначение всегда
+    /// «Зарегистрировано», без контролёра, со СВОИМ сроком: «единый срок» действует только на
+    /// назначения, созданные при регистрации, и на добавленное позже НЕ распространяется (перенос
+    /// решения СКИД). Пишет историю (переход «ниоткуда») и пересчитывает агрегат документа.
+    /// </summary>
+    /// <remarks>
+    /// ВНИМАНИЕ на последствие пересчёта, оно не дефект, а свойство §4.3: добавление назначения
+    /// ОТКАТЫВАЕТ агрегированный статус назад. У документа, где все назначения были «Исполнено»
+    /// (агрегат «Исполнен») или «Снято» («Снят»), после добавления одного «Зарегистрировано» агрегат
+    /// станет «Зарегистрирован» — закрытый документ снова становится незакрытым.
+    /// Недоступный документ неотличим от несуществующего — см. <see cref="WriteAccessRule"/>.
+    /// </remarks>
+    Task<AssignmentAddResult> AddAssignmentAsync(
+        int documentId, AssignmentDraft draft, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Переназначает исполнителя назначения (§4.7). Статус, срок и контролёр НЕ меняются — новый
+    /// исполнитель наследует срок прежнего, счёт времени заново не начинается (перенос решения СКИД).
+    /// Пишет запись в <c>AssignmentReassignment</c>, попадающую в ленту событий (§4.8).
+    /// </summary>
+    /// <remarks>
+    /// Два ОСОЗНАННЫХ ужесточения против СКИД, оба — исправления их дефектов, найденных разбором
+    /// исходника (этап 3.2): (1) переназначение запрещено для «Исполнено» и «Снято с контроля» —
+    /// в СКИД оно проходило из ЛЮБОГО статуса, то есть можно было переписать исполнителя уже
+    /// закрытого поручения; (2) назначение того же исполнителя не считается изменением — в СКИД оно
+    /// писало в аудит запись с одинаковыми «было/стало» и слало человеку «вы назначены исполнителем».
+    /// Недоступное назначение неотличимо от несуществующего — см. <see cref="WriteAccessRule"/>.
+    /// </remarks>
+    Task<AssignmentReassignResult> ReassignAssigneeAsync(
+        int assignmentId, int newAssigneeUserId, string? reason, AccessContext access,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Лента событий назначения (§4.8) — переходы статусов, продления сроков и смены исполнителя
+    /// в ЕДИНОМ хронологическом порядке, старые первыми. <see langword="null"/> — назначения нет либо его документ недоступен.
+    /// </summary>
+    /// <remarks>
+    /// Данные копились с этапа 3.1 (история переходов пишется на каждом переходе), но наружу не
+    /// отдавались — в карточке ленты не было. Это чтение, поэтому фильтр допуска обязателен, как и
+    /// у карточки: недоступное неотличимо от несуществующего (ТБ-020/021).
+    /// </remarks>
+    Task<IReadOnlyList<AssignmentTimelineEvent>?> GetAssignmentTimelineAsync(
         int assignmentId, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>

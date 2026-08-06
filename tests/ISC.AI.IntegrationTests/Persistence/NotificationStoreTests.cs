@@ -39,7 +39,7 @@ public sealed class NotificationStoreTests : IAsyncLifetime
         }
 
         var typeStore = new DocumentTypeStore(factory);
-        var documents = new DocumentStore(factory, new NoFileStorage(), new AllowAllAccessPolicy());
+        var documents = new DocumentStore(factory, new NoFileStorage(), new AllowAllAccessPolicy(), TestUserDirectory.AllowAll);
         var notifications = new NotificationStore(factory, new AllowAllAccessPolicy());
 
         var typeId = await typeStore.CreateAsync("Поручение", DocumentGroup.Execution, isActive: true);
@@ -117,7 +117,7 @@ public sealed class NotificationStoreTests : IAsyncLifetime
         }
 
         var typeStore = new DocumentTypeStore(factory);
-        var documents = new DocumentStore(factory, new NoFileStorage(), new AllowAllAccessPolicy());
+        var documents = new DocumentStore(factory, new NoFileStorage(), new AllowAllAccessPolicy(), TestUserDirectory.AllowAll);
         var notifications = new NotificationStore(factory, new AllowAllAccessPolicy());
 
         var typeId = await typeStore.CreateAsync("Справка", DocumentGroup.Storage, isActive: true);

@@ -310,6 +310,148 @@ public sealed record GetDocumentQuery(int DocumentId) : IRequest<ResponseDto<Doc
     }
 }
 
+/// <summary>Добавить назначение к уже зарегистрированному документу (§4.1).</summary>
+public sealed record AddAssignmentCommand(int DocumentId, int DivisionId, int? AssigneeUserId, DateOnly? Deadline)
+    : IRequest<ResponseDto<int>>, IAuditableRequest
+{
+    /// <inheritdoc />
+    public AuditAction AuditAction => AuditAction.Modify;
+
+    /// <inheritdoc />
+    public string? AuditSummary => $"docflow:document:{DocumentId}:assignment:add:division={DivisionId}";
+
+    /// <inheritdoc cref="AddAssignmentCommand" />
+    public sealed class Handler(
+        IDocumentStore store, IAccessContextProvider accessProvider, DocFlowEventNotifier notifier)
+        : IRequestHandler<AddAssignmentCommand, ResponseDto<int>>
+    {
+        /// <inheritdoc />
+        public async ValueTask<ResponseDto<int>> Handle(
+            AddAssignmentCommand command, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(command);
+
+            var access = await accessProvider.GetCurrentAsync(cancellationToken);
+            var result = await store.AddAssignmentAsync(
+                command.DocumentId,
+                new AssignmentDraft(command.DivisionId, command.AssigneeUserId, command.Deadline),
+                access,
+                cancellationToken);
+
+            if (result is { Status: DocumentWriteStatus.Ok, Notice: { } notice })
+            {
+                // Тот же путь, что при регистрации: исполнителю — «вам назначено», инспектору —
+                // «создано назначение». В СКИД уведомления слались ТОЛЬКО при указанном исполнителе,
+                // из-за чего назначение «на подразделение» проходило совсем молча.
+                await DocFlowEventNotifier.SafeAsync(() => notifier.DocumentRegisteredAsync(
+                    notice, access.NumericSubjectId, cancellationToken));
+            }
+
+            return result.Status switch
+            {
+                DocumentWriteStatus.Ok => ResponseDto<int>.Ok(result.AssignmentId),
+                DocumentWriteStatus.NotFound => ResponseDto<int>.NotFound("Документ не найден."),
+                DocumentWriteStatus.NotExecutionGroup =>
+                    ResponseDto<int>.BadRequest(
+                        "Назначения возможны только у документов группы «Исполнение» (ТЗ §4.1)."),
+                DocumentWriteStatus.AssignmentDivisionTaken =>
+                    ResponseDto<int>.BadRequest(
+                        "У документа уже есть назначение на это подразделение — выберите другое."),
+                DocumentWriteStatus.AssigneeOutsideDivision =>
+                    ResponseDto<int>.BadRequest(
+                        "Исполнителю не разрешено это подразделение — он не увидел бы порученный документ."),
+                _ => ResponseDto<int>.Fail("Не удалось добавить назначение."),
+            };
+        }
+    }
+}
+
+/// <summary>Переназначить исполнителя (§4.7): срок и статус сохраняются, меняется только ответственный.</summary>
+public sealed record ReassignAssigneeCommand(int AssignmentId, int NewAssigneeUserId, string? Reason)
+    : IRequest<ResponseDto<bool>>, IAuditableRequest
+{
+    /// <inheritdoc />
+    public AuditAction AuditAction => AuditAction.Modify;
+
+    /// <inheritdoc />
+    public string? AuditSummary => $"docflow:assignment:{AssignmentId}:reassign:{NewAssigneeUserId}";
+
+    /// <inheritdoc cref="ReassignAssigneeCommand" />
+    public sealed class Handler(
+        IDocumentStore store, IAccessContextProvider accessProvider, DocFlowEventNotifier notifier)
+        : IRequestHandler<ReassignAssigneeCommand, ResponseDto<bool>>
+    {
+        /// <inheritdoc />
+        public async ValueTask<ResponseDto<bool>> Handle(
+            ReassignAssigneeCommand command, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(command);
+
+            var access = await accessProvider.GetCurrentAsync(cancellationToken);
+            var result = await store.ReassignAssigneeAsync(
+                command.AssignmentId, command.NewAssigneeUserId, command.Reason, access, cancellationToken);
+
+            // Notice отсутствует при успехе = «назначили того же» — уведомлять не о чем.
+            if (result is { Status: DocumentWriteStatus.Ok, Notice: { } notice })
+            {
+                await DocFlowEventNotifier.SafeAsync(() => notifier.AssigneeReassignedAsync(
+                    notice, access.NumericSubjectId, cancellationToken));
+            }
+
+            return result.Status switch
+            {
+                DocumentWriteStatus.Ok => ResponseDto<bool>.Ok(true),
+                DocumentWriteStatus.NotFound => ResponseDto<bool>.NotFound("Назначение не найдено."),
+                DocumentWriteStatus.InvalidTransition =>
+                    ResponseDto<bool>.BadRequest(
+                        "Исполненное и снятое с контроля назначение не переназначается — это переписывание "
+                        + "уже состоявшегося факта. Верните назначение в работу, если исполнение продолжается."),
+                DocumentWriteStatus.AssigneeOutsideDivision =>
+                    ResponseDto<bool>.BadRequest(
+                        "Исполнителю не разрешено подразделение назначения — он не увидел бы этот документ."),
+                DocumentWriteStatus.Conflict =>
+                    ResponseDto<bool>.BadRequest("Назначение изменено параллельно — обновите данные и повторите."),
+                _ => ResponseDto<bool>.Fail("Не удалось переназначить исполнителя."),
+            };
+        }
+    }
+}
+
+/// <summary>Лента событий назначения (§4.8): переходы статусов и продления сроков одной хронологией.</summary>
+public sealed record GetAssignmentTimelineQuery(int AssignmentId)
+    : IRequest<ResponseDto<IReadOnlyList<AssignmentTimelineEvent>>>, IAuditableRequest
+{
+    /// <inheritdoc />
+    public AuditAction AuditAction => AuditAction.View;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Только идентификатор — не содержимое ленты (комментарии переходов и основания продлений
+    /// в журнал не копируются, ТБ-032). Гриф записи не переопределён по той же причине, что
+    /// у карточки: успешный ответ возможен лишь когда допуск субъекта уже ≥ грифа документа.
+    /// </remarks>
+    public string? AuditSummary => $"docflow:assignment:{AssignmentId}:timeline";
+
+    /// <inheritdoc cref="GetAssignmentTimelineQuery" />
+    public sealed class Handler(IDocumentStore store, IAccessContextProvider accessProvider)
+        : IRequestHandler<GetAssignmentTimelineQuery, ResponseDto<IReadOnlyList<AssignmentTimelineEvent>>>
+    {
+        /// <inheritdoc />
+        public async ValueTask<ResponseDto<IReadOnlyList<AssignmentTimelineEvent>>> Handle(
+            GetAssignmentTimelineQuery query, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(query);
+
+            var access = await accessProvider.GetCurrentAsync(cancellationToken);
+            var events = await store.GetAssignmentTimelineAsync(query.AssignmentId, access, cancellationToken);
+
+            return events is null
+                ? ResponseDto<IReadOnlyList<AssignmentTimelineEvent>>.NotFound("Назначение не найдено.")
+                : ResponseDto<IReadOnlyList<AssignmentTimelineEvent>>.Ok(events, events.Count);
+        }
+    }
+}
+
 /// <summary>
 /// Сменить статус назначения (§4.2): матрица §4.5, «Просрочено» — только система, вход/выход
 /// «Контроля» фиксирует/сбрасывает контролёра, переход пишется в историю, агрегат пересчитывается.

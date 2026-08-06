@@ -138,6 +138,42 @@ public sealed class ChangeAssignmentStatusValidator : AbstractValidator<ChangeAs
 }
 
 /// <inheritdoc cref="RegisterDocumentValidator" />
+/// <summary>
+/// Правила добавления назначения (§4.1). Обязательны только документ и подразделение: назначение
+/// «на подразделение», без исполнителя и без срока, — законное состояние (перенос решения СКИД,
+/// делать форму строже оригинала незачем). Остальное — дубль подразделения, группа документа,
+/// допуск исполнителя — проверяется в хранилище: этим правилам нужна БД.
+/// </summary>
+public sealed class AddAssignmentValidator : AbstractValidator<AddAssignmentCommand>
+{
+    /// <inheritdoc cref="AddAssignmentValidator" />
+    public AddAssignmentValidator()
+    {
+        RuleFor(c => c.DocumentId).GreaterThan(0);
+        RuleFor(c => c.DivisionId).GreaterThan(0)
+            .WithMessage("Для назначения необходимо указать подразделение.");
+        RuleFor(c => c.AssigneeUserId).GreaterThan(0)
+            .When(c => c.AssigneeUserId is not null)
+            .WithMessage("Некорректный исполнитель.");
+    }
+}
+
+/// <summary>Правила переназначения исполнителя (§4.7): основание НЕобязательно — как в СКИД.</summary>
+public sealed class ReassignAssigneeValidator : AbstractValidator<ReassignAssigneeCommand>
+{
+    /// <summary>Максимальная длина основания — как у основания продления срока.</summary>
+    public const int MaxReasonLength = 2000;
+
+    /// <inheritdoc cref="ReassignAssigneeValidator" />
+    public ReassignAssigneeValidator()
+    {
+        RuleFor(c => c.AssignmentId).GreaterThan(0);
+        RuleFor(c => c.NewAssigneeUserId).GreaterThan(0)
+            .WithMessage("Укажите нового исполнителя.");
+        RuleFor(c => c.Reason).MaximumLength(MaxReasonLength);
+    }
+}
+
 public sealed class ExtendAssignmentDeadlineValidator : AbstractValidator<ExtendAssignmentDeadlineCommand>
 {
     /// <summary>Правила формы §4.6 (основание обязательно; срок строго в будущем; + файловые лимиты).</summary>
