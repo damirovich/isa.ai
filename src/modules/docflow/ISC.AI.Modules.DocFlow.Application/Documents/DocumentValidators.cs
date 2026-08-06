@@ -60,6 +60,20 @@ internal static class FileRules
     /// <summary>Максимальный суммарный размер файлов операции (50 МБ).</summary>
     public const long MaxTotalBytes = 50L * 1024 * 1024;
 
+    /// <summary>
+    /// Перенос allowlist СКИД (<c>UploadDocumentFileCommandValidator</c>/<c>UploadedFileValidator</c>):
+    /// файл документа и файлы к переходам/продлениям — только PDF/DOCX/DOC. Сопутствующие вложения
+    /// (<see cref="UploadAttachmentValidator"/>) — БЕЗ ограничения, как и в СКИД; туда же естественно
+    /// ложатся картинки для предпросмотра (этап 4.3) — новый тип для загрузки не заводился.
+    /// </summary>
+    public static readonly IReadOnlySet<string> AllowedDocumentContentTypes = new HashSet<string>(
+        StringComparer.OrdinalIgnoreCase)
+    {
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword",
+    };
+
     /// <summary>Подключает правила списка файлов к валидатору команды.</summary>
     public static void ApplyFileListRules<T>(
         this AbstractValidator<T> validator,
@@ -71,7 +85,9 @@ internal static class FileRules
             .Must(list => list is null || list.All(f => f.Content.LongLength <= MaxFileBytes))
                 .WithMessage("Файл больше 25 МБ.")
             .Must(list => list is null || list.Sum(f => f.Content.LongLength) <= MaxTotalBytes)
-                .WithMessage("Суммарный размер файлов больше 50 МБ.");
+                .WithMessage("Суммарный размер файлов больше 50 МБ.")
+            .Must(list => list is null || list.All(f => AllowedDocumentContentTypes.Contains(f.ContentType)))
+                .WithMessage("Допустимые форматы: PDF, DOCX, DOC.");
     }
 }
 
@@ -83,7 +99,9 @@ public sealed class UploadDocumentFileValidator : AbstractValidator<UploadDocume
     {
         RuleFor(c => c.DocumentId).GreaterThan(0);
         RuleFor(c => c.FileName).NotEmpty().MaximumLength(500);
-        RuleFor(c => c.ContentType).NotEmpty().MaximumLength(200);
+        RuleFor(c => c.ContentType).NotEmpty().MaximumLength(200)
+            .Must(ct => FileRules.AllowedDocumentContentTypes.Contains(ct))
+            .WithMessage("Допустимые форматы файла документа: PDF, DOCX, DOC (ТЗ СКИД).");
         RuleFor(c => c.Language).IsInEnum();
         RuleFor(c => c.Content)
             .Must(content => content is { LongLength: > 0 and <= FileRules.MaxFileBytes })
@@ -122,12 +140,20 @@ public sealed class ChangeAssignmentStatusValidator : AbstractValidator<ChangeAs
 /// <inheritdoc cref="RegisterDocumentValidator" />
 public sealed class ExtendAssignmentDeadlineValidator : AbstractValidator<ExtendAssignmentDeadlineCommand>
 {
-    /// <summary>Правила формы §4.6 (основание обязательно; + файловые лимиты).</summary>
-    public ExtendAssignmentDeadlineValidator()
+    /// <summary>Правила формы §4.6 (основание обязательно; срок строго в будущем; + файловые лимиты).</summary>
+    public ExtendAssignmentDeadlineValidator(IDocFlowClock clock)
     {
+        ArgumentNullException.ThrowIfNull(clock);
+
         RuleFor(c => c.AssignmentId).GreaterThan(0);
         RuleFor(c => c.Reason).NotEmpty().WithMessage("Укажите основание продления (ТЗ §4.6).")
             .MaximumLength(2000);
+
+        // Перенос СКИД (ExtendDeadlineCommandValidator, Contracts §6.2): продление СТРОГО в будущее —
+        // «сегодня» и раньше не продление, а искажение истории (следующий тик снова пометит просроченным).
+        RuleFor(c => c.NewDeadline).Must(d => d > clock.Today)
+            .WithMessage("Новый срок должен быть строго позже сегодняшней даты.");
+
         this.ApplyFileListRules(c => c.Files);
     }
 }

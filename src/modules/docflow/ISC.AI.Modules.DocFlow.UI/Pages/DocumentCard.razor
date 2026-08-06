@@ -397,9 +397,11 @@ else
 
     // Состояние ветки DOCX (JS-рендер в контейнер). Идентификатор контейнера уникален на каждое
     // открытие: узел прошлого диалога уже удалён, но по прежнему id его можно было бы подхватить —
-    // с уникальным это исключено (см. docxPreview.js).
+    // с уникальным это исключено (см. docxPreview.js). Тот же счётчик — "поколение" предпросмотра:
+    // защищает от гонки (открыли файл A, закрыли, открыли B — поздний ответ по A не должен
+    // перезаписать уже показанный B, если он завершился позже).
     private string _docxPreviewContainerId = "docflow-docx-preview";
-    private int _docxPreviewCounter;
+    private int _previewGeneration;
     private IJSObjectReference? _docxPreviewModule;
 
     private DocumentLanguage _uploadLanguage = DocumentLanguage.Russian;
@@ -460,9 +462,10 @@ else
         _filePreviewError = null;
         _filePreviewObjectUrl = null;
 
+        var generation = ++_previewGeneration;
         if (_filePreviewKind == FilePreviewKind.Docx)
         {
-            _docxPreviewContainerId = $"docflow-docx-preview-{++_docxPreviewCounter}";
+            _docxPreviewContainerId = $"docflow-docx-preview-{generation}";
         }
 
         _filePreviewOpen = true;
@@ -571,35 +574,45 @@ else
 
         _filePreviewPending = false;
 
+        // Снимок на момент запуска: пока ждём JS (await ниже), пользователь мог закрыть диалог и
+        // открыть ДРУГОЙ файл — тогда поля компонента уже указывают на новый файл, а не на тот,
+        // который мы сейчас обрабатываем. Работаем с локальными копиями, не с живыми полями.
+        var generation = _previewGeneration;
+        var containerId = _docxPreviewContainerId;
+        var url = _filePreviewUrl;
+        var kind = _filePreviewKind;
+
         // Сбой JS-интеропа НЕЛЬЗЯ выпускать из OnAfterRenderAsync: необработанное исключение в методе
         // жизненного цикла рвёт circuit Blazor Server — страница перестаёт отвечать целиком, а не только
         // предпросмотр (лечится лишь перезагрузкой). Границу с браузером закрываем здесь.
         FilePreviewStatus status;
+        string? error = null;
+        string? objectUrl = null;
         try
         {
             _docxPreviewModule ??= await JS.InvokeAsync<IJSObjectReference>("import", DocxPreviewModulePath);
 
-            if (_filePreviewKind == FilePreviewKind.Docx)
+            if (kind == FilePreviewKind.Docx)
             {
                 var result = await _docxPreviewModule.InvokeAsync<DocxPreviewResult>(
-                    "renderDocxPreview", _docxPreviewContainerId, _filePreviewUrl);
+                    "renderDocxPreview", containerId, url);
                 status = MapPreviewStatus(result?.Status);
-                _filePreviewError = result?.Message;
+                error = result?.Message;
             }
             else
             {
                 var fetched = await _docxPreviewModule.InvokeAsync<FilePreviewFetchResult>(
-                    "fetchFileToObjectUrl", _filePreviewUrl);
+                    "fetchFileToObjectUrl", url);
                 status = MapPreviewStatus(fetched?.Status);
-                _filePreviewError = fetched?.Message;
+                error = fetched?.Message;
 
-                if (status == FilePreviewStatus.Ok && fetched?.ObjectUrl is { } objectUrl)
+                if (status == FilePreviewStatus.Ok && fetched?.ObjectUrl is { } fetchedUrl)
                 {
                     // Фрагмент управления просмотрщиком PDF (закрытая панель миниатюр: navpanes=0 —
                     // Adobe/Edge, pagemode=none — pdf.js; незнающие игнорируют) применим и к blob-URL.
-                    _filePreviewObjectUrl = _filePreviewKind == FilePreviewKind.Pdf
-                        ? objectUrl + "#navpanes=0&pagemode=none"
-                        : objectUrl;
+                    objectUrl = kind == FilePreviewKind.Pdf
+                        ? fetchedUrl + "#navpanes=0&pagemode=none"
+                        : fetchedUrl;
                 }
                 else if (status == FilePreviewStatus.Ok)
                 {
@@ -610,7 +623,7 @@ else
         catch (JSException ex)
         {
             status = FilePreviewStatus.Error;
-            _filePreviewError = ex.Message;
+            error = ex.Message;
         }
         catch (JSDisconnectedException)
         {
@@ -618,7 +631,20 @@ else
             return;
         }
 
+        // Поколение сменилось, пока мы ждали ответ, — результат устарел (относится к прежнему файлу
+        // или прежнему открытию того же файла); применять его к текущему состоянию нельзя.
+        if (generation != _previewGeneration)
+        {
+            return;
+        }
+
         _filePreviewStatus = status;
+        _filePreviewError = error;
+        if (objectUrl is not null)
+        {
+            _filePreviewObjectUrl = objectUrl;
+        }
+
         StateHasChanged();
     }
 

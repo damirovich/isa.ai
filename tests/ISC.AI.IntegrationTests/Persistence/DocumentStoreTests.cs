@@ -167,7 +167,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         var today = new DateOnly(2026, 8, 10);
         var doc = await store.CreateAsync(
             new DocumentDraft("ПР-1", new DateOnly(2026, 8, 1), executionType!.Value, DocumentDirection.Incoming,
-                null, "Контроль сроков", null, null, DocumentPriority.Medium, 77, 0, 10, 42),
+                null, "Контроль сроков", null, null, DocumentPriority.Medium, 77, 6, 10, 42),
             [
                 new AssignmentDraft(10, null, today.AddDays(-1)),
                 new AssignmentDraft(20, null, today.AddDays(-1)),
@@ -191,7 +191,14 @@ public sealed class DocumentStoreTests : IAsyncLifetime
 
         // Тик: помечено ровно одно (срок вчера, статус Registered); история — от системы (без пользователя).
         var marked = await store.MarkOverdueAsync(today);
-        var markedId = marked.ShouldHaveSingleItem();
+        var markedItem = marked.ShouldHaveSingleItem();
+        var markedId = markedItem.AssignmentId;
+
+        // Гриф/подразделение в результате — документа-владельца (6/10), НЕ нули (ТБ-032: аудит перевода
+        // в DeadlineCheckerJob классифицируется этим значением — см. OverdueMark).
+        markedItem.Classification.ShouldBe<short>(6);
+        markedItem.DivisionId.ShouldBe(10);
+
         await using (var db = factory.CreateDbContext())
         {
             (await db.DocumentAssignments.SingleAsync(a => a.Id == markedId))

@@ -14,6 +14,10 @@ public sealed class DocumentStore(
     IDbContextFactory<DocFlowDbContext> contextFactory,
     IDocFlowFileStorage fileStorage) : IDocumentStore
 {
+    // Перенос СКИД (UploadDocumentAttachmentCommandValidator, DL-057 / ТЗ §3.3.1).
+    private const int MaxAttachmentsPerDocument = 10;
+
+
     /// <inheritdoc />
     public async Task<DocumentWriteStatus> AddDocumentFileAsync(
         int documentId, UploadedFile file, DocumentLanguage language, int? uploadedByUserId,
@@ -80,6 +84,14 @@ public sealed class DocumentStore(
         if (!await db.Documents.AnyAsync(d => d.Id == documentId, cancellationToken))
         {
             return DocumentWriteStatus.NotFound;
+        }
+
+        // Лимит — ДО записи в хранилище (не тратим байты на диске, если операция всё равно отклонится).
+        var attachmentCount = await db.DocumentAttachments
+            .CountAsync(a => a.DocumentId == documentId, cancellationToken);
+        if (attachmentCount >= MaxAttachmentsPerDocument)
+        {
+            return DocumentWriteStatus.TooManyAttachments;
         }
 
         var subPath = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -525,7 +537,7 @@ public sealed class DocumentStore(
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<int>> MarkOverdueAsync(
+    public async Task<IReadOnlyList<OverdueMark>> MarkOverdueAsync(
         DateOnly today, CancellationToken cancellationToken = default)
     {
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -540,7 +552,7 @@ public sealed class DocumentStore(
             .Select(a => a.Id)
             .ToListAsync(cancellationToken);
 
-        var marked = new List<int>();
+        var marked = new List<(int AssignmentId, int DocumentId)>();
         var affectedDocuments = new HashSet<int>();
 
         foreach (var id in candidateIds)
@@ -572,7 +584,7 @@ public sealed class DocumentStore(
             try
             {
                 await itemDb.SaveChangesAsync(cancellationToken);
-                marked.Add(assignment.Id);
+                marked.Add((assignment.Id, assignment.DocumentId));
                 affectedDocuments.Add(assignment.DocumentId);
             }
             catch (DbUpdateConcurrencyException)
@@ -587,7 +599,22 @@ public sealed class DocumentStore(
             await RecalculateAggregateAsync(db, documentId, cancellationToken);
         }
 
-        return marked;
+        if (marked.Count == 0)
+        {
+            return [];
+        }
+
+        // Гриф/подразделение владеющих документов — иначе аудит перевода классифицировал бы запись
+        // грифом 0 независимо от реального грифа объекта (ТБ-032, см. OverdueMark).
+        var documentAccess = await db.Documents.AsNoTracking()
+            .Where(d => affectedDocuments.Contains(d.Id))
+            .Select(d => new { d.Id, d.Classification, d.DivisionId })
+            .ToDictionaryAsync(d => d.Id, cancellationToken);
+
+        return marked
+            .Select(m => new OverdueMark(
+                m.AssignmentId, documentAccess[m.DocumentId].Classification, documentAccess[m.DocumentId].DivisionId))
+            .ToList();
     }
 
     /// <summary>

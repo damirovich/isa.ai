@@ -86,21 +86,24 @@ public sealed class DeadlineCheckerJob(
 
         DeadlineCheckerLog.Marked(logger, marked.Count, today);
 
-        foreach (var assignmentId in marked)
+        foreach (var mark in marked)
         {
             try
             {
+                // Гриф записи — гриф ВЛАДЕЮЩЕГО документа (ТБ-032), не 0: пометка просрочки раскрывает
+                // сам факт существования и статуса назначения режимного документа.
                 await auditWriter.WriteAsync(
                     new AuditEntry(
                         AuditAction.Modify,
-                        Classification: 0,
+                        Classification: mark.Classification,
                         SubjectId: null,
-                        ObjectRef: $"docflow:assignment:{assignmentId}:auto-overdue:{today:yyyy-MM-dd}"),
+                        ObjectRef: $"docflow:assignment:{mark.AssignmentId}:auto-overdue:{today:yyyy-MM-dd}",
+                        DivisionId: mark.DivisionId),
                     cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                DeadlineCheckerLog.AuditFailed(logger, assignmentId, ex);
+                DeadlineCheckerLog.AuditFailed(logger, mark.AssignmentId, ex);
             }
         }
     }

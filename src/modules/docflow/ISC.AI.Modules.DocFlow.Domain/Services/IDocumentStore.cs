@@ -74,7 +74,17 @@ public enum DocumentWriteStatus
 
     /// <summary>Конкурентное изменение (xmin) — повторить с актуальными данными.</summary>
     Conflict,
+
+    /// <summary>Превышен лимит сопутствующих вложений на документ (ТЗ §3.3.1, перенос СКИД DL-057).</summary>
+    TooManyAttachments,
 }
+
+/// <summary>
+/// Назначение, автоматически переведённое в «Просрочено» (§4.2), с грифом/подразделением его документа —
+/// без них аудит перевода (см. <c>DeadlineCheckerJob</c>) классифицировал бы запись журнала грифом 0
+/// независимо от реального грифа объекта (нарушение ТБ-032).
+/// </summary>
+public sealed record OverdueMark(int AssignmentId, short Classification, int DivisionId);
 
 /// <summary>Итог создания документа: статус + идентификатор при успехе.</summary>
 public sealed record DocumentCreateResult(DocumentWriteStatus Status, int DocumentId = 0);
@@ -188,9 +198,10 @@ public interface IDocumentStore
     /// Переводит в «Просрочено» все назначения с истёкшим сроком (§4.2: ставит ТОЛЬКО система).
     /// Кандидаты: срок &lt; <paramref name="today"/> и статус не Done/Closed/Overdue. Каждое — отдельной
     /// транзакцией (конкуренция одного не валит остальных); история — от системы (без пользователя);
-    /// агрегаты затронутых документов пересчитываются. Возвращает идентификаторы переведённых.
+    /// агрегаты затронутых документов пересчитываются. Возвращает переведённые назначения вместе
+    /// с грифом/подразделением владеющего документа (для честного аудита перевода, ТБ-032).
     /// </summary>
-    Task<IReadOnlyList<int>> MarkOverdueAsync(DateOnly today, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<OverdueMark>> MarkOverdueAsync(DateOnly today, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Продление срока назначения (§4.6): фиксируется старый/новый срок и основание; назначение

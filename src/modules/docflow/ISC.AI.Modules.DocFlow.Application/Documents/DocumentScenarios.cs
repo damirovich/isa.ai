@@ -108,8 +108,17 @@ public sealed record ListDocumentsQuery(
     int? TypeId = null,
     DocumentAggregatedStatus? AggregatedStatus = null,
     DateOnly? RegDateFrom = null,
-    DateOnly? RegDateTo = null) : IRequest<ResponseDto<IReadOnlyList<DocumentListItem>>>
+    DateOnly? RegDateTo = null)
+    : IRequest<ResponseDto<IReadOnlyList<DocumentListItem>>>, IAuditableRequest
 {
+    /// <inheritdoc />
+    public AuditAction AuditAction => AuditAction.Search;
+
+    /// <inheritdoc />
+    /// <remarks>Только критерии фильтра — не содержимое найденных документов (ТБ-032).</remarks>
+    public string? AuditSummary =>
+        $"docflow:documents:list:text={Text ?? "-"};type={TypeId?.ToString() ?? "-"};status={AggregatedStatus?.ToString() ?? "-"}";
+
     /// <inheritdoc cref="ListDocumentsQuery" />
     public sealed class Handler(IDocumentStore store, IAccessContextProvider accessProvider)
         : IRequestHandler<ListDocumentsQuery, ResponseDto<IReadOnlyList<DocumentListItem>>>
@@ -189,9 +198,13 @@ public sealed record UploadAttachmentCommand(int DocumentId, string FileName, st
                 command.DocumentId,
                 new UploadedFile(command.FileName, command.ContentType, command.Content),
                 access.NumericSubjectId, cancellationToken);
-            return result == DocumentWriteStatus.Ok
-                ? ResponseDto<bool>.Ok(true)
-                : ResponseDto<bool>.NotFound("Документ не найден.");
+            return result switch
+            {
+                DocumentWriteStatus.Ok => ResponseDto<bool>.Ok(true),
+                DocumentWriteStatus.TooManyAttachments =>
+                    ResponseDto<bool>.BadRequest("У документа уже 10 сопутствующих вложений — больше нельзя (ТЗ §3.3.1)."),
+                _ => ResponseDto<bool>.NotFound("Документ не найден."),
+            };
         }
     }
 }
@@ -223,8 +236,20 @@ public sealed record ReindexDocumentCommand(int DocumentId) : IRequest<ResponseD
 }
 
 /// <summary>Карточка документа с назначениями (§3.2, §4.8).</summary>
-public sealed record GetDocumentQuery(int DocumentId) : IRequest<ResponseDto<DocumentDetails>>
+public sealed record GetDocumentQuery(int DocumentId) : IRequest<ResponseDto<DocumentDetails>>, IAuditableRequest
 {
+    /// <inheritdoc />
+    public AuditAction AuditAction => AuditAction.View;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Только идентификатор — не содержимое карточки (ShortContent/FullText, ТБ-032). Гриф записи
+    /// AuditClassification намеренно НЕ переопределён: успешный ответ возможен только когда допуск
+    /// субъекта уже ≥ грифа документа (решётка в <c>DocumentStore.GetAsync</c>), поэтому классификация
+    /// по умолчанию (допуск субъекта) автоматически не ниже грифа данных.
+    /// </remarks>
+    public string? AuditSummary => $"docflow:document:{DocumentId}";
+
     /// <inheritdoc cref="GetDocumentQuery" />
     public sealed class Handler(IDocumentStore store, IAccessContextProvider accessProvider)
         : IRequestHandler<GetDocumentQuery, ResponseDto<DocumentDetails>>
