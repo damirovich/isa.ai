@@ -1,4 +1,5 @@
 using FluentValidation;
+using ISC.AI.Modules.DocFlow.Application.Notifications;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ISC.AI.Modules.DocFlow.Application;
@@ -10,8 +11,11 @@ namespace ISC.AI.Modules.DocFlow.Application;
 public static class DocFlowApplicationServiceCollectionExtensions
 {
     /// <summary>
-    /// Регистрирует валидаторы сценариев модуля (сквозной <c>ValidationBehavior</c> хоста берёт их из DI).
+    /// Регистрирует валидаторы сценариев модуля (сквозной <c>ValidationBehavior</c> хоста берёт их из DI)
+    /// и составитель уведомлений (разд. 5): «кому и какой текст» — прикладное правило, не хранилище.
     /// </summary>
     public static IServiceCollection AddDocFlowApplication(this IServiceCollection services) =>
-        services.AddValidatorsFromAssembly(typeof(DocFlowApplicationServiceCollectionExtensions).Assembly);
+        services
+            .AddScoped<DocFlowEventNotifier>()
+            .AddValidatorsFromAssembly(typeof(DocFlowApplicationServiceCollectionExtensions).Assembly);
 }

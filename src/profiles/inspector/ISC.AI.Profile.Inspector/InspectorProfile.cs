@@ -90,6 +90,10 @@ public sealed class InspectorProfile : IProfile
     ];
 
     /// <inheritdoc />
+    /// <remarks>Колокольчик уведомлений даёт пакет docflow — профиль лишь включает его в оболочку.</remarks>
+    public IReadOnlyList<IShellWidget> ShellWidgets { get; } = [.. DocFlowModule.ShellWidgets];
+
+    /// <inheritdoc />
     public IReadOnlyList<IModelContributor> ModelContributors { get; } = [];
 
     /// <inheritdoc />

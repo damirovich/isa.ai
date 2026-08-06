@@ -48,6 +48,9 @@ public static class DocFlowPersistenceServiceCollectionExtensions
         // Комментарии к документам (этап 2.2, §4.8): обсуждение с ответами, упоминаниями и файлами.
         services.AddScoped<Domain.Services.ICommentStore, CommentStore>();
 
+        // Уведомления (этап 2.2b, разд. 5): сроки, статусы, упоминания. Только в интерфейсе, без email.
+        services.AddScoped<Domain.Services.INotificationStore, NotificationStore>();
+
         return services;
     }
 }

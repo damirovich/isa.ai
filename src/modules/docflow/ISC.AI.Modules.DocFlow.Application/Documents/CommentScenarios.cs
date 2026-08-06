@@ -2,6 +2,7 @@ using FluentValidation;
 using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.Security;
+using ISC.AI.Modules.DocFlow.Application.Notifications;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 using ISC.AI.Modules.DocFlow.Domain.Services;
 using Mediator;
@@ -59,7 +60,8 @@ public sealed record AddCommentCommand(
 
     /// <inheritdoc cref="AddCommentCommand" />
     public sealed class Handler(
-        ICommentStore comments, IDocumentStore documents, IAccessContextProvider accessProvider)
+        ICommentStore comments, IDocumentStore documents, IAccessContextProvider accessProvider,
+        DocFlowEventNotifier notifier)
         : IRequestHandler<AddCommentCommand, ResponseDto<int>>
     {
         /// <inheritdoc />
@@ -73,7 +75,8 @@ public sealed record AddCommentCommand(
                 return ResponseDto<int>.BadRequest("Комментарий требует аутентифицированного пользователя.");
             }
 
-            if (await documents.GetAsync(command.DocumentId, access, cancellationToken) is null)
+            var document = await documents.GetAsync(command.DocumentId, access, cancellationToken);
+            if (document is null)
             {
                 return ResponseDto<int>.NotFound("Документ не найден.");
             }
@@ -83,6 +86,14 @@ public sealed record AddCommentCommand(
                     command.DocumentId, command.ParentCommentId, command.Content, command.CommentType,
                     command.MentionedUserIds, command.Files),
                 authorId, cancellationToken);
+
+            if (status == CommentWriteStatus.Ok)
+            {
+                // Разд. 5: упомянутым — «вас упомянули», остальным участникам — «добавлен комментарий».
+                // Сбой уведомления не отменяет уже сохранённый комментарий (см. DocFlowEventNotifier).
+                await DocFlowEventNotifier.SafeAsync(() => notifier.CommentAddedAsync(
+                    document, commentId, authorId, command.MentionedUserIds, cancellationToken));
+            }
 
             return status switch
             {

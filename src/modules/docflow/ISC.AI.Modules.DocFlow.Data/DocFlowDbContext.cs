@@ -62,6 +62,9 @@ public class DocFlowDbContext(DbContextOptions<DocFlowDbContext> options) : Audi
     /// <summary>Файлы, приложенные к комментариям (§4.8).</summary>
     public DbSet<DocumentCommentFile> DocumentCommentFiles { get; set; } = null!;
 
+    /// <summary>Уведомления пользователей (разд. 5).</summary>
+    public DbSet<Notification> Notifications { get; set; } = null!;
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

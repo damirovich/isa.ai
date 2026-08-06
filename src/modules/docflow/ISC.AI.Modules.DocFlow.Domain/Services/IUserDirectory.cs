@@ -12,4 +12,11 @@ public interface IUserDirectory
 {
     /// <summary>Список активных пользователей (идентификатор + отображаемое имя), по алфавиту.</summary>
     Task<IReadOnlyList<UserItem>> ListActiveAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Отображаемое имя одного пользователя; <see langword="null"/> — такого пользователя нет.
+    /// Нужно для подстановки автора в текст уведомления (разд. 5): тянуть ради одного имени весь
+    /// список активных было бы расточительно, а неактивный автор из списка вообще выпадает.
+    /// </summary>
+    Task<string?> GetNameAsync(int userId, CancellationToken cancellationToken = default);
 }

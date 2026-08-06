@@ -86,11 +86,50 @@ public enum DocumentWriteStatus
 }
 
 /// <summary>
+/// Назначение со сроком в интересующем окне — исходные данные для уведомления (разд. 5 ТЗ).
+/// Получатели: исполнитель назначения и инспектор документа.
+/// </summary>
+/// <remarks>
+/// «Все Руководители» из СКИД в получатели НЕ входят: список ролей ведёт ПРОФИЛЬ (<c>inspector</c>),
+/// а модуль документооборота на профиль не ссылается (ADR-0017). При необходимости добавляется портом,
+/// реализацию которого даст профиль, — как сделано для справочника подразделений.
+/// </remarks>
+public sealed record DeadlineNotice(
+    int AssignmentId,
+    int DocumentId,
+    string DocumentTitle,
+    DateOnly Deadline,
+    int? AssigneeUserId,
+    int? InspectorUserId);
+
+/// <summary>
 /// Назначение, автоматически переведённое в «Просрочено» (§4.2), с грифом/подразделением его документа —
 /// без них аудит перевода (см. <c>DeadlineCheckerJob</c>) классифицировал бы запись журнала грифом 0
 /// независимо от реального грифа объекта (нарушение ТБ-032).
 /// </summary>
-public sealed record OverdueMark(int AssignmentId, short Classification, int DivisionId);
+public sealed record OverdueMark(
+    int AssignmentId,
+    short Classification,
+    int DivisionId,
+    int DocumentId,
+    string DocumentTitle,
+    DateOnly? Deadline,
+    int? AssigneeUserId,
+    int? InspectorUserId);
+
+/// <summary>
+/// Участники назначения и обозначение его документа — исходные данные уведомлений о СОБЫТИЯХ
+/// (смена статуса, продление; разд. 5 ТЗ). Отдельно от <see cref="DeadlineNotice"/>: там срок есть
+/// всегда (по нему и шёл отбор), здесь может отсутствовать, зато нужен контролёр.
+/// </summary>
+public sealed record AssignmentParticipants(
+    int AssignmentId,
+    int DocumentId,
+    string DocumentTitle,
+    DateOnly? Deadline,
+    int? AssigneeUserId,
+    int? InspectorUserId,
+    int? ControllerUserId);
 
 /// <summary>Итог создания документа: статус + идентификатор при успехе.</summary>
 public sealed record DocumentCreateResult(DocumentWriteStatus Status, int DocumentId = 0);
@@ -212,6 +251,22 @@ public interface IDocumentStore
     /// с грифом/подразделением владеющего документа (для честного аудита перевода, ТБ-032).
     /// </summary>
     Task<IReadOnlyList<OverdueMark>> MarkOverdueAsync(DateOnly today, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Назначения, чей срок попадает в окно <paramref name="from"/>..<paramref name="until"/> включительно
+    /// и которые ещё в работе (не «Исполнено»/«Снято»/«Просрочено») — кандидаты на уведомление о сроке.
+    /// Только чтение; повторные отправки отсекает дедупликация <see cref="INotificationStore"/>.
+    /// </summary>
+    Task<IReadOnlyList<DeadlineNotice>> FindDeadlineNoticesAsync(
+        DateOnly from, DateOnly until, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Участники назначения для уведомления о событии (разд. 5); <see langword="null"/> — назначения нет
+    /// ИЛИ его документ недоступен субъекту <paramref name="access"/> (та же неразличимость, что
+    /// у операций записи, см. <see cref="WriteAccessRule"/>).
+    /// </summary>
+    Task<AssignmentParticipants?> GetAssignmentParticipantsAsync(
+        int assignmentId, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Продление срока назначения (§4.6): фиксируется старый/новый срок и основание; назначение

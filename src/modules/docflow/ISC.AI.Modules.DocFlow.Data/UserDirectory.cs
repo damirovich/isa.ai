@@ -21,4 +21,17 @@ public sealed class UserDirectory(IDbContextFactory<CoreDbContext> contextFactor
             .Select(u => new UserItem(u.Id, u.DisplayName ?? u.UserName))
             .ToListAsync(cancellationToken);
     }
+
+    /// <inheritdoc />
+    public async Task<string?> GetNameAsync(int userId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Без фильтра IsActive: имя автора нужно и тогда, когда учётную запись уже отключили —
+        // иначе уведомление превратилось бы в «кто-то упомянул вас».
+        return await db.Users.AsNoTracking()
+            .Where(u => u.Id == userId)
+            .Select(u => u.DisplayName ?? u.UserName)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
 }

@@ -1,0 +1,165 @@
+@namespace ISC.AI.Modules.DocFlow.UI
+@* Колокольчик уведомлений (разд. 5 ТЗ СКИД). Встраивается в шапку хоста через нейтральный шов
+   IShellWidget: хост знает «слот + тип компонента» и остаётся доменно-нейтральным (ТС-003). *@
+@* Собственный @rendermode НЕ объявляется намеренно: виджет живёт в MainLayout, а режим для всего
+   дерева задаётся единой точкой в App.razor (Э3-08). Своё объявление в компоненте ЛЕЙАУТА — ровно тот
+   случай, от которого предостерегает комментарий в App.razor. *@
+@implements IAsyncDisposable
+@using Mediator
+@using Microsoft.AspNetCore.Components.Routing
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Modules.DocFlow.Application.Notifications
+@using ISC.AI.Modules.DocFlow.Domain.Services
+@inject IMediator Dispatcher
+@inject NavigationManager Navigation
+
+<MudMenu Dense="true" ActivationEvent="MouseEvent.LeftClick" AnchorOrigin="Origin.BottomRight"
+         TransformOrigin="Origin.TopRight" PopoverClass="docflow-bell-popover">
+    <ActivatorContent>
+        <MudBadge Content="_unreadCount" Color="Color.Error" Overlap="true" Visible="_unreadCount > 0"
+                  Max="99" Bordered="true">
+            <MudIconButton Icon="@Icons.Material.Filled.Notifications" Color="Color.Inherit"
+                           aria-label="Уведомления" />
+        </MudBadge>
+    </ActivatorContent>
+    <ChildContent>
+        <div style="min-width:320px;max-width:420px;">
+            <div class="d-flex align-center justify-space-between px-4 py-2">
+                <MudText Typo="Typo.subtitle2">Уведомления</MudText>
+                @if (_items.Count > 0)
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="MarkAllReadAsync">
+                        Прочитать все
+                    </MudButton>
+                }
+            </div>
+            <MudDivider />
+
+            @if (_busy)
+            {
+                <div class="pa-4"><MudProgressLinear Indeterminate="true" Color="Color.Primary" /></div>
+            }
+            else if (_items.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Непрочитанных уведомлений нет.</MudText>
+            }
+            else
+            {
+                @foreach (var item in _items)
+                {
+                    <MudMenuItem OnClick="@(() => OpenAsync(item))">
+                        <MudText Typo="Typo.body2" Style="white-space:normal;">@item.Message</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            @item.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm",
+                                System.Globalization.CultureInfo.InvariantCulture)
+                        </MudText>
+                    </MudMenuItem>
+                }
+            }
+        </div>
+    </ChildContent>
+</MudMenu>
+
+@code {
+    // Опрос счётчика: уведомления рождаются и фоновой проверкой сроков, и действиями ДРУГИХ
+    // пользователей — без периодического обновления колокольчик бы «просыпался» только при
+    // перезагрузке страницы. Минута — компромисс между свежестью и нагрузкой на БД.
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(1);
+
+    private IReadOnlyList<NotificationItem> _items = [];
+    private int _unreadCount;
+    private bool _busy;
+    private PeriodicTimer? _timer;
+    private CancellationTokenSource? _pollCts;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+        await LoadItemsAsync();
+        StartPolling();
+    }
+
+    private void StartPolling()
+    {
+        _pollCts = new CancellationTokenSource();
+        _timer = new PeriodicTimer(PollInterval);
+        var token = _pollCts.Token;
+
+        // Опрос НЕ ждётся здесь намеренно: это фоновый цикл на время жизни компонента.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (await _timer.WaitForNextTickAsync(token))
+                {
+                    // Всё, что трогает состояние компонента, — через InvokeAsync (свой поток рендера).
+                    await InvokeAsync(async () =>
+                    {
+                        await RefreshAsync();
+                        await LoadItemsAsync();
+                        StateHasChanged();
+                    });
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Компонент уничтожен — штатное завершение цикла.
+            }
+        }, token);
+    }
+
+    private async Task RefreshAsync()
+    {
+        var response = await Dispatcher.Send(new CountUnreadNotificationsQuery());
+        _unreadCount = response.Status ? response.Data : 0;
+    }
+
+    private async Task LoadItemsAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ListNotificationsQuery());
+            _items = response.Status && response.Data is not null ? response.Data : [];
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task OpenAsync(NotificationItem item)
+    {
+        await Dispatcher.Send(new MarkNotificationReadCommand(item.Id));
+        await RefreshAsync();
+        await LoadItemsAsync();
+
+        if (item.DocumentId is { } documentId)
+        {
+            // Комментарий открывается в карточке документа — отдельного маршрута у ленты нет.
+            Navigation.NavigateTo($"/docflow/documents/{documentId}");
+        }
+    }
+
+    private async Task MarkAllReadAsync()
+    {
+        await Dispatcher.Send(new MarkAllNotificationsReadCommand());
+        await RefreshAsync();
+        await LoadItemsAsync();
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        if (_pollCts is not null)
+        {
+            await _pollCts.CancelAsync();
+            _pollCts.Dispose();
+            _pollCts = null;
+        }
+
+        _timer?.Dispose();
+        _timer = null;
+    }
+}

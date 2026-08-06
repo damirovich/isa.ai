@@ -45,6 +45,16 @@ public static class DocFlowModule
             Icons.Material.Filled.Category, typeof(DocumentTypes), ReadPolicy, MenuGroup),
     ];
 
+    /// <summary>
+    /// Виджеты оболочки — профиль подмешивает их в свой <c>IProfile.ShellWidgets</c>. Пока один:
+    /// колокольчик уведомлений (разд. 5 ТЗ СКИД).
+    /// </summary>
+    public static IReadOnlyList<IShellWidget> ShellWidgets { get; } =
+    [
+        new ShellWidgetDescriptor(
+            "docflow-notifications", ShellWidgetSlot.AppBarRight, Order: 10, typeof(NotificationBell)),
+    ];
+
     /// <summary>Прикладные сервисы модуля — вызывается профилем в <c>IProfile.RegisterServices</c>.</summary>
     public static IServiceCollection RegisterServices(IServiceCollection services) =>
         services.AddDocFlowApplication();

@@ -25,6 +25,20 @@
         <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined"
                  Icon="@Icons.Material.Filled.Lock" Class="mr-3 d-none d-sm-flex">изолированный контур</MudChip>
         <MudText Typo="Typo.body2" Class="mud-text-secondary mr-2 d-none d-sm-flex">@DateTime.Now.ToString("dd.MM.yyyy")</MudText>
+
+        @* Виджеты шапки объявляет ПРОФИЛЬ (ТС-003): хост знает про «слот» и «тип компонента», но не
+           про их содержимое. Только аутентифицированному — как и состав меню (ТБ-010). *@
+        <AuthorizeView>
+            <Authorized>
+                @foreach (var widget in Profile.ShellWidgets
+                    .Where(w => w.Slot == ShellWidgetSlot.AppBarRight)
+                    .OrderBy(w => w.Order))
+                {
+                    <DynamicComponent Type="widget.ComponentType" @key="widget.Id" />
+                }
+            </Authorized>
+        </AuthorizeView>
+
         <MudIconButton Icon="@(_isDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
                        Color="Color.Inherit" OnClick="ToggleTheme" aria-label="Переключить тему" />
 

@@ -684,17 +684,87 @@ public sealed class DocumentStore(
         }
 
         // Гриф/подразделение владеющих документов — иначе аудит перевода классифицировал бы запись
-        // грифом 0 независимо от реального грифа объекта (ТБ-032, см. OverdueMark).
-        var documentAccess = await db.Documents.AsNoTracking()
+        // грифом 0 независимо от реального грифа объекта (ТБ-032, см. OverdueMark). Здесь же —
+        // данные для уведомления о просрочке (разд. 5): заголовок и инспектор документа.
+        var documentInfo = await db.Documents.AsNoTracking()
             .Where(d => affectedDocuments.Contains(d.Id))
-            .Select(d => new { d.Id, d.Classification, d.DivisionId })
+            .Select(d => new
+            {
+                d.Id, d.Classification, d.DivisionId, d.RegNumber, d.ShortContent, d.InspectorUserId,
+            })
             .ToDictionaryAsync(d => d.Id, cancellationToken);
 
+        var markedIds = marked.Select(m => m.AssignmentId).ToList();
+        var assignees = await db.DocumentAssignments.AsNoTracking()
+            .Where(a => markedIds.Contains(a.Id))
+            .Select(a => new { a.Id, a.AssigneeUserId, a.Deadline })
+            .ToDictionaryAsync(a => a.Id, cancellationToken);
+
         return marked
-            .Select(m => new OverdueMark(
-                m.AssignmentId, documentAccess[m.DocumentId].Classification, documentAccess[m.DocumentId].DivisionId))
+            .Select(m =>
+            {
+                var document = documentInfo[m.DocumentId];
+                var assignment = assignees[m.AssignmentId];
+                return new OverdueMark(
+                    m.AssignmentId,
+                    document.Classification,
+                    document.DivisionId,
+                    m.DocumentId,
+                    DocumentTitle(document.RegNumber, document.ShortContent),
+                    assignment.Deadline,
+                    assignment.AssigneeUserId,
+                    document.InspectorUserId);
+            })
             .ToList();
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<DeadlineNotice>> FindDeadlineNoticesAsync(
+        DateOnly from, DateOnly until, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        return await db.DocumentAssignments.AsNoTracking()
+            .Where(a => a.Deadline != null && a.Deadline >= from && a.Deadline <= until
+                && a.Status != AssignmentStatus.Done
+                && a.Status != AssignmentStatus.Closed
+                && a.Status != AssignmentStatus.Overdue)
+            .Join(db.Documents, a => a.DocumentId, d => d.Id, (a, d) => new DeadlineNotice(
+                a.Id,
+                d.Id,
+                d.RegNumber != null ? d.RegNumber : "б/н «" + d.ShortContent + "»",
+                a.Deadline!.Value,
+                a.AssigneeUserId,
+                d.InspectorUserId))
+            .ToListAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<AssignmentParticipants?> GetAssignmentParticipantsAsync(
+        int assignmentId, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Соединение ИМЕННО с VisibleDocuments, а не с db.Documents: недоступный документ не должен
+        // раскрывать даже состав участников своего назначения (ТБ-020/021, WriteAccessRule).
+        return await db.DocumentAssignments.AsNoTracking()
+            .Where(a => a.Id == assignmentId)
+            .Join(VisibleDocuments(db, access), a => a.DocumentId, d => d.Id, (a, d) => new AssignmentParticipants(
+                a.Id,
+                d.Id,
+                d.RegNumber != null ? d.RegNumber : "б/н «" + d.ShortContent + "»",
+                a.Deadline,
+                a.AssigneeUserId,
+                d.InspectorUserId,
+                a.ControllerUserId))
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    /// <summary>Обозначение документа для уведомлений — общее правило домена (см. NotificationTemplates).</summary>
+    private static string DocumentTitle(string? regNumber, string shortContent) =>
+        NotificationTemplates.DocumentTitle(regNumber, shortContent);
 
     /// <summary>
     /// Пересчёт агрегированного статуса документа (§4.3) по чистой функции. Пишется через

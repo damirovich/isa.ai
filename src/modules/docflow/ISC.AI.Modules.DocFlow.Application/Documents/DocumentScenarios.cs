@@ -2,6 +2,7 @@ using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.BackgroundTasks;
 using ISC.AI.Abstractions.Security;
+using ISC.AI.Modules.DocFlow.Application.Notifications;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 using ISC.AI.Modules.DocFlow.Domain.Services;
 using Mediator;
@@ -47,7 +48,8 @@ public sealed record RegisterDocumentCommand(
 
     /// <inheritdoc cref="RegisterDocumentCommand" />
     public sealed class Handler(
-        IDocumentStore store, IAccessContextProvider accessProvider, IBackgroundTaskQueue taskQueue)
+        IDocumentStore store, IAccessContextProvider accessProvider, IBackgroundTaskQueue taskQueue,
+        DocFlowEventNotifier notifier)
         : IRequestHandler<RegisterDocumentCommand, ResponseDto<int>>
     {
         /// <inheritdoc />
@@ -84,6 +86,16 @@ public sealed record RegisterDocumentCommand(
                     "Индексация документа в корпус ИИ",
                     async (sp, ct) => await sp.GetRequiredService<IDocumentIndexer>().IndexAsync(documentId, ct),
                     cancellationToken);
+
+                // Уведомления о созданных назначениях (§4.1, разд. 5). Карточка перечитывается: только
+                // после записи известны идентификаторы назначений и итоговые сроки (общий срок §4.1
+                // раскладывается по назначениям в хранилище). Регистратор себя не уведомляет.
+                var registered = await store.GetAsync(documentId, access, cancellationToken);
+                if (registered is not null)
+                {
+                    await DocFlowEventNotifier.SafeAsync(() => notifier.DocumentRegisteredAsync(
+                        registered, access.NumericSubjectId, cancellationToken));
+                }
             }
 
             return result.Status switch
@@ -306,7 +318,8 @@ public sealed record ChangeAssignmentStatusCommand(
     public string? AuditSummary => $"docflow:assignment:{AssignmentId}:status:{NewStatus}";
 
     /// <inheritdoc cref="ChangeAssignmentStatusCommand" />
-    public sealed class Handler(IDocumentStore store, IAccessContextProvider accessProvider)
+    public sealed class Handler(
+        IDocumentStore store, IAccessContextProvider accessProvider, DocFlowEventNotifier notifier)
         : IRequestHandler<ChangeAssignmentStatusCommand, ResponseDto<bool>>
     {
         /// <inheritdoc />
@@ -319,6 +332,19 @@ public sealed record ChangeAssignmentStatusCommand(
             var result = await store.ChangeAssignmentStatusAsync(
                 command.AssignmentId, command.NewStatus, command.Comment,
                 access, command.Files, cancellationToken);
+
+            if (result == DocumentWriteStatus.Ok)
+            {
+                // Участники читаются ПОСЛЕ записи: вход в «Контроль» назначает контролёра, и он тоже
+                // должен получить уведомление о собственном назначении контролёром (разд. 5).
+                var participants = await store.GetAssignmentParticipantsAsync(
+                    command.AssignmentId, access, cancellationToken);
+                if (participants is not null)
+                {
+                    await DocFlowEventNotifier.SafeAsync(() => notifier.AssignmentStatusChangedAsync(
+                        participants, command.NewStatus, access.NumericSubjectId, cancellationToken));
+                }
+            }
 
             return result switch
             {
@@ -349,7 +375,8 @@ public sealed record ExtendAssignmentDeadlineCommand(
     public string? AuditSummary => $"docflow:assignment:{AssignmentId}:extend:{NewDeadline:yyyy-MM-dd}";
 
     /// <inheritdoc cref="ExtendAssignmentDeadlineCommand" />
-    public sealed class Handler(IDocumentStore store, IAccessContextProvider accessProvider)
+    public sealed class Handler(
+        IDocumentStore store, IAccessContextProvider accessProvider, DocFlowEventNotifier notifier)
         : IRequestHandler<ExtendAssignmentDeadlineCommand, ResponseDto<bool>>
     {
         /// <inheritdoc />
@@ -365,9 +392,19 @@ public sealed record ExtendAssignmentDeadlineCommand(
                 return ResponseDto<bool>.BadRequest("Продление срока требует аутентифицированного пользователя.");
             }
 
+            // Участники — ДО записи: в тексте уведомления нужен СТАРЫЙ срок, после продления он утрачен.
+            var participants = await store.GetAssignmentParticipantsAsync(
+                command.AssignmentId, access, cancellationToken);
+
             var result = await store.ExtendDeadlineAsync(
                 command.AssignmentId, command.NewDeadline, command.Reason, access,
                 command.Files, cancellationToken);
+
+            if (result == DocumentWriteStatus.Ok && participants is not null)
+            {
+                await DocFlowEventNotifier.SafeAsync(() => notifier.DeadlineExtendedAsync(
+                    participants, command.NewDeadline, access.NumericSubjectId, cancellationToken));
+            }
 
             return result switch
             {
