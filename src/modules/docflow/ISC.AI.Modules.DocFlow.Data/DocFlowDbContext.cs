@@ -53,6 +53,15 @@ public class DocFlowDbContext(DbContextOptions<DocFlowDbContext> options) : Audi
     /// <summary>Мостики «документ ↔ корпус ядра» (этап 7 Э4-35, ADR-0017 п.6).</summary>
     public DbSet<DocumentIndexLink> DocumentIndexLinks { get; set; } = null!;
 
+    /// <summary>Комментарии к документам (§4.8).</summary>
+    public DbSet<DocumentComment> DocumentComments { get; set; } = null!;
+
+    /// <summary>Упоминания участников в комментариях (§4.8).</summary>
+    public DbSet<DocumentCommentMention> DocumentCommentMentions { get; set; } = null!;
+
+    /// <summary>Файлы, приложенные к комментариям (§4.8).</summary>
+    public DbSet<DocumentCommentFile> DocumentCommentFiles { get; set; } = null!;
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

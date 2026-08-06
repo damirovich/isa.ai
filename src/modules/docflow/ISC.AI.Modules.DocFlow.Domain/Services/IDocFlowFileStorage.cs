@@ -17,6 +17,9 @@ public static class FileCategories
 
     /// <summary>Файлы-обоснования продлений (§4.6).</summary>
     public const string DeadlineExtensions = "deadline-extensions";
+
+    /// <summary>Файлы, приложенные к комментариям (§4.8).</summary>
+    public const string Comments = "comments";
 }
 
 /// <summary>

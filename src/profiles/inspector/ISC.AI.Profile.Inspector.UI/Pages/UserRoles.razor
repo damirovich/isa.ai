@@ -2,9 +2,9 @@
 @* Роли пользователей (§2.1 ТЗ СКИД, этап 6 Э4-35) — построчный доступ к докфлоу-документам поверх
    IAccessPolicy (ADR-0014): Администратор не видит документов вовсе, Руководитель — все, Инспектор —
    только свои, Исполнитель — только свои назначения. Сама страница видна всем (ReadPolicy как везде —
-   в системе сегодня нет claim'а под роль, см. Э4-35 этап 6), но обработчики отклоняют запрос от
-   вызывающего, который сам не Администратор (RoleScenarios.cs) — тем самым НЕ полагаемся на то,
-   что кнопку просто не покажут. *@
+   в системе сегодня нет claim'а под роль, см. Э4-35 этап 6), но обработчики (RoleScenarios.cs) сами
+   решают, вправе ли вызывающий: Администратор — всегда; любой вошедший — ТОЛЬКО пока Администратора
+   в системе нет (режим первичной настройки, 6.4.1). На «кнопку не покажем» не полагаемся. *@
 @page "/admin/roles"
 @rendermode InteractiveServer
 @using ISC.AI.Abstractions.Application
@@ -12,13 +12,32 @@
 @using ISC.AI.Profile.Inspector.Domain.Enums
 @using ISC.AI.Profile.Inspector.Domain.Services
 
-<PageHeader Title="Роли пользователей" Subtitle="Построчный доступ к документам (§2.1 ТЗ СКИД) · доступно только Администратору"
+<PageHeader Title="Роли пользователей" Subtitle="Построчный доступ к документам (§2.1 ТЗ СКИД) · ведёт Администратор"
             Icon="@Icons.Material.Filled.AdminPanelSettings" />
 
 @if (_error is not null)
 {
     <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
               ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@* Условие ТО ЖЕ, что на сервере (нет Администратора), иначе баннер и правило разъедутся. *@
+@if (_rows.Count > 0 && _rows.All(r => r.Role != UserRole.Administrator))
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-3">
+        <MudText Typo="Typo.body2"><b>Режим первичной настройки: Администратор не назначен.</b></MudText>
+        <MudText Typo="Typo.body2">
+            Пока в системе нет ни одного Администратора, эта страница открыта любому вошедшему — иначе
+            назначить первого Администратора было бы некому. Как только Администратор появится,
+            страница станет доступна только ему.
+        </MudText>
+        <MudText Typo="Typo.body2" Class="mt-1">
+            ⚠️ По ТЗ (§2.1) <b>Администратор не видит документов вообще</b> — он ведёт пользователей и
+            справочники. Для работы с документами нужна роль «Руководитель» (все документы), «Инспектор»
+            (свои) или «Исполнитель» (свои поручения). Роль у пользователя одна, поэтому в системе нужен
+            хотя бы один отдельный Администратор — иначе управление ролями снова станет общедоступным.
+        </MudText>
+    </MudAlert>
 }
 
 <MudTable T="UserRoleRow" Items="_rows" Hover="true" Dense="true" Outlined="true" Loading="_busy">

@@ -25,7 +25,7 @@ public sealed record ListUserRolesQuery : IRequest<ResponseDto<IReadOnlyList<Use
         public async ValueTask<ResponseDto<IReadOnlyList<UserRoleRow>>> Handle(
             ListUserRolesQuery query, CancellationToken cancellationToken)
         {
-            if (!await RoleScenariosGuard.CallerIsAdministratorAsync(store, accessProvider, cancellationToken))
+            if (!await RoleScenariosGuard.CallerCanManageRolesAsync(store, accessProvider, cancellationToken))
             {
                 return ResponseDto<IReadOnlyList<UserRoleRow>>.BadRequest(
                     "Список и назначение ролей доступны только Администратору.");
@@ -55,7 +55,7 @@ public sealed record SetUserRoleCommand(int UserId, UserRole? Role) : IRequest<R
         {
             ArgumentNullException.ThrowIfNull(command);
 
-            if (!await RoleScenariosGuard.CallerIsAdministratorAsync(store, accessProvider, cancellationToken))
+            if (!await RoleScenariosGuard.CallerCanManageRolesAsync(store, accessProvider, cancellationToken))
             {
                 return ResponseDto<bool>.BadRequest("Назначение ролей доступно только Администратору.");
             }
@@ -69,7 +69,19 @@ public sealed record SetUserRoleCommand(int UserId, UserRole? Role) : IRequest<R
 /// <summary>Общая проверка вызывающего для обоих сценариев (см. remarks класса).</summary>
 file static class RoleScenariosGuard
 {
-    public static async Task<bool> CallerIsAdministratorAsync(
+    /// <summary>
+    /// Вправе ли вызывающий видеть и назначать роли. Обычное правило — только Администратор; но пока
+    /// В СИСТЕМЕ НЕТ НИ ОДНОГО АДМИНИСТРАТОРА, действует РЕЖИМ ПЕРВИЧНОЙ НАСТРОЙКИ: иначе назначить
+    /// первого Администратора некому (страница требует Администратора — замок без ключа; ровно так
+    /// система и оказалась запертой сразу после выпуска этапа 6.4).
+    /// </summary>
+    /// <remarks>
+    /// Условие — «нет Администратора», НЕ «реестр ролей пуст». Проверка пустоты (первая редакция
+    /// фикса) закрывала окно ЛЮБОЙ первой ролью: назначил себе «Руководителя» (единственная роль,
+    /// которая видит все документы) — Администратора нет, окно закрыто, управление ролями потеряно
+    /// навсегда. Текущее правило самовосстанавливающееся: не стало Администратора — окно открылось.
+    /// </remarks>
+    public static async Task<bool> CallerCanManageRolesAsync(
         IUserRoleStore store, IAccessContextProvider accessProvider, CancellationToken cancellationToken)
     {
         var access = await accessProvider.GetCurrentAsync(cancellationToken);
@@ -78,6 +90,11 @@ file static class RoleScenariosGuard
             return false;
         }
 
-        return await store.GetRoleAsync(callerId, cancellationToken) == UserRole.Administrator;
+        if (await store.GetRoleAsync(callerId, cancellationToken) == UserRole.Administrator)
+        {
+            return true;
+        }
+
+        return !await store.AnyAdministratorAsync(cancellationToken);
     }
 }

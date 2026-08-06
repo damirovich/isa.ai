@@ -27,6 +27,14 @@ public sealed class UserRoleStore(
     }
 
     /// <inheritdoc />
+    public async Task<bool> AnyAdministratorAsync(CancellationToken cancellationToken = default)
+    {
+        await using var db = await inspectorContextFactory.CreateDbContextAsync(cancellationToken);
+        return await db.UserRoleAssignments.AsNoTracking()
+            .AnyAsync(r => r.Role == UserRole.Administrator, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<UserRoleRow>> ListAsync(CancellationToken cancellationToken = default)
     {
         await using var coreDb = await coreContextFactory.CreateDbContextAsync(cancellationToken);

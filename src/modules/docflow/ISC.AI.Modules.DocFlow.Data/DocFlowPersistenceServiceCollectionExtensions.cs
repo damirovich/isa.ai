@@ -45,6 +45,9 @@ public static class DocFlowPersistenceServiceCollectionExtensions
         // Просмотр файлов без скачивания (этап 4.3, §3.3): резолвинг для эндпоинта раздачи.
         services.AddScoped<Domain.Services.IDocumentFileAccess, DocumentFileAccessResolver>();
 
+        // Комментарии к документам (этап 2.2, §4.8): обсуждение с ответами, упоминаниями и файлами.
+        services.AddScoped<Domain.Services.ICommentStore, CommentStore>();
+
         return services;
     }
 }
