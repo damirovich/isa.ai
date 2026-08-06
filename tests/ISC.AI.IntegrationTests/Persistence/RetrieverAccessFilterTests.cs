@@ -61,6 +61,38 @@ public sealed class RetrieverAccessFilterTests : IAsyncLifetime
         (await retriever.RetrieveAsync("любой запрос", noAccess, topK: 50)).ShouldBeEmpty();
     }
 
+    [Fact(DisplayName = "Retriever: метаданные документа доезжают до RetrievedChunk.Metadata (этап 7.2 Э4-35 — ссылки-источники в чате)")]
+    public async Task Retriever_projects_document_metadata_onto_chunk()
+    {
+        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        DocumentEntity doc;
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+
+            doc = new DocumentEntity
+            {
+                DocType = "поручение",
+                Title = "П-1 · Тест",
+                Classification = 0,
+                DivisionId = 7,
+                Metadata = new Dictionary<string, string> { ["docflow_document_id"] = "555", ["reg_number"] = "П-1" },
+            };
+            db.Documents.Add(doc);
+            await db.SaveChangesAsync();
+            await AddChunkWithEmbeddingAsync(db, doc.Id, ordinal: 0, classification: 0, divisionId: 7, isCurrent: true);
+        }
+
+        var retriever = new PgVectorRetriever(
+            factory, new FixedEmbeddingGenerator(EmbeddingEntity.Dimensions), new AllowAllAccessPolicy(), RetrievalOptions.None);
+        var access = new AccessContext("u1", MaxClassification: 5, AllowedDivisions: [7]);
+
+        var chunk = (await retriever.RetrieveAsync("любой запрос", access, topK: 10)).ShouldHaveSingleItem();
+        chunk.Metadata.ShouldNotBeNull();
+        chunk.Metadata!["docflow_document_id"].ShouldBe("555");
+        chunk.Metadata["reg_number"].ShouldBe("П-1");
+    }
+
     private static async Task SeedAsync(CoreDbContext db)
     {
         var doc = new DocumentEntity { DocType = "приказ", Title = "Тест", Classification = 1, DivisionId = 7 };

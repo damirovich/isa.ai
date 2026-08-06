@@ -60,7 +60,8 @@ public sealed class ChatService(
             conversationId, subjectId, ConversationMessageRole.Assistant, response.Answer,
             response.ResultClassification, JsonSerializer.Serialize(response.Grounding), cancellationToken);
 
-        return new ChatReply(conversationId, response.Answer, response.Grounding, response.ResultClassification);
+        return new ChatReply(
+            conversationId, response.Answer, response.Grounding, response.ResultClassification, response.UsedFragments);
     }
 
     /// <inheritdoc />
@@ -139,6 +140,7 @@ public sealed class ChatService(
 
         yield return new ChatStreamUpdate(
             TextDelta: null,
-            Final: new ChatReply(conversationId, final.Answer, final.Grounding, final.ResultClassification));
+            Final: new ChatReply(
+                conversationId, final.Answer, final.Grounding, final.ResultClassification, final.UsedFragments));
     }
 }

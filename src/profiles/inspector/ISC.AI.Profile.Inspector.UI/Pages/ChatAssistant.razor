@@ -9,6 +9,7 @@
 @using ISC.AI.Abstractions.Conversations
 @using ISC.AI.Abstractions.Enums
 @using ISC.AI.Abstractions.Grounding
+@using ISC.AI.Abstractions.Retrieval
 @using ISC.AI.Profile.Inspector.Application.Chat
 
 <PageHeader Title="Чат-ассистент" Subtitle="Ассистент инспектора · история диалогов"
@@ -81,6 +82,25 @@
                      style="@(message.Role == ConversationMessageRole.User ? "justify-content:flex-end;" : "justify-content:flex-start;")">
                     <MudPaper Class="pa-2" Elevation="0" Style="@BubbleStyle(message.Role)">
                         <MudText Typo="Typo.body2" Style="white-space:pre-wrap;">@message.Text</MudText>
+                        @* Источники — только у ответа ИЗ ТЕКУЩЕЙ сессии (Sources не переживает перезагрузку
+                           истории — GetConversationHistoryQuery их не хранит, этап 7.2 Э4-35 неполный). *@
+                        @if (message.Sources is { Count: > 0 })
+                        {
+                            <div class="d-flex align-center gap-1 flex-wrap mt-1">
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">Источники:</MudText>
+                                @foreach (var source in DistinctSources(message.Sources))
+                                {
+                                    @if (DocFlowUrl(source) is { } url)
+                                    {
+                                        <MudLink Href="@url" Typo="Typo.caption">@SourceLabel(source)</MudLink>
+                                    }
+                                    else
+                                    {
+                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@SourceLabel(source)</MudText>
+                                    }
+                                }
+                            </div>
+                        }
                     </MudPaper>
                 </div>
             }
@@ -127,6 +147,9 @@
     {
         public ConversationMessageRole Role { get; } = role;
         public string Text { get; set; } = text;
+
+        /// <summary>Фрагменты, на которых построен ЭТОТ ответ (этап 7.2 Э4-35) — только у Assistant.</summary>
+        public IReadOnlyList<RetrievedChunk>? Sources { get; set; }
     }
 
     private readonly List<ConversationSummary> _conversations = [];
@@ -220,6 +243,7 @@
                     _conversationId = reply.ConversationId;
                     _lastGrounding = reply.Grounding;
                     assistant.Text = reply.Answer; // финальный полный текст (на случай расхождений)
+                    assistant.Sources = reply.UsedFragments;
                     await ReloadConversationsAsync();
                 }
             }
@@ -275,4 +299,20 @@
         role == ConversationMessageRole.User
             ? "max-width:78%; background: var(--mud-palette-primary); color: var(--mud-palette-primary-text);"
             : "max-width:78%; background: var(--mud-palette-background-grey);";
+
+    // Один ответ может опираться на несколько фрагментов одного документа — источник показываем один раз.
+    private static IEnumerable<RetrievedChunk> DistinctSources(IReadOnlyList<RetrievedChunk> fragments) =>
+        fragments.DistinctBy(f => f.DocumentId);
+
+    // Метаданные — «багаж» профиля, ядро их не интерпретирует (RetrievedChunk.Metadata); это единственное
+    // место, где ключи docflow_document_id/reg_number получают доменный смысл (этап 7.2 Э4-35).
+    private static string? DocFlowUrl(RetrievedChunk source) =>
+        source.Metadata?.GetValueOrDefault("docflow_document_id") is { Length: > 0 } id
+            ? $"/docflow/documents/{id}"
+            : null;
+
+    private static string SourceLabel(RetrievedChunk source) =>
+        source.Metadata?.GetValueOrDefault("reg_number") is { Length: > 0 } regNumber
+            ? regNumber
+            : $"Документ №{source.DocumentId}";
 }
