@@ -12,7 +12,8 @@ namespace ISC.AI.Modules.DocFlow.Data;
 /// </summary>
 public sealed class DocumentStore(
     IDbContextFactory<DocFlowDbContext> contextFactory,
-    IDocFlowFileStorage fileStorage) : IDocumentStore
+    IDocFlowFileStorage fileStorage,
+    IAccessPolicy accessPolicy) : IDocumentStore
 {
     // Перенос СКИД (UploadDocumentAttachmentCommandValidator, DL-057 / ТЗ §3.3.1).
     private const int MaxAttachmentsPerDocument = 10;
@@ -234,10 +235,14 @@ public sealed class DocumentStore(
         // Решётка доступа В ЗАПРОСЕ, не пост-фильтром (инвариант 3, ТБ-020/021): гриф ≤ допуск И
         // подразделение ∈ разрешённых — тот же предикат, что у floor'а ядра (BaselineAccess) и
         // раздачи файлов (этап 4.3). Пустой список подразделений ⇒ пустая выдача (fail-closed).
+        // Второй Where — СУЖАЮЩАЯ политика профиля (этап 6, ADR-0014): построчные правила по роли/
+        // владению (§2.1 ТЗ СКИД). Docflow сам не знает, что такое «роль», — только зовёт нейтральный
+        // порт; по умолчанию (без профиля с политикой) BuildFilter пропускает всё без изменений.
         var allowedDivisions = access.AllowedDivisions;
         var query = db.Documents.AsNoTracking()
             .Where(d => d.Classification <= access.MaxClassification
-                && allowedDivisions.Contains(d.DivisionId));
+                && allowedDivisions.Contains(d.DivisionId))
+            .Where(accessPolicy.BuildFilter<Document>(access));
 
         if (!string.IsNullOrWhiteSpace(filter.Text))
         {
@@ -296,11 +301,13 @@ public sealed class DocumentStore(
 
         // Допуск — в самом запросе: документ вне допуска даёт null, неотличимый от «не найден»
         // (сам факт существования не подтверждается — то же решение, что 404 у раздачи файлов).
+        // Второй Where — та же сужающая политика профиля, что и в ListAsync (см. комментарий там).
         var allowedDivisions = access.AllowedDivisions;
         return await db.Documents.AsNoTracking()
             .Where(d => d.Id == documentId
                 && d.Classification <= access.MaxClassification
                 && allowedDivisions.Contains(d.DivisionId))
+            .Where(accessPolicy.BuildFilter<Document>(access))
             .Select(d => new DocumentDetails(
                 d.Id,
                 d.RegNumber,

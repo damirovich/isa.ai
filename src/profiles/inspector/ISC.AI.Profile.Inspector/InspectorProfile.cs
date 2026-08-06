@@ -25,6 +25,7 @@ public sealed class InspectorProfile : IProfile
 {
     private const string GroupMain = "Навигация";
     private const string GroupDivisions = "Подразделения";
+    private const string GroupAdmin = "Администрирование";
     private const string ReadPolicy = "inspector.read";
 
     /// <inheritdoc />
@@ -76,6 +77,12 @@ public sealed class InspectorProfile : IProfile
             Icons.Material.Filled.AccountTree, typeof(TerritorialDivisions), ReadPolicy, GroupDivisions),
         new ModuleDescriptor("divisions-linear", "/divisions/linear", "Линейные",
             Icons.Material.Filled.Business, typeof(LinearDivisions), ReadPolicy, GroupDivisions),
+
+        // --- Секция «Администрирование»: роли (§2.1 ТЗ СКИД, этап 6 Э4-35) — страница видна всем
+        // (в claim'ах сессии нет роли, см. RoleScenarios.cs), обработчики отклоняют вызывающего,
+        // который сам не Администратор.
+        new ModuleDescriptor("admin-roles", "/admin/roles", "Роли пользователей",
+            Icons.Material.Filled.AdminPanelSettings, typeof(UserRoles), ReadPolicy, GroupAdmin),
 
         // --- Секция «Документооборот»: подключаемый пакет модулей docflow (ADR-0017, Э4-35) ---
         // Страницы объявляет САМ модуль; профиль лишь включает их в свой реестр. Пока пусто (скелет, этап 0).

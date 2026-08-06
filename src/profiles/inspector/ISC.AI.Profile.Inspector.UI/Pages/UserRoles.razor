@@ -1,0 +1,87 @@
+@namespace ISC.AI.Profile.Inspector.UI
+@* Роли пользователей (§2.1 ТЗ СКИД, этап 6 Э4-35) — построчный доступ к докфлоу-документам поверх
+   IAccessPolicy (ADR-0014): Администратор не видит документов вовсе, Руководитель — все, Инспектор —
+   только свои, Исполнитель — только свои назначения. Сама страница видна всем (ReadPolicy как везде —
+   в системе сегодня нет claim'а под роль, см. Э4-35 этап 6), но обработчики отклоняют запрос от
+   вызывающего, который сам не Администратор (RoleScenarios.cs) — тем самым НЕ полагаемся на то,
+   что кнопку просто не покажут. *@
+@page "/admin/roles"
+@rendermode InteractiveServer
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Profile.Inspector.Application.Roles
+@using ISC.AI.Profile.Inspector.Domain.Enums
+@using ISC.AI.Profile.Inspector.Domain.Services
+
+<PageHeader Title="Роли пользователей" Subtitle="Построчный доступ к документам (§2.1 ТЗ СКИД) · доступно только Администратору"
+            Icon="@Icons.Material.Filled.AdminPanelSettings" />
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+<MudTable T="UserRoleRow" Items="_rows" Hover="true" Dense="true" Outlined="true" Loading="_busy">
+    <HeaderContent>
+        <MudTh>Пользователь</MudTh>
+        <MudTh>Роль</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Пользователь">@context.DisplayName</MudTd>
+        <MudTd DataLabel="Роль">
+            <MudSelect T="UserRole?" Value="@context.Role" ValueChanged="@(role => SetRoleAsync(context.UserId, role))"
+                       Variant="Variant.Outlined" Dense="true" Margin="Margin.Dense" Clearable="true"
+                       Style="min-width:220px;" Placeholder="Роль не назначена">
+                @foreach (var role in Enum.GetValues<UserRole>())
+                {
+                    <MudSelectItem T="UserRole?" Value="@role">@role.Label()</MudSelectItem>
+                }
+            </MudSelect>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Активных пользователей нет.</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    private readonly List<UserRoleRow> _rows = [];
+    private bool _busy;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ListUserRolesQuery());
+            _rows.Clear();
+            if (response is { Status: true, Data: { } list })
+            {
+                _rows.AddRange(list);
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SetRoleAsync(int userId, UserRole? role)
+    {
+        _error = null;
+        var response = await Dispatcher.Send(new SetUserRoleCommand(userId, role));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+}

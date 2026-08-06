@@ -1,4 +1,5 @@
 using ISC.AI.Abstractions.Security;
+using ISC.AI.AI.Security;
 using ISC.AI.Modules.DocFlow.Data;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 using ISC.AI.Modules.DocFlow.Domain.Services;
@@ -32,7 +33,7 @@ public sealed class DocumentFileAccessResolverTests : IAsyncLifetime
 
         var storage = new TempFileStorage();
         var typeStore = new DocumentTypeStore(factory);
-        var documentStore = new DocumentStore(factory, storage);
+        var documentStore = new DocumentStore(factory, storage, new AllowAllAccessPolicy());
         var resolver = new DocumentFileAccessResolver(factory);
 
         var typeId = await typeStore.CreateAsync("Поручение", DocumentGroup.Execution, isActive: true);

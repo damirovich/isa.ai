@@ -1,4 +1,5 @@
 using ISC.AI.Abstractions.Security;
+using ISC.AI.AI.Security;
 using ISC.AI.Modules.DocFlow.Data;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 using ISC.AI.Modules.DocFlow.Domain.Services;
@@ -33,7 +34,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         }
 
         var typeStore = new DocumentTypeStore(factory);
-        var store = new DocumentStore(factory, new TempFileStorage());
+        var store = new DocumentStore(factory, new TempFileStorage(), new AllowAllAccessPolicy());
 
         var storageType = await typeStore.CreateAsync("Справка", DocumentGroup.Storage, isActive: true);
         var executionType = await typeStore.CreateAsync("Поручение", DocumentGroup.Execution, isActive: true);
@@ -160,7 +161,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         }
 
         var typeStore = new DocumentTypeStore(factory);
-        var store = new DocumentStore(factory, new TempFileStorage());
+        var store = new DocumentStore(factory, new TempFileStorage(), new AllowAllAccessPolicy());
         var executionType = await typeStore.CreateAsync("Поручение", DocumentGroup.Execution, isActive: true);
 
         // Два назначения со сроком «вчера» (одно доведём до Done) + одно со сроком «завтра».
@@ -233,7 +234,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         }
 
         var storage = new TempFileStorage();
-        var store = new DocumentStore(factory, storage);
+        var store = new DocumentStore(factory, storage, new AllowAllAccessPolicy());
         var typeStore = new DocumentTypeStore(factory);
         var typeId = await typeStore.CreateAsync("Справка", DocumentGroup.Storage, isActive: true);
         var created = await store.CreateAsync(
@@ -276,7 +277,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         }
 
         var typeStore = new DocumentTypeStore(factory);
-        var store = new DocumentStore(factory, new TempFileStorage());
+        var store = new DocumentStore(factory, new TempFileStorage(), new AllowAllAccessPolicy());
         var typeId = await typeStore.CreateAsync("Справка", DocumentGroup.Storage, isActive: true);
 
         // Три документа: доступный (гриф 3, подр. 10), выше грифа (7, подр. 10), чужое подразделение (3, подр. 99).

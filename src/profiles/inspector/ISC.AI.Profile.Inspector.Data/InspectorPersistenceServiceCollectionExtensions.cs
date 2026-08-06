@@ -1,3 +1,4 @@
+using ISC.AI.Abstractions.Security;
 using ISC.AI.Persistence;
 using ISC.AI.Profile.Inspector.Domain.Services;
 using Microsoft.Extensions.Configuration;
@@ -33,6 +34,15 @@ public static class InspectorPersistenceServiceCollectionExtensions
 
         // Ведение справочника подразделений (§4.2) — страница «Территориальные».
         services.AddScoped<IDivisionAdminStore, DivisionAdminStore>();
+
+        // Роли пользователей (§2.1 ТЗ СКИД, этап 6 Э4-35) — построчный доступ к докфлоу-документам.
+        services.AddScoped<IUserRoleStore, UserRoleStore>();
+
+        // Переопределяет AllowAllAccessPolicy ядра (AddCoreRetrieval регистрируется РАНЬШЕ — Program.cs)
+        // тем же приёмом, что и ICitationExtractor/ICitationNormalizer: явная замена дефолта повторной
+        // регистрацией, не вторая параллельная. Singleton — как у дефолта; IDbContextFactory сам по себе
+        // потокобезопасен, конкретный DbContext создаётся заново на каждый вызов BuildFilter.
+        services.AddSingleton<IAccessPolicy, InspectorAccessPolicy>();
 
         return services;
     }

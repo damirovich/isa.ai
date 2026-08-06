@@ -1,4 +1,5 @@
 using ISC.AI.Abstractions.Audit;
+using ISC.AI.AI.Security;
 using ISC.AI.Ingestion;
 using ISC.AI.Modules.DocFlow.Data;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
@@ -43,7 +44,8 @@ public sealed class DocFlowIndexerTests : IAsyncLifetime
         }
 
         var typeStore = new DocumentTypeStore(docFlowFactory);
-        var documentStore = new DocumentStore(docFlowFactory, Substitute.For<IDocFlowFileStorage>());
+        var documentStore = new DocumentStore(
+            docFlowFactory, Substitute.For<IDocFlowFileStorage>(), new AllowAllAccessPolicy());
         var port = new IngestionPort(coreFactory, new FixedEmbeddingGenerator(768), new SimpleTextChunker());
         var indexer = new DocFlowDocumentIndexer(
             docFlowFactory, coreFactory, port, Substitute.For<IAuditWriter>());
