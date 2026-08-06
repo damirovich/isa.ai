@@ -18,19 +18,56 @@ public sealed class DocumentStore(
     // Перенос СКИД (UploadDocumentAttachmentCommandValidator, DL-057 / ТЗ §3.3.1).
     private const int MaxAttachmentsPerDocument = 10;
 
+    /// <summary>
+    /// Виден ли документ субъекту — ЕДИНСТВЕННОЕ место, где записан предикат доступа (решётка
+    /// ТБ-020/021 + сужающая политика профиля ADR-0014). И чтение (<c>ListAsync</c>/<c>GetAsync</c>),
+    /// и все проверки записи (<see cref="WriteAccessRule"/>) идут через него, чтобы правила не
+    /// разъехались: раньше они и разъехались — чтение сузили, запись забыли (6.4.2).
+    /// </summary>
+    private IQueryable<Document> VisibleDocuments(DocFlowDbContext db, AccessContext access)
+    {
+        var allowedDivisions = access.AllowedDivisions;
+        return db.Documents
+            .Where(d => d.Classification <= access.MaxClassification
+                && allowedDivisions.Contains(d.DivisionId))
+            .Where(accessPolicy.BuildFilter<Document>(access));
+    }
+
+    /// <summary>Виден ли субъекту документ-владелец: недоступный неотличим от несуществующего.</summary>
+    private Task<bool> IsDocumentVisibleAsync(
+        DocFlowDbContext db, int documentId, AccessContext access, CancellationToken cancellationToken) =>
+        VisibleDocuments(db, access).AnyAsync(d => d.Id == documentId, cancellationToken);
+
+    /// <summary>Виден ли субъекту документ, которому принадлежит назначение (проверка перед записью).</summary>
+    private async Task<bool> IsAssignmentVisibleAsync(
+        DocFlowDbContext db, int assignmentId, AccessContext access, CancellationToken cancellationToken)
+    {
+        var documentId = await db.DocumentAssignments.AsNoTracking()
+            .Where(a => a.Id == assignmentId)
+            .Select(a => (int?)a.DocumentId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return documentId is { } id && await IsDocumentVisibleAsync(db, id, access, cancellationToken);
+    }
+
 
     /// <inheritdoc />
     public async Task<DocumentWriteStatus> AddDocumentFileAsync(
-        int documentId, UploadedFile file, DocumentLanguage language, int? uploadedByUserId,
+        int documentId, UploadedFile file, DocumentLanguage language, AccessContext access,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(access);
 
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-        if (!await db.Documents.AnyAsync(d => d.Id == documentId, cancellationToken))
+
+        // Нельзя менять то, чего не видишь (WriteAccessRule): недоступный документ — тот же NotFound.
+        if (!await IsDocumentVisibleAsync(db, documentId, access, cancellationToken))
         {
             return DocumentWriteStatus.NotFound;
         }
+
+        var uploadedByUserId = access.NumericSubjectId;
 
         // Содержимое — в хранилище ДО записи в БД; при сбое БД файл компенсирующе удаляется (как в СКИД).
         var subPath = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -77,15 +114,20 @@ public sealed class DocumentStore(
 
     /// <inheritdoc />
     public async Task<DocumentWriteStatus> AddAttachmentAsync(
-        int documentId, UploadedFile file, int? uploadedByUserId, CancellationToken cancellationToken = default)
+        int documentId, UploadedFile file, AccessContext access, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(access);
 
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-        if (!await db.Documents.AnyAsync(d => d.Id == documentId, cancellationToken))
+
+        // Нельзя менять то, чего не видишь (WriteAccessRule).
+        if (!await IsDocumentVisibleAsync(db, documentId, access, cancellationToken))
         {
             return DocumentWriteStatus.NotFound;
         }
+
+        var uploadedByUserId = access.NumericSubjectId;
 
         // Лимит — ДО записи в хранилище (не тратим байты на диске, если операция всё равно отклонится).
         var attachmentCount = await db.DocumentAttachments
@@ -127,10 +169,20 @@ public sealed class DocumentStore(
         IReadOnlyList<AssignmentDraft> assignments,
         bool useCommonDeadline,
         DateOnly? commonDeadline,
+        AccessContext access,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(draft);
         ArgumentNullException.ThrowIfNull(assignments);
+        ArgumentNullException.ThrowIfNull(access);
+
+        // Регистрация — единственная запись без «уже существующего» объекта, поэтому проверяется не
+        // видимость, а вместимость в допуск автора (ТБ-020/021, этап 6.6): документ выше своего грифа
+        // или в чужое подразделение создать нельзя — он тут же стал бы невидим самому создавшему.
+        if (draft.Classification > access.MaxClassification || !access.AllowedDivisions.Contains(draft.DivisionId))
+        {
+            return new DocumentCreateResult(DocumentWriteStatus.OutsideClearance);
+        }
 
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
 
@@ -343,11 +395,21 @@ public sealed class DocumentStore(
         int assignmentId,
         AssignmentStatus newStatus,
         string? comment,
-        int? changedByUserId,
+        AccessContext access,
         IReadOnlyList<UploadedFile>? files = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(access);
+
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Нельзя менять то, чего не видишь (WriteAccessRule): проверяется ДОКУМЕНТ-владелец назначения.
+        if (!await IsAssignmentVisibleAsync(db, assignmentId, access, cancellationToken))
+        {
+            return DocumentWriteStatus.NotFound;
+        }
+
+        var changedByUserId = access.NumericSubjectId;
 
         var assignment = await db.DocumentAssignments
             .FirstOrDefaultAsync(a => a.Id == assignmentId, cancellationToken);
@@ -447,13 +509,23 @@ public sealed class DocumentStore(
         int assignmentId,
         DateOnly newDeadline,
         string reason,
-        int initiatedByUserId,
+        AccessContext access,
         IReadOnlyList<UploadedFile>? files = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+        ArgumentNullException.ThrowIfNull(access);
 
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Нельзя менять то, чего не видишь (WriteAccessRule).
+        if (!await IsAssignmentVisibleAsync(db, assignmentId, access, cancellationToken))
+        {
+            return DocumentWriteStatus.NotFound;
+        }
+
+        // §4.6: инициатор фиксируется обязательно — сценарий уже отверг запрос без числового субъекта.
+        var initiatedByUserId = access.NumericSubjectId ?? 0;
 
         var assignment = await db.DocumentAssignments
             .FirstOrDefaultAsync(a => a.Id == assignmentId, cancellationToken);

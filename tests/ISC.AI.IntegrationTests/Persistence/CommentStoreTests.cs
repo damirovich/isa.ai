@@ -1,3 +1,4 @@
+using ISC.AI.Abstractions.Security;
 using ISC.AI.AI.Security;
 using ISC.AI.Modules.DocFlow.Data;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
@@ -18,6 +19,9 @@ namespace ISC.AI.IntegrationTests.Persistence;
 /// </summary>
 public sealed class CommentStoreTests : IAsyncLifetime
 {
+    // Допуск автора документов теста: предмет проверки — комментарии, не разграничение.
+    private static readonly AccessContext FullAccess = new("42", 10, [5]);
+
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16").Build();
 
     public Task InitializeAsync() => _postgres.StartAsync();
@@ -54,7 +58,7 @@ public sealed class CommentStoreTests : IAsyncLifetime
         var doc = await documents.CreateAsync(
             new DocumentDraft("К-1", new DateOnly(2026, 8, 6), typeId!.Value, DocumentDirection.Internal,
                 null, "Документ с обсуждением", null, null, null, null, 0, 5, authorId),
-            [], useCommonDeadline: false, commonDeadline: null);
+            [], useCommonDeadline: false, commonDeadline: null, FullAccess);
         doc.Status.ShouldBe(DocumentWriteStatus.Ok);
 
         // Корневой комментарий: упомянуты активный, НЕАКТИВНЫЙ и «заявленный, но не написанный в тексте».
@@ -82,7 +86,7 @@ public sealed class CommentStoreTests : IAsyncLifetime
         var otherDoc = await documents.CreateAsync(
             new DocumentDraft("К-2", new DateOnly(2026, 8, 6), typeId.Value, DocumentDirection.Internal,
                 null, "Другой документ", null, null, null, null, 0, 5, authorId),
-            [], useCommonDeadline: false, commonDeadline: null);
+            [], useCommonDeadline: false, commonDeadline: null, FullAccess);
         (await comments.AddAsync(
             new CommentDraft(otherDoc.DocumentId, rootId, "чужая ветка", CommentType.Remark, [], null), authorId))
             .Status.ShouldBe(CommentWriteStatus.ParentMismatch);

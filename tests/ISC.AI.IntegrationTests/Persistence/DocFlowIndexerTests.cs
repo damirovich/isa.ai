@@ -1,4 +1,5 @@
 using ISC.AI.Abstractions.Audit;
+using ISC.AI.Abstractions.Security;
 using ISC.AI.AI.Security;
 using ISC.AI.Ingestion;
 using ISC.AI.Modules.DocFlow.Data;
@@ -21,6 +22,9 @@ namespace ISC.AI.IntegrationTests.Persistence;
 /// </summary>
 public sealed class DocFlowIndexerTests : IAsyncLifetime
 {
+    // Допуск автора: проверяется индексация, не разграничение (оно — в InspectorAccessPolicyTests).
+    private static readonly AccessContext FullAccess = new("42", 10, [10]);
+
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16").Build();
 
     public Task InitializeAsync() => _postgres.StartAsync();
@@ -56,7 +60,7 @@ public sealed class DocFlowIndexerTests : IAsyncLifetime
                 null, "Проверить склад вооружения", "Полный текст поручения о проверке склада.",
                 null, DocumentPriority.High, 77, 2, 10, 42),
             [new AssignmentDraft(10, null, new DateOnly(2026, 9, 1))],
-            useCommonDeadline: true, commonDeadline: new DateOnly(2026, 9, 1));
+            useCommonDeadline: true, commonDeadline: new DateOnly(2026, 9, 1), FullAccess);
         created.Status.ShouldBe(DocumentWriteStatus.Ok);
 
         // 1) Индексация: чанки с грифом/подразделением ДОКУМЕНТА, мостик создан, метаданные — обратная ссылка.

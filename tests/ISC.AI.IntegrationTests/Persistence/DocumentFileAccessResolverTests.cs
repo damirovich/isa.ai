@@ -16,6 +16,9 @@ namespace ISC.AI.IntegrationTests.Persistence;
 /// </summary>
 public sealed class DocumentFileAccessResolverTests : IAsyncLifetime
 {
+    // Допуск автора документа: тесту нужен сам резолвинг, решётка здесь не предмет проверки.
+    private static readonly AccessContext FullAccess = new("42", 10, [20]);
+
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16").Build();
 
     public Task InitializeAsync() => _postgres.StartAsync();
@@ -41,30 +44,28 @@ public sealed class DocumentFileAccessResolverTests : IAsyncLifetime
             new DocumentDraft(null, new DateOnly(2026, 8, 5), typeId!.Value, DocumentDirection.Incoming,
                 null, "Документ с файлами всех категорий", null, null, DocumentPriority.Medium, 77, 5, 20, 42),
             [new AssignmentDraft(20, null, new DateOnly(2026, 9, 1))],
-            useCommonDeadline: false, commonDeadline: null);
+            useCommonDeadline: false, commonDeadline: null, FullAccess);
         doc.Status.ShouldBe(DocumentWriteStatus.Ok);
 
-        // Полный допуск: тесту резолвера нужна карточка, решётка GetAsync здесь не предмет проверки.
-        var fullAccess = new AccessContext("42", MaxClassification: 10, AllowedDivisions: [20]);
-        var assignmentId = (await documentStore.GetAsync(doc.DocumentId, fullAccess))!.Assignments.Single().Id;
+        var assignmentId = (await documentStore.GetAsync(doc.DocumentId, FullAccess))!.Assignments.Single().Id;
 
         // Документ + вложение.
         (await documentStore.AddDocumentFileAsync(doc.DocumentId,
-            new UploadedFile("файл.docx", "application/msword", [1, 2, 3]), DocumentLanguage.Russian, 42))
+            new UploadedFile("файл.docx", "application/msword", [1, 2, 3]), DocumentLanguage.Russian, FullAccess))
             .ShouldBe(DocumentWriteStatus.Ok);
         (await documentStore.AddAttachmentAsync(doc.DocumentId,
-            new UploadedFile("прил.pdf", "application/pdf", [4, 5]), 42))
+            new UploadedFile("прил.pdf", "application/pdf", [4, 5]), FullAccess))
             .ShouldBe(DocumentWriteStatus.Ok);
 
         // Файл к переходу статуса + файл к продлению (§4.2/§4.6).
-        (await documentStore.ChangeAssignmentStatusAsync(assignmentId, AssignmentStatus.InProgress, "старт", 42,
+        (await documentStore.ChangeAssignmentStatusAsync(assignmentId, AssignmentStatus.InProgress, "старт", FullAccess,
             [new UploadedFile("акт.pdf", "application/pdf", [6, 7])]))
             .ShouldBe(DocumentWriteStatus.Ok);
-        (await documentStore.ExtendDeadlineAsync(assignmentId, new DateOnly(2026, 10, 1), "продление", 42,
+        (await documentStore.ExtendDeadlineAsync(assignmentId, new DateOnly(2026, 10, 1), "продление", FullAccess,
             [new UploadedFile("обоснование.pdf", "application/pdf", [8, 9])]))
             .ShouldBe(DocumentWriteStatus.Ok);
 
-        var details = await documentStore.GetAsync(doc.DocumentId, fullAccess);
+        var details = await documentStore.GetAsync(doc.DocumentId, FullAccess);
         var documentFileName = details!.Files.Single().StoredFileName;
         var attachmentFileName = details.Attachments.Single().StoredFileName;
 

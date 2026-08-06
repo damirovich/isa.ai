@@ -44,7 +44,12 @@ public sealed class InspectorAccessPolicy(IDbContextFactory<InspectorDbContext> 
         // где у него есть ХОТЯ БЫ одно назначение (Any по навигации — EF транслирует в EXISTS).
         Expression<Func<Document, bool>> documentFilter = role switch
         {
-            UserRole.Administrator => _ => false,
+            // ОТКЛОНЕНИЕ ОТ ТЗ §2.1 по решению заказчика (2026-08-06): в ТЗ у Администратора доступ к
+            // документам закрыт ПОЛНОСТЬЮ, здесь он видит всё. Причины: роль у пользователя одна, и
+            // «слепой» Администратор вынуждал заводить вторую учётку ради обычной работы; кроме того
+            // закрытость была мнимой — содержимое тех же документов Администратор всё равно читал
+            // через чат (retrieval роль не применяет, см. 6.4.2). Отклонение осознанное, не недосмотр.
+            UserRole.Administrator => _ => true,
             UserRole.Manager => _ => true,
             UserRole.Inspector => d => d.InspectorUserId == subject.NumericSubjectId,
             UserRole.Performer => d => d.Assignments.Any(a => a.AssigneeUserId == subject.NumericSubjectId),

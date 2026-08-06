@@ -24,7 +24,7 @@ public sealed class InspectorAccessPolicyTests : IAsyncLifetime
 
     public Task DisposeAsync() => _postgres.DisposeAsync().AsTask();
 
-    [Fact(DisplayName = "InspectorAccessPolicy: Администратор — ничего, Руководитель — всё, Инспектор/Исполнитель — только своё, без роли — ничего")]
+    [Fact(DisplayName = "InspectorAccessPolicy: Администратор и Руководитель — всё, Инспектор/Исполнитель — только своё, без роли — ничего")]
     public async Task Policy_enforces_role_based_document_visibility()
     {
         var docFlowFactory = new DocFlowContextFactory(_postgres.GetConnectionString());
@@ -45,15 +45,20 @@ public sealed class InspectorAccessPolicyTests : IAsyncLifetime
 
         var typeId = await typeStore.CreateAsync("Поручение", DocumentGroup.Execution, isActive: true);
 
+        // Решётка (гриф/подразделение) у всех субъектов теста одинаковая — предмет проверки РОЛЬ,
+        // поэтому различается только SubjectId. Создаёт документы субъект 1 (роли ему не назначено,
+        // но создание ограничено лишь решёткой — см. WriteAccessRule).
+        var floor = new AccessContext("1", MaxClassification: 9, AllowedDivisions: [5]);
+
         // Документ A: инспектор = 10, назначение исполнителю 20. Документ B: инспектор = 11, исполнителю 21.
         var docA = await store.CreateAsync(
             new DocumentDraft("A-1", new DateOnly(2026, 8, 6), typeId!.Value, DocumentDirection.Incoming,
                 null, "Документ A", null, null, DocumentPriority.Medium, 10, 0, 5, 1),
-            [new AssignmentDraft(5, 20, null)], useCommonDeadline: false, commonDeadline: null);
+            [new AssignmentDraft(5, 20, null)], useCommonDeadline: false, commonDeadline: null, floor);
         var docB = await store.CreateAsync(
             new DocumentDraft("B-1", new DateOnly(2026, 8, 6), typeId.Value, DocumentDirection.Incoming,
                 null, "Документ B", null, null, DocumentPriority.Medium, 11, 0, 5, 1),
-            [new AssignmentDraft(5, 21, null)], useCommonDeadline: false, commonDeadline: null);
+            [new AssignmentDraft(5, 21, null)], useCommonDeadline: false, commonDeadline: null, floor);
         docA.Status.ShouldBe(DocumentWriteStatus.Ok);
         docB.Status.ShouldBe(DocumentWriteStatus.Ok);
 
@@ -69,8 +74,6 @@ public sealed class InspectorAccessPolicyTests : IAsyncLifetime
             await db.SaveChangesAsync();
         }
 
-        var floor = new AccessContext("0", MaxClassification: 9, AllowedDivisions: [5]);
-
         // Инспектор 10 — только «свой» документ A (назначен инспектором именно на нём).
         (await store.ListAsync(new DocumentListFilter(), floor with { SubjectId = "10" }))
             .Select(d => d.RegNumber).ShouldBe(["A-1"]);
@@ -84,8 +87,10 @@ public sealed class InspectorAccessPolicyTests : IAsyncLifetime
         // Руководитель 30 — оба документа (в пределах floor'а грифа/подразделения).
         (await store.ListAsync(new DocumentListFilter(), floor with { SubjectId = "30" })).Count.ShouldBe(2);
 
-        // Администратор 40 — ни одного документа (правило снятия доступа у привилегированной роли).
-        (await store.ListAsync(new DocumentListFilter(), floor with { SubjectId = "40" })).ShouldBeEmpty();
+        // Администратор 40 — тоже все документы. ОТКЛОНЕНИЕ ОТ ТЗ §2.1 (там доступ закрыт полностью),
+        // решение заказчика 2026-08-06 — см. UserRole.Administrator. Тест закрепляет именно принятое
+        // решение, чтобы возврат к «слепому» Администратору был осознанным, а не случайным.
+        (await store.ListAsync(new DocumentListFilter(), floor with { SubjectId = "40" })).Count.ShouldBe(2);
 
         // Без назначенной роли (50) — default-deny (ТБ-012), не «Руководитель по умолчанию».
         (await store.ListAsync(new DocumentListFilter(), floor with { SubjectId = "50" })).ShouldBeEmpty();
@@ -93,6 +98,81 @@ public sealed class InspectorAccessPolicyTests : IAsyncLifetime
         // GetAsync — та же решётка: карточка чужого документа неотличима от «не найден».
         (await store.GetAsync(docA.DocumentId, floor with { SubjectId = "11" })).ShouldBeNull();
         (await store.GetAsync(docA.DocumentId, floor with { SubjectId = "10" })).ShouldNotBeNull();
+    }
+
+    [Fact(DisplayName = "WriteAccessRule: нельзя менять то, чего не видишь — запись по чужому/невидимому документу даёт NotFound")]
+    public async Task Write_paths_reject_invisible_documents()
+    {
+        var docFlowFactory = new DocFlowContextFactory(_postgres.GetConnectionString());
+        var inspectorFactory = new InspectorContextFactory(_postgres.GetConnectionString());
+        await using (var db = docFlowFactory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+        }
+
+        await using (var db = inspectorFactory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+        }
+
+        var typeStore = new DocumentTypeStore(docFlowFactory);
+        var store = new DocumentStore(docFlowFactory, new TempFileStorage(), new InspectorAccessPolicy(inspectorFactory));
+        var typeId = await typeStore.CreateAsync("Поручение", DocumentGroup.Execution, isActive: true);
+
+        // Автор-Руководитель (60) заводит документ со своим назначением исполнителю 61.
+        var author = new AccessContext("60", MaxClassification: 9, AllowedDivisions: [5]);
+        await using (var db = inspectorFactory.CreateDbContext())
+        {
+            db.UserRoleAssignments.AddRange(
+                new UserRoleAssignment { UserId = 60, Role = UserRole.Manager },
+                new UserRoleAssignment { UserId = 61, Role = UserRole.Inspector });
+            await db.SaveChangesAsync();
+        }
+
+        var doc = await store.CreateAsync(
+            new DocumentDraft("W-1", new DateOnly(2026, 8, 6), typeId!.Value, DocumentDirection.Incoming,
+                null, "Документ для проверки записи", null, null, DocumentPriority.Medium, 60, 0, 5, 60),
+            [new AssignmentDraft(5, 61, new DateOnly(2026, 9, 1))],
+            useCommonDeadline: false, commonDeadline: null, author);
+        doc.Status.ShouldBe(DocumentWriteStatus.Ok);
+
+        var assignmentId = (await store.GetAsync(doc.DocumentId, author))!.Assignments.Single().Id;
+
+        // Инспектор 61 НЕ назначен инспектором этого документа (там 60) ⇒ документ ему не виден.
+        var outsider = author with { SubjectId = "61" };
+        (await store.GetAsync(doc.DocumentId, outsider)).ShouldBeNull();
+
+        // ГЛАВНОЕ: раз не виден — значит и менять нельзя. Каждый путь записи отвечает NotFound,
+        // тем же ответом, что и для несуществующего объекта (существование не подтверждается).
+        var file = new UploadedFile("чужой.pdf", "application/pdf", [1, 2, 3]);
+        (await store.AddDocumentFileAsync(doc.DocumentId, file, DocumentLanguage.Russian, outsider))
+            .ShouldBe(DocumentWriteStatus.NotFound);
+        (await store.AddAttachmentAsync(doc.DocumentId, file, outsider))
+            .ShouldBe(DocumentWriteStatus.NotFound);
+        (await store.ChangeAssignmentStatusAsync(assignmentId, AssignmentStatus.InProgress, "чужой переход", outsider))
+            .ShouldBe(DocumentWriteStatus.NotFound);
+        (await store.ExtendDeadlineAsync(assignmentId, new DateOnly(2026, 12, 1), "чужое продление", outsider))
+            .ShouldBe(DocumentWriteStatus.NotFound);
+
+        // Автор те же операции выполняет штатно — guard не ломает легитимный путь.
+        (await store.AddAttachmentAsync(doc.DocumentId, file, author)).ShouldBe(DocumentWriteStatus.Ok);
+        (await store.ChangeAssignmentStatusAsync(assignmentId, AssignmentStatus.InProgress, "старт", author))
+            .ShouldBe(DocumentWriteStatus.Ok);
+
+        // Регистрация выше собственного допуска запрещена: иначе документ сразу пропал бы из виду.
+        var lowClearance = new AccessContext("60", MaxClassification: 1, AllowedDivisions: [5]);
+        (await store.CreateAsync(
+            new DocumentDraft("W-2", new DateOnly(2026, 8, 6), typeId.Value, DocumentDirection.Incoming,
+                null, "Гриф выше допуска", null, null, DocumentPriority.Medium, 60, 7, 5, 60),
+            [new AssignmentDraft(5, 61, null)], useCommonDeadline: false, commonDeadline: null, lowClearance))
+            .Status.ShouldBe(DocumentWriteStatus.OutsideClearance);
+
+        // …и в чужое подразделение — тоже.
+        (await store.CreateAsync(
+            new DocumentDraft("W-3", new DateOnly(2026, 8, 6), typeId.Value, DocumentDirection.Incoming,
+                null, "Чужое подразделение", null, null, DocumentPriority.Medium, 60, 0, 999, 60),
+            [new AssignmentDraft(5, 61, null)], useCommonDeadline: false, commonDeadline: null, author))
+            .Status.ShouldBe(DocumentWriteStatus.OutsideClearance);
     }
 
     private sealed class TempFileStorage : IDocFlowFileStorage

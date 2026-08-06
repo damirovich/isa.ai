@@ -26,8 +26,48 @@ public sealed class DocumentFileAccessResolver(IDbContextFactory<DocFlowDbContex
             FileCategories.Attachments => await ResolveAttachmentAsync(db, parentId, storedFileName, cancellationToken),
             FileCategories.StatusHistory => await ResolveStatusHistoryFileAsync(db, parentId, storedFileName, cancellationToken),
             FileCategories.DeadlineExtensions => await ResolveDeadlineExtensionFileAsync(db, parentId, storedFileName, cancellationToken),
+            FileCategories.Comments => await ResolveCommentFileAsync(db, parentId, storedFileName, cancellationToken),
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// Файл комментария (§4.8). parentId маршрута — идентификатор ДОКУМЕНТА (файлы комментариев лежат
+    /// в подпути документа, как и вложения), поэтому проверяется, что комментарий-владелец относится
+    /// именно к нему: несовпадение — то же «файла нет», что и для остальных категорий.
+    /// </summary>
+    private static async Task<ResolvedFile?> ResolveCommentFileAsync(
+        DocFlowDbContext db, int documentId, string storedFileName, CancellationToken cancellationToken)
+    {
+        var fileRow = await db.DocumentCommentFiles.AsNoTracking()
+            .Where(f => f.StoredFileName == storedFileName)
+            .Select(f => new { f.ContentType, f.FileName, f.CommentId })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (fileRow is null)
+        {
+            return null;
+        }
+
+        // Комментарий берётся В ОБХОД глобального фильтра мягкого удаления: файл удалённого комментария
+        // не должен внезапно становиться недоступным «по другой причине» — решает допуск к документу.
+        var ownerDocumentId = await db.DocumentComments.AsNoTracking().IgnoreQueryFilters()
+            .Where(c => c.Id == fileRow.CommentId && c.DocumentId == documentId)
+            .Select(c => (int?)c.DocumentId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (ownerDocumentId is not { } confirmedDocumentId)
+        {
+            return null;
+        }
+
+        var access = await ResolveDocumentAccessAsync(db, confirmedDocumentId, cancellationToken);
+        if (access is null)
+        {
+            return null;
+        }
+
+        return new ResolvedFile(
+            storedFileName, SubPath(confirmedDocumentId), fileRow.ContentType, fileRow.FileName,
+            access.Value.Classification, access.Value.DivisionId);
     }
 
     private static async Task<ResolvedFile?> ResolveDocumentFileAsync(

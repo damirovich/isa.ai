@@ -77,6 +77,12 @@ public enum DocumentWriteStatus
 
     /// <summary>Превышен лимит сопутствующих вложений на документ (ТЗ §3.3.1, перенос СКИД DL-057).</summary>
     TooManyAttachments,
+
+    /// <summary>
+    /// Гриф/подразделение создаваемого документа вне допуска создающего (ТБ-020/021, этап 6.6):
+    /// нельзя зарегистрировать документ выше собственного допуска — он тут же стал бы невидим автору.
+    /// </summary>
+    OutsideClearance,
 }
 
 /// <summary>
@@ -149,6 +155,7 @@ public interface IDocumentStore
         IReadOnlyList<AssignmentDraft> assignments,
         bool useCommonDeadline,
         DateOnly? commonDeadline,
+        AccessContext access,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -172,11 +179,12 @@ public interface IDocumentStore
     /// Ручной переход статуса назначения (§4.2/4.5): матрица переходов, запрет ручного «Просрочено»,
     /// фиксация/сброс контролёра на входе/выходе «Контроль», запись истории, пересчёт агрегата документа.
     /// </summary>
+    /// <remarks>Недоступное назначение неотличимо от несуществующего — см. <see cref="WriteAccessRule"/>.</remarks>
     Task<DocumentWriteStatus> ChangeAssignmentStatusAsync(
         int assignmentId,
         AssignmentStatus newStatus,
         string? comment,
-        int? changedByUserId,
+        AccessContext access,
         IReadOnlyList<UploadedFile>? files = null,
         CancellationToken cancellationToken = default);
 
@@ -185,13 +193,15 @@ public interface IDocumentStore
     /// новая получает <c>Version = max + 1</c> и <c>IsLatest</c>. Содержимое — в защищённое хранилище;
     /// при сбое записи в БД сохранённый файл компенсирующе удаляется.
     /// </summary>
+    /// <remarks>Недоступный документ неотличим от несуществующего — см. <see cref="WriteAccessRule"/>.</remarks>
     Task<DocumentWriteStatus> AddDocumentFileAsync(
-        int documentId, UploadedFile file, DocumentLanguage language, int? uploadedByUserId,
+        int documentId, UploadedFile file, DocumentLanguage language, AccessContext access,
         CancellationToken cancellationToken = default);
 
     /// <summary>Прикрепляет сопутствующий файл (без версионирования).</summary>
+    /// <remarks>Недоступный документ неотличим от несуществующего — см. <see cref="WriteAccessRule"/>.</remarks>
     Task<DocumentWriteStatus> AddAttachmentAsync(
-        int documentId, UploadedFile file, int? uploadedByUserId,
+        int documentId, UploadedFile file, AccessContext access,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -207,11 +217,30 @@ public interface IDocumentStore
     /// Продление срока назначения (§4.6): фиксируется старый/новый срок и основание; назначение
     /// автоматически возвращается «В работу» (с записью истории, если статус изменился).
     /// </summary>
+    /// <remarks>Недоступное назначение неотличимо от несуществующего — см. <see cref="WriteAccessRule"/>.</remarks>
     Task<DocumentWriteStatus> ExtendDeadlineAsync(
         int assignmentId,
         DateOnly newDeadline,
         string reason,
-        int initiatedByUserId,
+        AccessContext access,
         IReadOnlyList<UploadedFile>? files = null,
         CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// Правило доступа на ЗАПИСЬ (этап 6.6 Э4-35): «нельзя менять то, чего не видишь». Любая операция
+/// записи по существующему объекту сперва проверяет, что документ-владелец ВИДЕН субъекту тем же
+/// предикатом, что и чтение (решётка гриф/подразделение ТБ-020/021 + сужающая политика профиля
+/// ADR-0014), и при недоступности возвращает <see cref="DocumentWriteStatus.NotFound"/> — тот же
+/// ответ, что и для несуществующего объекта (существование чужого документа не подтверждается).
+/// </summary>
+/// <remarks>
+/// Введено после проверки радиуса поражения (6.4.2): этап 6.4 сузил ЧТЕНИЕ, оставив запись открытой —
+/// субъект, не видевший ни одного документа, мог зарегистрировать документ с любым грифом, залить
+/// файл в чужой документ по идентификатору и сменить статус любого назначения. Прежнее обоснование
+/// («из интерфейса не добраться») держалось лишь на том, что кнопку не рисуют.
+/// Регистрация НОВОГО документа проверяется иначе — гриф/подразделение создаваемого документа обязаны
+/// укладываться в допуск создающего (<see cref="DocumentWriteStatus.OutsideClearance"/>): нельзя
+/// создать документ выше собственного допуска и тем самым «потерять» его из виду.
+/// </remarks>
+public static class WriteAccessRule;

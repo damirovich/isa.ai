@@ -16,7 +16,10 @@ namespace ISC.AI.IntegrationTests.Persistence;
 public sealed class DocumentStoreTests : IAsyncLifetime
 {
     // Полный допуск тестового субъекта: покрывает грифы (≤10) и подразделения всех тестовых документов.
-    private static readonly AccessContext FullAccess = new("42", 10, [10, 20, 30]);
+    // Субъект 42 с широким допуском: тесты этого файла проверяют доменные правила (§3–4), а НЕ
+    // разграничение — оно живёт в InspectorAccessPolicyTests. Подразделения перечислены все, что
+    // встречаются ниже, включая заведомо «чужое» 99 из теста решётки.
+    private static readonly AccessContext FullAccess = new("42", 10, [5, 10, 20, 30, 99]);
 
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16").Build();
 
@@ -43,7 +46,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         var storageDoc = await store.CreateAsync(
             new DocumentDraft("С-1", new DateOnly(2026, 8, 1), storageType!.Value, DocumentDirection.Incoming,
                 null, "Справка о результатах", null, null, DocumentPriority.High, 77, 0, 10, 42),
-            [], useCommonDeadline: false, commonDeadline: null);
+            [], useCommonDeadline: false, commonDeadline: null, FullAccess);
         storageDoc.Status.ShouldBe(DocumentWriteStatus.Ok);
         var storageItem = (await store.ListAsync(new DocumentListFilter(TypeId: storageType.Value), FullAccess)).ShouldHaveSingleItem();
         storageItem.AggregatedStatus.ShouldBe(DocumentAggregatedStatus.NotApplicable);
@@ -54,7 +57,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         (await store.CreateAsync(
             new DocumentDraft(null, new DateOnly(2026, 8, 2), executionType!.Value, DocumentDirection.Internal,
                 null, "Поручение без назначений", null, null, null, null, 0, 10, 42),
-            [], false, null)).Status.ShouldBe(DocumentWriteStatus.ExecutionFieldsMissing);
+            [], false, null, FullAccess)).Status.ShouldBe(DocumentWriteStatus.ExecutionFieldsMissing);
 
         // «Исполнение» с двумя назначениями и единым сроком: история Registered, агрегат «Зарегистрирован».
         var deadline = new DateOnly(2026, 9, 1);
@@ -62,7 +65,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
             new DocumentDraft("П-1", new DateOnly(2026, 8, 2), executionType.Value, DocumentDirection.Incoming,
                 "ГИ", "Проверить исполнение приказа", null, null, DocumentPriority.High, 77, 2, 10, 42),
             [new AssignmentDraft(10, 101, null), new AssignmentDraft(20, null, null)],
-            useCommonDeadline: true, commonDeadline: deadline);
+            useCommonDeadline: true, commonDeadline: deadline, FullAccess);
         executionDoc.Status.ShouldBe(DocumentWriteStatus.Ok);
 
         int firstAssignment, secondAssignment;
@@ -82,16 +85,16 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         (await store.CreateAsync(
             new DocumentDraft("П-1", new DateOnly(2026, 8, 3), storageType.Value, DocumentDirection.Internal,
                 null, "Дубль номера", null, null, null, null, 0, 10, 42),
-            [], false, null)).Status.ShouldBe(DocumentWriteStatus.RegNumberTaken);
+            [], false, null, FullAccess)).Status.ShouldBe(DocumentWriteStatus.RegNumberTaken);
 
         // Переходы: недопустимый (§4.5) и ручное «Просрочено» (§4.2) отклоняются.
-        (await store.ChangeAssignmentStatusAsync(firstAssignment, AssignmentStatus.Done, null, 42))
+        (await store.ChangeAssignmentStatusAsync(firstAssignment, AssignmentStatus.Done, null, FullAccess))
             .ShouldBe(DocumentWriteStatus.InvalidTransition);
-        (await store.ChangeAssignmentStatusAsync(firstAssignment, AssignmentStatus.Overdue, null, 42))
+        (await store.ChangeAssignmentStatusAsync(firstAssignment, AssignmentStatus.Overdue, null, FullAccess))
             .ShouldBe(DocumentWriteStatus.OverdueIsAutomatic);
 
         // «Контроль»: контролёр фиксируется на входе и сбрасывается на выходе; агрегат — «В работе».
-        (await store.ChangeAssignmentStatusAsync(firstAssignment, AssignmentStatus.InControl, "беру на контроль", 42))
+        (await store.ChangeAssignmentStatusAsync(firstAssignment, AssignmentStatus.InControl, "беру на контроль", FullAccess))
             .ShouldBe(DocumentWriteStatus.Ok);
         await using (var db = factory.CreateDbContext())
         {
@@ -101,7 +104,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
                 .AggregatedStatus.ShouldBe(DocumentAggregatedStatus.InProgress);
         }
 
-        (await store.ChangeAssignmentStatusAsync(firstAssignment, AssignmentStatus.InProgress, null, 42))
+        (await store.ChangeAssignmentStatusAsync(firstAssignment, AssignmentStatus.InProgress, null, FullAccess))
             .ShouldBe(DocumentWriteStatus.Ok);
         await using (var db = factory.CreateDbContext())
         {
@@ -111,7 +114,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
 
         // Исполнение первого назначения: агрегат остаётся «В работе»? Нет — второе ещё Registered →
         // по §4.3 «хотя бы одно В работе/Контроль» не выполняется, все не Done → «Зарегистрирован».
-        (await store.ChangeAssignmentStatusAsync(firstAssignment, AssignmentStatus.Done, "готово", 42))
+        (await store.ChangeAssignmentStatusAsync(firstAssignment, AssignmentStatus.Done, "готово", FullAccess))
             .ShouldBe(DocumentWriteStatus.Ok);
         await using (var db = factory.CreateDbContext())
         {
@@ -121,7 +124,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
 
         // Продление §4.6: фиксируется старый/новый срок, статус автоматически «В работе», история пишется.
         var newDeadline = new DateOnly(2026, 10, 1);
-        (await store.ExtendDeadlineAsync(secondAssignment, newDeadline, "объём работ вырос", 42))
+        (await store.ExtendDeadlineAsync(secondAssignment, newDeadline, "объём работ вырос", FullAccess))
             .ShouldBe(DocumentWriteStatus.Ok);
         await using (var db = factory.CreateDbContext())
         {
@@ -174,7 +177,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
                 new AssignmentDraft(20, null, today.AddDays(-1)),
                 new AssignmentDraft(30, null, today.AddDays(1)),
             ],
-            useCommonDeadline: false, commonDeadline: null);
+            useCommonDeadline: false, commonDeadline: null, FullAccess);
         doc.Status.ShouldBe(DocumentWriteStatus.Ok);
 
         int doneAssignment;
@@ -185,9 +188,9 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         }
 
         // Довели одно из просроченных до «Исполнено» ДО тика — трогать его нельзя.
-        (await store.ChangeAssignmentStatusAsync(doneAssignment, AssignmentStatus.InProgress, null, 42))
+        (await store.ChangeAssignmentStatusAsync(doneAssignment, AssignmentStatus.InProgress, null, FullAccess))
             .ShouldBe(DocumentWriteStatus.Ok);
-        (await store.ChangeAssignmentStatusAsync(doneAssignment, AssignmentStatus.Done, null, 42))
+        (await store.ChangeAssignmentStatusAsync(doneAssignment, AssignmentStatus.Done, null, FullAccess))
             .ShouldBe(DocumentWriteStatus.Ok);
 
         // Тик: помечено ровно одно (срок вчера, статус Registered); история — от системы (без пользователя).
@@ -215,7 +218,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
 
         // Повторный тик — пусто (уже Overdue); продление возвращает «В работу» (§4.6 выход из Overdue).
         (await store.MarkOverdueAsync(today)).ShouldBeEmpty();
-        (await store.ExtendDeadlineAsync(markedId, today.AddDays(7), "продлено после просрочки", 42))
+        (await store.ExtendDeadlineAsync(markedId, today.AddDays(7), "продлено после просрочки", FullAccess))
             .ShouldBe(DocumentWriteStatus.Ok);
         await using (var db = factory.CreateDbContext())
         {
@@ -240,21 +243,21 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         var created = await store.CreateAsync(
             new DocumentDraft("Ф-1", new DateOnly(2026, 8, 3), typeId!.Value, DocumentDirection.Internal,
                 null, "Документ с файлами", null, null, null, null, 0, 10, 42),
-            [], false, null);
+            [], false, null, FullAccess);
 
         var v1 = new UploadedFile("справка.docx", "application/vnd.openxmlformats", [1, 2, 3]);
         var v2 = new UploadedFile("справка-испр.docx", "application/vnd.openxmlformats", [4, 5, 6, 7]);
 
-        (await store.AddDocumentFileAsync(created.DocumentId, v1, DocumentLanguage.Russian, 42))
+        (await store.AddDocumentFileAsync(created.DocumentId, v1, DocumentLanguage.Russian, FullAccess))
             .ShouldBe(DocumentWriteStatus.Ok);
-        (await store.AddDocumentFileAsync(created.DocumentId, v2, DocumentLanguage.Russian, 42))
+        (await store.AddDocumentFileAsync(created.DocumentId, v2, DocumentLanguage.Russian, FullAccess))
             .ShouldBe(DocumentWriteStatus.Ok);
         (await store.AddAttachmentAsync(created.DocumentId,
-            new UploadedFile("приложение.pdf", "application/pdf", [9, 9]), 42))
+            new UploadedFile("приложение.pdf", "application/pdf", [9, 9]), FullAccess))
             .ShouldBe(DocumentWriteStatus.Ok);
 
         // Несуществующий документ — NotFound (и файл в хранилище не остаётся).
-        (await store.AddDocumentFileAsync(999_999, v1, DocumentLanguage.Russian, 42))
+        (await store.AddDocumentFileAsync(999_999, v1, DocumentLanguage.Russian, FullAccess))
             .ShouldBe(DocumentWriteStatus.NotFound);
 
         var details = await store.GetAsync(created.DocumentId, FullAccess);
@@ -286,7 +289,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
             var created = await store.CreateAsync(
                 new DocumentDraft(regNumber, new DateOnly(2026, 8, 1), typeId!.Value, DocumentDirection.Internal,
                     null, $"Документ {regNumber}", null, null, null, null, classification, divisionId, 42),
-                [], useCommonDeadline: false, commonDeadline: null);
+                [], useCommonDeadline: false, commonDeadline: null, FullAccess);
             created.Status.ShouldBe(DocumentWriteStatus.Ok);
             return created.DocumentId;
         }

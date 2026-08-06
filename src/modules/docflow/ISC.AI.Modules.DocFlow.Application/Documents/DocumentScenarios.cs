@@ -73,7 +73,7 @@ public sealed record RegisterDocumentCommand(
                 access.NumericSubjectId);
 
             var result = await store.CreateAsync(
-                draft, command.Assignments, command.UseCommonDeadline, command.CommonDeadline, cancellationToken);
+                draft, command.Assignments, command.UseCommonDeadline, command.CommonDeadline, access, cancellationToken);
 
             if (result.Status == DocumentWriteStatus.Ok)
             {
@@ -96,6 +96,9 @@ public sealed record RegisterDocumentCommand(
                 DocumentWriteStatus.ExecutionFieldsMissing =>
                     ResponseDto<int>.BadRequest(
                         "Для документа группы «Исполнение» обязательны приоритет, инспектор и хотя бы одно назначение (ТЗ §3.2)."),
+                DocumentWriteStatus.OutsideClearance =>
+                    ResponseDto<int>.BadRequest(
+                        "Гриф или подразделение документа вне вашего допуска — такой документ вы бы сразу перестали видеть."),
                 _ => ResponseDto<int>.Fail("Не удалось зарегистрировать документ."),
             };
         }
@@ -166,7 +169,7 @@ public sealed record UploadDocumentFileCommand(
             var result = await store.AddDocumentFileAsync(
                 command.DocumentId,
                 new UploadedFile(command.FileName, command.ContentType, command.Content),
-                command.Language, access.NumericSubjectId, cancellationToken);
+                command.Language, access, cancellationToken);
             return result == DocumentWriteStatus.Ok
                 ? ResponseDto<bool>.Ok(true)
                 : ResponseDto<bool>.NotFound("Документ не найден.");
@@ -197,7 +200,7 @@ public sealed record UploadAttachmentCommand(int DocumentId, string FileName, st
             var result = await store.AddAttachmentAsync(
                 command.DocumentId,
                 new UploadedFile(command.FileName, command.ContentType, command.Content),
-                access.NumericSubjectId, cancellationToken);
+                access, cancellationToken);
             return result switch
             {
                 DocumentWriteStatus.Ok => ResponseDto<bool>.Ok(true),
@@ -214,10 +217,17 @@ public sealed record UploadAttachmentCommand(int DocumentId, string FileName, st
 /// задачи (делегаты не переживают перезапуск) либо для обновления корпуса после правок.
 /// Сама индексация аудируется индексатором (<c>Ingest</c>) — команда лишь ставит задачу.
 /// </summary>
-public sealed record ReindexDocumentCommand(int DocumentId) : IRequest<ResponseDto<bool>>
+public sealed record ReindexDocumentCommand(int DocumentId) : IRequest<ResponseDto<bool>>, IAuditableRequest
 {
+    /// <inheritdoc />
+    public AuditAction AuditAction => AuditAction.Modify;
+
+    /// <inheritdoc />
+    public string? AuditSummary => $"docflow:document:{DocumentId}:reindex";
+
     /// <inheritdoc cref="ReindexDocumentCommand" />
-    public sealed class Handler(IBackgroundTaskQueue taskQueue)
+    public sealed class Handler(
+        IBackgroundTaskQueue taskQueue, IDocumentStore store, IAccessContextProvider accessProvider)
         : IRequestHandler<ReindexDocumentCommand, ResponseDto<bool>>
     {
         /// <inheritdoc />
@@ -225,6 +235,15 @@ public sealed record ReindexDocumentCommand(int DocumentId) : IRequest<ResponseD
             ReindexDocumentCommand command, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(command);
+
+            // Постановка задачи — тоже действие над документом: недоступный переиндексировать нельзя
+            // (этап 6.6; раньше обработчик не резолвил допуск вовсе и не аудировался).
+            var access = await accessProvider.GetCurrentAsync(cancellationToken);
+            if (await store.GetAsync(command.DocumentId, access, cancellationToken) is null)
+            {
+                return ResponseDto<bool>.NotFound("Документ не найден.");
+            }
+
             var documentId = command.DocumentId;
             await taskQueue.EnqueueAsync(
                 "Индексация документа в корпус ИИ",
@@ -299,7 +318,7 @@ public sealed record ChangeAssignmentStatusCommand(
 
             var result = await store.ChangeAssignmentStatusAsync(
                 command.AssignmentId, command.NewStatus, command.Comment,
-                access.NumericSubjectId, command.Files, cancellationToken);
+                access, command.Files, cancellationToken);
 
             return result switch
             {
@@ -341,13 +360,13 @@ public sealed record ExtendAssignmentDeadlineCommand(
             var access = await accessProvider.GetCurrentAsync(cancellationToken);
 
             // §4.6: инициатор продления фиксируется обязательно — без числового субъекта не продлеваем.
-            if (access.NumericSubjectId is not { } initiatorId)
+            if (access.NumericSubjectId is null)
             {
                 return ResponseDto<bool>.BadRequest("Продление срока требует аутентифицированного пользователя.");
             }
 
             var result = await store.ExtendDeadlineAsync(
-                command.AssignmentId, command.NewDeadline, command.Reason, initiatorId,
+                command.AssignmentId, command.NewDeadline, command.Reason, access,
                 command.Files, cancellationToken);
 
             return result switch

@@ -129,7 +129,8 @@ public static class DocFlowFileEndpoints
 
     private static bool IsKnownCategory(string category) => category is
         FileCategories.Documents or FileCategories.Attachments
-        or FileCategories.StatusHistory or FileCategories.DeadlineExtensions;
+        or FileCategories.StatusHistory or FileCategories.DeadlineExtensions
+        or FileCategories.Comments;
 }
 
 /// <summary>Категория логгера эндпоинтов раздачи (DI-якорь для <see cref="ILogger{TCategoryName}"/>).</summary>
