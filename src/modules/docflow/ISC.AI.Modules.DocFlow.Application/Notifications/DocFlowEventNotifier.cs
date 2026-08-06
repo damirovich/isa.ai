@@ -25,12 +25,17 @@ public sealed class DocFlowEventNotifier(INotificationStore notifications, IUser
     /// Уведомления о созданных при регистрации назначениях (§4.1): исполнителю — «вам назначено»,
     /// инспектору документа — «создано назначение».
     /// </summary>
+    /// <remarks>
+    /// На вход идёт <see cref="CreatedDocumentNotice"/> ИЗ операции создания, а не перечитанная
+    /// карточка: иначе уведомления молча пропадали бы для документов, которых сам регистратор не видит
+    /// (сужающая политика профиля по роли, ADR-0014) — см. комментарий у самого типа.
+    /// </remarks>
     public async Task DocumentRegisteredAsync(
-        DocumentDetails document, int? actorUserId, CancellationToken cancellationToken = default)
+        CreatedDocumentNotice document, int? actorUserId, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(document);
 
-        var title = NotificationTemplates.DocumentTitle(document.RegNumber, document.ShortContent);
+        var title = document.DocumentTitle;
 
         foreach (var assignment in document.Assignments)
         {
@@ -47,8 +52,8 @@ public sealed class DocFlowEventNotifier(INotificationStore notifications, IUser
                             ["document"] = title,
                             ["deadline"] = FormatDeadline(assignment.Deadline),
                         },
-                        document.Id,
-                        assignment.Id),
+                        document.DocumentId,
+                        assignment.AssignmentId),
                     cancellationToken);
             }
 
@@ -67,8 +72,8 @@ public sealed class DocFlowEventNotifier(INotificationStore notifications, IUser
                             ["document"] = title,
                             ["deadline"] = FormatDeadline(assignment.Deadline),
                         },
-                        document.Id,
-                        assignment.Id),
+                        document.DocumentId,
+                        assignment.AssignmentId),
                     cancellationToken);
             }
         }

@@ -79,8 +79,8 @@ public sealed class DocFlowEventNotifierTests
     {
         var notifier = new DocFlowEventNotifier(_notifications, _users);
 
-        var document = Document(inspectorUserId: 3, assignees: [2]);
-        await notifier.DocumentRegisteredAsync(document, actorUserId: 1);
+        var created = Created(inspectorUserId: 3, assignees: [2]);
+        await notifier.DocumentRegisteredAsync(created, actorUserId: 1);
 
         var drafts = CapturedDrafts();
         drafts.Count.ShouldBe(2);
@@ -95,8 +95,8 @@ public sealed class DocFlowEventNotifierTests
     {
         var notifier = new DocFlowEventNotifier(_notifications, _users);
 
-        var document = Document(inspectorUserId: 2, assignees: [2]);
-        await notifier.DocumentRegisteredAsync(document, actorUserId: 1);
+        var created = Created(inspectorUserId: 2, assignees: [2]);
+        await notifier.DocumentRegisteredAsync(created, actorUserId: 1);
 
         var draft = CapturedDrafts().ShouldHaveSingleItem();
         draft.MessageKey.ShouldBe(NotificationTemplates.AssignedToYou);
@@ -115,6 +115,21 @@ public sealed class DocFlowEventNotifierTests
     public async Task Cancellation_is_not_swallowed() =>
         await Should.ThrowAsync<OperationCanceledException>(
             () => DocFlowEventNotifier.SafeAsync(() => throw new OperationCanceledException()));
+
+    /// <summary>
+    /// Итог регистрации для уведомлений — приходит ИЗ операции создания, а не перечитыванием карточки
+    /// (иначе уведомления пропадали бы для документов, невидимых самому регистратору).
+    /// </summary>
+    private static CreatedDocumentNotice Created(int inspectorUserId, IReadOnlyList<int> assignees) =>
+        new(
+            DocumentId: 9,
+            DocumentTitle: "П-1",
+            InspectorUserId: inspectorUserId,
+            Assignments:
+            [
+                .. assignees.Select((assignee, index) => new CreatedAssignmentNotice(
+                    AssignmentId: index + 1, AssigneeUserId: assignee, Deadline: new DateOnly(2026, 8, 20))),
+            ]);
 
     private static DocumentDetails Document(int inspectorUserId, IReadOnlyList<int> assignees) =>
         new(

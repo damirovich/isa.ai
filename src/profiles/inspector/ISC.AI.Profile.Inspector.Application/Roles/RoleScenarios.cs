@@ -18,14 +18,14 @@ namespace ISC.AI.Profile.Inspector.Application.Roles;
 public sealed record ListUserRolesQuery : IRequest<ResponseDto<IReadOnlyList<UserRoleRow>>>
 {
     /// <inheritdoc cref="ListUserRolesQuery" />
-    public sealed class Handler(IUserRoleStore store, IAccessContextProvider accessProvider)
+    public sealed class Handler(IUserRoleStore store, ISubjectProvider subjectProvider)
         : IRequestHandler<ListUserRolesQuery, ResponseDto<IReadOnlyList<UserRoleRow>>>
     {
         /// <inheritdoc />
         public async ValueTask<ResponseDto<IReadOnlyList<UserRoleRow>>> Handle(
             ListUserRolesQuery query, CancellationToken cancellationToken)
         {
-            if (!await RoleScenariosGuard.CallerCanManageRolesAsync(store, accessProvider, cancellationToken))
+            if (!await RoleScenariosGuard.CallerCanManageRolesAsync(store, subjectProvider, cancellationToken))
             {
                 return ResponseDto<IReadOnlyList<UserRoleRow>>.BadRequest(
                     "Список и назначение ролей доступны только Администратору.");
@@ -47,7 +47,7 @@ public sealed record SetUserRoleCommand(int UserId, UserRole? Role) : IRequest<R
     public string? AuditSummary => $"inspector:user-role:{UserId}:{(Role is { } r ? r.ToString() : "снята")}";
 
     /// <inheritdoc cref="SetUserRoleCommand" />
-    public sealed class Handler(IUserRoleStore store, IAccessContextProvider accessProvider)
+    public sealed class Handler(IUserRoleStore store, ISubjectProvider subjectProvider)
         : IRequestHandler<SetUserRoleCommand, ResponseDto<bool>>
     {
         /// <inheritdoc />
@@ -55,7 +55,7 @@ public sealed record SetUserRoleCommand(int UserId, UserRole? Role) : IRequest<R
         {
             ArgumentNullException.ThrowIfNull(command);
 
-            if (!await RoleScenariosGuard.CallerCanManageRolesAsync(store, accessProvider, cancellationToken))
+            if (!await RoleScenariosGuard.CallerCanManageRolesAsync(store, subjectProvider, cancellationToken))
             {
                 return ResponseDto<bool>.BadRequest("Назначение ролей доступно только Администратору.");
             }
@@ -67,6 +67,13 @@ public sealed record SetUserRoleCommand(int UserId, UserRole? Role) : IRequest<R
 }
 
 /// <summary>Общая проверка вызывающего для обоих сценариев (см. remarks класса).</summary>
+/// <remarks>
+/// Опирается на <see cref="ISubjectProvider"/> («кто вошёл»), а НЕ на <c>IAccessContextProvider</c>
+/// («что вошедшему можно»). Это исправление отдельного отказа, зафиксированного проверкой 6.4.2:
+/// на ЧИСТОЙ установке ни у кого нет записи в <c>core.clearance</c>, поэтому <c>GetCurrentAsync</c>
+/// бросал <c>AccessContextRequiredException</c> — и страница ролей падала ИМЕННО ТАМ, где режим
+/// первичной настройки и нужен. Право распоряжаться ролями определяется ролью, а не допуском.
+/// </remarks>
 file static class RoleScenariosGuard
 {
     /// <summary>
@@ -82,10 +89,9 @@ file static class RoleScenariosGuard
     /// навсегда. Текущее правило самовосстанавливающееся: не стало Администратора — окно открылось.
     /// </remarks>
     public static async Task<bool> CallerCanManageRolesAsync(
-        IUserRoleStore store, IAccessContextProvider accessProvider, CancellationToken cancellationToken)
+        IUserRoleStore store, ISubjectProvider subjectProvider, CancellationToken cancellationToken)
     {
-        var access = await accessProvider.GetCurrentAsync(cancellationToken);
-        if (access.NumericSubjectId is not { } callerId)
+        if (await subjectProvider.GetCurrentUserIdAsync(cancellationToken) is not { } callerId)
         {
             return false;
         }

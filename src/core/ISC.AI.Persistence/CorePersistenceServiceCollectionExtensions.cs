@@ -55,6 +55,10 @@ public static class CorePersistenceServiceCollectionExtensions
         // Per-op чтение допуска (Э3-08, ТБ-012/016): без кэша — отзыв действует немедленно.
         services.AddScoped<ClearanceAccessReader>();
 
+        // Ведение допусков из интерфейса (ТБ-011/030): раньше гриф и подразделения правились только
+        // SQL'ем по живой базе — мимо неизменяемого журнала.
+        services.AddScoped<Abstractions.Security.IClearanceStore, ClearanceStore>();
+
         // Хранилище диалогов чата (сохранение истории общения), разграничение по владельцу-субъекту.
         services.AddScoped<IConversationStore, ConversationStore>();
 

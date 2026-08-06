@@ -84,6 +84,12 @@ public sealed class InspectorProfile : IProfile
         new ModuleDescriptor("admin-roles", "/admin/roles", "Роли пользователей",
             Icons.Material.Filled.AdminPanelSettings, typeof(UserRoles), ReadPolicy, GroupAdmin),
 
+        // Допуски (ТБ-011/020/021) — гриф и подразделения. Раньше правились только SQL'ем по живой
+        // базе, мимо неизменяемого журнала; страница закрывает это и показывает расхождение со
+        // справочником подразделений.
+        new ModuleDescriptor("admin-clearances", "/admin/clearances", "Допуски пользователей",
+            Icons.Material.Filled.Key, typeof(UserClearances), ReadPolicy, GroupAdmin),
+
         // --- Секция «Документооборот»: подключаемый пакет модулей docflow (ADR-0017, Э4-35) ---
         // Страницы объявляет САМ модуль; профиль лишь включает их в свой реестр. Пока пусто (скелет, этап 0).
         .. DocFlowModule.Modules,

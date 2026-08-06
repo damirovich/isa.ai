@@ -55,28 +55,42 @@
     <div class="d-flex gap-3 flex-wrap">
         @* Без предзаполненного значения — сознательный выбор (2026-08-06, вопрос 2): предзаполненный
            0 предлагал бы «самый открытый» гриф по умолчанию для ДСП-системы, что противоречит
-           fail-closed; пользователь обязан выбрать явно. *@
+           fail-closed; пользователь обязан выбрать явно.
+           Список ограничен СОБСТВЕННЫМ допуском: документ выше своего грифа зарегистрировать нельзя
+           (он сразу пропал бы из виду), и предлагать заведомо отказной вариант незачем. Проверка на
+           сервере при этом остаётся — она ловит запрос в обход формы и отзыв допуска на открытой форме. *@
         <MudSelect T="short?" @bind-Value="_classification" Label="Гриф *" Variant="Variant.Outlined"
-                   Style="width:200px;" Placeholder="Выберите гриф">
-            @for (short level = 0; level <= 9; level++)
+                   Style="width:220px;" Placeholder="Выберите гриф" Disabled="_maxClassification is null">
+            @for (short level = 0; level <= SelectableClassificationLimit; level++)
             {
                 var value = level;
                 <MudSelectItem T="short?" Value="@value">@(value == 0 ? "0 — открытый" : value.ToString())</MudSelectItem>
             }
         </MudSelect>
         <MudSelect T="int?" @bind-Value="_divisionId" Label="Подразделение-владелец *" Variant="Variant.Outlined"
-                   Style="min-width:280px;" Class="flex-grow-1">
-            @foreach (var division in _divisions)
+                   Style="min-width:280px;" Class="flex-grow-1" Disabled="_ownerDivisions.Count == 0">
+            @foreach (var division in _ownerDivisions)
             {
                 <MudSelectItem T="int?" Value="@division.Id">@division.Name</MudSelectItem>
             }
         </MudSelect>
     </div>
-    @if (_divisions.Count == 0)
+
+    @* Подпись показывает ФАКТИЧЕСКИЙ потолок списка, а не «сырой» допуск: при допуске выше шкалы
+       (ошибочная строка в core.clearance) подпись «до 12» противоречила бы списку 0..9. *@
+    @if (SelectableClassificationLimit >= 0)
     {
         <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1 d-block">
-            Справочник подразделений пуст — его ведёт профиль (раздел «Подразделения»).
+            Ваш допуск: гриф до @SelectableClassificationLimit включительно;
+            подразделений-владельцев доступно: @_ownerDivisions.Count.
         </MudText>
+    }
+
+    @if (_scopeError is not null)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-2">
+            @_scopeError
+        </MudAlert>
     }
 </MudPaper>
 
@@ -109,6 +123,10 @@
                            Style="width:220px;" Class="mb-2" />
         }
 
+        @* Здесь список подразделений ПОЛНЫЙ, в отличие от подразделения-владельца. Назначение —
+           это «кому поручено исполнить», а не поле видимости: видимость документа определяет только
+           его подразделение-владелец. Инспекция и должна раздавать поручения В ДРУГИЕ подразделения
+           (§4.1) — сузить этот список значило бы сломать основной сценарий. *@
         @foreach (var row in _assignments)
         {
             <div class="d-flex gap-3 align-center flex-wrap mb-2">
@@ -143,7 +161,7 @@
 
 <div class="d-flex gap-2">
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
-               Disabled="_busy" OnClick="SubmitAsync">Зарегистрировать</MudButton>
+               Disabled="_busy || !CanRegister" OnClick="SubmitAsync">Зарегистрировать</MudButton>
     <MudButton Variant="Variant.Text" OnClick="@(() => Navigation.NavigateTo("/docflow/documents"))">Отмена</MudButton>
 </div>
 
@@ -156,7 +174,13 @@
     }
 
     private readonly List<DocumentTypeItem> _types = [];
+
+    // ПОЛНЫЙ справочник — для назначений (§4.1: поручение уходит в другое подразделение).
     private readonly List<DivisionItem> _divisions = [];
+
+    // Только те, где субъект вправе быть ВЛАДЕЛЬЦЕМ документа (пересечение с его допуском).
+    private readonly List<DivisionItem> _ownerDivisions = [];
+
     private readonly List<UserItem> _users = [];
     private readonly List<AssignmentRow> _assignments = [new()];
 
@@ -177,8 +201,28 @@
     private bool _busy;
     private string? _error;
 
+    // Потолок шкалы в интерфейсе — как было до сужения (0..9). Нужен, чтобы ошибочно выставленный
+    // в БД допуск (скажем, 1000) не превратил выпадающий список в тысячу строк.
+    private const short MaxSelectableClassification = 9;
+
+    // null = пределы допуска не получены; форма в этом состоянии НИЧЕГО не предлагает (fail-closed).
+    private short? _maxClassification;
+    private string? _scopeError;
+
+    // Отличает «справочник действительно пуст» от «запрос справочника не удался»: подсказки разные,
+    // и посылать человека наполнять непустой справочник — худшее, что тут можно сделать.
+    private bool _divisionsLoaded;
+
+    // -1 => цикл не выполнится ни разу: без известного допуска грифов на выбор нет.
+    private int SelectableClassificationLimit =>
+        _maxClassification is { } max ? Math.Min((int)max, MaxSelectableClassification) : -1;
+
     private bool IsExecution =>
         _typeId is { } id && _types.FirstOrDefault(t => t.Id == id)?.Group == DocumentGroup.Execution;
+
+    // Регистрировать нечем, если неизвестен допуск либо нет ни одного своего подразделения-владельца:
+    // любой такой документ был бы отвергнут сервером, поэтому кнопка не активна.
+    private bool CanRegister => _maxClassification is not null && _ownerDivisions.Count > 0;
 
     protected override async Task OnInitializedAsync()
     {
@@ -192,6 +236,7 @@
         var divisions = await Dispatcher.Send(new ListDivisionsQuery());
         if (divisions is { Status: true, Data: { } divisionList })
         {
+            _divisionsLoaded = true;
             _divisions.AddRange(divisionList);
         }
 
@@ -200,6 +245,31 @@
         {
             _users.AddRange(userList);
         }
+
+        await LoadScopeAsync();
+    }
+
+    /// <summary>Пределы регистрации субъекта: до какого грифа и в каких подразделениях он вправе создать документ.</summary>
+    private async Task LoadScopeAsync()
+    {
+        var scope = await Dispatcher.Send(new GetRegistrationScopeQuery());
+        if (scope is not { Status: true, Data: { } limits })
+        {
+            _scopeError = "Не удалось определить ваш допуск — регистрация недоступна. Обратитесь к администратору.";
+            return;
+        }
+
+        _maxClassification = limits.MaxClassification;
+        _ownerDivisions.AddRange(limits.OwnerDivisions);
+
+        _scopeError = (_ownerDivisions.Count, _divisionsLoaded, _divisions.Count) switch
+        {
+            ( > 0, _, _) => null,
+            (0, false, _) => "Справочник подразделений не загрузился — повторите позже.",
+            (0, true, 0) => "Справочник подразделений пуст — его ведёт профиль (раздел «Подразделения»).",
+            _ => "Вам не разрешено ни одно подразделение-владелец, поэтому регистрировать документы нельзя. "
+                + "Расширение допуска выдаёт администратор.",
+        };
     }
 
     private async Task SubmitAsync()

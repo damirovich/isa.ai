@@ -115,6 +115,8 @@ try
     {
         builder.Services.AddScoped<IAccessContextProvider, DevAccessContextProvider>();
         builder.Services.AddScoped<AuthenticationStateProvider, DevAuthenticationStateProvider>();
+        builder.Services.AddHttpContextAccessor();
+        builder.Services.AddScoped<ISubjectProvider, HttpSubjectProvider>();
         builder.Services.AddAuthorization(); // без фолбэк-политики: dev-режим запускаем без входа
     }
     else
@@ -158,6 +160,10 @@ try
                 }
             });
         }
+
+        // «Кто вошёл» — отдельно от «что ему можно»: администрирование допусков и ролей обязано
+        // работать ДО появления первой записи допуска, иначе чистый контур запирается (см. ISubjectProvider).
+        builder.Services.AddScoped<ISubjectProvider, HttpSubjectProvider>();
 
         // Боевой контекст доступа: допуск из core.clearance на каждую операцию, fail-closed (ТБ-012/016/021).
         builder.Services.AddScoped<IAccessContextProvider, ClearanceAccessContextProvider>();

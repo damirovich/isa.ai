@@ -160,19 +160,35 @@ public sealed class InspectorAccessPolicyTests : IAsyncLifetime
             .ShouldBe(DocumentWriteStatus.Ok);
 
         // Регистрация выше собственного допуска запрещена: иначе документ сразу пропал бы из виду.
+        // Статус НАЗЫВАЕТ причину — пользователь должен знать, какое из двух полей исправлять.
         var lowClearance = new AccessContext("60", MaxClassification: 1, AllowedDivisions: [5]);
         (await store.CreateAsync(
             new DocumentDraft("W-2", new DateOnly(2026, 8, 6), typeId.Value, DocumentDirection.Incoming,
                 null, "Гриф выше допуска", null, null, DocumentPriority.Medium, 60, 7, 5, 60),
             [new AssignmentDraft(5, 61, null)], useCommonDeadline: false, commonDeadline: null, lowClearance))
-            .Status.ShouldBe(DocumentWriteStatus.OutsideClearance);
+            .Status.ShouldBe(DocumentWriteStatus.ClassificationOutsideClearance);
 
-        // …и в чужое подразделение — тоже.
+        // …и в чужое подразделение — тоже, но это ДРУГОЙ отказ.
         (await store.CreateAsync(
             new DocumentDraft("W-3", new DateOnly(2026, 8, 6), typeId.Value, DocumentDirection.Incoming,
                 null, "Чужое подразделение", null, null, DocumentPriority.Medium, 60, 0, 999, 60),
             [new AssignmentDraft(5, 61, null)], useCommonDeadline: false, commonDeadline: null, author))
-            .Status.ShouldBe(DocumentWriteStatus.OutsideClearance);
+            .Status.ShouldBe(DocumentWriteStatus.DivisionOutsideClearance);
+
+        // Оба поля мимо — сообщается про ГРИФ (проверяется первым): пользователь чинит по одному,
+        // а не получает «что-то не так» без указания поля.
+        (await store.CreateAsync(
+            new DocumentDraft("W-4", new DateOnly(2026, 8, 6), typeId.Value, DocumentDirection.Incoming,
+                null, "И гриф, и подразделение мимо", null, null, DocumentPriority.Medium, 60, 7, 999, 60),
+            [new AssignmentDraft(5, 61, null)], useCommonDeadline: false, commonDeadline: null, lowClearance))
+            .Status.ShouldBe(DocumentWriteStatus.ClassificationOutsideClearance);
+
+        // Граница включительна: гриф РАВЕН допуску — регистрация проходит (не «строго меньше»).
+        (await store.CreateAsync(
+            new DocumentDraft("W-5", new DateOnly(2026, 8, 6), typeId.Value, DocumentDirection.Incoming,
+                null, "Гриф ровно по допуску", null, null, DocumentPriority.Medium, 60, 1, 5, 60),
+            [new AssignmentDraft(5, 61, null)], useCommonDeadline: false, commonDeadline: null, lowClearance))
+            .Status.ShouldBe(DocumentWriteStatus.Ok);
     }
 
     private sealed class TempFileStorage : IDocFlowFileStorage

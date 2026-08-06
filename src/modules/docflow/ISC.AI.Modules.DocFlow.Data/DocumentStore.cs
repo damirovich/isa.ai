@@ -179,9 +179,15 @@ public sealed class DocumentStore(
         // Регистрация — единственная запись без «уже существующего» объекта, поэтому проверяется не
         // видимость, а вместимость в допуск автора (ТБ-020/021, этап 6.6): документ выше своего грифа
         // или в чужое подразделение создать нельзя — он тут же стал бы невидим самому создавшему.
-        if (draft.Classification > access.MaxClassification || !access.AllowedDivisions.Contains(draft.DivisionId))
+        // Два РАЗНЫХ статуса, а не один общий: пользователь должен знать, какое поле исправлять.
+        if (draft.Classification > access.MaxClassification)
         {
-            return new DocumentCreateResult(DocumentWriteStatus.OutsideClearance);
+            return new DocumentCreateResult(DocumentWriteStatus.ClassificationOutsideClearance);
+        }
+
+        if (!access.AllowedDivisions.Contains(draft.DivisionId))
+        {
+            return new DocumentCreateResult(DocumentWriteStatus.DivisionOutsideClearance);
         }
 
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -229,6 +235,10 @@ public sealed class DocumentStore(
         };
         db.Documents.Add(document);
 
+        // Созданные назначения удерживаются, чтобы после SaveChanges отдать их идентификаторы
+        // вызывающему для уведомлений (см. CreatedDocumentNotice) — без повторного чтения документа.
+        var createdAssignments = new List<DocumentAssignment>(assignments.Count);
+
         if (isExecution)
         {
             var now = DateTime.UtcNow;
@@ -245,6 +255,7 @@ public sealed class DocumentStore(
                     Status = AssignmentStatus.Registered,
                 };
                 db.DocumentAssignments.Add(assignment);
+                createdAssignments.Add(assignment);
 
                 // История: создание назначения = переход «ниоткуда» в «Зарегистрировано» (§4.8).
                 db.AssignmentStatusHistories.Add(new AssignmentStatusHistory
@@ -272,7 +283,15 @@ public sealed class DocumentStore(
             return new DocumentCreateResult(DocumentWriteStatus.RegNumberTaken);
         }
 
-        return new DocumentCreateResult(DocumentWriteStatus.Ok, document.Id);
+        // Данные для уведомлений отдаются ИЗ этой же операции: право исполнителя и инспектора получить
+        // уведомление не должно зависеть от того, видит ли регистратор свой документ (см. CreatedDocumentNotice).
+        var notice = new CreatedDocumentNotice(
+            document.Id,
+            DocumentTitle(document.RegNumber, document.ShortContent),
+            document.InspectorUserId,
+            [.. createdAssignments.Select(a => new CreatedAssignmentNotice(a.Id, a.AssigneeUserId, a.Deadline))]);
+
+        return new DocumentCreateResult(DocumentWriteStatus.Ok, document.Id, notice);
     }
 
     /// <inheritdoc />

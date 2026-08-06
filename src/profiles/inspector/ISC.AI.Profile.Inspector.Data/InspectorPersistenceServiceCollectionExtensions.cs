@@ -38,6 +38,10 @@ public static class InspectorPersistenceServiceCollectionExtensions
         // Роли пользователей (§2.1 ТЗ СКИД, этап 6 Э4-35) — построчный доступ к докфлоу-документам.
         services.AddScoped<IUserRoleStore, UserRoleStore>();
 
+        // Сверка допусков со справочником подразделений на старте: словарь номеров обязан быть общим
+        // у решётки ядра и справочника профиля, но ничем не проверяется (см. сам класс).
+        services.AddHostedService<ClearanceDivisionConsistencyCheck>();
+
         // Переопределяет AllowAllAccessPolicy ядра (AddCoreRetrieval регистрируется РАНЬШЕ — Program.cs)
         // тем же приёмом, что и ICitationExtractor/ICitationNormalizer: явная замена дефолта повторной
         // регистрацией, не вторая параллельная. Singleton — как у дефолта; IDbContextFactory сам по себе

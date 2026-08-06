@@ -87,14 +87,15 @@ public sealed record RegisterDocumentCommand(
                     async (sp, ct) => await sp.GetRequiredService<IDocumentIndexer>().IndexAsync(documentId, ct),
                     cancellationToken);
 
-                // Уведомления о созданных назначениях (§4.1, разд. 5). Карточка перечитывается: только
-                // после записи известны идентификаторы назначений и итоговые сроки (общий срок §4.1
-                // раскладывается по назначениям в хранилище). Регистратор себя не уведомляет.
-                var registered = await store.GetAsync(documentId, access, cancellationToken);
-                if (registered is not null)
+                // Уведомления о созданных назначениях (§4.1, разд. 5). Данные берутся ИЗ результата
+                // создания, а НЕ перечитыванием карточки допуском автора: право исполнителя и
+                // инспектора получить уведомление не зависит от того, видит ли документ регистратор
+                // (сужающая политика профиля может быть построена по роли — ADR-0014). Перечитывание
+                // молча съедало все уведомления такого документа. Регистратор себя не уведомляет.
+                if (result.Notice is { } notice)
                 {
                     await DocFlowEventNotifier.SafeAsync(() => notifier.DocumentRegisteredAsync(
-                        registered, access.NumericSubjectId, cancellationToken));
+                        notice, access.NumericSubjectId, cancellationToken));
                 }
             }
 
@@ -108,9 +109,16 @@ public sealed record RegisterDocumentCommand(
                 DocumentWriteStatus.ExecutionFieldsMissing =>
                     ResponseDto<int>.BadRequest(
                         "Для документа группы «Исполнение» обязательны приоритет, инспектор и хотя бы одно назначение (ТЗ §3.2)."),
-                DocumentWriteStatus.OutsideClearance =>
+                // Два отдельных текста вместо прежнего «гриф ИЛИ подразделение»: раньше пользователю
+                // приходилось гадать, какое из двух полей исправлять.
+                DocumentWriteStatus.ClassificationOutsideClearance =>
                     ResponseDto<int>.BadRequest(
-                        "Гриф или подразделение документа вне вашего допуска — такой документ вы бы сразу перестали видеть."),
+                        "Гриф документа выше вашего допуска: такой документ вы бы сразу перестали видеть. "
+                        + "Выберите гриф не выше вашего либо запросите повышение допуска."),
+                DocumentWriteStatus.DivisionOutsideClearance =>
+                    ResponseDto<int>.BadRequest(
+                        "Подразделение-владелец не входит в разрешённые вам: такой документ вы бы сразу "
+                        + "перестали видеть. Выберите подразделение из своих либо запросите расширение допуска."),
                 _ => ResponseDto<int>.Fail("Не удалось зарегистрировать документ."),
             };
         }

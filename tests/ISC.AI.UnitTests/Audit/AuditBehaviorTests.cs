@@ -29,11 +29,16 @@ public sealed class AuditBehaviorTests
         var writer = Substitute.For<IAuditWriter>();
         var accessProvider = Substitute.For<IAccessContextProvider>();
         accessProvider.GetCurrentAsync(Arg.Any<CancellationToken>())
-            .Returns(new AccessContext("u1", maxClassification, [1]));
-        var behavior = new AuditBehavior<FakeAuditable, ResponseDto<string>>(
-            writer, accessProvider, NullLogger<AuditBehavior<FakeAuditable, ResponseDto<string>>>.Instance);
-        return (behavior, writer);
+            .Returns(new AccessContext("1", maxClassification, [1]));
+        return (Build(writer, accessProvider), writer);
     }
+
+    private static AuditBehavior<FakeAuditable, ResponseDto<string>> Build(
+        IAuditWriter writer, IAccessContextProvider accessProvider, ISubjectProvider? subjectProvider = null) =>
+        new(writer,
+            accessProvider,
+            subjectProvider ?? Substitute.For<ISubjectProvider>(),
+            NullLogger<AuditBehavior<FakeAuditable, ResponseDto<string>>>.Instance);
 
     private static MessageHandlerDelegate<FakeAuditable, ResponseDto<string>> Ok() =>
         (_, _) => ValueTask.FromResult(ResponseDto<string>.Ok("готово"));
@@ -87,5 +92,48 @@ public sealed class AuditBehaviorTests
 
         await Should.ThrowAsync<InvalidOperationException>(async () =>
             await behavior.Handle(new FakeAuditable(), Ok(), CancellationToken.None));
+    }
+
+    [Fact(DisplayName = "Аудит без допуска: «кто» берётся из сессии, гриф — максимальный")]
+    public async Task Subject_is_taken_from_session_when_clearance_is_missing()
+    {
+        // Ровно случай ПЕРВОЙ выдачи допуска на чистом контуре: у распорядителя допуска ещё нет,
+        // GetCurrentAsync бросает. Раньше такая запись уходила в журнал без субъекта — самое
+        // чувствительное действие системы оставалось без ответа на вопрос «кто» (ТБ-030).
+        var writer = Substitute.For<IAuditWriter>();
+        var accessProvider = Substitute.For<IAccessContextProvider>();
+        accessProvider.GetCurrentAsync(Arg.Any<CancellationToken>())
+            .Returns<Task<AccessContext>>(_ => throw new AccessContextRequiredException());
+
+        var subjectProvider = Substitute.For<ISubjectProvider>();
+        subjectProvider.GetCurrentUserIdAsync(Arg.Any<CancellationToken>()).Returns((int?)7);
+
+        await Build(writer, accessProvider, subjectProvider)
+            .Handle(new FakeAuditable(), Ok(), CancellationToken.None);
+
+        await writer.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.SubjectId == 7 && e.Classification == short.MaxValue),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "Аудит без допуска: сбой определения субъекта не срывает запись журнала")]
+    public async Task Subject_resolution_failure_does_not_block_the_audit_record()
+    {
+        var writer = Substitute.For<IAuditWriter>();
+        var accessProvider = Substitute.For<IAccessContextProvider>();
+        accessProvider.GetCurrentAsync(Arg.Any<CancellationToken>())
+            .Returns<Task<AccessContext>>(_ => throw new AccessContextRequiredException());
+
+        var subjectProvider = Substitute.For<ISubjectProvider>();
+        subjectProvider.GetCurrentUserIdAsync(Arg.Any<CancellationToken>())
+            .Returns<Task<int?>>(_ => throw new InvalidOperationException("сессия недоступна"));
+
+        // Запись без «кто» хуже записи с «кто», но НАМНОГО лучше отсутствия записи: при fail-closed
+        // отказ журнала отменил бы и саму операцию.
+        await Build(writer, accessProvider, subjectProvider)
+            .Handle(new FakeAuditable(), Ok(), CancellationToken.None);
+
+        await writer.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.SubjectId == null), Arg.Any<CancellationToken>());
     }
 }
