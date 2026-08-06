@@ -24,6 +24,21 @@ public static class DocFlowFileEndpoints
     private static readonly Regex StoredFileNamePattern = new(
         @"^[0-9a-fA-F]{32}\.[A-Za-z0-9]{2,5}$", RegexOptions.Compiled);
 
+    // БЕЗОПАСНОСТЬ (аудит 2026-08-06): сопутствующие вложения загружаются БЕЗ ограничения типа
+    // (осознанно, как в СКИД, — см. FileRules) — ContentType в БД равен тому, что назвал ЗАГРУЗИВШИЙ,
+    // а не проверенному содержимому. Если тип не в этом списке, отдаём принудительно как вложение
+    // (Content-Disposition: attachment) НЕЗАВИСИМО от параметра download — иначе прямая навигация на
+    // URL (запасная ссылка «Просмотр» для нераспознанных форматов) отрисовала бы, например, text/html
+    // с same-origin XSS. На клиентский предпросмотр (docxPreview.js) не влияет: там байты берутся
+    // через fetch(), а Content-Disposition управляет только НАВИГАЦИЕЙ браузера, не fetch-запросами.
+    private static readonly HashSet<string> SafeInlineContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "application/pdf",
+        "image/png", "image/jpeg", "image/gif", "image/bmp", "image/webp",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword",
+    };
+
     /// <summary>Маршрут <c>GET /docflow/files/{category}/{parentId}/{storedFileName}</c>.</summary>
     public static void MapDocFlowFileEndpoints(this IEndpointRouteBuilder endpoints)
     {
@@ -33,6 +48,7 @@ public static class DocFlowFileEndpoints
     }
 
     private static async Task<IResult> ServeFileAsync(
+        HttpContext httpContext,
         [FromRoute] string category,
         [FromRoute] int parentId,
         [FromRoute] string storedFileName,
@@ -44,6 +60,10 @@ public static class DocFlowFileEndpoints
         CancellationToken cancellationToken,
         [FromQuery(Name = "download")] bool download = false)
     {
+        // Второй рубеж против MIME-confusion (аудит 2026-08-06): браузер не должен «угадывать» тип
+        // по содержимому вместо заявленного Content-Type.
+        httpContext.Response.Headers.Append("X-Content-Type-Options", "nosniff");
+
         if (!IsKnownCategory(category) || !StoredFileNamePattern.IsMatch(storedFileName))
         {
             DocFlowFileEndpointsLog.RejectedBadRoute(logger, category, storedFileName);
@@ -99,8 +119,12 @@ public static class DocFlowFileEndpoints
                 ObjectRef: $"docflow:file:{category}:{parentId}:{storedFileName}"),
             cancellationToken);
 
+        // Типы вне allowlist'а — принудительно вложением, даже если download=false не запрашивал этого
+        // (см. комментарий у SafeInlineContentTypes).
+        var attachToResponse = download || !SafeInlineContentTypes.Contains(file.ContentType);
         return Results.File(
-            stream, file.ContentType, fileDownloadName: download ? file.FileName : null, enableRangeProcessing: true);
+            stream, file.ContentType, fileDownloadName: attachToResponse ? file.FileName : null,
+            enableRangeProcessing: true);
     }
 
     private static bool IsKnownCategory(string category) => category is

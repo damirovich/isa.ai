@@ -54,6 +54,32 @@ function isZipArchive(buffer) {
     return header.length === 2 && header[0] === 0x50 && header[1] === 0x4B;
 }
 
+// БЕЗОПАСНОСТЬ (найдено аудитом 2026-08-06): altChunk — вложенный HTML-объект, который Word сам
+// создаёт при вставке HTML-файла объектом; docx-preview по умолчанию (renderAltChunks:true в
+// библиотеке) рендерит его в <iframe srcdoc=...> БЕЗ атрибута sandbox — содержимое исполняется на
+// origin ISC.AI (доступ к cookies, DOM, вызовам защищённых эндпоинтов от имени открывшего файл).
+// Загрузить DOCX может любой аутентифицированный (тип в allowlist загрузки), а открыть «Просмотр» —
+// любой с допуском к документу: классический сценарий эскалации через файл. renderAltChunks:false
+// отключает рендер на уровне библиотеки; sanitizeRenderedDocx — второй рубеж (на случай будущих
+// версий/веток библиотеки), удаляет любые iframe и небезопасные схемы ссылок (javascript:, data:).
+const SAFE_HREF_SCHEME = /^https?:\/\//i;
+
+function sanitizeRenderedDocx(container) {
+    for (const frame of container.querySelectorAll('iframe')) {
+        frame.remove();
+    }
+
+    for (const link of container.querySelectorAll('a[href]')) {
+        const href = link.getAttribute('href') || '';
+        if (href.startsWith('#') || SAFE_HREF_SCHEME.test(href)) {
+            link.setAttribute('rel', 'noopener noreferrer');
+            link.setAttribute('target', '_blank');
+        } else {
+            link.removeAttribute('href');
+        }
+    }
+}
+
 // blob-URL прошлых предпросмотров: отзываются при каждом новом открытии и при уходе со страницы,
 // чтобы содержимое файлов не копилось в памяти вкладки.
 let objectUrls = [];
@@ -97,7 +123,12 @@ export async function renderDocxPreview(containerId, fileUrl) {
             return { status: 'legacy-doc' };
         }
 
-        await docx.renderAsync(buffer, container, container, { className: 'docflow-docx', inWrapper: true });
+        await docx.renderAsync(buffer, container, container, {
+            className: 'docflow-docx',
+            inWrapper: true,
+            renderAltChunks: false, // XSS — см. комментарий у sanitizeRenderedDocx выше
+        });
+        sanitizeRenderedDocx(container);
         return { status: 'ok' };
     } catch (error) {
         return { status: 'error', message: error?.message ?? String(error) };
@@ -109,8 +140,16 @@ export async function renderDocxPreview(containerId, fileUrl) {
  * URL при 404 отрисовал бы СТРАНИЦУ «Not Found» всей системы внутри диалога — здесь же настоящий
  * код ответа виден и превращается в аккуратное сообщение. Возвращает { status, objectUrl, message }:
  * 'ok' | 'unavailable' | 'error'.
+ *
+ * БЕЗОПАСНОСТЬ (найдено аудитом 2026-08-06): mimeType — ОБЯЗАТЕЛЬНЫЙ параметр, тип blob строится ИМ,
+ * а не заголовком ответа сервера (response.blob() унаследовал бы Content-Type). Сопутствующие вложения
+ * загружаются без ограничения типа (осознанно, как в СКИД) — злоумышленник может назвать файл
+ * «отчёт.pdf», а реальным содержимым положить text/html; сервер при раздаче вернёт ИМЕННО тот
+ * Content-Type, что был при загрузке. Браузер выбирает поведение по типу BLOB'а, не по имени файла —
+ * если мы навяжем свой тип (по формату, который сами же и выбрали для рендера), содержимое либо
+ * корректно отрисуется, либо browser откажется его распознать as HTML — исполнения скрипта не будет.
  */
-export async function fetchFileToObjectUrl(fileUrl) {
+export async function fetchFileToObjectUrl(fileUrl, mimeType) {
     try {
         revokeObjectUrls();
 
@@ -123,7 +162,8 @@ export async function fetchFileToObjectUrl(fileUrl) {
             return { status: 'error', message: `сервер вернул ${response.status}` };
         }
 
-        const blob = await response.blob();
+        const bytes = await response.arrayBuffer();
+        const blob = new Blob([bytes], { type: mimeType });
         const objectUrl = URL.createObjectURL(blob);
         objectUrls.push(objectUrl);
         return { status: 'ok', objectUrl };

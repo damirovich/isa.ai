@@ -448,6 +448,27 @@ else
     private static bool HasInlinePreview(string fileName) =>
         IsWordDocument(fileName) || IsPdf(fileName) || IsImage(fileName);
 
+    // БЕЗОПАСНОСТЬ (аудит 2026-08-06): MIME для blob'а предпросмотра выбираем САМИ, по формату, под
+    // который рендерим ветку UI, — НЕ доверяем Content-Type, вернувшемуся с сервера (для вложений он
+    // равен тому, что назвал загрузивший файл, см. FileRules — вложения намеренно без ограничения
+    // типа). Если реальные байты не совпадают с объявленным типом, браузер не сможет их выполнить как
+    // HTML — максимум не отрисует как PDF/картинку.
+    private static string ResolvePreviewMimeType(FilePreviewKind kind, string fileName) => kind switch
+    {
+        FilePreviewKind.Pdf => "application/pdf",
+        FilePreviewKind.Image => Path.GetExtension(fileName).ToLowerInvariant() switch
+        {
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".bmp" => "image/bmp",
+            ".webp" => "image/webp",
+            ".svg" => "image/svg+xml",
+            _ => "application/octet-stream",
+        },
+        _ => "application/octet-stream",
+    };
+
     // Открывает диалог; содержимое готовится на следующем OnAfterRenderAsync (для DOCX появление
     // контейнера ждёт JS-сторона — диалог рисует ДРУГОЙ компонент, провайдер, его рендер с нашим
     // не синхронен; для PDF/картинок сперва выкачивается blob и лишь потом появляется iframe/img).
@@ -581,6 +602,7 @@ else
         var containerId = _docxPreviewContainerId;
         var url = _filePreviewUrl;
         var kind = _filePreviewKind;
+        var fileName = _filePreviewFileName ?? string.Empty;
 
         // Сбой JS-интеропа НЕЛЬЗЯ выпускать из OnAfterRenderAsync: необработанное исключение в методе
         // жизненного цикла рвёт circuit Blazor Server — страница перестаёт отвечать целиком, а не только
@@ -602,7 +624,7 @@ else
             else
             {
                 var fetched = await _docxPreviewModule.InvokeAsync<FilePreviewFetchResult>(
-                    "fetchFileToObjectUrl", url);
+                    "fetchFileToObjectUrl", url, ResolvePreviewMimeType(kind, fileName));
                 status = MapPreviewStatus(fetched?.Status);
                 error = fetched?.Message;
 
