@@ -24,13 +24,9 @@
     <Project Path="src/profiles/inspector/ISC.AI.Profile.Inspector.UI/ISC.AI.Profile.Inspector.UI.csproj" Id="c045e1c0-4655-4792-bc03-70da6999ab4b" />
     <Project Path="src/profiles/inspector/ISC.AI.Profile.Inspector/ISC.AI.Profile.Inspector.csproj" Id="47a6e48b-dbf4-456b-9bdd-752e97d848b7" />
   </Folder>
-  <Folder Name="/src/integrations/">
-    <Project Path="src/integrations/ISC.AI.Identity.Skid/ISC.AI.Identity.Skid.csproj" />
-  </Folder>
   <Folder Name="/src/tools/">
     <Project Path="src/tools/ISC.AI.Harvester.Web/ISC.AI.Harvester.Web.csproj" />
     <Project Path="src/tools/ISC.AI.Harvester/ISC.AI.Harvester.csproj" />
-    <Project Path="src/tools/ISC.AI.Identity.Import/ISC.AI.Identity.Import.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/ISC.AI.Evals/ISC.AI.Evals.csproj" Id="d8e5669e-a27a-47c3-b0d7-3943d7069417" />

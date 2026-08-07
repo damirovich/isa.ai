@@ -10,7 +10,6 @@
   <ItemGroup>
     <ProjectReference Include="..\..\profiles\inspector\ISC.AI.Profile.Inspector\ISC.AI.Profile.Inspector.csproj" />
     <!-- Адаптер идентичности СКИД (Э3-08): подключает ТОЛЬКО хост; ядро о СКИД не знает. -->
-    <ProjectReference Include="..\..\integrations\ISC.AI.Identity.Skid\ISC.AI.Identity.Skid.csproj" />
     <ProjectReference Include="..\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
     <ProjectReference Include="..\ISC.AI.AI\ISC.AI.AI.csproj" />
     <ProjectReference Include="..\ISC.AI.Documents\ISC.AI.Documents.csproj" />

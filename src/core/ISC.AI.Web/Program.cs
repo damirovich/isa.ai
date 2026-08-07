@@ -5,7 +5,6 @@ using System.Threading.RateLimiting;
 using ISC.AI.Abstractions.Profiles;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.AI.Audit;
-using ISC.AI.Identity.Skid;
 using ISC.AI.AI.BackgroundTasks;
 using ISC.AI.AI.Grounding;
 using ISC.AI.AI.Models;
@@ -105,8 +104,9 @@ try
     }
 
     // --- Аутентификация и авторизация (Э3-08, ТБ-010..016) — последний шаг композиции (ТО-прог-05). ---
-    // Auth:Mode=Dev (только Development) — прежняя dev-заглушка без входа, чтобы каркас был запускаем
-    // без БД идентичности; боевой режим — вход по учёткам внешней системы (СКИД), допуск — локально.
+    // Auth:Mode=Dev (только Development) — dev-заглушка без входа, чтобы каркас был запускаем без
+    // учёток вообще; любое другое значение — обычный вход по логину и паролю (идентичность локальная,
+    // §6.5), допуск — отдельно, из core.clearance.
     var devAuth = builder.Environment.IsDevelopment()
         && string.Equals(builder.Configuration["Auth:Mode"], "Dev", StringComparison.OrdinalIgnoreCase);
 
@@ -131,29 +131,19 @@ try
             .AddCookie(options => AuthCookieConfiguration.Configure(
                 options, idleMinutes, builder.Environment.IsDevelopment())); // режимные настройки — ТБ-010/014
 
-        // ОТКУДА БЕРЁТСЯ ИДЕНТИЧНОСТЬ (Э4-35 §6.5). Переключатель Auth:Provider:
-        //   "Skid"  (по умолчанию) — вход по чужой БД СКИД, как было;
-        //   "Local" — вход по core.app_user (Argon2id локально).
-        // Переключение СДЕЛАНО НАСТРОЙКОЙ, а не правкой кода, намеренно: это самая рискованная точка
-        // перехода (ошибка = никто не может войти), и возврат обязан быть одним значением в конфиге,
-        // а не откатом сборки. Порядок обязателен: сперва перенести учётки, убедиться, что вход
-        // локально работает, и только потом выводить адаптер СКИД (иначе система остаётся без входа).
-        var useLocalIdentity = string.Equals(
-            builder.Configuration["Auth:Provider"], "Local", StringComparison.OrdinalIgnoreCase);
-
-        if (useLocalIdentity)
-        {
-            builder.Services.AddScoped<IExternalIdentityProvider, LocalIdentityProvider>();
-        }
-        else
-        {
-            // Адаптер идентичности СКИД: read-only чтение пользователей чужой БД. ResolveExternal (не
-            // Resolve!) — сторонний секрет обязателен явно (Database:Passwords:Skid), общий пароль ядровой
-            // БД сюда НИКОГДА не подставляется молча (Э4-10, ТБ-013): забытый секрет — явный отказ на старте,
-            // а не утечка пароля ISC_AI на сервер СКИД.
-            builder.Services.AddSkidIdentity(
-                ConnectionStringResolver.ResolveExternal(builder.Configuration, "Skid"));
-        }
+        // ИДЕНТИЧНОСТЬ — ЛОКАЛЬНАЯ (Э4-35 §6.5 завершён 2026-08-07): проверка пароля по
+        // core.app_user (Argon2id). Адаптер чужой БД СКИД выведен из решения вместе со строкой
+        // ConnectionStrings:Skid и секретом Database:Passwords:Skid — приложение СКИД отключается,
+        // держать её БД ради одних учёток бессмысленно (вопрос 4 Э4-35).
+        //
+        // Порт IExternalIdentityProvider СОХРАНЁН намеренно — это шов под будущий SSO: меняется не
+        // порт, а то, что за ним стоит. Вход, cookie, штамп безопасности и ревалидация сессий
+        // (ISC.AI.Web/Security) от смены источника идентичности не зависят.
+        //
+        // Учётки по умолчанию НЕТ и быть не должно (предустановленный пароль — открытая дверь на весь
+        // срок эксплуатации). Первая учётка заводится служебной командой хоста create-account,
+        // роль — режимом первичной настройки (§6.4.1).
+        builder.Services.AddScoped<IExternalIdentityProvider, LocalIdentityProvider>();
 
         builder.Services.AddHttpContextAccessor();
         builder.Services.AddScoped<LoginService>();
@@ -218,6 +208,23 @@ try
 
     var app = builder.Build();
 
+    // СЛУЖЕБНАЯ КОМАНДА вместо запуска сервера: завести учётку для входа (Э4-35 §6.5).
+    //   dotnet run --project src/core/ISC.AI.Web -- create-account <логин> [ФИО]
+    //
+    // ПОЧЕМУ КОМАНДА, А НЕ ЗАСЕВ (DataSeed). Засев создавал бы учётку САМ, при старте, и вопрос
+    // упирался бы в пароль: захардкоженный или конфигурационный — открытая дверь на весь срок
+    // эксплуатации (попадает в репозиторий и в копии конфигов); сгенерированный — некуда отдать
+    // (в лог нельзя — их читают шире, чем учётные данные; в файл нельзя — пароль на диске; в консоль
+    // бессмысленно — служба работает без наблюдателя). Плюс засев отрабатывает на каждом старте:
+    // условие «только если пусто» означало бы, что после удаления всех учёток молча появляется
+    // новый администратор с никому не известным паролем.
+    // Создание входа в режимную систему обязано быть ОСОЗНАННЫМ действием человека с доступом
+    // к серверу, а не побочным эффектом запуска.
+    if (AccountCommand.Matches(args))
+    {
+        return await AccountCommand.RunAsync(app.Services, args);
+    }
+
     if (!app.Environment.IsDevelopment())
     {
         app.UseExceptionHandler("/Error", createScopeForErrors: true);
@@ -257,11 +264,16 @@ try
         .AddAdditionalAssemblies(moduleAssemblies);
 
     Log.Information("Хост ISC.AI запущен с профилем {ProfileId} ({ProfileName})", profile.Id, profile.DisplayName);
-    app.Run();
+    await app.RunAsync();
+    return 0;
 }
 catch (Exception ex)
 {
     Log.Fatal(ex, "Хост ISC.AI завершился аварийно при запуске");
+
+    // Ненулевой код возврата: под службой/оркестратором молчаливый выход с нулём выглядел бы
+    // как штатное завершение, и падение старта осталось бы незамеченным.
+    return 1;
 }
 finally
 {

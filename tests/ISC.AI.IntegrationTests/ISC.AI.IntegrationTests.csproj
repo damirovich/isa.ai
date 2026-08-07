@@ -18,9 +18,6 @@
     <ProjectReference Include="..\..\src\core\ISC.AI.AI\ISC.AI.AI.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.Ingestion\ISC.AI.Ingestion.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.Web\ISC.AI.Web.csproj" />
-    <!-- Перенос учёток при переходе на локальную идентичность (Э4-35 §6.5): проверяется на реальных
-         двух базах. Ссылка уйдёт вместе с адаптером СКИД, когда переход завершится. -->
-    <ProjectReference Include="..\..\src\integrations\ISC.AI.Identity.Skid\ISC.AI.Identity.Skid.csproj" />
   </ItemGroup>
 
 </Project>

@@ -16,7 +16,6 @@
     <ProjectReference Include="..\..\src\core\ISC.AI.Documents\ISC.AI.Documents.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.Ingestion\ISC.AI.Ingestion.csproj" />
     <ProjectReference Include="..\..\src\tools\ISC.AI.Harvester\ISC.AI.Harvester.csproj" />
-    <ProjectReference Include="..\..\src\integrations\ISC.AI.Identity.Skid\ISC.AI.Identity.Skid.csproj" />
     <!-- Регрессионный тест на open-redirect (AuthEndpoints.SafeLocalUrl, internal + InternalsVisibleTo). -->
     <ProjectReference Include="..\..\src\core\ISC.AI.Web\ISC.AI.Web.csproj" />
     <ProjectReference Include="..\ISC.AI.Evals\ISC.AI.Evals.csproj" />
