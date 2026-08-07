@@ -1,0 +1,307 @@
+@namespace ISC.AI.Modules.DocFlow.UI
+@* Правка реквизитов зарегистрированного документа (ТЗ СКИД §3.2).
+   Отдельная страница, а не диалог в карточке: полей столько же, сколько при регистрации, и в модальном
+   окне их пришлось бы прокручивать. Назначения здесь НЕ правятся — у них свои действия в карточке
+   (§4.1/§4.7), и смешивать «реквизиты документа» с «кому поручено» значит путать два разных решения. *@
+@page "/docflow/documents/{Id:int}/edit"
+@rendermode InteractiveServer
+@inject NavigationManager Navigation
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Modules.DocFlow.Application.Documents
+@using ISC.AI.Modules.DocFlow.Application.DocumentTypes
+@using ISC.AI.Modules.DocFlow.Domain.Enums
+@using ISC.AI.Modules.DocFlow.Domain.Services
+
+<div class="d-flex align-center justify-space-between flex-wrap gap-2">
+    <div>
+        <MudText Typo="Typo.h5">Изменение документа</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            @(_document?.RegNumber ?? "без номера") · @(_document?.TypeName ?? "—")
+        </MudText>
+    </div>
+    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack"
+               OnClick="@(() => Navigation.NavigateTo($"/docflow/documents/{Id}"))">
+        К карточке
+    </MudButton>
+</div>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-4" />
+}
+else if (_document is null)
+{
+    @* Недоступный документ неотличим от несуществующего (ТБ-020/021) — тот же текст, что в карточке. *@
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="my-4">Документ не найден.</MudAlert>
+}
+else
+{
+    <MudPaper Outlined="true" Class="pa-4 my-4">
+        <MudGrid Spacing="3">
+            <MudItem xs="12" md="4">
+                <MudTextField @bind-Value="_regNumber" Label="Регистрационный номер" Variant="Variant.Outlined"
+                              MaxLength="200" HelperText="Пусто — документ без номера" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudDatePicker @bind-Date="_regDate" Label="Дата регистрации" Variant="Variant.Outlined"
+                               DateFormat="dd.MM.yyyy" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudSelect T="int" @bind-Value="_typeId" Label="Тип документа" Variant="Variant.Outlined">
+                    @foreach (var type in _types)
+                    {
+                        <MudSelectItem T="int" Value="@type.Id">@type.Name</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    Группа «@_document.Group.Label()» неизменна: сменить её правкой нельзя
+                </MudText>
+            </MudItem>
+
+            <MudItem xs="12" md="4">
+                <MudSelect T="DocumentDirection" @bind-Value="_direction" Label="Направленность"
+                           Variant="Variant.Outlined">
+                    @foreach (var direction in Enum.GetValues<DocumentDirection>())
+                    {
+                        <MudSelectItem T="DocumentDirection" Value="@direction">@direction.Label()</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="8">
+                <MudTextField @bind-Value="_source" Label="Источник" Variant="Variant.Outlined" MaxLength="500" />
+            </MudItem>
+
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_shortContent" Label="Краткое содержание" Variant="Variant.Outlined"
+                              Lines="2" MaxLength="2000" Required="true" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_fullText" Label="Полный текст" Variant="Variant.Outlined" Lines="6"
+                              HelperText="Используется поиском ИИ: после сохранения документ переиндексируется" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_notes" Label="Примечания" Variant="Variant.Outlined" Lines="2"
+                              MaxLength="2000" />
+            </MudItem>
+
+            @if (_document.Group == DocumentGroup.Execution)
+            {
+                <MudItem xs="12" md="4">
+                    <MudSelect T="DocumentPriority?" @bind-Value="_priority" Label="Приоритет"
+                               Variant="Variant.Outlined">
+                        @foreach (var priority in Enum.GetValues<DocumentPriority>())
+                        {
+                            <MudSelectItem T="DocumentPriority?" Value="@priority">@priority.Label()</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" md="8">
+                    <MudSelect T="int?" @bind-Value="_inspectorUserId" Label="Ответственный инспектор"
+                               Variant="Variant.Outlined" Clearable="true">
+                        @foreach (var user in _users)
+                        {
+                            <MudSelectItem T="int?" Value="@user.Id">@user.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        При смене инспектора уведомление получат и новый, и прежний
+                    </MudText>
+                </MudItem>
+            }
+
+            <MudItem xs="12" md="6">
+                <MudSelect T="short" @bind-Value="_classification" Label="Гриф" Variant="Variant.Outlined">
+                    @for (short level = _minClassification; level <= _maxClassification; level++)
+                    {
+                        var value = level;
+                        <MudSelectItem T="short" Value="@value">@ClassificationLabel(value)</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">@ClassificationHint</MudText>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudSelect T="int" @bind-Value="_divisionId" Label="Подразделение-владелец"
+                           Variant="Variant.Outlined">
+                    @foreach (var division in _ownerDivisions)
+                    {
+                        <MudSelectItem T="int" Value="@division.Id">@division.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+        </MudGrid>
+
+        <div class="d-flex justify-end gap-2 mt-4">
+            <MudButton Variant="Variant.Text"
+                       OnClick="@(() => Navigation.NavigateTo($"/docflow/documents/{Id}"))">Отмена</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                       OnClick="SaveAsync" Disabled="_saving">
+                @(_saving ? "Сохраняем…" : "Сохранить")
+            </MudButton>
+        </div>
+    </MudPaper>
+}
+
+@code {
+    /// <summary>Идентификатор правимого документа (из маршрута).</summary>
+    [Parameter]
+    public int Id { get; set; }
+
+    private DocumentDetails? _document;
+    private IReadOnlyList<DocumentTypeItem> _types = [];
+    private IReadOnlyList<DivisionItem> _ownerDivisions = [];
+    private IReadOnlyList<UserItem> _users = [];
+
+    private string? _regNumber;
+    private DateTime? _regDate;
+    private int _typeId;
+    private DocumentDirection _direction;
+    private string? _source;
+    private string _shortContent = string.Empty;
+    private string? _fullText;
+    private string? _notes;
+    private DocumentPriority? _priority;
+    private int? _inspectorUserId;
+    private short _classification;
+    private int _divisionId;
+
+    // Границы выбора грифа: понизить нельзя (рассекречивание), поднять — не выше своего допуска.
+    private short _minClassification;
+    private short _maxClassification;
+
+    private bool _loading = true;
+    private bool _saving;
+    private string? _error;
+
+    private string ClassificationHint => _minClassification >= _maxClassification
+        ? "Гриф изменить нельзя: понижение — это рассекречивание, а выше вашего допуска документ станет вам недоступен"
+        : "Понизить гриф правкой нельзя — только повысить, и не выше вашего допуска";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+        try
+        {
+            var details = await Dispatcher.Send(new GetDocumentQuery(Id));
+            if (!details.Status || details.Data is null)
+            {
+                _document = null;
+                return;
+            }
+
+            _document = details.Data;
+            Fill(_document);
+
+            var types = await Dispatcher.Send(new ListDocumentTypesQuery());
+            if (types.Status && types.Data is not null)
+            {
+                // Действующие типы своей группы плюс ТЕКУЩИЙ тип документа — даже если он выведен
+                // из обращения: иначе список не даст сохранить форму, не сменив заодно и тип.
+                _types = [.. types.Data.Where(t =>
+                    t.Group == _document.Group && (t.IsActive || t.Id == _document.TypeId))];
+            }
+
+            // Подразделения — только разрешённые субъекту: перенести документ туда, где он его
+            // потеряет, нельзя (то же правило, что при регистрации).
+            var scope = await Dispatcher.Send(new GetRegistrationScopeQuery());
+            if (scope.Status && scope.Data is not null)
+            {
+                _ownerDivisions = scope.Data.OwnerDivisions;
+                _maxClassification = Math.Max(scope.Data.MaxClassification, _document.Classification);
+            }
+            else
+            {
+                // Допуск не прочитался — оставляем гриф и подразделение как есть, без выбора.
+                _maxClassification = _document.Classification;
+                _ownerDivisions = [];
+            }
+
+            _minClassification = _document.Classification;
+
+            var users = await Dispatcher.Send(new ListUsersQuery());
+            if (users.Status && users.Data is not null)
+            {
+                _users = users.Data;
+            }
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Fill(DocumentDetails document)
+    {
+        _regNumber = document.RegNumber;
+        _regDate = document.RegDate.ToDateTime(TimeOnly.MinValue);
+        _typeId = document.TypeId;
+        _direction = document.Direction;
+        _source = document.Source;
+        _shortContent = document.ShortContent;
+        _fullText = document.FullText;
+        _notes = document.Notes;
+        _priority = document.Priority;
+        _inspectorUserId = document.InspectorUserId;
+        _classification = document.Classification;
+        _divisionId = document.DivisionId;
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+
+        if (_regDate is not { } regDate)
+        {
+            _error = "Укажите дату регистрации.";
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            var response = await Dispatcher.Send(new UpdateDocumentCommand(
+                Id,
+                _regNumber,
+                DateOnly.FromDateTime(regDate),
+                _typeId,
+                _direction,
+                _source,
+                _shortContent,
+                _fullText,
+                _notes,
+                _priority,
+                _inspectorUserId,
+                _classification,
+                _divisionId));
+
+            if (!response.Status)
+            {
+                _error = response.StatusMessage;
+                return;
+            }
+
+            Navigation.NavigateTo($"/docflow/documents/{Id}");
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    // Тот же текст грифа, что в карточке и списке: 0 — «Открыто», иначе номер уровня.
+    private static string ClassificationLabel(short level) =>
+        level == 0 ? "Открыто" : $"ДСП · уровень {level.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+}

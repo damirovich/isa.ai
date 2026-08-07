@@ -22,6 +22,49 @@ public sealed record DocumentDraft(
 /// <summary>Черновик назначения при регистрации (§4.1): подразделение + исполнитель + индивидуальный срок.</summary>
 public sealed record AssignmentDraft(int DivisionId, int? AssigneeUserId, DateOnly? Deadline);
 
+/// <summary>
+/// Правка реквизитов уже зарегистрированного документа (§3.2).
+/// </summary>
+/// <remarks>
+/// Гриф и подразделение здесь ЕСТЬ, но правила для них строже, чем при регистрации, — см.
+/// <see cref="IDocumentStore.UpdateAsync"/>: понизить гриф правкой нельзя, это рассекречивание.
+/// Назначения этой операцией не меняются: у них свои сценарии (§4.1/§4.7).
+/// </remarks>
+public sealed record DocumentEdit(
+    int DocumentId,
+    string? RegNumber,
+    DateOnly RegDate,
+    int TypeId,
+    DocumentDirection Direction,
+    string? Source,
+    string ShortContent,
+    string? FullText,
+    string? Notes,
+    DocumentPriority? Priority,
+    int? InspectorUserId,
+    short Classification,
+    int DivisionId);
+
+/// <summary>
+/// Итог правки документа: что изменилось, для аудита и уведомления о смене инспектора.
+/// </summary>
+/// <param name="ChangedFields">
+/// Имена изменённых реквизитов (человекочитаемые). В журнал идут именно ИМЕНА, а не значения:
+/// содержание документа под грифом не должно копиться второй копией в аудите (ТБ-032).
+/// </param>
+/// <param name="PreviousInspectorUserId">Инспектор ДО правки — по нему видно, была ли смена.</param>
+public sealed record UpdatedDocumentNotice(
+    int DocumentId,
+    string DocumentTitle,
+    short Classification,
+    int DivisionId,
+    IReadOnlyList<string> ChangedFields,
+    int? PreviousInspectorUserId,
+    int? InspectorUserId);
+
+/// <summary>Результат правки документа.</summary>
+public sealed record DocumentUpdateResult(DocumentWriteStatus Status, UpdatedDocumentNotice? Notice = null);
+
 /// <summary>Фильтры списка документов (§3.4).</summary>
 public sealed record DocumentListFilter(
     string? Text = null,
@@ -112,6 +155,32 @@ public enum DocumentWriteStatus
     /// поручают (см. <see cref="IUserDirectory.CanSeeDivisionAsync"/>).
     /// </summary>
     AssigneeOutsideDivision,
+
+    /// <summary>
+    /// Правкой нельзя ПОНИЗИТЬ гриф документа — это рассекречивание, а не исправление опечатки.
+    /// </summary>
+    /// <remarks>
+    /// ИНВАРИАНТ БЕЗОПАСНОСТИ (ТБ-020). Повышение грифа безопасно: документ становится доступен
+    /// более узкому кругу, и правило «не выше своего допуска» его удержит в поле зрения автора правки.
+    /// Понижение действует ровно наоборот — одним полем формы документ ДСП открывается всем, у кого
+    /// допуск ниже, причём задним числом и без отдельного следа. Рассекречивание обязано быть
+    /// самостоятельной процедурой со своим правом и своей записью в журнале; до её появления —
+    /// запрет. В СКИД грифа не было вовсе, так что аналога этому правилу там нет.
+    /// </remarks>
+    ClassificationDowngradeNotAllowed,
+
+    /// <summary>
+    /// Правкой нельзя сменить ГРУППУ типа документа («Исполнение» ↔ «Хранение»).
+    /// </summary>
+    /// <remarks>
+    /// ИСПРАВЛЕНИЕ ДЕФЕКТА СКИД, а не перенос. Там смена типа на «Хранение» просто обнуляла приоритет
+    /// и инспектора, а НАЗНАЧЕНИЯ документа оставались в базе — висячие поручения у документа, который
+    /// по своей группе поручений иметь не может: они не показывались в карточке, но продолжали
+    /// участвовать в проверке сроков и уведомлениях. Обратный переход «Хранение» → «Исполнение» столь
+    /// же неполон: документ получал группу исполнения без единого назначения. Смена группы — это смена
+    /// СМЫСЛА документа; такой документ регистрируют заново.
+    /// </remarks>
+    TypeGroupChangeNotAllowed,
 }
 
 /// <summary>
@@ -319,6 +388,27 @@ public interface IDocumentStore
         DateOnly? commonDeadline,
         AccessContext access,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Правит реквизиты зарегистрированного документа (§3.2). Назначения не затрагиваются.
+    /// </summary>
+    /// <remarks>
+    /// Разграничение — тем же предикатом, что и чтение: невидимый документ неотличим от
+    /// несуществующего (<see cref="DocumentWriteStatus.NotFound"/>), менять то, чего не видишь, нельзя.
+    /// Дополнительно к этому действуют три правила, которых в СКИД не было:
+    /// <list type="number">
+    /// <item>гриф нельзя понизить (<see cref="DocumentWriteStatus.ClassificationDowngradeNotAllowed"/>)
+    /// и нельзя поднять выше своего допуска (<see cref="DocumentWriteStatus.ClassificationOutsideClearance"/>) —
+    /// иначе документ исчез бы из поля зрения того, кто его же и правит;</item>
+    /// <item>подразделение-владелец можно сменить только на разрешённое субъекту
+    /// (<see cref="DocumentWriteStatus.DivisionOutsideClearance"/>);</item>
+    /// <item>группа типа неизменна (<see cref="DocumentWriteStatus.TypeGroupChangeNotAllowed"/>).</item>
+    /// </list>
+    /// Конкурентная правка (<c>xmin</c>) даёт <see cref="DocumentWriteStatus.Conflict"/>: вторая
+    /// сохранённая форма не должна молча затирать первую.
+    /// </remarks>
+    Task<DocumentUpdateResult> UpdateAsync(
+        DocumentEdit edit, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Список документов с фильтрами (§3.4), новые первыми. Разграничение — НА ЭТАПЕ ВЫБОРКИ

@@ -60,6 +60,12 @@ else
                     <MudChip T="string" Color="Color.Default" Variant="Variant.Text">не в корпусе</MudChip>
                 </MudTooltip>
             }
+            @* Правка реквизитов — отдельной страницей (§3.2). Проверку «кому можно» делает сценарий:
+               кнопку видно всем, но недоступный документ и сохранить нельзя. *@
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit"
+                       OnClick="@(() => Navigation.NavigateTo($"/docflow/documents/{Id}/edit"))">
+                Изменить
+            </MudButton>
             <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true">
                 <MudMenuItem OnClick="ReindexAsync">Переиндексировать в корпусе ИИ</MudMenuItem>
             </MudMenu>

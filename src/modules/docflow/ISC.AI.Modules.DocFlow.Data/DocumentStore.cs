@@ -296,6 +296,165 @@ public sealed class DocumentStore(
     }
 
     /// <inheritdoc />
+    public async Task<DocumentUpdateResult> UpdateAsync(
+        DocumentEdit edit, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(edit);
+        ArgumentNullException.ThrowIfNull(access);
+
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Нельзя менять то, чего не видишь (WriteAccessRule): недоступный документ — тот же NotFound.
+        // Берём ОТСЛЕЖИВАЕМУЮ сущность через тот же предикат видимости, а не db.Documents напрямую.
+        var document = await VisibleDocuments(db, access)
+            .FirstOrDefaultAsync(d => d.Id == edit.DocumentId, cancellationToken);
+        if (document is null)
+        {
+            return new DocumentUpdateResult(DocumentWriteStatus.NotFound);
+        }
+
+        // --- Режимные правила правки (ТБ-020/021). Порядок проверок = порядок полей в форме. ---
+
+        // Понижение грифа = рассекречивание, отдельная процедура (см. статус).
+        if (edit.Classification < document.Classification)
+        {
+            return new DocumentUpdateResult(DocumentWriteStatus.ClassificationDowngradeNotAllowed);
+        }
+
+        // Поднять выше своего допуска нельзя: документ исчез бы у того, кто его правит.
+        if (edit.Classification > access.MaxClassification)
+        {
+            return new DocumentUpdateResult(DocumentWriteStatus.ClassificationOutsideClearance);
+        }
+
+        // Подразделение меняем только на разрешённое — по той же причине.
+        if (edit.DivisionId != document.DivisionId && !access.AllowedDivisions.Contains(edit.DivisionId))
+        {
+            return new DocumentUpdateResult(DocumentWriteStatus.DivisionOutsideClearance);
+        }
+
+        // --- Правила предметной области (§3.1/§3.2) ---
+
+        var type = await db.DocumentTypes.AsNoTracking()
+            .FirstOrDefaultAsync(t => t.Id == edit.TypeId, cancellationToken);
+
+        // Неактивный тип не предлагается (§3.1). Если тип документа НЕ МЕНЯЕТСЯ, его неактивность
+        // правку не блокирует: иначе выведенный из обращения тип запирал бы старые документы навсегда.
+        if (type is null || (!type.IsActive && edit.TypeId != document.TypeId))
+        {
+            return new DocumentUpdateResult(DocumentWriteStatus.TypeUnavailable);
+        }
+
+        var currentGroup = await db.DocumentTypes.AsNoTracking()
+            .Where(t => t.Id == document.TypeId)
+            .Select(t => (DocumentGroup?)t.Group)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (currentGroup is { } group && group != type.Group)
+        {
+            return new DocumentUpdateResult(DocumentWriteStatus.TypeGroupChangeNotAllowed);
+        }
+
+        var isExecution = type.Group == DocumentGroup.Execution;
+
+        // §3.2: у «Исполнения» приоритет и инспектор обязательны. Назначения здесь не проверяются —
+        // они у документа уже есть (иначе он не был бы «Исполнением») и этой операцией не меняются.
+        if (isExecution && (edit.Priority is null || edit.InspectorUserId is null))
+        {
+            return new DocumentUpdateResult(DocumentWriteStatus.ExecutionFieldsMissing);
+        }
+
+        var regNumber = string.IsNullOrWhiteSpace(edit.RegNumber) ? null : edit.RegNumber.Trim();
+
+        // Уникальность рег. номера — ИСКЛЮЧАЯ сам документ, иначе сохранение без правки номера
+        // отбивалось бы как «номер занят» им же самим.
+        if (regNumber is not null && await db.Documents
+                .AnyAsync(d => d.RegNumber == regNumber && d.Id != document.Id, cancellationToken))
+        {
+            return new DocumentUpdateResult(DocumentWriteStatus.RegNumberTaken);
+        }
+
+        var previousInspectorUserId = document.InspectorUserId;
+        var changed = ChangedFields(document, edit, regNumber, isExecution);
+
+        document.RegNumber = regNumber;
+        document.RegDate = edit.RegDate;
+        document.TypeId = edit.TypeId;
+        document.DirectionFlag = edit.Direction;
+        document.Source = edit.Source;
+        document.ShortContent = edit.ShortContent.Trim();
+        document.FullText = edit.FullText;
+        document.Notes = edit.Notes;
+        document.Priority = isExecution ? edit.Priority : null;
+        document.InspectorUserId = isExecution ? edit.InspectorUserId : null;
+        document.Classification = edit.Classification;
+        document.DivisionId = edit.DivisionId;
+
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Кто-то сохранил карточку, пока эта форма была открыта. Молча затирать чужую правку
+            // нельзя — возвращаем конфликт, пользователь перечитает актуальные данные.
+            return new DocumentUpdateResult(DocumentWriteStatus.Conflict);
+        }
+        catch (DbUpdateException) when (regNumber is not null)
+        {
+            // Гонку по рег. номеру добивает unique-индекс — проверка выше её не ловит.
+            return new DocumentUpdateResult(DocumentWriteStatus.RegNumberTaken);
+        }
+
+        return new DocumentUpdateResult(
+            DocumentWriteStatus.Ok,
+            new UpdatedDocumentNotice(
+                document.Id,
+                DocumentTitle(document.RegNumber, document.ShortContent),
+                document.Classification,
+                document.DivisionId,
+                changed,
+                previousInspectorUserId,
+                document.InspectorUserId));
+    }
+
+    /// <summary>
+    /// Перечень изменённых реквизитов — ИМЕНАМИ, без значений.
+    /// </summary>
+    /// <remarks>
+    /// В журнал аудита уходит именно этот список (ТБ-032): «изменено краткое содержание» достаточно
+    /// для разбора, а копия самого содержания сделала бы журнал второй базой документов под грифом.
+    /// </remarks>
+    private static IReadOnlyList<string> ChangedFields(
+        Document document, DocumentEdit edit, string? regNumber, bool isExecution)
+    {
+        var changed = new List<string>();
+
+        void Track(bool differs, string name)
+        {
+            if (differs)
+            {
+                changed.Add(name);
+            }
+        }
+
+        Track(document.RegNumber != regNumber, "рег. номер");
+        Track(document.RegDate != edit.RegDate, "дата регистрации");
+        Track(document.TypeId != edit.TypeId, "тип");
+        Track(document.DirectionFlag != edit.Direction, "направленность");
+        Track(document.Source != edit.Source, "источник");
+        Track(document.ShortContent != edit.ShortContent.Trim(), "краткое содержание");
+        Track(document.FullText != edit.FullText, "полный текст");
+        Track(document.Notes != edit.Notes, "примечания");
+        Track(document.Priority != (isExecution ? edit.Priority : null), "приоритет");
+        Track(document.InspectorUserId != (isExecution ? edit.InspectorUserId : null), "инспектор");
+        Track(document.Classification != edit.Classification, "гриф");
+        Track(document.DivisionId != edit.DivisionId, "подразделение");
+
+        return changed;
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<DocumentListItem>> ListAsync(
         DocumentListFilter filter, AccessContext access, CancellationToken cancellationToken = default)
     {

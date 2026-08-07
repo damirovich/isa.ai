@@ -40,6 +40,12 @@ public static class NotificationTemplates
     /// <summary>Исполнитель сменился (уведомление наблюдателю — инспектору документа).</summary>
     public const string ReassignedNotice = "assignment.reassigned-notice";
 
+    /// <summary>Вы назначены ответственным инспектором документа (правка карточки, §3.2).</summary>
+    public const string InspectorAssignedToYou = "document.inspector-assigned-to-you";
+
+    /// <summary>Вы больше не ответственный инспектор документа (§3.2).</summary>
+    public const string InspectorRemovedFromYou = "document.inspector-removed-from-you";
+
     /// <summary>Упоминание в комментарии.</summary>
     public const string MentionedInComment = "comment.mentioned";
 
@@ -58,6 +64,8 @@ public static class NotificationTemplates
         [ReassignedToYou] = "Вы назначены исполнителем по документу {document}. Срок: {deadline}.",
         [ReassignedFromYou] = "Документ {document}: исполнение передано другому исполнителю ({actor}).",
         [ReassignedNotice] = "Документ {document}: сменился исполнитель (изменил: {actor}).",
+        [InspectorAssignedToYou] = "Вы назначены ответственным инспектором по документу {document} (изменил: {actor}).",
+        [InspectorRemovedFromYou] = "Документ {document}: вы больше не ответственный инспектор (изменил: {actor}).",
         [MentionedInComment] = "{author} упомянул вас в комментарии к документу {document}.",
         [CommentAdded] = "{author} добавил комментарий к документу {document}.",
     };

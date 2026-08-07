@@ -234,6 +234,55 @@ public sealed class DocFlowEventNotifier(INotificationStore notifications, IUser
     /// Упомянутый получает ТОЛЬКО «вас упомянули», даже если он ещё и исполнитель: два уведомления об
     /// одном комментарии — шум. Самоупоминание игнорируется (упомянуть себя в СКИД не запрещено).
     /// </remarks>
+    /// <summary>
+    /// Смена ответственного инспектора документа при правке карточки (§3.2, разд. 5).
+    /// </summary>
+    /// <remarks>
+    /// Уведомляются ОБА: и новый инспектор («вам поручено»), и прежний («с вас снято»). Уведомить
+    /// только нового значило бы, что человек молча перестал отвечать за документ и узнал об этом
+    /// случайно. Прочие реквизиты правки уведомлений не порождают: их фиксирует журнал аудита,
+    /// а лента должна оставаться списком дел, а не потоком мелких изменений.
+    /// </remarks>
+    public async Task InspectorChangedAsync(
+        UpdatedDocumentNotice notice, int actorUserId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(notice);
+
+        var actorName = await NameOfAsync(actorUserId, cancellationToken);
+        var arguments = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["document"] = notice.DocumentTitle,
+            ["actor"] = actorName,
+        };
+
+        // Себе уведомление не шлём: тот, кто правит, и так знает, что сделал.
+        var assigned = Exclude([notice.InspectorUserId], actorUserId);
+        if (assigned.Count > 0)
+        {
+            await notifications.RaiseAsync(
+                new NotificationDraft(
+                    assigned,
+                    NotificationType.InspectorChanged,
+                    NotificationTemplates.InspectorAssignedToYou,
+                    arguments,
+                    notice.DocumentId),
+                cancellationToken);
+        }
+
+        var removed = Exclude([notice.PreviousInspectorUserId], actorUserId);
+        if (removed.Count > 0)
+        {
+            await notifications.RaiseAsync(
+                new NotificationDraft(
+                    removed,
+                    NotificationType.InspectorChanged,
+                    NotificationTemplates.InspectorRemovedFromYou,
+                    arguments,
+                    notice.DocumentId),
+                cancellationToken);
+        }
+    }
+
     public async Task CommentAddedAsync(
         DocumentDetails document,
         int commentId,
