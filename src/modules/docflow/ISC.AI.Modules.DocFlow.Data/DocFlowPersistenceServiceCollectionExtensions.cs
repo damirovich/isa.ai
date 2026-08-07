@@ -54,6 +54,17 @@ public static class DocFlowPersistenceServiceCollectionExtensions
         // Данные отчётов (этап 5, разд. 6): разграничение — В ЗАПРОСЕ, отчёт это массовая выгрузка.
         services.AddScoped<Domain.Services.IReportDataSource, ReportDataSource>();
 
+        // Рендереры отчётов — все три сразу; сценарий выбирает нужный по ReportFormat.
+        // Шрифт для PDF берётся из системы по настраиваемому пути: вшить его в сборку нельзя
+        // из-за лицензий, скачать — из-за изолированного контура (см. PdfReportFontOptions).
+        services.AddSingleton(new Reports.PdfReportFontOptions(
+            configuration["DocFlow:Reports:PdfFont:Regular"],
+            configuration["DocFlow:Reports:PdfFont:Bold"]));
+
+        services.AddSingleton<Domain.Services.IReportRenderer, Reports.ExcelReportRenderer>();
+        services.AddSingleton<Domain.Services.IReportRenderer, Reports.WordReportRenderer>();
+        services.AddSingleton<Domain.Services.IReportRenderer, Reports.PdfReportRenderer>();
+
         return services;
     }
 }

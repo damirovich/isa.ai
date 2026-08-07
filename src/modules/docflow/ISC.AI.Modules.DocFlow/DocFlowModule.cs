@@ -41,6 +41,8 @@ public static class DocFlowModule
     [
         new ModuleDescriptor("docflow-documents", "/docflow/documents", "Документы",
             Icons.Material.Filled.Description, typeof(Documents), ReadPolicy, MenuGroup),
+        new ModuleDescriptor("docflow-reports", "/docflow/reports", "Отчёты",
+            Icons.Material.Filled.Assessment, typeof(Reports), ReadPolicy, MenuGroup),
         new ModuleDescriptor("docflow-types", "/docflow/types", "Типы документов",
             Icons.Material.Filled.Category, typeof(DocumentTypes), ReadPolicy, MenuGroup),
     ];

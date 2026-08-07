@@ -17,7 +17,12 @@ public sealed class LocalDocFlowFileStorage : IDocFlowFileStorage
     public LocalDocFlowFileStorage(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
-        _basePath = Path.GetFullPath(configuration["DocFlow:Storage:BasePath"] ?? "docflow-files");
+
+        // Пустая строка приравнена к «не задано»: в appsettings ключ лежит пустым как документация,
+        // а Path.GetFullPath("") бросает — хост не поднялся бы вовсе из-за пустого значения в файле.
+        var configured = configuration["DocFlow:Storage:BasePath"];
+        _basePath = Path.GetFullPath(
+            string.IsNullOrWhiteSpace(configured) ? "docflow-files" : configured);
         Directory.CreateDirectory(_basePath);
     }
 

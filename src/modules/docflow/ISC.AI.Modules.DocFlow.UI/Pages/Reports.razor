@@ -1,0 +1,245 @@
+@namespace ISC.AI.Modules.DocFlow.UI
+@* Отчёты (ТЗ СКИД разд. 6): шесть видов × три формата, отбор по периоду и реквизитам.
+   Э4-35 этап 5. Разграничение применяет источник данных В ЗАПРОСЕ — экран его не дублирует
+   и не может ослабить. *@
+@page "/docflow/reports"
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Modules.DocFlow.Application.Documents
+@using ISC.AI.Modules.DocFlow.Application.DocumentTypes
+@using ISC.AI.Modules.DocFlow.Application.Reports
+@using ISC.AI.Modules.DocFlow.Domain.Enums
+@using ISC.AI.Modules.DocFlow.Domain.Services
+
+<MudText Typo="Typo.h5">Отчёты</MudText>
+<MudText Typo="Typo.body2" Class="mud-text-secondary">
+    Выгрузка по поручениям · в отчёт попадает только то, что доступно вам по грифу и подразделению
+</MudText>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@if (_info is not null)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="my-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _info = null)">@_info</MudAlert>
+}
+
+<MudPaper Outlined="true" Class="pa-4 my-4">
+    <MudGrid Spacing="3">
+        <MudItem xs="12" md="4">
+            <MudSelect T="ReportKind" @bind-Value="_kind" Label="Вид отчёта" Variant="Variant.Outlined">
+                @foreach (var kind in ReportOptions.Kinds)
+                {
+                    <MudSelectItem T="ReportKind" Value="@kind">@ReportViewBuilder.TitleOf(kind)</MudSelectItem>
+                }
+            </MudSelect>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">@PeriodHint</MudText>
+        </MudItem>
+
+        <MudItem xs="12" md="4">
+            <MudDatePicker @bind-Date="_from" Label="Период с" Variant="Variant.Outlined"
+                           DateFormat="dd.MM.yyyy" />
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudDatePicker @bind-Date="_to" Label="Период по" Variant="Variant.Outlined"
+                           DateFormat="dd.MM.yyyy" />
+        </MudItem>
+
+        <MudItem xs="12" md="4">
+            <MudSelect T="int?" @bind-Value="_divisionId" Label="Подразделение" Variant="Variant.Outlined"
+                       Clearable="true">
+                @foreach (var division in _divisions)
+                {
+                    <MudSelectItem T="int?" Value="@division.Id">@division.Name</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudSelect T="int?" @bind-Value="_assigneeUserId" Label="Исполнитель" Variant="Variant.Outlined"
+                       Clearable="true">
+                @foreach (var user in _users)
+                {
+                    <MudSelectItem T="int?" Value="@user.Id">@user.Name</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudSelect T="int?" @bind-Value="_inspectorUserId" Label="Инспектор" Variant="Variant.Outlined"
+                       Clearable="true">
+                @foreach (var user in _users)
+                {
+                    <MudSelectItem T="int?" Value="@user.Id">@user.Name</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+
+        <MudItem xs="12" md="4">
+            <MudSelect T="int?" @bind-Value="_typeId" Label="Тип документа" Variant="Variant.Outlined"
+                       Clearable="true">
+                @foreach (var type in _types)
+                {
+                    <MudSelectItem T="int?" Value="@type.Id">@type.Name</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudSelect T="AssignmentStatus?" @bind-Value="_status" Label="Статус поручения"
+                       Variant="Variant.Outlined" Clearable="true" Disabled="@(_kind == ReportKind.Overdue)">
+                @foreach (var status in ReportOptions.Statuses)
+                {
+                    <MudSelectItem T="AssignmentStatus?" Value="@status">@AssignmentStatusNames.Of(status)</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudSelect T="ReportFormat" @bind-Value="_format" Label="Формат" Variant="Variant.Outlined">
+                @foreach (var format in ReportOptions.Formats)
+                {
+                    <MudSelectItem T="ReportFormat" Value="@format">@ReportOptions.Label(format)</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+    </MudGrid>
+
+    <div class="d-flex justify-end mt-4">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download"
+                   OnClick="GenerateAsync" Disabled="_busy">
+            @(_busy ? "Формируем…" : "Сформировать")
+        </MudButton>
+    </div>
+</MudPaper>
+
+<MudText Typo="Typo.caption" Class="mud-text-secondary">
+    Файл помечается грифом и штампом «кто и когда сформировал». Выгрузка записывается в журнал аудита.
+</MudText>
+
+@code {
+    // Путь к JS-модулю пакета: у RCL статические файлы раздаются из _content/<имя сборки>.
+    private const string DownloadModulePath = "./_content/ISC.AI.Modules.DocFlow.UI/js/download.js";
+
+    // Период по умолчанию охватывает и прошлое, и ближайшее будущее: у видов «по срокам»
+    // и «просроченные» период применяется к СРОКУ, и окно «только назад» показало бы пустоту.
+    private static readonly int DefaultDaysBack = 30;
+    private static readonly int DefaultDaysForward = 30;
+
+    private IJSObjectReference? _downloadModule;
+
+    private ReportKind _kind = ReportKind.ByAssignee;
+    private ReportFormat _format = ReportFormat.Excel;
+    private DateTime? _from = DateTime.Today.AddDays(-DefaultDaysBack);
+    private DateTime? _to = DateTime.Today.AddDays(DefaultDaysForward);
+    private int? _divisionId;
+    private int? _assigneeUserId;
+    private int? _inspectorUserId;
+    private int? _typeId;
+    private AssignmentStatus? _status;
+
+    private IReadOnlyList<DivisionItem> _divisions = [];
+    private IReadOnlyList<UserItem> _users = [];
+    private IReadOnlyList<DocumentTypeItem> _types = [];
+
+    private bool _busy;
+    private string? _error;
+    private string? _info;
+
+    private string PeriodHint => _kind is ReportKind.ByDeadline or ReportKind.Overdue
+        ? "Период применяется к СРОКУ исполнения поручения."
+        : "Период применяется к дате регистрации документа.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var divisions = await Dispatcher.Send(new ListDivisionsQuery());
+        if (divisions.Status && divisions.Data is not null)
+        {
+            _divisions = divisions.Data;
+        }
+
+        var users = await Dispatcher.Send(new ListUsersQuery());
+        if (users.Status && users.Data is not null)
+        {
+            _users = users.Data;
+        }
+
+        var types = await Dispatcher.Send(new ListDocumentTypesQuery());
+        if (types.Status && types.Data is not null)
+        {
+            _types = types.Data;
+        }
+    }
+
+    private async Task GenerateAsync()
+    {
+        _error = null;
+        _info = null;
+
+        if (_from is not { } from || _to is not { } to)
+        {
+            _error = "Укажите период.";
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            // Для «просроченных» статус в отборе не имеет смысла — вид сам его и задаёт;
+            // передавать выбранное значение значило бы получить пустой отчёт без объяснения.
+            var status = _kind == ReportKind.Overdue ? null : _status;
+
+            var filter = new ReportFilter(
+                DateOnly.FromDateTime(from), DateOnly.FromDateTime(to),
+                _divisionId, _assigneeUserId, _inspectorUserId, _typeId, status);
+
+            var response = await Dispatcher.Send(new GenerateReportCommand(_kind, _format, filter));
+            if (!response.Status || response.Data is null)
+            {
+                _error = response.StatusMessage;
+                return;
+            }
+
+            await SaveAsync(response.Data);
+        }
+        catch (Exception exception)
+        {
+            // Текст исключения показываем как есть: у PDF сюда приходит понятное «шрифт не найден,
+            // проверьте настройку», и прятать его за общим «ошибка» значит лишить админа подсказки.
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SaveAsync(ReportDocument document)
+    {
+        _downloadModule ??= await JS.InvokeAsync<IJSObjectReference>("import", DownloadModulePath);
+
+        using var stream = new MemoryStream(document.Content);
+        using var reference = new DotNetStreamReference(stream, leaveOpen: true);
+
+        await _downloadModule.InvokeVoidAsync(
+            "saveStream", document.FileName, document.ContentType, reference);
+
+        _info = $"Отчёт сформирован: {document.FileName}.";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_downloadModule is not null)
+        {
+            try
+            {
+                await _downloadModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Вкладку закрыли — соединения уже нет, освобождать нечего.
+            }
+        }
+    }
+}

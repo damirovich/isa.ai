@@ -24,6 +24,9 @@
     <ProjectReference Include="..\..\src\profiles\inspector\ISC.AI.Profile.Inspector.UI\ISC.AI.Profile.Inspector.UI.csproj" />
     <!-- Пакет модулей документооборота (Э4-35): валидаторы сценариев. -->
     <ProjectReference Include="..\..\src\modules\docflow\ISC.AI.Modules.DocFlow.Application\ISC.AI.Modules.DocFlow.Application.csproj" />
+    <!-- Рендереры отчётов лежат в слое данных (там пакеты ClosedXML/OpenXml/PDFsharp), но БД не трогают:
+         это чистая отрисовка готовой модели, и место её проверке — в юнит-тестах, а не в интеграционных. -->
+    <ProjectReference Include="..\..\src\modules\docflow\ISC.AI.Modules.DocFlow.Data\ISC.AI.Modules.DocFlow.Data.csproj" />
   </ItemGroup>
 
 </Project>

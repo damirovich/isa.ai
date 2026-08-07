@@ -19,6 +19,11 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="EFCore.NamingConventions" />
+    <!-- Отчёты разд. 6 ТЗ (этап 5). Обе MIT: ClosedXML — Excel, PDFsharp — PDF (замена QuestPDF,
+         у которого двойная лицензия). Word рисуется OpenXml, он уже есть транзитивно. -->
+    <PackageReference Include="ClosedXML" />
+    <PackageReference Include="PDFsharp" />
+    <PackageReference Include="DocumentFormat.OpenXml" />
     <!-- Фоновая проверка сроков (BackgroundService) — как очередь ИИ-задач ядра. -->
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
