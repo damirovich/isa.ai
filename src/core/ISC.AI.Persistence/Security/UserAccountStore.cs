@@ -36,6 +36,96 @@ public sealed class UserAccountStore(IDbContextFactory<CoreDbContext> contextFac
             .ToList();
     }
 
+    /// <summary>Потолок размера страницы — та же защита, что у реестра документов.</summary>
+    public const int MaxPageSize = 200;
+
+    /// <inheritdoc />
+    public async Task<UserAccountPage> SearchAsync(
+        UserAccountFilter filter, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var query = db.Users.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(filter.Text))
+        {
+            // Поиск по логину, ФИО и ДОЛЖНОСТИ: однофамильцев в списке иначе не различить —
+            // ровно поэтому должность искалась и в СКИД.
+            var pattern = $"%{filter.Text.Trim()}%";
+            query = query.Where(u =>
+                EF.Functions.ILike(u.UserName, pattern)
+                || (u.DisplayName != null && EF.Functions.ILike(u.DisplayName, pattern))
+                || (u.Position != null && EF.Functions.ILike(u.Position, pattern)));
+        }
+
+        if (filter.IsActive is { } isActive)
+        {
+            query = query.Where(u => u.IsActive == isActive);
+        }
+
+        if (filter.DivisionId is { } divisionId)
+        {
+            query = query.Where(u => u.Clearance != null && u.Clearance.DivisionScope.Contains(divisionId));
+        }
+
+        if (filter.RestrictToUserIds is { } restrict)
+        {
+            // Пустой набор означает «никто не подошёл», а НЕ «ограничения нет»: иначе фильтр по роли,
+            // под которую нет ни одного пользователя, показал бы весь список — противоположный ответ.
+            var ids = restrict as IReadOnlyList<int> ?? [.. restrict];
+            query = query.Where(u => ids.Contains(u.Id));
+        }
+
+        var total = await query.CountAsync(cancellationToken);
+
+        var page = Math.Max(1, filter.Page);
+        var pageSize = Math.Clamp(filter.PageSize, 1, MaxPageSize);
+
+        var rows = await query
+            // Сортировка в БД: по ФИО, а при его отсутствии — по логину.
+            .OrderBy(u => u.DisplayName ?? u.UserName)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(u => new UserAccountRow(
+                u.Id,
+                u.UserName,
+                u.DisplayName,
+                u.IsActive,
+                // Наружу — ТОЛЬКО признак наличия пароля, не хеш (ТБ-043).
+                u.PasswordHash != null,
+                u.MustChangePassword,
+                u.Position,
+                u.DeactivationReason,
+                u.Clearance == null ? null : u.Clearance.MaxClassification,
+                u.Clearance == null ? null : u.Clearance.DivisionScope))
+            .ToListAsync(cancellationToken);
+
+        return new UserAccountPage(rows, total);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> UpdateProfileAsync(
+        int userId, string? displayName, string? position, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+        if (user is null)
+        {
+            return false;
+        }
+
+        user.DisplayName = string.IsNullOrWhiteSpace(displayName) ? null : displayName.Trim();
+        user.Position = string.IsNullOrWhiteSpace(position) ? null : position.Trim();
+
+        // Штамп НЕ трогаем: правка подписи ничего не меняет в правах, и обрывать человеку сессию
+        // из-за исправленной опечатки в фамилии — наказание без причины.
+        await db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
     /// <inheritdoc />
     public async Task<int?> CreateAsync(
         string userName, string? displayName, string temporaryPassword,
@@ -101,7 +191,7 @@ public sealed class UserAccountStore(IDbContextFactory<CoreDbContext> contextFac
 
     /// <inheritdoc />
     public async Task<bool> SetActiveAsync(
-        int userId, bool isActive, CancellationToken cancellationToken = default)
+        int userId, bool isActive, string? reason = null, CancellationToken cancellationToken = default)
     {
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
 
@@ -115,6 +205,9 @@ public sealed class UserAccountStore(IDbContextFactory<CoreDbContext> contextFac
 
         if (!isActive)
         {
+            user.DeactivationReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
+            user.DeactivatedAt = DateTime.UtcNow;
+
             // Отключение обязано действовать немедленно (ТБ-016), а не по истечении cookie.
             user.SecurityStamp = PasswordHashing.NewSecurityStamp();
         }

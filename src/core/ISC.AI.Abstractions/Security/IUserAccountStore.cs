@@ -12,7 +12,39 @@ public sealed record UserAccountRow(
     string? DisplayName,
     bool IsActive,
     bool HasLocalPassword,
-    bool MustChangePassword);
+    bool MustChangePassword,
+    string? Position = null,
+    string? DeactivationReason = null,
+    short? MaxClassification = null,
+    IReadOnlyList<int>? Divisions = null);
+
+/// <summary>
+/// Отбор списка учётных записей.
+/// </summary>
+/// <param name="Text">Поиск по имени входа, ФИО и должности (без учёта регистра).</param>
+/// <param name="IsActive">Только включённые/только отключённые; <see langword="null"/> — все.</param>
+/// <param name="DivisionId">Подразделение из допуска пользователя.</param>
+/// <param name="RestrictToUserIds">
+/// Ограничение множеством идентификаторов; <see langword="null"/> — без ограничения.
+/// </param>
+/// <param name="Page">Номер страницы, с 1.</param>
+/// <param name="PageSize">Размер страницы.</param>
+/// <remarks>
+/// <paramref name="RestrictToUserIds"/> существует ради фильтра ПО РОЛИ. Роли ведёт профиль в своей
+/// схеме, ядро о них не знает и знать не должно, а соединить две схемы одним запросом через два
+/// разных контекста нельзя. Поэтому профиль сам превращает «роль» в набор идентификаторов и передаёт
+/// его сюда — постраничность при этом остаётся серверной.
+/// </remarks>
+public sealed record UserAccountFilter(
+    string? Text = null,
+    bool? IsActive = null,
+    int? DivisionId = null,
+    IReadOnlyList<int>? RestrictToUserIds = null,
+    int Page = 1,
+    int PageSize = 25);
+
+/// <summary>Страница списка учётных записей: строки и общее число подходящих.</summary>
+public sealed record UserAccountPage(IReadOnlyList<UserAccountRow> Rows, int TotalCount);
 
 /// <summary>Итог смены собственного пароля.</summary>
 public enum PasswordChangeStatus
@@ -49,6 +81,27 @@ public interface IUserAccountStore
     /// <summary>Все учётные записи (включая отключённые), по отображаемому имени.</summary>
     Task<IReadOnlyList<UserAccountRow>> ListAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>Страница списка учётных записей с отбором.</summary>
+    /// <remarks>
+    /// Постраничность серверная — по той же причине, что и в реестре документов: на сотне сотрудников
+    /// разницы нет, а на тысяче полный список тянется в память при каждом открытии экрана.
+    /// </remarks>
+    Task<UserAccountPage> SearchAsync(
+        UserAccountFilter filter, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Правит справочные поля учётной записи: отображаемое имя и должность.
+    /// </summary>
+    /// <remarks>
+    /// Здесь НЕТ ни роли, ни допуска, и это осознанно. Роль и допуск — разные полномочия с разными
+    /// последствиями (роль решает, что человек делает; допуск — что он видит), у каждого свой экран
+    /// и своя запись в журнале. Общая форма «поменять всё сразу», как в СКИД, склеивает их в одно
+    /// действие: администратор, поправивший опечатку в фамилии, незаметно для себя переутверждает
+    /// и права. Здесь меняется только подпись человека.
+    /// </remarks>
+    Task<bool> UpdateProfileAsync(
+        int userId, string? displayName, string? position, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Создаёт учётную запись с ВРЕМЕННЫМ паролем (его показывает администратору вызывающий).
     /// Возвращает идентификатор либо <see langword="null"/>, если имя входа уже занято.
@@ -68,7 +121,12 @@ public interface IUserAccountStore
     /// Включает или отключает учётную запись. При отключении штамп меняется — сессии обрываются;
     /// без этого отключённый пользователь работал бы до истечения cookie.
     /// </summary>
-    Task<bool> SetActiveAsync(int userId, bool isActive, CancellationToken cancellationToken = default);
+    /// <param name="reason">
+    /// Причина отключения (при включении игнорируется). Сохраняется в учётке, чтобы через месяц
+    /// администратор видел «уволен» прямо в списке, а не поднимал журнал.
+    /// </param>
+    Task<bool> SetActiveAsync(
+        int userId, bool isActive, string? reason = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Смена СОБСТВЕННОГО пароля: обязательна проверка текущего (владение сессией не заменяет знание

@@ -43,6 +43,127 @@ public sealed record ListUserAccountsQuery : IRequest<ResponseDto<IReadOnlyList<
     }
 }
 
+/// <summary>Учётная запись с ролью — строка расширенного списка администрирования.</summary>
+public sealed record UserAccountView(UserAccountRow Account, UserRole? Role);
+
+/// <summary>Страница расширенного списка учётных записей.</summary>
+public sealed record UserAccountViewPage(IReadOnlyList<UserAccountView> Rows, int TotalCount);
+
+/// <summary>
+/// Постраничный поиск учётных записей с фильтрами (роль, подразделение, состояние) и текстом.
+/// </summary>
+/// <remarks>
+/// Фильтр ПО РОЛИ обрабатывается здесь, а не в ядре: роли ведёт профиль в своей схеме, ядро о них
+/// не знает, а соединить две схемы одним запросом через два разных контекста нельзя. Профиль
+/// превращает роль в набор идентификаторов и отдаёт его ядру — постраничность при этом остаётся
+/// серверной, а ядро не узнаёт слова «роль».
+/// </remarks>
+public sealed record SearchUserAccountsQuery(
+    string? Text = null,
+    UserRole? Role = null,
+    int? DivisionId = null,
+    bool? IsActive = null,
+    int Page = 1,
+    int PageSize = 25) : IRequest<ResponseDto<UserAccountViewPage>>
+{
+    /// <inheritdoc cref="SearchUserAccountsQuery" />
+    public sealed class Handler(
+        IUserAccountStore accounts, IUserRoleStore roles, ISubjectProvider subjectProvider)
+        : IRequestHandler<SearchUserAccountsQuery, ResponseDto<UserAccountViewPage>>
+    {
+        /// <inheritdoc />
+        public async ValueTask<ResponseDto<UserAccountViewPage>> Handle(
+            SearchUserAccountsQuery query, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(query);
+
+            if (!await AccountGuard.CallerCanManageAsync(roles, subjectProvider, cancellationToken))
+            {
+                return ResponseDto<UserAccountViewPage>.BadRequest(AccountGuard.Denied);
+            }
+
+            // Реестр ролей — таблица размером с штат организации, её чтение целиком дешевле, чем
+            // попытка соединить схемы. Он же даёт роль для каждой строки выдачи.
+            var roleRows = await roles.ListAsync(cancellationToken);
+            var roleByUser = roleRows
+                .GroupBy(r => r.UserId)
+                .ToDictionary(g => g.Key, g => g.First().Role);
+
+            IReadOnlyList<int>? restrict = null;
+            if (query.Role is { } role)
+            {
+                // Пустой набор — законный исход «под эту роль никого нет»; ядро понимает его именно
+                // так и вернёт пустую страницу, а не весь список.
+                restrict = [.. roleRows.Where(r => r.Role == role).Select(r => r.UserId)];
+            }
+
+            var page = await accounts.SearchAsync(
+                new UserAccountFilter(
+                    query.Text, query.IsActive, query.DivisionId, restrict, query.Page, query.PageSize),
+                cancellationToken);
+
+            var rows = page.Rows
+                .Select(row => new UserAccountView(
+                    row, roleByUser.TryGetValue(row.UserId, out var value) ? value : null))
+                .ToList();
+
+            return ResponseDto<UserAccountViewPage>.Ok(
+                new UserAccountViewPage(rows, page.TotalCount), page.TotalCount);
+        }
+    }
+}
+
+/// <summary>Изменить справочные поля учётной записи: ФИО и должность.</summary>
+/// <remarks>
+/// Роль и допуск здесь НЕ меняются — у них свои экраны и свои записи в журнале. Общая форма
+/// «поменять всё сразу», как в СКИД, склеивает разные полномочия в одно действие: администратор,
+/// исправивший опечатку в фамилии, незаметно для себя переутверждает и права.
+/// </remarks>
+public sealed record UpdateUserAccountCommand(int UserId, string? DisplayName, string? Position)
+    : IRequest<ResponseDto<bool>>, IAuditableRequest
+{
+    /// <inheritdoc />
+    public AuditAction AuditAction => AuditAction.Modify;
+
+    /// <inheritdoc />
+    public string? AuditSummary => $"inspector:account:{UserId}:update-profile";
+
+    /// <inheritdoc cref="UpdateUserAccountCommand" />
+    public sealed class Handler(
+        IUserAccountStore accounts, IUserRoleStore roles, ISubjectProvider subjectProvider)
+        : IRequestHandler<UpdateUserAccountCommand, ResponseDto<bool>>
+    {
+        /// <inheritdoc />
+        public async ValueTask<ResponseDto<bool>> Handle(
+            UpdateUserAccountCommand command, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(command);
+
+            if (!await AccountGuard.CallerCanManageAsync(roles, subjectProvider, cancellationToken))
+            {
+                return ResponseDto<bool>.BadRequest(AccountGuard.Denied);
+            }
+
+            return await accounts.UpdateProfileAsync(
+                command.UserId, command.DisplayName, command.Position, cancellationToken)
+                ? ResponseDto<bool>.Ok(true, "Сохранено.")
+                : ResponseDto<bool>.NotFound("Учётная запись не найдена.");
+        }
+    }
+}
+
+/// <summary>Правила правки учётной записи.</summary>
+public sealed class UpdateUserAccountValidator : AbstractValidator<UpdateUserAccountCommand>
+{
+    /// <inheritdoc cref="UpdateUserAccountValidator" />
+    public UpdateUserAccountValidator()
+    {
+        RuleFor(c => c.UserId).GreaterThan(0);
+        RuleFor(c => c.DisplayName).MaximumLength(200);
+        RuleFor(c => c.Position).MaximumLength(200);
+    }
+}
+
 /// <summary>Создать учётную запись; в ответе — ВРЕМЕННЫЙ пароль (показывается один раз).</summary>
 public sealed record CreateUserAccountCommand(string UserName, string? DisplayName)
     : IRequest<ResponseDto<string>>, IAuditableRequest
@@ -116,7 +237,7 @@ public sealed record ResetUserPasswordCommand(int UserId) : IRequest<ResponseDto
 }
 
 /// <summary>Включить или отключить учётную запись (отключение обрывает сессии немедленно).</summary>
-public sealed record SetUserAccountActiveCommand(int UserId, bool IsActive)
+public sealed record SetUserAccountActiveCommand(int UserId, bool IsActive, string? Reason = null)
     : IRequest<ResponseDto<bool>>, IAuditableRequest
 {
     /// <inheritdoc />
@@ -156,7 +277,7 @@ public sealed record SetUserAccountActiveCommand(int UserId, bool IsActive)
                     "Нельзя отключить собственную учётную запись — вы потеряете доступ немедленно.");
             }
 
-            return await accounts.SetActiveAsync(command.UserId, command.IsActive, cancellationToken)
+            return await accounts.SetActiveAsync(command.UserId, command.IsActive, command.Reason, cancellationToken)
                 ? ResponseDto<bool>.Ok(true)
                 : ResponseDto<bool>.NotFound("Учётная запись не найдена.");
         }
