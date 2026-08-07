@@ -36,6 +36,12 @@ public static class InspectorPersistenceServiceCollectionExtensions
         // только профиль. Без этой регистрации право не имеет никто (fail-closed).
         services.AddScoped<ISC.AI.Modules.DocFlow.Domain.Services.IDocFlowAdministration, DocFlowAdministration>();
 
+        // Кого предлагать в инспекторы и исполнители (§3.2/§4.1): ответ зависит от роли и допуска —
+        // и то и другое вне модуля.
+        services.AddScoped<
+            ISC.AI.Modules.DocFlow.Domain.Services.IAssignmentCandidateDirectory,
+            AssignmentCandidateDirectory>();
+
         // Ведение справочника подразделений (§4.2) — страница «Территориальные».
         services.AddScoped<IDivisionAdminStore, DivisionAdminStore>();
 

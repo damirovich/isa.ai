@@ -67,6 +67,10 @@ public static class DocFlowPersistenceServiceCollectionExtensions
         // Данные дашборда модуля: то же разграничение — агрегат утекает числом, а не текстом.
         services.AddScoped<Domain.Services.IDashboardDataSource, DashboardDataSource>();
 
+        // Ответ модуля профилю на вопрос «сколько на подразделении документов и поручений»:
+        // справочник ведёт профиль, поручения живут здесь, соединить схемы одним запросом нельзя.
+        services.AddScoped<Domain.Services.IDivisionUsage, DivisionUsageQuery>();
+
         // Рендереры отчётов — все три сразу; сценарий выбирает нужный по ReportFormat.
         // Шрифт для PDF берётся из системы по настраиваемому пути: вшить его в сборку нельзя
         // из-за лицензий, скачать — из-за изолированного контура (см. PdfReportFontOptions).

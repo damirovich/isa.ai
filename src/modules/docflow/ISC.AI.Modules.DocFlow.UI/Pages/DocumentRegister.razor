@@ -108,7 +108,8 @@
             </MudSelect>
             <MudSelect T="int?" @bind-Value="_inspectorUserId" Label="Инспектор (контроль исполнения) *"
                        Variant="Variant.Outlined" Style="min-width:280px;" Class="flex-grow-1">
-                @foreach (var user in _users)
+                @* Только те, кому инспекторство положено по роли (§3.2). *@
+                @foreach (var user in _inspectors)
                 {
                     <MudSelectItem T="int?" Value="@user.Id">@user.Name</MudSelectItem>
                 }
@@ -138,8 +139,11 @@
                     }
                 </MudSelect>
                 <MudSelect T="int?" @bind-Value="row.AssigneeUserId" Label="Исполнитель (опц.)" Variant="Variant.Outlined"
-                           Clearable="true" Style="min-width:240px;">
-                    @foreach (var user in _users)
+                           Clearable="true" Style="min-width:240px;" Disabled="@(row.DivisionId is null)"
+                           HelperText="@(row.DivisionId is null ? "Сначала выберите подразделение" : null)">
+                    @* Только те, кому доступно подразделение назначения: иначе исполнитель не увидит
+                       документ, который ему поручают, и узнает о поручении только от инспектора. *@
+                    @foreach (var user in Candidates(row.DivisionId))
                     {
                         <MudSelectItem T="int?" Value="@user.Id">@user.Name</MudSelectItem>
                     }
@@ -246,7 +250,57 @@
             _users.AddRange(userList);
         }
 
+        var inspectors = await Dispatcher.Send(new ListInspectorCandidatesQuery());
+        if (inspectors is { Status: true, Data: { } inspectorList })
+        {
+            _inspectors.AddRange(inspectorList);
+        }
+
         await LoadScopeAsync();
+    }
+
+    /// <summary>Кандидаты в инспекторы: те, кому инспекторство положено по роли (§3.2).</summary>
+    private readonly List<UserItem> _inspectors = [];
+
+    /// <summary>Кандидаты в исполнители по подразделению — подгружаются по мере выбора подразделения.</summary>
+    private readonly Dictionary<int, IReadOnlyList<UserItem>> _assigneeCandidates = [];
+
+    /// <summary>
+    /// Кандидаты в исполнители для подразделения строки назначения.
+    /// </summary>
+    /// <remarks>
+    /// Список для КАЖДОГО подразделения запрашивается один раз и запоминается: назначений в форме
+    /// бывает с десяток, и спрашивать сервер на каждую перерисовку значило бы дёргать его при вводе
+    /// любого другого поля. Пока ответ не пришёл, показывается пусто — выбор станет доступен, когда
+    /// список загрузится.
+    /// </remarks>
+    private IReadOnlyList<UserItem> Candidates(int? divisionId)
+    {
+        if (divisionId is not { } id)
+        {
+            return [];
+        }
+
+        if (_assigneeCandidates.TryGetValue(id, out var cached))
+        {
+            return cached;
+        }
+
+        // Пустой ответ кладём сразу: он же служит отметкой «запрос уже в пути», иначе перерисовка
+        // отправила бы второй такой же.
+        _assigneeCandidates[id] = [];
+        _ = LoadCandidatesAsync(id);
+        return [];
+    }
+
+    private async Task LoadCandidatesAsync(int divisionId)
+    {
+        var response = await Dispatcher.Send(new ListAssigneeCandidatesQuery(divisionId));
+        if (response is { Status: true, Data: { } list })
+        {
+            _assigneeCandidates[divisionId] = list;
+            StateHasChanged();
+        }
     }
 
     /// <summary>Пределы регистрации субъекта: до какого грифа и в каких подразделениях он вправе создать документ.</summary>

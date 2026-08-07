@@ -73,6 +73,59 @@ public sealed record ListDivisionsQuery : IRequest<ResponseDto<IReadOnlyList<Div
     }
 }
 
+/// <summary>
+/// Кандидаты в ответственные инспекторы документа (§3.2).
+/// </summary>
+/// <remarks>
+/// Отдельно от <see cref="ListUsersQuery"/>: там ВЕСЬ активный реестр — он нужен, например, чтобы
+/// подставить упоминание в комментарий или показать имя. Здесь — только те, кому инспекторство
+/// вообще положено; предлагать остальных значит приглашать к ошибке, которая вылезет после
+/// регистрации.
+/// </remarks>
+public sealed record ListInspectorCandidatesQuery : IRequest<ResponseDto<IReadOnlyList<UserItem>>>
+{
+    /// <inheritdoc cref="ListInspectorCandidatesQuery" />
+    public sealed class Handler(IAssignmentCandidateDirectory candidates)
+        : IRequestHandler<ListInspectorCandidatesQuery, ResponseDto<IReadOnlyList<UserItem>>>
+    {
+        /// <inheritdoc />
+        public async ValueTask<ResponseDto<IReadOnlyList<UserItem>>> Handle(
+            ListInspectorCandidatesQuery query, CancellationToken cancellationToken)
+        {
+            var items = await candidates.ListInspectorsAsync(cancellationToken);
+            return ResponseDto<IReadOnlyList<UserItem>>.Ok(items, items.Count);
+        }
+    }
+}
+
+/// <summary>Кандидаты в исполнители по подразделению назначения (§4.1).</summary>
+public sealed record ListAssigneeCandidatesQuery(int DivisionId)
+    : IRequest<ResponseDto<IReadOnlyList<UserItem>>>
+{
+    /// <inheritdoc cref="ListAssigneeCandidatesQuery" />
+    public sealed class Handler(IAssignmentCandidateDirectory candidates)
+        : IRequestHandler<ListAssigneeCandidatesQuery, ResponseDto<IReadOnlyList<UserItem>>>
+    {
+        /// <inheritdoc />
+        public async ValueTask<ResponseDto<IReadOnlyList<UserItem>>> Handle(
+            ListAssigneeCandidatesQuery query, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(query);
+
+            if (query.DivisionId <= 0)
+            {
+                // Подразделение ещё не выбрано — предлагать некого. Пустой список честнее, чем
+                // «все подряд»: иначе человек выберет исполнителя, а потом сменит подразделение,
+                // и выбор молча станет недопустимым.
+                return ResponseDto<IReadOnlyList<UserItem>>.Ok([], 0);
+            }
+
+            var items = await candidates.ListAssigneesAsync(query.DivisionId, cancellationToken);
+            return ResponseDto<IReadOnlyList<UserItem>>.Ok(items, items.Count);
+        }
+    }
+}
+
 /// <summary>Справочник активных пользователей (инспектор §3.2, исполнитель §4.1).</summary>
 public sealed record ListUsersQuery : IRequest<ResponseDto<IReadOnlyList<UserItem>>>
 {

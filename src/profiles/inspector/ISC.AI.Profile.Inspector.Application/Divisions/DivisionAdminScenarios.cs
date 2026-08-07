@@ -77,6 +77,71 @@ public sealed record RenameDivisionCommand(int Id, string Name, string? Code)
     }
 }
 
+/// <summary>Вывести подразделение из обращения или вернуть в него.</summary>
+/// <remarks>
+/// Нужно ОТДЕЛЬНО от удаления: расформированное подразделение удалить нельзя — за ним числятся
+/// документы и поручения, и их владелец превратился бы в число без имени. Неактивное перестаёт
+/// предлагаться при регистрации и в назначениях, но история остаётся читаемой.
+/// </remarks>
+public sealed record SetDivisionActiveCommand(int Id, bool IsActive)
+    : IRequest<ResponseDto<bool>>, IAuditableRequest
+{
+    /// <inheritdoc />
+    public AuditAction AuditAction => AuditAction.Modify;
+
+    /// <inheritdoc />
+    public string? AuditSummary => $"inspector:division:{Id}:{(IsActive ? "enable" : "disable")}";
+
+    /// <inheritdoc cref="SetDivisionActiveCommand" />
+    public sealed class Handler(IDivisionAdminStore store)
+        : IRequestHandler<SetDivisionActiveCommand, ResponseDto<bool>>
+    {
+        /// <inheritdoc />
+        public async ValueTask<ResponseDto<bool>> Handle(
+            SetDivisionActiveCommand command, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(command);
+            return await store.SetActiveAsync(command.Id, command.IsActive, cancellationToken)
+                ? ResponseDto<bool>.Ok(true)
+                : ResponseDto<bool>.NotFound("Подразделение не найдено.");
+        }
+    }
+}
+
+/// <summary>
+/// Удалить подразделение. ИНВАРИАНТ: только если за ним ничего не числится и нет дочерних.
+/// </summary>
+public sealed record DeleteDivisionCommand(int Id) : IRequest<ResponseDto<bool>>, IAuditableRequest
+{
+    /// <inheritdoc />
+    public AuditAction AuditAction => AuditAction.Modify;
+
+    /// <inheritdoc />
+    public string? AuditSummary => $"inspector:division:delete:{Id}";
+
+    /// <inheritdoc cref="DeleteDivisionCommand" />
+    public sealed class Handler(IDivisionAdminStore store)
+        : IRequestHandler<DeleteDivisionCommand, ResponseDto<bool>>
+    {
+        /// <inheritdoc />
+        public async ValueTask<ResponseDto<bool>> Handle(
+            DeleteDivisionCommand command, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(command);
+
+            return await store.DeleteAsync(command.Id, cancellationToken) switch
+            {
+                DivisionWriteResult.Ok => ResponseDto<bool>.Ok(true, "Подразделение удалено."),
+                DivisionWriteResult.NotFound => ResponseDto<bool>.NotFound("Подразделение не найдено."),
+                _ => ResponseDto<bool>.BadRequest(
+                    "Подразделение нельзя удалить: за ним числятся пользователи, документы или "
+                    + "поручения либо у него есть дочерние. Выведите его из обращения, сняв признак "
+                    + "«действующее» — история при этом сохранится."),
+            };
+        }
+    }
+}
+
 /// <summary>Валидатор создания подразделения (форма §4.2).</summary>
 public sealed class CreateDivisionValidator : AbstractValidator<CreateDivisionCommand>
 {

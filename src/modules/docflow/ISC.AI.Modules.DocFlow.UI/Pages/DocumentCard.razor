@@ -405,10 +405,12 @@ else
             }
         </MudSelect>
         <MudSelect T="int?" @bind-Value="_addAssigneeUserId" Label="Исполнитель (необязательно)"
-                   Variant="Variant.Outlined" Clearable="true" Class="mb-2">
-            @foreach (var user in _userNames)
+                   Variant="Variant.Outlined" Clearable="true" Class="mb-2"
+                   Disabled="@(_addDivisionId is null)">
+            @* Только те, кому доступно выбранное подразделение (§4.1). *@
+            @foreach (var user in Candidates(_addDivisionId))
             {
-                <MudSelectItem T="int?" Value="@user.Key">@user.Value</MudSelectItem>
+                <MudSelectItem T="int?" Value="@user.Id">@user.Name</MudSelectItem>
             }
         </MudSelect>
         <MudDatePicker @bind-Date="_addDeadline" Label="Срок (необязательно)" Variant="Variant.Outlined" />
@@ -433,9 +435,12 @@ else
                    Class="mb-2">
             @* Текущий исполнитель из списка исключён: переназначение на него самого — не изменение
                (в СКИД он оставался в списке, и такой выбор порождал ложное уведомление). *@
-            @foreach (var user in _userNames.Where(u => u.Key != _reassignTarget?.AssigneeUserId))
+            @* Кандидаты — по подразделению ЭТОГО назначения: переназначать можно только на того,
+               кто увидит документ. *@
+            @foreach (var user in Candidates(_reassignTarget?.DivisionId)
+                .Where(u => u.Id != _reassignTarget?.AssigneeUserId))
             {
-                <MudSelectItem T="int?" Value="@user.Key">@user.Value</MudSelectItem>
+                <MudSelectItem T="int?" Value="@user.Id">@user.Name</MudSelectItem>
             }
         </MudSelect>
         <MudTextField @bind-Value="_reassignReason" Label="Основание (необязательно)" Variant="Variant.Outlined"
@@ -721,6 +726,43 @@ else
 
     /// <summary>Активные пользователи — для подстановки упоминания в комментарий (§4.8).</summary>
     private IReadOnlyList<UserItem> _users = [];
+
+    /// <summary>Кандидаты в исполнители по подразделению (§4.1) — запрашиваются по мере надобности.</summary>
+    private readonly Dictionary<int, IReadOnlyList<UserItem>> _assigneeCandidates = [];
+
+    /// <summary>
+    /// Кандидаты в исполнители для подразделения. Ответ на каждое подразделение запрашивается один
+    /// раз и запоминается: диалог перерисовывается на каждое нажатие, и без этого сервер получал бы
+    /// запрос при вводе любого другого поля.
+    /// </summary>
+    private IReadOnlyList<UserItem> Candidates(int? divisionId)
+    {
+        if (divisionId is not { } id)
+        {
+            return [];
+        }
+
+        if (_assigneeCandidates.TryGetValue(id, out var cached))
+        {
+            return cached;
+        }
+
+        // Пустой ответ кладём сразу — он же отметка «запрос уже в пути», иначе перерисовка отправила
+        // бы второй такой же.
+        _assigneeCandidates[id] = [];
+        _ = LoadCandidatesAsync(id);
+        return [];
+    }
+
+    private async Task LoadCandidatesAsync(int divisionId)
+    {
+        var response = await Dispatcher.Send(new ListAssigneeCandidatesQuery(divisionId));
+        if (response is { Status: true, Data: { } list })
+        {
+            _assigneeCandidates[divisionId] = list;
+            StateHasChanged();
+        }
+    }
 
     /// <summary>
     /// Вставляет разметку упоминания в конец текста комментария.

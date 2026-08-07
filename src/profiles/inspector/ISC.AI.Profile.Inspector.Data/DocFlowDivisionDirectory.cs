@@ -18,7 +18,11 @@ public sealed class DocFlowDivisionDirectory(IDbContextFactory<InspectorDbContex
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
 
         // Иерархию показываем плоско «родитель / дочернее» — модулю достаточно имени и id.
+        // Выведенные из обращения НЕ предлагаются: справочник этого порта — список для ВЫБОРА,
+        // а расформированному подразделению документ не адресуют. Показ уже существующих
+        // привязок этим не ломается: карточка берёт название по идентификатору, а не из списка.
         return await db.Divisions.AsNoTracking()
+            .Where(d => d.IsActive)
             .OrderBy(d => d.Parent != null ? d.Parent.Name : d.Name)
             .ThenBy(d => d.Name)
             .Select(d => new DivisionItem(

@@ -44,6 +44,8 @@
     <HeaderContent>
         <MudTh>Подразделение</MudTh>
         <MudTh>Код</MudTh>
+        <MudTh>Используется</MudTh>
+        <MudTh>Действует</MudTh>
         <MudTh Style="width:1%;"></MudTh>
     </HeaderContent>
     <RowTemplate>
@@ -54,13 +56,64 @@
                     <MudIcon Icon="@Icons.Material.Filled.SubdirectoryArrowRight" Size="Size.Small"
                              Class="mud-text-secondary" />
                 }
-                @context.Node.Name
+                <span class="@(context.Node.IsActive ? null : "mud-text-secondary")">@context.Node.Name</span>
             </div>
         </MudTd>
         <MudTd DataLabel="Код">@(context.Node.Code ?? "—")</MudTd>
+        <MudTd DataLabel="Используется">
+            @* Счётчики нужны не для красоты: по ним видно, ПОЧЕМУ подразделение нельзя удалить. *@
+            @if (context.Node.CanDelete)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">не используется</MudText>
+            }
+            else
+            {
+                <div class="d-flex gap-2 flex-wrap">
+                    @if (context.Node.Users > 0)
+                    {
+                        <MudTooltip Text="Пользователей с этим подразделением в допуске">
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Class="ma-0"
+                                     Icon="@Icons.Material.Filled.Person">@context.Node.Users</MudChip>
+                        </MudTooltip>
+                    }
+                    @if (context.Node.Documents > 0)
+                    {
+                        <MudTooltip Text="Документов подразделения">
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Class="ma-0"
+                                     Icon="@Icons.Material.Filled.Description">@context.Node.Documents</MudChip>
+                        </MudTooltip>
+                    }
+                    @if (context.Node.Assignments > 0)
+                    {
+                        <MudTooltip Text="Поручений на подразделение">
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Class="ma-0"
+                                     Icon="@Icons.Material.Filled.AssignmentInd">@context.Node.Assignments</MudChip>
+                        </MudTooltip>
+                    }
+                    @if (context.Node.Children > 0)
+                    {
+                        <MudTooltip Text="Дочерних подразделений">
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Class="ma-0"
+                                     Icon="@Icons.Material.Filled.AccountTree">@context.Node.Children</MudChip>
+                        </MudTooltip>
+                    }
+                </div>
+            }
+        </MudTd>
+        <MudTd DataLabel="Действует">
+            <MudSwitch T="bool" Value="@context.Node.IsActive" Color="Color.Primary" Disabled="_busy"
+                       ValueChanged="@(async (bool value) => await SetActiveAsync(context.Node, value))" />
+        </MudTd>
         <MudTd>
-            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
-                           OnClick="@(() => OpenRename(context.Node))" />
+            <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Dense="true">
+                <MudMenuItem OnClick="@(() => OpenRename(context.Node))">Изменить</MudMenuItem>
+                @* Удаление предлагается только тому, за кем ничего не числится: расформированное
+                   подразделение выводят из обращения переключателем, а не удаляют. *@
+                @if (context.Node.CanDelete)
+                {
+                    <MudMenuItem OnClick="@(() => DeleteAsync(context.Node))">Удалить</MudMenuItem>
+                }
+            </MudMenu>
         </MudTd>
     </RowTemplate>
     <NoRecordsContent>
@@ -172,6 +225,32 @@
         finally
         {
             _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task SetActiveAsync(DivisionNode node, bool isActive)
+    {
+        _error = null;
+        var response = await Dispatcher.Send(new SetDivisionActiveCommand(node.Id, isActive));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task DeleteAsync(DivisionNode node)
+    {
+        _error = null;
+        var response = await Dispatcher.Send(new DeleteDivisionCommand(node.Id));
+        if (!response.Status)
+        {
+            // Сюда приходит и отказ «уже используется»: между отрисовкой списка и нажатием кнопки
+            // мог появиться документ, поручение или допуск на это подразделение.
+            _error = response.StatusMessage;
         }
 
         await ReloadAsync();
