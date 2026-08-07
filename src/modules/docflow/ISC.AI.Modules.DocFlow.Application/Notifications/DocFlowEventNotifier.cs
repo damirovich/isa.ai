@@ -181,7 +181,7 @@ public sealed class DocFlowEventNotifier(INotificationStore notifications, IUser
                 new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["document"] = participants.DocumentTitle,
-                    ["status"] = StatusNames.Of(newStatus),
+                    ["status"] = AssignmentStatusNames.Of(newStatus),
                     ["actor"] = await NameOfAsync(actorUserId, cancellationToken),
                 },
                 participants.DocumentId,
@@ -334,20 +334,4 @@ public sealed class DocFlowEventNotifier(INotificationStore notifications, IUser
 
     private static string FormatDeadline(DateOnly? deadline) =>
         deadline is { } value ? value.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture) : "не задан";
-}
-
-/// <summary>Русские названия статусов назначения для текстов уведомлений (§4.2).</summary>
-internal static class StatusNames
-{
-    public static string Of(AssignmentStatus status) => status switch
-    {
-        AssignmentStatus.Registered => "Зарегистрировано",
-        AssignmentStatus.InControl => "Контроль",
-        AssignmentStatus.InProgress => "В работе",
-        AssignmentStatus.PartiallyDone => "Частично исполнено",
-        AssignmentStatus.Done => "Исполнено",
-        AssignmentStatus.Overdue => "Просрочено",
-        AssignmentStatus.Closed => "Снято с контроля",
-        _ => status.ToString(),
-    };
 }

@@ -1,4 +1,5 @@
 using ISC.AI.Modules.DocFlow.Domain.Enums;
+using ISC.AI.Modules.DocFlow.Domain.Services;
 using MudBlazor;
 
 namespace ISC.AI.Modules.DocFlow.UI;
@@ -7,17 +8,12 @@ namespace ISC.AI.Modules.DocFlow.UI;
 public static class StatusLabels
 {
     /// <summary>Подпись статуса назначения.</summary>
-    public static string Label(this AssignmentStatus status) => status switch
-    {
-        AssignmentStatus.Registered => "Зарегистрировано",
-        AssignmentStatus.InControl => "Контроль",
-        AssignmentStatus.InProgress => "В работе",
-        AssignmentStatus.PartiallyDone => "Частично исполнено",
-        AssignmentStatus.Done => "Исполнено",
-        AssignmentStatus.Overdue => "Просрочено",
-        AssignmentStatus.Closed => "Снято с контроля",
-        _ => status.ToString(),
-    };
+    /// <remarks>
+    /// Делегирует в домен (<see cref="AssignmentStatusNames"/>) — это ЕДИНСТВЕННЫЙ источник таких
+    /// строк в модуле. Своя копия здесь означала бы, что один статус называется на экране, в письме
+    /// и в отчёте по-разному, а расхождение заметит читатель, а не разработчик.
+    /// </remarks>
+    public static string Label(this AssignmentStatus status) => AssignmentStatusNames.Of(status);
 
     /// <summary>Подпись агрегированного статуса документа (NotApplicable — прочерк, §4.3).</summary>
     public static string Label(this DocumentAggregatedStatus status) => status switch
