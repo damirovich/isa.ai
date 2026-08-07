@@ -95,6 +95,11 @@ public sealed class InspectorProfile : IProfile
         new ModuleDescriptor("admin-users", "/admin/users", "Учётные записи",
             Icons.Material.Filled.ManageAccounts, typeof(UserAccounts), ReadPolicy, GroupAdmin),
 
+        // Журнал аудита (ТБ-030/032): писался с самого начала, но смотреть его из интерфейса было
+        // нельзя — только запросом к БД.
+        new ModuleDescriptor("admin-audit", "/admin/audit", "Журнал аудита",
+            Icons.Material.Filled.History, typeof(AuditJournal), ReadPolicy, GroupAdmin),
+
         // Смена СВОЕГО пароля — не администрирование, доступна любому вошедшему.
         new ModuleDescriptor("account-password", "/account/password", "Смена пароля",
             Icons.Material.Filled.Password, typeof(ChangePassword), ReadPolicy, GroupAdmin),

@@ -27,9 +27,6 @@ public sealed class DeadlineCheckerJob(
 {
     private static readonly TimeSpan StartupDelay = TimeSpan.FromSeconds(30);
 
-    /// <summary>Горизонт уведомления «срок приближается», дней — дефолт СКИД (разд. 5 ТЗ).</summary>
-    private const int DefaultNotificationHorizonDays = 7;
-
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -85,10 +82,11 @@ public sealed class DeadlineCheckerJob(
         var clock = scope.ServiceProvider.GetRequiredService<IDocFlowClock>();
         var auditWriter = scope.ServiceProvider.GetRequiredService<IAuditWriter>();
         var notifications = scope.ServiceProvider.GetRequiredService<INotificationStore>();
+        var settings = scope.ServiceProvider.GetRequiredService<ISystemSettingsStore>();
 
         var today = clock.Today;
 
-        await NotifyDeadlinesAsync(store, notifications, today, cancellationToken);
+        await NotifyDeadlinesAsync(store, notifications, settings, today, cancellationToken);
 
         var marked = await store.MarkOverdueAsync(today, cancellationToken);
         if (marked.Count == 0)
@@ -140,8 +138,9 @@ public sealed class DeadlineCheckerJob(
     }
 
     /// <summary>
-    /// Уведомления «срок приближается» и «срок сегодня» (разд. 5 ТЗ). Горизонт — конфигурация
-    /// <c>DocFlow:NotificationHorizonDays</c> (по умолчанию 7, как дефолт СКИД).
+    /// Уведомления «срок приближается» и «срок сегодня» (разд. 5 ТЗ). Горизонт — СИСТЕМНАЯ НАСТРОЙКА
+    /// (§9): эксплуатант меняет её в интерфейсе, и новое значение действует со следующего тика —
+    /// перезапуск не нужен. Прежний ключ конфигурации остался запасным вариантом (см. хранилище).
     /// </summary>
     /// <remarks>
     /// Окно берётся ДИАПАЗОНОМ (сегодня..сегодня+горизонт), а не строгим равенством «срок = сегодня +
@@ -150,12 +149,10 @@ public sealed class DeadlineCheckerJob(
     /// даёт: повторы отсекает дедупликация по (назначение, вид, значение срока) в INotificationStore.
     /// </remarks>
     private async Task NotifyDeadlinesAsync(
-        IDocumentStore store, INotificationStore notifications, DateOnly today, CancellationToken cancellationToken)
+        IDocumentStore store, INotificationStore notifications, ISystemSettingsStore settings,
+        DateOnly today, CancellationToken cancellationToken)
     {
-        var horizonDays = int.TryParse(configuration["DocFlow:NotificationHorizonDays"], out var configured)
-            && configured is > 0 and <= 30
-                ? configured
-                : DefaultNotificationHorizonDays;
+        var horizonDays = (await settings.GetAsync(cancellationToken)).NotificationHorizonDays;
 
         var notices = await store.FindDeadlineNoticesAsync(today, today.AddDays(horizonDays), cancellationToken);
         foreach (var notice in notices)

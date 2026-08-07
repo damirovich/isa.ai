@@ -216,21 +216,14 @@ public static class AccountGuard
     public const string Denied = "Ведение учётных записей доступно только Администратору.";
 
     /// <inheritdoc cref="AccountGuard" />
-    public static async Task<bool> CallerCanManageAsync(
-        IUserRoleStore roles, ISubjectProvider subjectProvider, CancellationToken cancellationToken)
-    {
-        if (await subjectProvider.GetCurrentUserIdAsync(cancellationToken) is not { } callerId)
-        {
-            return false;
-        }
-
-        if (await roles.GetRoleAsync(callerId, cancellationToken) == UserRole.Administrator)
-        {
-            return true;
-        }
-
-        return !await roles.AnyAdministratorAsync(cancellationToken);
-    }
+    /// <remarks>
+    /// Само правило — в домене (<see cref="AdministrationRule"/>): его же спрашивает слой данных,
+    /// отдавая модулю документооборота реализацию его порта администрирования, а разъехавшиеся копии
+    /// правила доступа замечает не разработчик, а посторонний.
+    /// </remarks>
+    public static Task<bool> CallerCanManageAsync(
+        IUserRoleStore roles, ISubjectProvider subjectProvider, CancellationToken cancellationToken) =>
+        AdministrationRule.CallerCanManageAsync(roles, subjectProvider, cancellationToken);
 }
 
 /// <summary>Порождение временного пароля для выдачи администратором.</summary>

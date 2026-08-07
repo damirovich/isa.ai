@@ -31,6 +31,11 @@ public static class DocFlowPersistenceServiceCollectionExtensions
         // (IDivisionDirectory, вопрос 3) — здесь их реализация не регистрируется намеренно.
         services.AddScoped<Domain.Services.IUserDirectory, UserDirectory>();
 
+        // Системные настройки модуля (§9): значение в БД, меняется без перезапуска. Кеш — SINGLETON
+        // (хранилище scoped и своего кеша пережить не может), сам стор — scoped над фабрикой контекста.
+        services.AddSingleton<DocFlowSettingsCache>();
+        services.AddScoped<Domain.Services.ISystemSettingsStore, SystemSettingsStore>();
+
         // Часы эксплуатанта (Asia/Bishkek по умолчанию) + фоновая проверка сроков (§4.2: «Просрочено»
         // ставит только система).
         services.AddSingleton<Domain.Services.IDocFlowClock, DocFlowClock>();

@@ -1,0 +1,96 @@
+@namespace ISC.AI.Modules.DocFlow.UI
+@* Системные настройки документооборота (ТЗ СКИД §9). Раньше горизонт уведомлений жил в
+   appsettings.json и требовал доступа к серверу и перезапуска — теперь он в базе и меняется отсюда,
+   действуя со следующей проверки сроков. *@
+@page "/docflow/settings"
+@rendermode InteractiveServer
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Modules.DocFlow.Application.Settings
+@using ISC.AI.Modules.DocFlow.Domain.Services
+
+<MudText Typo="Typo.h5">Настройки документооборота</MudText>
+<MudText Typo="Typo.body2" Class="mud-text-secondary">
+    Параметры работы модуля · изменяет Администратор
+</MudText>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@if (_saved is not null)
+{
+    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="my-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _saved = null)">@_saved</MudAlert>
+}
+
+<MudPaper Outlined="true" Class="pa-4 my-4" Style="max-width:640px;">
+    <MudText Typo="Typo.subtitle1" Class="mb-1">Уведомления о сроках</MudText>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">
+        За сколько дней до срока исполнитель и инспектор получают предупреждение (разд. 5 ТЗ).
+    </MudText>
+
+    <MudNumericField T="int" @bind-Value="_horizonDays" Label="Горизонт, дней" Variant="Variant.Outlined"
+                     Min="@DocFlowSettings.MinHorizonDays" Max="@DocFlowSettings.MaxHorizonDays"
+                     Style="max-width:220px;"
+                     HelperText="@($"От {DocFlowSettings.MinHorizonDays} до {DocFlowSettings.MaxHorizonDays}")" />
+
+    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+        Значение задаёт окно отбора в фоновой проверке сроков: чем оно шире, тем больше поручений
+        попадает в рассылку на каждом тике.
+    </MudText>
+
+    <div class="d-flex justify-end mt-4">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                   OnClick="SaveAsync" Disabled="_busy">
+            @(_busy ? "Сохраняем…" : "Сохранить")
+        </MudButton>
+    </div>
+</MudPaper>
+
+@code {
+    private int _horizonDays = 7;
+    private bool _busy;
+    private string? _error;
+    private string? _saved;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var response = await Dispatcher.Send(new GetDocFlowSettingsQuery());
+        if (response.Status && response.Data is not null)
+        {
+            _horizonDays = response.Data.NotificationHorizonDays;
+        }
+        else
+        {
+            _error = response.StatusMessage;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        _error = null;
+        _saved = null;
+        try
+        {
+            var response = await Dispatcher.Send(new SetNotificationHorizonCommand(_horizonDays));
+            if (!response.Status)
+            {
+                _error = response.StatusMessage;
+                return;
+            }
+
+            _saved = response.StatusMessage;
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

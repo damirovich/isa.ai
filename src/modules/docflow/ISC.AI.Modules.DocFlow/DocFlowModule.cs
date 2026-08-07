@@ -45,6 +45,8 @@ public static class DocFlowModule
             Icons.Material.Filled.Assessment, typeof(Reports), ReadPolicy, MenuGroup),
         new ModuleDescriptor("docflow-types", "/docflow/types", "Типы документов",
             Icons.Material.Filled.Category, typeof(DocumentTypes), ReadPolicy, MenuGroup),
+        new ModuleDescriptor("docflow-settings", "/docflow/settings", "Настройки",
+            Icons.Material.Filled.Tune, typeof(DocFlowSettingsPage), ReadPolicy, MenuGroup),
     ];
 
     /// <summary>

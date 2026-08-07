@@ -32,6 +32,10 @@ public static class InspectorPersistenceServiceCollectionExtensions
         // словарь id един с решёткой доступа, справочник ведёт профиль.
         services.AddScoped<ISC.AI.Modules.DocFlow.Domain.Services.IDivisionDirectory, DocFlowDivisionDirectory>();
 
+        // Профиль отдаёт модулю ответ на вопрос «кто вправе вести его настройки» (§9): роль знает
+        // только профиль. Без этой регистрации право не имеет никто (fail-closed).
+        services.AddScoped<ISC.AI.Modules.DocFlow.Domain.Services.IDocFlowAdministration, DocFlowAdministration>();
+
         // Ведение справочника подразделений (§4.2) — страница «Территориальные».
         services.AddScoped<IDivisionAdminStore, DivisionAdminStore>();
 

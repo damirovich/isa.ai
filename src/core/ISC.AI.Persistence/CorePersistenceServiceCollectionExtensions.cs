@@ -43,6 +43,10 @@ public static class CorePersistenceServiceCollectionExtensions
         // Неизменяемый журнал аудита (ТБ-030/031), append-only с хеш-цепочкой.
         services.AddScoped<IAuditWriter, AuditWriter>();
 
+        // Чтение журнала — ОТДЕЛЬНЫМ портом от записи: писать обязаны все сценарии, читать — единицы
+        // (ТБ-032; право просмотра по роли проверяет сценарий профиля).
+        services.AddScoped<IAuditReader, Audit.AuditReader>();
+
         // Материализация флага годности чанков (Э4-02, ADR-0013): профиль ставит видимость по редакциям.
         services.AddScoped<IChunkCurrencyPort, ChunkCurrencyPort>();
 

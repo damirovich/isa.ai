@@ -68,6 +68,9 @@ public class DocFlowDbContext(DbContextOptions<DocFlowDbContext> options) : Audi
     /// <summary>Уведомления пользователей (разд. 5).</summary>
     public DbSet<Notification> Notifications { get; set; } = null!;
 
+    /// <summary>Системные настройки модуля (§9) — «ключ-значение», меняются без перезапуска.</summary>
+    public DbSet<SystemSetting> SystemSettings { get; set; } = null!;
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
