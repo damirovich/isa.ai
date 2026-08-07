@@ -3,7 +3,13 @@ using ISC.AI.Modules.DocFlow.Domain.Enums;
 namespace ISC.AI.Modules.DocFlow.Domain.Services;
 
 /// <summary>Строка справочника типов документов для списков UI (ТЗ СКИД §3.1).</summary>
-public sealed record DocumentTypeItem(int Id, string Name, DocumentGroup Group, bool IsActive);
+/// <param name="CanDelete">
+/// Тип не используется ни одним документом, значит его можно удалить. Признак считается ВМЕСТЕ
+/// со списком: иначе экран либо предлагал бы заведомо невыполнимое действие, либо делал по запросу
+/// на строку.
+/// </param>
+public sealed record DocumentTypeItem(
+    int Id, string Name, DocumentGroup Group, bool IsActive, bool CanDelete = false);
 
 /// <summary>Итог изменяющей операции справочника (для маппинга в ответ сценария).</summary>
 public enum DocumentTypeWriteResult
@@ -47,4 +53,16 @@ public interface IDocumentTypeStore
     /// </summary>
     Task<DocumentTypeWriteResult> ChangeGroupAsync(
         int id, DocumentGroup newGroup, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Удаляет тип. ИНВАРИАНТ: только если по нему НЕТ ни одного документа
+    /// (<see cref="DocumentTypeWriteResult.HasDocuments"/>).
+    /// </summary>
+    /// <remarks>
+    /// Удаление нужно РЯДОМ с признаком активности, а не вместо него: неактивный тип остаётся
+    /// в справочнике и продолжает занимать имя, а ошибочно заведённый — просто мусор. Использованный
+    /// тип не удаляется никогда: у зарегистрированных документов пропала бы группа, а с ней и правила
+    /// поведения (§3.1); для вышедших из обращения остаётся снятие признака «действующий».
+    /// </remarks>
+    Task<DocumentTypeWriteResult> DeleteAsync(int id, CancellationToken cancellationToken = default);
 }

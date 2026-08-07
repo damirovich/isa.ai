@@ -30,7 +30,11 @@ public sealed class DocumentTypeStore(IDbContextFactory<DocFlowDbContext> contex
 
         return await query
             .OrderBy(t => t.Name)
-            .Select(t => new DocumentTypeItem(t.Id, t.Name, t.Group, t.IsActive))
+            // CanDelete считается подзапросом В ТОМ ЖЕ запросе: иначе экран делал бы по обращению
+            // к БД на каждую строку справочника.
+            .Select(t => new DocumentTypeItem(
+                t.Id, t.Name, t.Group, t.IsActive,
+                !db.Documents.Any(d => d.TypeId == t.Id)))
             .ToListAsync(cancellationToken);
     }
 
@@ -95,6 +99,31 @@ public sealed class DocumentTypeStore(IDbContextFactory<DocFlowDbContext> contex
         }
 
         entity.Group = newGroup;
+        await db.SaveChangesAsync(cancellationToken);
+        return DocumentTypeWriteResult.Ok;
+    }
+
+    /// <inheritdoc />
+    public async Task<DocumentTypeWriteResult> DeleteAsync(
+        int id, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var entity = await db.DocumentTypes.FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
+        if (entity is null)
+        {
+            return DocumentTypeWriteResult.NotFound;
+        }
+
+        // Тот же инвариант, что у смены группы: использованный тип не удаляется — у документов
+        // пропала бы группа, а с ней и правила их поведения (§3.1). Проверка ЗДЕСЬ, а не только
+        // в форме: признак CanDelete в списке мог устареть, пока экран был открыт.
+        if (await db.Documents.AnyAsync(d => d.TypeId == id, cancellationToken))
+        {
+            return DocumentTypeWriteResult.HasDocuments;
+        }
+
+        db.DocumentTypes.Remove(entity);
         await db.SaveChangesAsync(cancellationToken);
         return DocumentTypeWriteResult.Ok;
     }

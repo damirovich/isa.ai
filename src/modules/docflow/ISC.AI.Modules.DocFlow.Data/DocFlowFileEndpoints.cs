@@ -56,6 +56,8 @@ public static class DocFlowFileEndpoints
         [FromServices] IDocFlowFileStorage storage,
         [FromServices] IAccessContextProvider accessProvider,
         [FromServices] IAuditWriter auditWriter,
+        [FromServices] IUserDirectory userDirectory,
+        [FromServices] Reports.PdfReportFontOptions fontOptions,
         [FromServices] ILogger<DocFlowFileEndpointsCategory> logger,
         CancellationToken cancellationToken,
         [FromQuery(Name = "download")] bool download = false)
@@ -122,6 +124,27 @@ public static class DocFlowFileEndpoints
         // Типы вне allowlist'а — принудительно вложением, даже если download=false не запрашивал этого
         // (см. комментарий у SafeInlineContentTypes).
         var attachToResponse = download || !SafeInlineContentTypes.Contains(file.ContentType);
+
+        // ОТМЕТКА ПОЛУЧАТЕЛЯ на PDF: копия, покинувшая систему, остаётся привязанной к тому, кто её
+        // получил, и к моменту выдачи. Журнал фиксирует факт, отметка делает след видимым на бумаге.
+        // Только PDF: другие форматы пришлось бы конвертировать, а от конвертации в закрытом контуре
+        // уже отказались (этап 4.3). Неудача нанесения отдаёт файл КАК ЕСТЬ — см. PdfWatermark.
+        if (string.Equals(file.ContentType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer, cancellationToken);
+            await stream.DisposeAsync();
+
+            var recipient = await userDirectory.GetNameAsync(
+                access.NumericSubjectId ?? 0, cancellationToken) ?? access.SubjectId;
+
+            var stamped = Reports.PdfWatermark.TryStamp(
+                buffer.ToArray(), recipient, DateTime.Now, fontOptions);
+
+            return Results.File(
+                stamped, file.ContentType, fileDownloadName: attachToResponse ? file.FileName : null);
+        }
+
         return Results.File(
             stream, file.ContentType, fileDownloadName: attachToResponse ? file.FileName : null,
             enableRangeProcessing: true);

@@ -1,23 +1,25 @@
 {
   "$schema": "https://json.schemastore.org/launchsettings.json",
-    "profiles": {
-      "http": {
-        "commandName": "Project",
-        "dotnetRunMessages": true,
-        "launchBrowser": true,
-        "applicationUrl": "http://localhost:5134",
-        "environmentVariables": {
-          "ASPNETCORE_ENVIRONMENT": "Development"
-        }
-      },
-      "https": {
-        "commandName": "Project",
-        "dotnetRunMessages": true,
-        "launchBrowser": true,
-        "applicationUrl": "https://localhost:7058;http://localhost:5134",
-        "environmentVariables": {
-          "ASPNETCORE_ENVIRONMENT": "Development"
-        }
+  "//": "Профили запуска ДЛЯ РАЗРАБОТКИ. В контуре хост запускается службой, а не отсюда. Файл нужен Visual Studio: без него профиль «https» не существует, и VS сообщает «не удалось установить подключение к веб-серверу». Пароль БД здесь НЕ хранится — только переменная окружения Database__Password или user-secrets (Э4-10, ТБ-043).",
+  "profiles": {
+    "https": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "applicationUrl": "https://localhost:7080;http://localhost:5080",
+      "dotnetRunMessages": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
+    "http": {
+      "//": "Запасной профиль без TLS — на случай, когда локальный сертификат разработчика не выпущен или не доверен (иначе Kestrel не поднимется и процесс завершится).",
+      "commandName": "Project",
+      "launchBrowser": true,
+      "applicationUrl": "http://localhost:5080",
+      "dotnetRunMessages": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
       }
     }
   }
+}

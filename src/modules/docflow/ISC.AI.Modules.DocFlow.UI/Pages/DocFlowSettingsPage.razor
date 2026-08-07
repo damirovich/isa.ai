@@ -49,6 +49,26 @@
     </div>
 </MudPaper>
 
+<MudPaper Outlined="true" Class="pa-4 my-4" Style="max-width:640px;">
+    <MudText Typo="Typo.subtitle1" Class="mb-1">Проверка сроков</MudText>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">
+        Система проверяет сроки по расписанию (раз в час). Здесь можно выполнить проверку немедленно —
+        например, сразу после развёртывания или при разборе обращения «уведомление не пришло».
+    </MudText>
+
+    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-3">
+        Повторный запуск безопасен: перевод в «Просрочено» ничего не меняет у уже просроченных,
+        а повторные уведомления отсекаются по паре «назначение + срок».
+    </MudText>
+
+    <div class="d-flex justify-end">
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PlayArrow"
+                   OnClick="RunCheckAsync" Disabled="_busy">
+            @(_busy ? "Выполняем…" : "Выполнить проверку сейчас")
+        </MudButton>
+    </div>
+</MudPaper>
+
 @code {
     private int _horizonDays = 7;
     private bool _busy;
@@ -65,6 +85,32 @@
         else
         {
             _error = response.StatusMessage;
+        }
+    }
+
+    private async Task RunCheckAsync()
+    {
+        _busy = true;
+        _error = null;
+        _saved = null;
+        try
+        {
+            var response = await Dispatcher.Send(new RunDeadlineCheckCommand());
+            if (!response.Status)
+            {
+                _error = response.StatusMessage;
+                return;
+            }
+
+            _saved = response.StatusMessage;
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
         }
     }
 

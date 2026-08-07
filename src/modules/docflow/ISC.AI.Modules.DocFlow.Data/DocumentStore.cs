@@ -172,6 +172,50 @@ public sealed class DocumentStore(
     }
 
     /// <inheritdoc />
+    public async Task<DocumentWriteStatus> DeleteAttachmentAsync(
+        int attachmentId, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var attachment = await db.DocumentAttachments
+            .FirstOrDefaultAsync(a => a.Id == attachmentId, cancellationToken);
+        if (attachment is null)
+        {
+            return DocumentWriteStatus.NotFound;
+        }
+
+        // Нельзя менять то, чего не видишь (WriteAccessRule): недоступный документ — тот же NotFound,
+        // и по ответу нельзя узнать, существует ли вложение.
+        if (!await IsDocumentVisibleAsync(db, attachment.DocumentId, access, cancellationToken))
+        {
+            return DocumentWriteStatus.NotFound;
+        }
+
+        var storedFileName = attachment.StoredFileName;
+        var subPath = attachment.DocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        db.DocumentAttachments.Remove(attachment);
+        await db.SaveChangesAsync(cancellationToken);
+
+        // Файл с диска — ПОСЛЕ успешной записи в БД. Обратный порядок при сбое сохранения оставил бы
+        // строку, указывающую в пустоту; здесь же худший исход — осиротевший файл, который не виден
+        // ниоткуда и не мешает работе.
+        try
+        {
+            await fileStorage.DeleteAsync(
+                storedFileName, FileCategories.Attachments, subPath, CancellationToken.None);
+        }
+        catch (IOException)
+        {
+            // Файл занят или уже удалён — запись в БД снята, для пользователя вложения больше нет.
+        }
+
+        return DocumentWriteStatus.Ok;
+    }
+
+    /// <inheritdoc />
     public async Task<DocumentCreateResult> CreateAsync(
         DocumentDraft draft,
         IReadOnlyList<AssignmentDraft> assignments,

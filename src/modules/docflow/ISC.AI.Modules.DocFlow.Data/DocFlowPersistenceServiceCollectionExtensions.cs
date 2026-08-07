@@ -39,6 +39,11 @@ public static class DocFlowPersistenceServiceCollectionExtensions
         // Часы эксплуатанта (Asia/Bishkek по умолчанию) + фоновая проверка сроков (§4.2: «Просрочено»
         // ставит только система).
         services.AddSingleton<Domain.Services.IDocFlowClock, DocFlowClock>();
+
+        // Сама проверка сроков — отдельным scoped-сервисом: её зовёт и фоновая задача (создавая
+        // свой scope на тик), и ручной запуск администратором. Повторный вызов безопасен —
+        // перевод в «Просрочено» идемпотентен, уведомления отсекает дедупликация.
+        services.AddScoped<Domain.Services.IDeadlineChecker, DeadlineChecker>();
         services.AddHostedService<DeadlineCheckerJob>();
 
         // Индексация документов в корпус ядра (этап 7 Э4-35): вызывается очередью фоновых задач.

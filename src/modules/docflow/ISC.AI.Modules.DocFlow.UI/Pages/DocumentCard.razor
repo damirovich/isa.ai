@@ -199,6 +199,10 @@ else
                     }
                     <MudLink Href="@FileUrl(FileCategories.Attachments, attachment.StoredFileName, download: true)"
                              Typo="Typo.caption">Скачать</MudLink>
+                    @* Вложение — черновик или справочный материал, его удаление обратимо только
+                       повторной загрузкой; версионируемые файлы документа так не удаляются. *@
+                    <MudLink Typo="Typo.caption" Color="Color.Error"
+                             OnClick="@(() => DeleteAttachmentAsync(attachment))">Удалить</MudLink>
                 </div>
             }
         }
@@ -290,6 +294,20 @@ else
                       Variant="Variant.Outlined" Lines="2" AutoGrow="true" MaxLines="10"
                       MaxLength="AddCommentValidator.MaxContentLength" Class="mb-2" />
         <div class="d-flex align-center gap-2 flex-wrap">
+            @* ПОДСТАНОВКА УПОМИНАНИЯ. Формат разметки — @[Имя](user:Id), и набирать его руками
+               человек не станет: ошибётся в скобках — упоминание не сработает и уведомление
+               не уйдёт, причём молча. Выбор из списка вставляет разметку целиком.
+               Выпадающий СПИСОК, а не автодополнение по вводу: подсказка-в-поле требует перехвата
+               ввода и позиции курсора, а сотрудников в организации немного. *@
+            <MudSelect T="int?" Value="@(null)" ValueChanged="InsertMention" Label="Упомянуть"
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Style="width:200px;"
+                       Disabled="_commentBusy">
+                @foreach (var user in _users)
+                {
+                    <MudSelectItem T="int?" Value="@user.Id">@user.Name</MudSelectItem>
+                }
+            </MudSelect>
+
             @* Вид и файлы — только у НОВОГО комментария: при правке меняется лишь текст (как в СКИД). *@
             @if (_editingCommentId is null)
             {
@@ -700,6 +718,28 @@ else
     private const string CommentsCategory = "comments";
     private readonly List<CommentItem> _comments = [];
     private string _commentText = string.Empty;
+
+    /// <summary>Активные пользователи — для подстановки упоминания в комментарий (§4.8).</summary>
+    private IReadOnlyList<UserItem> _users = [];
+
+    /// <summary>
+    /// Вставляет разметку упоминания в конец текста комментария.
+    /// </summary>
+    /// <remarks>
+    /// В КОНЕЦ, а не по месту курсора: позиция курсора в Blazor Server доступна только через
+    /// JS-взаимодействие, а неверно вычисленная позиция рвала бы уже набранный текст. Упоминания
+    /// почти всегда дописывают к готовой фразе, поэтому потеря невелика.
+    /// </remarks>
+    private void InsertMention(int? userId)
+    {
+        if (userId is not { } id || !_userNames.TryGetValue(id, out var name))
+        {
+            return;
+        }
+
+        var separator = string.IsNullOrEmpty(_commentText) || _commentText.EndsWith(' ') ? string.Empty : " ";
+        _commentText = $"{_commentText}{separator}@[{name}](user:{id.ToString(System.Globalization.CultureInfo.InvariantCulture)}) ";
+    }
     private CommentType _commentType = CommentType.Question;
     private IReadOnlyList<IBrowserFile>? _commentFiles;
     private CommentItem? _replyTo;
@@ -1186,6 +1226,18 @@ else
         }
 
         // Индексация фоновая — карточка обновит чип при следующем открытии/перезагрузке.
+        await ReloadAsync();
+    }
+
+    private async Task DeleteAttachmentAsync(AttachmentItem attachment)
+    {
+        _error = null;
+        var response = await Dispatcher.Send(new DeleteAttachmentCommand(attachment.Id));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
         await ReloadAsync();
     }
 

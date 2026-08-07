@@ -67,6 +67,13 @@
                 <MudMenuItem OnClick="@(() => ChangeGroupAsync(context))">
                     Сменить группу на «@(context.Group == DocumentGroup.Execution ? "Хранение" : "Исполнение")»
                 </MudMenuItem>
+                @* Удалять можно только НЕиспользуемый тип: у документов пропала бы группа,
+                   а с ней и правила их поведения (§3.1). Вышедшие из обращения — снятием
+                   признака «действующий». *@
+                @if (context.CanDelete)
+                {
+                    <MudMenuItem OnClick="@(() => DeleteAsync(context))">Удалить</MudMenuItem>
+                }
             </MudMenu>
         </MudTd>
     </RowTemplate>
@@ -215,6 +222,20 @@
         if (!response.Status)
         {
             _error = response.StatusMessage; // в т.ч. отказ §3.1 «по типу уже есть документы»
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task DeleteAsync(DocumentTypeItem item)
+    {
+        _error = null;
+        var response = await Dispatcher.Send(new DeleteDocumentTypeCommand(item.Id));
+        if (!response.Status)
+        {
+            // Сюда же приходит отказ, если документы по типу появились, пока экран был открыт:
+            // признак CanDelete в списке к моменту нажатия мог устареть.
+            _error = response.StatusMessage;
         }
 
         await ReloadAsync();

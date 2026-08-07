@@ -106,13 +106,78 @@
         </MudItem>
     </MudGrid>
 
-    <div class="d-flex justify-end mt-4">
+    <div class="d-flex justify-end gap-2 mt-4">
+        @* Предпросмотр — чтобы не выгружать вслепую: отбор задаётся семью полями, и промах видно
+           только открыв скачанный файл. Файла здесь не возникает, из системы ничего не уходит. *@
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Visibility"
+                   OnClick="PreviewAsync" Disabled="_busy">Предпросмотр</MudButton>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download"
                    OnClick="GenerateAsync" Disabled="_busy">
             @(_busy ? "Формируем…" : "Сформировать")
         </MudButton>
     </div>
 </MudPaper>
+
+@if (_preview is not null)
+{
+    <MudPaper Outlined="true" Class="pa-4 mb-4">
+        <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+            <div>
+                <MudText Typo="Typo.subtitle1">@_preview.Title</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    @_preview.ClassificationMarking · @_preview.PrintStamp
+                </MudText>
+            </div>
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                           OnClick="@(() => _preview = null)" aria-label="Закрыть предпросмотр" />
+        </div>
+
+        @if (_previewTotal == 0)
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Text" Dense="true">
+                По этому отбору строк нет — файл получится пустым.
+            </MudAlert>
+        }
+        else
+        {
+            @* Усечение названо ЧЕСТНО: «первые N» не должны выдавать себя за весь отчёт. *@
+            <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2">
+                Строк всего: @_previewTotal.@(_previewTotal > PreviewRows
+                    ? $" Показаны первые {PreviewRows} — в файл попадут все." : string.Empty)
+            </MudText>
+
+            <div style="overflow-x:auto;">
+                <MudSimpleTable Dense="true" Hover="true" Striped="true" Style="min-width:900px;">
+                    <thead>
+                        <tr>
+                            @foreach (var column in _preview.Columns)
+                            {
+                                <th>@column</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var group in _preview.Groups)
+                        {
+                            <tr>
+                                <td colspan="@_preview.Columns.Count" style="font-weight:600;">@group.Title</td>
+                            </tr>
+                            @foreach (var row in group.Rows)
+                            {
+                                <tr>
+                                    @foreach (var cell in row.Cells)
+                                    {
+                                        <td>@cell</td>
+                                    }
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            </div>
+        }
+    </MudPaper>
+}
 
 <MudText Typo="Typo.caption" Class="mud-text-secondary">
     Файл помечается грифом и штампом «кто и когда сформировал». Выгрузка записывается в журнал аудита.
@@ -172,28 +237,78 @@
         }
     }
 
-    private async Task GenerateAsync()
+    /// <summary>Сколько строк показывать в предпросмотре: больше на экран всё равно не поместится.</summary>
+    private const int PreviewRows = 200;
+
+    private ReportView? _preview;
+    private int _previewTotal;
+
+    private async Task PreviewAsync()
     {
         _error = null;
         _info = null;
+        _preview = null;
 
-        if (_from is not { } from || _to is not { } to)
+        if (BuildFilter() is not { } filter)
         {
-            _error = "Укажите период.";
             return;
         }
 
         _busy = true;
         try
         {
-            // Для «просроченных» статус в отборе не имеет смысла — вид сам его и задаёт;
-            // передавать выбранное значение значило бы получить пустой отчёт без объяснения.
-            var status = _kind == ReportKind.Overdue ? null : _status;
+            var response = await Dispatcher.Send(new PreviewReportQuery(_kind, filter, PreviewRows));
+            if (!response.Status || response.Data is null)
+            {
+                _error = response.StatusMessage;
+                return;
+            }
 
-            var filter = new ReportFilter(
-                DateOnly.FromDateTime(from), DateOnly.FromDateTime(to),
-                _divisionId, _assigneeUserId, _inspectorUserId, _typeId, status);
+            _preview = response.Data;
+            _previewTotal = response.TotalCount ?? 0;
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
+    /// <summary>Собирает отбор из полей формы; <see langword="null"/> — период не задан.</summary>
+    private ReportFilter? BuildFilter()
+    {
+        if (_from is not { } from || _to is not { } to)
+        {
+            _error = "Укажите период.";
+            return null;
+        }
+
+        // Для «просроченных» статус в отборе не имеет смысла — вид сам его задаёт.
+        var status = _kind == ReportKind.Overdue ? null : _status;
+
+        return new ReportFilter(
+            DateOnly.FromDateTime(from), DateOnly.FromDateTime(to),
+            _divisionId, _assigneeUserId, _inspectorUserId, _typeId, status);
+    }
+
+    private async Task GenerateAsync()
+    {
+        _error = null;
+        _info = null;
+
+        // Отбор собирается ОДНИМ методом на предпросмотр и выгрузку: разойдись они — на экране
+        // показывалось бы одно, а в файл попадало другое, и заметить это было бы нечем.
+        if (BuildFilter() is not { } filter)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
             var response = await Dispatcher.Send(new GenerateReportCommand(_kind, _format, filter));
             if (!response.Status || response.Data is null)
             {
