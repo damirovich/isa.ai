@@ -46,7 +46,10 @@ try
 
     // Blazor Server + MudBlazor.
     builder.Services.AddRazorComponents()
-        .AddInteractiveServerComponents();
+        // DetailedErrors ТОЛЬКО в Development: в браузер уходит текст исключения со стеком, а это
+        // выдача внутреннего устройства системы наружу (ТБ-010). В контуре ошибку ищут по журналу.
+        .AddInteractiveServerComponents(options =>
+            options.DetailedErrors = builder.Environment.IsDevelopment());
     builder.Services.AddMudServices();
 
     // CQRS-lite: Mediator (source-генератор — в этом хосте). Обработчики — Scoped: они тянут

@@ -4,84 +4,57 @@
 @* Собственный @rendermode НЕ объявляется намеренно: виджет живёт в MainLayout, а режим для всего
    дерева задаётся единой точкой в App.razor (Э3-08). Своё объявление в компоненте ЛЕЙАУТА — ровно тот
    случай, от которого предостерегает комментарий в App.razor. *@
+@* СЧЁТЧИК СО ССЫЛКОЙ, а не выпадающий список. Раньше здесь был MudMenu с кастомным ActivatorContent
+   (бейдж + кнопка) — единственное такое место в проекте: остальные меню используют встроенный
+   активатор (Icon="…") и работают. Меню не открывалось: счётчик пользователь видел, а до самих
+   уведомлений добраться не мог. Список переехал на отдельный экран дашборда (NotificationsPanel), где он —
+   обычная разметка страницы и не зависит ни от поповеров, ни от порядка их провайдеров. *@
 @implements IAsyncDisposable
-@using Mediator
-@using Microsoft.AspNetCore.Components.Routing
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Modules.DocFlow.Application.Notifications
-@using ISC.AI.Modules.DocFlow.Domain.Services
+@using Mediator
 @inject IMediator Dispatcher
 @inject NavigationManager Navigation
 
-<MudMenu Dense="true" ActivationEvent="MouseEvent.LeftClick" AnchorOrigin="Origin.BottomRight"
-         TransformOrigin="Origin.TopRight" PopoverClass="docflow-bell-popover">
-    <ActivatorContent>
-        <MudBadge Content="_unreadCount" Color="Color.Error" Overlap="true" Visible="_unreadCount > 0"
-                  Max="99" Bordered="true">
-            <MudIconButton Icon="@Icons.Material.Filled.Notifications" Color="Color.Inherit"
-                           aria-label="Уведомления" />
-        </MudBadge>
-    </ActivatorContent>
-    <ChildContent>
-        <div style="min-width:320px;max-width:420px;">
-            <div class="d-flex align-center justify-space-between px-4 py-2">
-                <MudText Typo="Typo.subtitle2">Уведомления</MudText>
-                @if (_items.Count > 0)
-                {
-                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="MarkAllReadAsync">
-                        Прочитать все
-                    </MudButton>
-                }
-            </div>
-            <MudDivider />
-
-            @if (_busy)
-            {
-                <div class="pa-4"><MudProgressLinear Indeterminate="true" Color="Color.Primary" /></div>
-            }
-            else if (_items.Count == 0)
-            {
-                <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Непрочитанных уведомлений нет.</MudText>
-            }
-            else
-            {
-                @foreach (var item in _items)
-                {
-                    <MudMenuItem OnClick="@(() => OpenAsync(item))">
-                        <MudText Typo="Typo.body2" Style="white-space:normal;">@item.Message</MudText>
-                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                            @item.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm",
-                                System.Globalization.CultureInfo.InvariantCulture)
-                        </MudText>
-                    </MudMenuItem>
-                }
-            }
-        </div>
-    </ChildContent>
-</MudMenu>
+<MudBadge Content="_unreadCount" Color="Color.Error" Overlap="true" Visible="_unreadCount > 0"
+          Max="99" Bordered="true">
+    <MudIconButton Icon="@Icons.Material.Filled.Notifications" Color="Color.Inherit"
+                   OnClick="OpenFeed" Title="@Title" aria-label="@Title" />
+</MudBadge>
 
 @code {
+    /// <summary>Маршрут ленты — экран дашборда профиля, где панель модуля и живёт.</summary>
+    private const string FeedRoute = "/dashboard";
+
     // Опрос счётчика: уведомления рождаются и фоновой проверкой сроков, и действиями ДРУГИХ
     // пользователей — без периодического обновления колокольчик бы «просыпался» только при
     // перезагрузке страницы. Минута — компромисс между свежестью и нагрузкой на БД.
     private static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(1);
 
-    private IReadOnlyList<NotificationItem> _items = [];
     private int _unreadCount;
-    private bool _busy;
     private PeriodicTimer? _timer;
     private CancellationTokenSource? _pollCts;
+
+    private string Title => _unreadCount > 0
+        ? $"Непрочитанных уведомлений: {_unreadCount}. Открыть ленту"
+        : "Уведомления";
 
     /// <inheritdoc />
     protected override async Task OnInitializedAsync()
     {
         await RefreshAsync();
-        await LoadItemsAsync();
         StartPolling();
     }
 
     private void StartPolling()
     {
+        // Предрендер выполняет OnInitializedAsync ДВАЖДЫ; второй запуск оставил бы цикл-сироту,
+        // который некому остановить.
+        if (_pollCts is not null)
+        {
+            return;
+        }
+
         _pollCts = new CancellationTokenSource();
         _timer = new PeriodicTimer(PollInterval);
         var token = _pollCts.Token;
@@ -97,7 +70,6 @@
                     await InvokeAsync(async () =>
                     {
                         await RefreshAsync();
-                        await LoadItemsAsync();
                         StateHasChanged();
                     });
                 }
@@ -106,47 +78,30 @@
             {
                 // Компонент уничтожен — штатное завершение цикла.
             }
+            catch (ObjectDisposedException)
+            {
+                // Гонка ухода со страницы: тик уже случился, а рендерер (или таймер) уже уничтожен.
+                // НЕОБРАБОТАННОЕ исключение из фоновой задачи роняет весь circuit, а колокольчик
+                // живёт в шапке — то есть на КАЖДОМ экране, и ронял бы систему при любом переходе.
+            }
         }, token);
     }
 
+    private void OpenFeed() => Navigation.NavigateTo(FeedRoute);
+
     private async Task RefreshAsync()
     {
-        var response = await Dispatcher.Send(new CountUnreadNotificationsQuery());
-        _unreadCount = response.Status ? response.Data : 0;
-    }
-
-    private async Task LoadItemsAsync()
-    {
-        _busy = true;
         try
         {
-            var response = await Dispatcher.Send(new ListNotificationsQuery());
-            _items = response.Status && response.Data is not null ? response.Data : [];
+            var response = await Dispatcher.Send(new CountUnreadNotificationsQuery());
+            _unreadCount = response.Status ? response.Data : 0;
         }
-        finally
+        catch (Exception)
         {
-            _busy = false;
+            // Колокольчик — деталь шапки: его сбой не должен ронять оболочку целиком. Ошибку увидит
+            // и назовёт панель ленты на дашборде — там для неё есть место, а в шапке его нет.
+            _unreadCount = 0;
         }
-    }
-
-    private async Task OpenAsync(NotificationItem item)
-    {
-        await Dispatcher.Send(new MarkNotificationReadCommand(item.Id));
-        await RefreshAsync();
-        await LoadItemsAsync();
-
-        if (item.DocumentId is { } documentId)
-        {
-            // Комментарий открывается в карточке документа — отдельного маршрута у ленты нет.
-            Navigation.NavigateTo($"/docflow/documents/{documentId}");
-        }
-    }
-
-    private async Task MarkAllReadAsync()
-    {
-        await Dispatcher.Send(new MarkAllNotificationsReadCommand());
-        await RefreshAsync();
-        await LoadItemsAsync();
     }
 
     /// <inheritdoc />

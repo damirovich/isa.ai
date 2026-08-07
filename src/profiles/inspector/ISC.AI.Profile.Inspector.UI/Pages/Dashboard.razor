@@ -1,6 +1,9 @@
 @namespace ISC.AI.Profile.Inspector.UI
 @page "/dashboard"
 @rendermode InteractiveServer
+@using ISC.AI.Abstractions.Modules
+@using ISC.AI.Abstractions.Profiles
+@inject IProfile Profile
 
 @* Модуль «Дашборд» (ТФ-ДШ-01/02). ВНИМАНИЕ: данные ПОКАЗАТЕЛЬНЫЕ (демо) — реальных записей ещё нет,
    домен «Нарушение» создан, но пуст. Демо-маркер обязан быть виден (плашка ниже + чип в оболочке).
@@ -8,6 +11,22 @@
 
 <PageHeader Title="Дашборд" Subtitle="Сводная картина по подразделениям — обзор"
             Icon="@Icons.Material.Filled.Dashboard" />
+
+@* Панели модулей — ПЕРВЫМИ, до демонстрационных показателей: здесь единственные НАСТОЯЩИЕ данные
+   экрана (лента уведомлений), а всё, что ниже, — показательные цифры. Состав панелей профиль не
+   перечисляет поимённо: он рендерит то, что объявили подключённые модули (ShellWidgetSlot.Dashboard),
+   поэтому «Дашборд» не приходится править при добавлении новой вертикали. *@
+@if (Panels.Count > 0)
+{
+    <MudGrid Class="mb-4">
+        @foreach (var panel in Panels)
+        {
+            <MudItem xs="12" md="@panel.Columns">
+                <DynamicComponent Type="panel.ComponentType" @key="panel.Id" />
+            </MudItem>
+        }
+    </MudGrid>
+}
 
 <DemoAlert>@InspectorDemoData.Notice</DemoAlert>
 
@@ -104,6 +123,11 @@
 </MudGrid>
 
 @code {
+    private IReadOnlyList<IShellWidget> Panels =>
+        [.. Profile.ShellWidgets
+            .Where(widget => widget.Slot == ShellWidgetSlot.Dashboard)
+            .OrderBy(widget => widget.Order)];
+
     // Цвет статуса устранения: согласован со свёрткой уровней риска в 3 цвета (Приложение §2).
     private static Color StatusColor(string status) => status switch
     {

@@ -48,13 +48,24 @@ public static class DocFlowModule
     ];
 
     /// <summary>
-    /// Виджеты оболочки — профиль подмешивает их в свой <c>IProfile.ShellWidgets</c>. Пока один:
-    /// колокольчик уведомлений (разд. 5 ТЗ СКИД).
+    /// Виджеты оболочки — профиль подмешивает их в свой <c>IProfile.ShellWidgets</c>: счётчик
+    /// уведомлений в шапке и лента уведомлений на общем дашборде (разд. 5 ТЗ СКИД).
     /// </summary>
+    /// <remarks>
+    /// Дашборд в системе ОДИН и живёт ОТДЕЛЬНЫМ экраном хоста (<c>/dashboard</c>, решение заказчика
+    /// 2026-08-07): своей страницы документооборот не заводит, а добавляет туда панель через слот
+    /// <see cref="ShellWidgetSlot.Dashboard"/>. Колокольчик в шапке — только счётчик, ведущий туда же.
+    /// </remarks>
     public static IReadOnlyList<IShellWidget> ShellWidgets { get; } =
     [
         new ShellWidgetDescriptor(
             "docflow-notifications", ShellWidgetSlot.AppBarRight, Order: 10, typeof(NotificationBell)),
+
+        // Columns: 12 — лента занимает весь ряд. Пока это единственная панель дашборда; когда рядом
+        // появятся показатели, ширину здесь и уменьшим (хост раскладывает по числу, а не по смыслу).
+        new ShellWidgetDescriptor(
+            "docflow-notifications-panel", ShellWidgetSlot.Dashboard, Order: 10,
+            typeof(NotificationsPanel), Columns: 12),
     ];
 
     /// <summary>Прикладные сервисы модуля — вызывается профилем в <c>IProfile.RegisterServices</c>.</summary>
