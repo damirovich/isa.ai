@@ -6,15 +6,6 @@ public enum ShellWidgetSlot
     /// <summary>Правая часть верхней панели — рядом с переключателем темы и выходом.</summary>
     AppBarRight = 0,
 
-    /// <summary>
-    /// Главная страница (дашборд) — над плитками модулей.
-    /// </summary>
-    /// <remarks>
-    /// Дашборд в системе ОДИН, общий (решение заказчика 2026-08-07): вместо отдельного экрана на каждую
-    /// вертикаль модули добавляют свои панели сюда. Хост при этом остаётся доменно-нейтральным — он
-    /// знает про «слот» и «тип компонента», но не про уведомления и документы (ТС-003).
-    /// </remarks>
-    Dashboard = 1,
 }
 
 /// <summary>
@@ -42,16 +33,6 @@ public interface IShellWidget
     /// <summary>Тип Razor-компонента виджета; оболочка создаёт его через <c>DynamicComponent</c>.</summary>
     Type ComponentType { get; }
 
-    /// <summary>
-    /// Ширина панели в 12-колоночной сетке на средних экранах и шире. Значима только для слота
-    /// <see cref="ShellWidgetSlot.Dashboard"/>; по умолчанию — половина ряда.
-    /// </summary>
-    /// <remarks>
-    /// Ширину задаёт объявляющая сторона, а не хост: только она знает, сколько места нужно её панели
-    /// (лента уведомлений и таблица показателей просят разного). Хост при этом не получает знания
-    /// о содержимом — он раскладывает по числу, а не по смыслу.
-    /// </remarks>
-    int Columns => 6;
 }
 
 /// <summary>Готовая реализация <see cref="IShellWidget"/> для деклараций в манифесте профиля.</summary>
@@ -59,5 +40,4 @@ public sealed record ShellWidgetDescriptor(
     string Id,
     ShellWidgetSlot Slot,
     int Order,
-    Type ComponentType,
-    int Columns = 6) : IShellWidget;
+    Type ComponentType) : IShellWidget;

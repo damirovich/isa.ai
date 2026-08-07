@@ -1,0 +1,29 @@
+@namespace ISC.AI.Modules.DocFlow.UI
+@* Плитка с числом для дашборда модуля. Своя, а не общая с профилем: пакет модулей на профиль
+   не ссылается (ADR-0017), и переиспользовать его StatCard он не может. *@
+
+<MudPaper Outlined="true" Class="pa-3 h-100 d-flex align-center gap-3">
+    <MudIcon Icon="@Icon" Color="@Color" Size="Size.Medium" />
+    <div>
+        <MudText Typo="Typo.h5" Style="line-height:1.1;">@Value</MudText>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">@Label</MudText>
+    </div>
+</MudPaper>
+
+@code {
+    /// <summary>Число на плитке.</summary>
+    [Parameter]
+    public int Value { get; set; }
+
+    /// <summary>Подпись под числом.</summary>
+    [Parameter]
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>Цвет значка — им и различаются «в работе», «просрочено», «срок сегодня».</summary>
+    [Parameter]
+    public Color Color { get; set; } = Color.Default;
+
+    /// <summary>Значок.</summary>
+    [Parameter]
+    public string Icon { get; set; } = Icons.Material.Filled.Circle;
+}

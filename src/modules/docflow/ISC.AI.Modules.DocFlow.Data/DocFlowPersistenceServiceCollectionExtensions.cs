@@ -59,6 +59,9 @@ public static class DocFlowPersistenceServiceCollectionExtensions
         // Данные отчётов (этап 5, разд. 6): разграничение — В ЗАПРОСЕ, отчёт это массовая выгрузка.
         services.AddScoped<Domain.Services.IReportDataSource, ReportDataSource>();
 
+        // Данные дашборда модуля: то же разграничение — агрегат утекает числом, а не текстом.
+        services.AddScoped<Domain.Services.IDashboardDataSource, DashboardDataSource>();
+
         // Рендереры отчётов — все три сразу; сценарий выбирает нужный по ReportFormat.
         // Шрифт для PDF берётся из системы по настраиваемому пути: вшить его в сборку нельзя
         // из-за лицензий, скачать — из-за изолированного контура (см. PdfReportFontOptions).
