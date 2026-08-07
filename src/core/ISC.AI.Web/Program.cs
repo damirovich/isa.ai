@@ -145,6 +145,12 @@ try
         // роль — режимом первичной настройки (§6.4.1).
         builder.Services.AddScoped<IExternalIdentityProvider, LocalIdentityProvider>();
 
+        // Учётная запись по умолчанию (решение заказчика 2026-08-07): создаётся при старте, только
+        // если реестр пользователей ПУСТ, и только с ВРЕМЕННЫМ паролем — до смены оболочка никуда
+        // не пускает, а смена делает пароль из конфигурации недействительным. Подробности и границы
+        // применимости — в DefaultAccountSeeder.
+        builder.Services.AddHostedService<DefaultAccountSeeder>();
+
         builder.Services.AddHttpContextAccessor();
         builder.Services.AddScoped<LoginService>();
         builder.Services.AddScoped<ExternalIdentityRevalidator>();

@@ -14,6 +14,13 @@ public static class AuthClaims
     public const string DisplayName = "iscai:display";
 
     /// <summary>
+    /// Пароль временный — до его смены оболочка не пускает никуда, кроме страницы смены пароля
+    /// (Э4-35 §6.5). Клейм ставится при входе по флагу учётки; после смены штамп безопасности
+    /// меняется, сессия завершается, и следующий вход происходит уже без него.
+    /// </summary>
+    public const string MustChangePassword = "iscai:pwdchange";
+
+    /// <summary>
     /// Unix-время (секунды) последней проверки принципала во внешней системе — используется
     /// <c>CookiePrincipalValidator</c>, чтобы не сверять внешнюю систему на КАЖДЫЙ HTTP-запрос
     /// (ТБ-014/016), а раз в окно <c>Auth:RevalidationMinutes</c>.
