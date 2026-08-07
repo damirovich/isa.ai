@@ -90,6 +90,15 @@ public sealed class InspectorProfile : IProfile
         new ModuleDescriptor("admin-clearances", "/admin/clearances", "Допуски пользователей",
             Icons.Material.Filled.Key, typeof(UserClearances), ReadPolicy, GroupAdmin),
 
+        // Учётные записи (Э4-35 §6.5): после перехода на локальную идентичность — единственное
+        // место, где заводят доступ и восстанавливают забытый пароль.
+        new ModuleDescriptor("admin-users", "/admin/users", "Учётные записи",
+            Icons.Material.Filled.ManageAccounts, typeof(UserAccounts), ReadPolicy, GroupAdmin),
+
+        // Смена СВОЕГО пароля — не администрирование, доступна любому вошедшему.
+        new ModuleDescriptor("account-password", "/account/password", "Смена пароля",
+            Icons.Material.Filled.Password, typeof(ChangePassword), ReadPolicy, GroupAdmin),
+
         // --- Секция «Документооборот»: подключаемый пакет модулей docflow (ADR-0017, Э4-35) ---
         // Страницы объявляет САМ модуль; профиль лишь включает их в свой реестр. Пока пусто (скелет, этап 0).
         .. DocFlowModule.Modules,

@@ -59,6 +59,10 @@ public static class CorePersistenceServiceCollectionExtensions
         // SQL'ем по живой базе — мимо неизменяемого журнала.
         services.AddScoped<Abstractions.Security.IClearanceStore, ClearanceStore>();
 
+        // Ведение учётных записей и смена пароля (Э4-35 §6.5): после перехода на локальную
+        // идентичность это единственное место, где заводят и восстанавливают доступ.
+        services.AddScoped<Abstractions.Security.IUserAccountStore, UserAccountStore>();
+
         // Хранилище диалогов чата (сохранение истории общения), разграничение по владельцу-субъекту.
         services.AddScoped<IConversationStore, ConversationStore>();
 

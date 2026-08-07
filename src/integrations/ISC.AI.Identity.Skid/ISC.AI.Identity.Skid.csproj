@@ -12,6 +12,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+    <!-- Одноразовый перенос учёток в core.app_user (Э4-35 §6.5): адаптеру нужен контекст ядра как
+         ПРИЁМНИК. Ссылка появляется только ради переноса и уходит вместе с проектом, когда
+         адаптер будет выведен из решения. -->
+    <ProjectReference Include="..\..\core\ISC.AI.Persistence\ISC.AI.Persistence.csproj" />
   </ItemGroup>
 
   <ItemGroup>

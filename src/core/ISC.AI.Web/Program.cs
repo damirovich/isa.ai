@@ -14,6 +14,7 @@ using ISC.AI.AI.Retrieval;
 using ISC.AI.Documents;
 using ISC.AI.Ingestion;
 using ISC.AI.Persistence;
+using ISC.AI.Persistence.Security;
 using ISC.AI.Web.Common.Behaviors;
 using ISC.AI.Web.Security;
 using ISC.AI.Profile.Inspector;
@@ -130,11 +131,29 @@ try
             .AddCookie(options => AuthCookieConfiguration.Configure(
                 options, idleMinutes, builder.Environment.IsDevelopment())); // режимные настройки — ТБ-010/014
 
-        // Адаптер идентичности СКИД: read-only чтение пользователей чужой БД. ResolveExternal (не
-        // Resolve!) — сторонний секрет обязателен явно (Database:Passwords:Skid), общий пароль ядровой
-        // БД сюда НИКОГДА не подставляется молча (Э4-10, ТБ-013): забытый секрет — явный отказ на старте,
-        // а не утечка пароля ISC_AI на сервер СКИД.
-        builder.Services.AddSkidIdentity(ConnectionStringResolver.ResolveExternal(builder.Configuration, "Skid"));
+        // ОТКУДА БЕРЁТСЯ ИДЕНТИЧНОСТЬ (Э4-35 §6.5). Переключатель Auth:Provider:
+        //   "Skid"  (по умолчанию) — вход по чужой БД СКИД, как было;
+        //   "Local" — вход по core.app_user (Argon2id локально).
+        // Переключение СДЕЛАНО НАСТРОЙКОЙ, а не правкой кода, намеренно: это самая рискованная точка
+        // перехода (ошибка = никто не может войти), и возврат обязан быть одним значением в конфиге,
+        // а не откатом сборки. Порядок обязателен: сперва перенести учётки, убедиться, что вход
+        // локально работает, и только потом выводить адаптер СКИД (иначе система остаётся без входа).
+        var useLocalIdentity = string.Equals(
+            builder.Configuration["Auth:Provider"], "Local", StringComparison.OrdinalIgnoreCase);
+
+        if (useLocalIdentity)
+        {
+            builder.Services.AddScoped<IExternalIdentityProvider, LocalIdentityProvider>();
+        }
+        else
+        {
+            // Адаптер идентичности СКИД: read-only чтение пользователей чужой БД. ResolveExternal (не
+            // Resolve!) — сторонний секрет обязателен явно (Database:Passwords:Skid), общий пароль ядровой
+            // БД сюда НИКОГДА не подставляется молча (Э4-10, ТБ-013): забытый секрет — явный отказ на старте,
+            // а не утечка пароля ISC_AI на сервер СКИД.
+            builder.Services.AddSkidIdentity(
+                ConnectionStringResolver.ResolveExternal(builder.Configuration, "Skid"));
+        }
 
         builder.Services.AddHttpContextAccessor();
         builder.Services.AddScoped<LoginService>();

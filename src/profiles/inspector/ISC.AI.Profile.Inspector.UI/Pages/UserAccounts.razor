@@ -1,0 +1,191 @@
+@namespace ISC.AI.Profile.Inspector.UI
+@* Учётные записи (Э4-35 §6.5): создание, сброс пароля, включение/отключение. После перехода на
+   локальную идентичность это единственное место, где заводят доступ и восстанавливают забытый
+   пароль. Как страницы ролей и допусков, видна всем, но обработчики сами решают, вправе ли
+   вызывающий: Администратор — всегда; любой вошедший — только пока Администратора нет. *@
+@page "/admin/users"
+@rendermode InteractiveServer
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Abstractions.Security
+@using ISC.AI.Profile.Inspector.Application.Accounts
+
+<PageHeader Title="Учётные записи"
+            Subtitle="Создание, сброс пароля, отключение · ведёт Администратор"
+            Icon="@Icons.Material.Filled.ManageAccounts" />
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@* Временный пароль показывается ОДИН раз: в базе лежит только хеш, восстановить его нельзя.
+   Если администратор закроет сообщение не записав — останется лишь сбросить пароль заново. *@
+@if (_issuedPassword is not null)
+{
+    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Class="mb-3">
+        <MudText Typo="Typo.body2"><b>Временный пароль для «@_issuedFor»:</b></MudText>
+        <MudText Typo="Typo.h6" Class="my-1" Style="font-family:monospace;">@_issuedPassword</MudText>
+        <MudText Typo="Typo.body2">
+            Показывается один раз — сохранить его система не может, в базе только хеш. Передайте
+            лично; при первом входе пользователь обязан сменить пароль.
+        </MudText>
+        <MudButton Size="Size.Small" Variant="Variant.Text" Class="mt-1"
+                   OnClick="@(() => { _issuedPassword = null; _issuedFor = null; })">
+            Я записал
+        </MudButton>
+    </MudAlert>
+}
+
+<MudPaper Outlined="true" Class="pa-3 mb-4">
+    <MudText Typo="Typo.subtitle2" Class="mb-2">Новая учётная запись</MudText>
+    <div class="d-flex gap-3 align-center flex-wrap">
+        <MudTextField @bind-Value="_newUserName" Label="Имя входа *" Variant="Variant.Outlined"
+                      Style="width:220px;" Immediate="true"
+                      HelperText="Латиница, цифры, точка, дефис" />
+        <MudTextField @bind-Value="_newDisplayName" Label="ФИО" Variant="Variant.Outlined"
+                      Style="min-width:260px;" Class="flex-grow-1" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd"
+                   Disabled="@(_busy || string.IsNullOrWhiteSpace(_newUserName))"
+                   OnClick="CreateAsync">Создать</MudButton>
+    </div>
+</MudPaper>
+
+<MudTable T="UserAccountRow" Items="_rows" Hover="true" Dense="true" Outlined="true" Loading="_busy">
+    <HeaderContent>
+        <MudTh>Пользователь</MudTh>
+        <MudTh>Имя входа</MudTh>
+        <MudTh>Состояние</MudTh>
+        <MudTh Style="width:1%;"></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Пользователь">@(context.DisplayName ?? "—")</MudTd>
+        <MudTd DataLabel="Имя входа">@context.UserName</MudTd>
+        <MudTd DataLabel="Состояние">
+            @if (!context.IsActive)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Text">отключена</MudChip>
+            }
+            else if (!context.HasLocalPassword)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text">
+                    без локального пароля
+                </MudChip>
+            }
+            else if (context.MustChangePassword)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Text">
+                    временный пароль
+                </MudChip>
+            }
+            else
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">активна</MudChip>
+            }
+        </MudTd>
+        <MudTd>
+            <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Dense="true">
+                <MudMenuItem OnClick="@(() => ResetAsync(context))">Сбросить пароль</MudMenuItem>
+                @if (context.IsActive)
+                {
+                    <MudMenuItem OnClick="@(() => SetActiveAsync(context, false))">Отключить</MudMenuItem>
+                }
+                else
+                {
+                    <MudMenuItem OnClick="@(() => SetActiveAsync(context, true))">Включить</MudMenuItem>
+                }
+            </MudMenu>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Учётных записей нет.</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+<MudText Typo="Typo.caption" Class="mud-text-secondary mt-3 d-block">
+    Сброс пароля и отключение завершают все сессии пользователя немедленно — не по истечении времени
+    неактивности. «Без локального пароля» означает учётку, которая ещё не перенесена из внешней
+    системы: войти по ней нельзя, пока не задан пароль.
+</MudText>
+
+@code {
+    private readonly List<UserAccountRow> _rows = [];
+    private string _newUserName = string.Empty;
+    private string? _newDisplayName;
+    private string? _issuedPassword;
+    private string? _issuedFor;
+    private bool _busy;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ListUserAccountsQuery());
+            _rows.Clear();
+            if (response is { Status: true, Data: { } list })
+            {
+                _rows.AddRange(list);
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        _error = null;
+        var response = await Dispatcher.Send(new CreateUserAccountCommand(_newUserName.Trim(), _newDisplayName));
+        if (response is { Status: true, Data: { } password })
+        {
+            _issuedPassword = password;
+            _issuedFor = _newUserName.Trim();
+            _newUserName = string.Empty;
+            _newDisplayName = null;
+        }
+        else
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task ResetAsync(UserAccountRow row)
+    {
+        _error = null;
+        var response = await Dispatcher.Send(new ResetUserPasswordCommand(row.UserId));
+        if (response is { Status: true, Data: { } password })
+        {
+            _issuedPassword = password;
+            _issuedFor = row.DisplayName ?? row.UserName;
+        }
+        else
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task SetActiveAsync(UserAccountRow row, bool isActive)
+    {
+        _error = null;
+        var response = await Dispatcher.Send(new SetUserAccountActiveCommand(row.UserId, isActive));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+}

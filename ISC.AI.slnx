@@ -30,6 +30,7 @@
   <Folder Name="/src/tools/">
     <Project Path="src/tools/ISC.AI.Harvester.Web/ISC.AI.Harvester.Web.csproj" />
     <Project Path="src/tools/ISC.AI.Harvester/ISC.AI.Harvester.csproj" />
+    <Project Path="src/tools/ISC.AI.Identity.Import/ISC.AI.Identity.Import.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/ISC.AI.Evals/ISC.AI.Evals.csproj" Id="d8e5669e-a27a-47c3-b0d7-3943d7069417" />
