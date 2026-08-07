@@ -41,7 +41,7 @@ public sealed class DashboardDataSourceTests : IAsyncLifetime
 
         // Субъект с допуском 0 и подразделением 5 видит в реестре ровно один документ.
         var limited = new AccessContext("60", 0, [5]);
-        (await store.ListAsync(new DocumentListFilter(), limited)).Count.ShouldBe(1);
+        (await store.ListAsync(new DocumentListFilter(), limited)).Rows.Count.ShouldBe(1);
 
         var data = await dashboard.GetAsync(limited, Today, horizonDays: 7);
 

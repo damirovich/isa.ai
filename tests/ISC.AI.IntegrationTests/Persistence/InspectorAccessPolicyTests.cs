@@ -75,25 +75,25 @@ public sealed class InspectorAccessPolicyTests : IAsyncLifetime
         }
 
         // Инспектор 10 — только «свой» документ A (назначен инспектором именно на нём).
-        (await store.ListAsync(new DocumentListFilter(), floor with { SubjectId = "10" }))
+        (await store.ListAsync(new DocumentListFilter(), floor with { SubjectId = "10" })).Rows
             .Select(d => d.RegNumber).ShouldBe(["A-1"]);
 
         // Исполнитель 20 — только документ A (там его назначение); исполнитель 21 — только B.
-        (await store.ListAsync(new DocumentListFilter(), floor with { SubjectId = "20" }))
+        (await store.ListAsync(new DocumentListFilter(), floor with { SubjectId = "20" })).Rows
             .Select(d => d.RegNumber).ShouldBe(["A-1"]);
-        (await store.ListAsync(new DocumentListFilter(), floor with { SubjectId = "21" }))
+        (await store.ListAsync(new DocumentListFilter(), floor with { SubjectId = "21" })).Rows
             .Select(d => d.RegNumber).ShouldBe(["B-1"]);
 
         // Руководитель 30 — оба документа (в пределах floor'а грифа/подразделения).
-        (await store.ListAsync(new DocumentListFilter(), floor with { SubjectId = "30" })).Count.ShouldBe(2);
+        (await store.ListAsync(new DocumentListFilter(), floor with { SubjectId = "30" })).Rows.Count.ShouldBe(2);
 
         // Администратор 40 — тоже все документы. ОТКЛОНЕНИЕ ОТ ТЗ §2.1 (там доступ закрыт полностью),
         // решение заказчика 2026-08-06 — см. UserRole.Administrator. Тест закрепляет именно принятое
         // решение, чтобы возврат к «слепому» Администратору был осознанным, а не случайным.
-        (await store.ListAsync(new DocumentListFilter(), floor with { SubjectId = "40" })).Count.ShouldBe(2);
+        (await store.ListAsync(new DocumentListFilter(), floor with { SubjectId = "40" })).Rows.Count.ShouldBe(2);
 
         // Без назначенной роли (50) — default-deny (ТБ-012), не «Руководитель по умолчанию».
-        (await store.ListAsync(new DocumentListFilter(), floor with { SubjectId = "50" })).ShouldBeEmpty();
+        (await store.ListAsync(new DocumentListFilter(), floor with { SubjectId = "50" })).Rows.ShouldBeEmpty();
 
         // GetAsync — та же решётка: карточка чужого документа неотличима от «не найден».
         (await store.GetAsync(docA.DocumentId, floor with { SubjectId = "11" })).ShouldBeNull();

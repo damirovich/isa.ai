@@ -20,6 +20,13 @@ public sealed class DocumentStore(
     private const int MaxAttachmentsPerDocument = 10;
 
     /// <summary>
+    /// Потолок размера страницы реестра. Не декоративный: без него запрос «дай 100000 строк» вернул
+    /// бы весь корпус вместе с кратким содержанием каждого документа — то самое, ради ухода от чего
+    /// постраничность и вводилась.
+    /// </summary>
+    public const int MaxPageSize = 200;
+
+    /// <summary>
     /// Виден ли документ субъекту — ЕДИНСТВЕННОЕ место, где записан предикат доступа (решётка
     /// ТБ-020/021 + сужающая политика профиля ADR-0014). И чтение (<c>ListAsync</c>/<c>GetAsync</c>),
     /// и все проверки записи (<see cref="WriteAccessRule"/>) идут через него, чтобы правила не
@@ -455,7 +462,7 @@ public sealed class DocumentStore(
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<DocumentListItem>> ListAsync(
+    public async Task<DocumentPage> ListAsync(
         DocumentListFilter filter, AccessContext access, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(filter);
@@ -477,11 +484,19 @@ public sealed class DocumentStore(
 
         if (!string.IsNullOrWhiteSpace(filter.Text))
         {
-            // §3.4: поиск по рег. номеру и ключевым словам краткого содержания (без учёта регистра).
+            // §3.4: поиск по рег. номеру, краткому содержанию и ИСТОЧНИКУ (без учёта регистра).
+            // Источник добавлен по образцу СКИД: документы часто ищут именно по отправителю,
+            // а его название в краткое содержание попадает не всегда.
             var pattern = $"%{filter.Text.Trim()}%";
             query = query.Where(d =>
                 (d.RegNumber != null && EF.Functions.ILike(d.RegNumber, pattern))
-                || EF.Functions.ILike(d.ShortContent, pattern));
+                || EF.Functions.ILike(d.ShortContent, pattern)
+                || (d.Source != null && EF.Functions.ILike(d.Source, pattern)));
+        }
+
+        if (filter.Group is { } group)
+        {
+            query = query.Where(d => d.Type!.Group == group);
         }
 
         if (filter.TypeId is { } typeId)
@@ -494,6 +509,21 @@ public sealed class DocumentStore(
             query = query.Where(d => d.AggregatedStatus == status);
         }
 
+        if (filter.Priority is { } priority)
+        {
+            query = query.Where(d => d.Priority == priority);
+        }
+
+        if (filter.InspectorUserId is { } inspectorUserId)
+        {
+            query = query.Where(d => d.InspectorUserId == inspectorUserId);
+        }
+
+        if (filter.DivisionId is { } divisionId)
+        {
+            query = query.Where(d => d.DivisionId == divisionId);
+        }
+
         if (filter.RegDateFrom is { } from)
         {
             query = query.Where(d => d.RegDate >= from);
@@ -504,7 +534,13 @@ public sealed class DocumentStore(
             query = query.Where(d => d.RegDate <= to);
         }
 
-        return await query
+        // Общее число — ДО среза страницы: навигация должна знать, сколько всего подошло.
+        var total = await query.CountAsync(cancellationToken);
+
+        var page = Math.Max(1, filter.Page);
+        var pageSize = Math.Clamp(filter.PageSize, 1, MaxPageSize);
+
+        var rows = await query
             .OrderByDescending(d => d.RegDate).ThenByDescending(d => d.Id)
             .Select(d => new DocumentListItem(
                 d.Id,
@@ -519,7 +555,11 @@ public sealed class DocumentStore(
                 d.Classification,
                 d.DivisionId,
                 d.Assignments.Count))
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .ToListAsync(cancellationToken);
+
+        return new DocumentPage(rows, total);
     }
 
     /// <inheritdoc />

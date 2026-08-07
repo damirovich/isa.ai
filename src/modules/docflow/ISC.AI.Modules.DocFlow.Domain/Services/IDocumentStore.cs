@@ -65,13 +65,42 @@ public sealed record UpdatedDocumentNotice(
 /// <summary>Результат правки документа.</summary>
 public sealed record DocumentUpdateResult(DocumentWriteStatus Status, UpdatedDocumentNotice? Notice = null);
 
-/// <summary>Фильтры списка документов (§3.4).</summary>
+/// <summary>
+/// Фильтры и постраничность реестра документов (§3.4).
+/// </summary>
+/// <param name="Text">Поиск по рег. номеру, краткому содержанию и источнику (без учёта регистра).</param>
+/// <param name="Group">Группа типа: «Исполнение» или «Хранение».</param>
+/// <param name="TypeId">Тип документа.</param>
+/// <param name="AggregatedStatus">Агрегированный статус документа (§4.3).</param>
+/// <param name="Priority">Приоритет (только у группы «Исполнение»).</param>
+/// <param name="InspectorUserId">Ответственный инспектор.</param>
+/// <param name="DivisionId">Подразделение-владелец документа.</param>
+/// <param name="RegDateFrom">Начало периода регистрации включительно.</param>
+/// <param name="RegDateTo">Конец периода регистрации включительно.</param>
+/// <param name="Page">Номер страницы, с 1.</param>
+/// <param name="PageSize">Размер страницы.</param>
 public sealed record DocumentListFilter(
     string? Text = null,
+    DocumentGroup? Group = null,
     int? TypeId = null,
     DocumentAggregatedStatus? AggregatedStatus = null,
+    DocumentPriority? Priority = null,
+    int? InspectorUserId = null,
+    int? DivisionId = null,
     DateOnly? RegDateFrom = null,
-    DateOnly? RegDateTo = null);
+    DateOnly? RegDateTo = null,
+    int Page = 1,
+    int PageSize = 25);
+
+/// <summary>
+/// Страница реестра: строки и ОБЩЕЕ число подходящих документов.
+/// </summary>
+/// <remarks>
+/// Общее число возвращается вместе со строками намеренно. Без него постраничная навигация не знает,
+/// сколько страниц, а «показать ещё, пока не кончится» на реестре в тысячи документов означает, что
+/// пользователь не может ни оценить объём выборки, ни попасть в её конец.
+/// </remarks>
+public sealed record DocumentPage(IReadOnlyList<DocumentListItem> Rows, int TotalCount);
 
 /// <summary>Строка списка документов.</summary>
 public sealed record DocumentListItem(
@@ -411,12 +440,18 @@ public interface IDocumentStore
         DocumentEdit edit, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Список документов с фильтрами (§3.4), новые первыми. Разграничение — НА ЭТАПЕ ВЫБОРКИ
+    /// Страница реестра документов с фильтрами (§3.4), новые первыми. Разграничение — НА ЭТАПЕ ВЫБОРКИ
     /// (инвариант 3, ТБ-020/021): выдаются только документы с грифом не выше допуска субъекта
     /// <paramref name="access"/> и из разрешённых ему подразделений; fail-closed — пустой список
     /// разрешённых подразделений даёт пустую выдачу, а не «все».
     /// </summary>
-    Task<IReadOnlyList<DocumentListItem>> ListAsync(
+    /// <remarks>
+    /// Постраничность — СЕРВЕРНАЯ. Раньше отдавался весь список: на демонстрации это незаметно,
+    /// а на реальном корпусе означает, что каждое открытие реестра тянет из БД в память тысячи строк
+    /// вместе с их кратким содержанием. Общее число считается ДО среза — иначе навигация не знает,
+    /// сколько страниц.
+    /// </remarks>
+    Task<DocumentPage> ListAsync(
         DocumentListFilter filter, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>

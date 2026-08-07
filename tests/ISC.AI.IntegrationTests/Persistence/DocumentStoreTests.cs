@@ -48,7 +48,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
                 null, "Справка о результатах", null, null, DocumentPriority.High, 77, 0, 10, 42),
             [], useCommonDeadline: false, commonDeadline: null, FullAccess);
         storageDoc.Status.ShouldBe(DocumentWriteStatus.Ok);
-        var storageItem = (await store.ListAsync(new DocumentListFilter(TypeId: storageType.Value), FullAccess)).ShouldHaveSingleItem();
+        var storageItem = (await store.ListAsync(new DocumentListFilter(TypeId: storageType.Value), FullAccess)).Rows.ShouldHaveSingleItem();
         storageItem.AggregatedStatus.ShouldBe(DocumentAggregatedStatus.NotApplicable);
         storageItem.Priority.ShouldBeNull();
         storageItem.AssignmentsCount.ShouldBe(0);
@@ -148,9 +148,9 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         (await store.GetAsync(999_999, FullAccess)).ShouldBeNull();
 
         // Фильтры списка (§3.4): текст и агрегированный статус.
-        (await store.ListAsync(new DocumentListFilter(Text: "приказ"), FullAccess)).ShouldHaveSingleItem()
+        (await store.ListAsync(new DocumentListFilter(Text: "приказ"), FullAccess)).Rows.ShouldHaveSingleItem()
             .RegNumber.ShouldBe("П-1");
-        (await store.ListAsync(new DocumentListFilter(AggregatedStatus: DocumentAggregatedStatus.InProgress), FullAccess))
+        (await store.ListAsync(new DocumentListFilter(AggregatedStatus: DocumentAggregatedStatus.InProgress), FullAccess)).Rows
             .ShouldHaveSingleItem().AssignmentsCount.ShouldBe(2);
     }
 
@@ -301,7 +301,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         var subject = new AccessContext("42", MaxClassification: 5, AllowedDivisions: [10]);
 
         // Список: только документ в пределах грифа И из разрешённого подразделения.
-        (await store.ListAsync(new DocumentListFilter(), subject))
+        (await store.ListAsync(new DocumentListFilter(), subject)).Rows
             .ShouldHaveSingleItem().Id.ShouldBe(visibleId);
 
         // Карточка: недоступный неотличим от несуществующего (null, существование не подтверждается).
@@ -311,7 +311,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
 
         // Fail-closed: пустой список разрешённых подразделений — пустая выдача, а не «все».
         var noDivisions = new AccessContext("42", MaxClassification: 10, AllowedDivisions: []);
-        (await store.ListAsync(new DocumentListFilter(), noDivisions)).ShouldBeEmpty();
+        (await store.ListAsync(new DocumentListFilter(), noDivisions)).Rows.ShouldBeEmpty();
         (await store.GetAsync(visibleId, noDivisions)).ShouldBeNull();
     }
 

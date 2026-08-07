@@ -34,10 +34,10 @@
     <div class="d-flex gap-3 align-end flex-wrap">
         <MudTextField @bind-Value="_filterText" Label="Рег. номер или ключевые слова" Variant="Variant.Outlined"
                       Immediate="true" Style="min-width:260px;" Class="flex-grow-1"
-                      OnKeyDown="@(async e => { if (e.Key == "Enter") await ReloadAsync(); })" />
+                      OnKeyDown="@(async e => { if (e.Key == "Enter") { await SearchAsync(); } })" />
         <MudSelect T="int?" @bind-Value="_filterTypeId" Label="Тип" Variant="Variant.Outlined" Clearable="true"
                    Style="width:220px;">
-            @foreach (var type in _types)
+            @foreach (var type in VisibleTypes)
             {
                 <MudSelectItem T="int?" Value="@type.Id">@type.Name</MudSelectItem>
             }
@@ -49,8 +49,47 @@
                 <MudSelectItem T="DocumentAggregatedStatus?" Value="@status">@status.Label()</MudSelectItem>
             }
         </MudSelect>
-        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Search" OnClick="ReloadAsync">
-            Найти
+    </div>
+
+    <div class="d-flex gap-3 align-end flex-wrap mt-3">
+        <MudSelect T="DocumentGroup?" @bind-Value="_filterGroup" Label="Группа" Variant="Variant.Outlined"
+                   Clearable="true" Style="width:180px;">
+            @foreach (var group in Enum.GetValues<DocumentGroup>())
+            {
+                <MudSelectItem T="DocumentGroup?" Value="@group">@group.Label()</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="DocumentPriority?" @bind-Value="_filterPriority" Label="Приоритет" Variant="Variant.Outlined"
+                   Clearable="true" Style="width:180px;">
+            @foreach (var priority in Enum.GetValues<DocumentPriority>())
+            {
+                <MudSelectItem T="DocumentPriority?" Value="@priority">@priority.Label()</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="int?" @bind-Value="_filterDivisionId" Label="Подразделение" Variant="Variant.Outlined"
+                   Clearable="true" Style="width:220px;">
+            @foreach (var division in _divisions)
+            {
+                <MudSelectItem T="int?" Value="@division.Id">@division.Name</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="int?" @bind-Value="_filterInspectorId" Label="Инспектор" Variant="Variant.Outlined"
+                   Clearable="true" Style="width:220px;">
+            @foreach (var user in _users)
+            {
+                <MudSelectItem T="int?" Value="@user.Id">@user.Name</MudSelectItem>
+            }
+        </MudSelect>
+        <MudDatePicker @bind-Date="_filterFrom" Label="Зарегистрирован с" Variant="Variant.Outlined"
+                       DateFormat="dd.MM.yyyy" Clearable="true" Style="width:180px;" />
+        <MudDatePicker @bind-Date="_filterTo" Label="по" Variant="Variant.Outlined"
+                       DateFormat="dd.MM.yyyy" Clearable="true" Style="width:180px;" />
+
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Search"
+                   OnClick="SearchAsync" Disabled="_busy">Найти</MudButton>
+        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.FilterAltOff"
+                   OnClick="@(async () => { ResetFilters(); await SearchAsync(); })" Disabled="_busy">
+            Сбросить
         </MudButton>
     </div>
 </MudPaper>
@@ -110,14 +149,48 @@
     </NoRecordsContent>
 </MudTable>
 
+@* Навигация показывается, только когда есть что листать: на пустой выдаче она бессмысленна. *@
+@if (_total > 0)
+{
+    <div class="d-flex align-center justify-space-between mt-3 flex-wrap gap-2">
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+            Документов: @_total · страница @_page из @PageCount
+        </MudText>
+        <MudPagination Count="@PageCount" Selected="_page" SelectedChanged="GoToPageAsync"
+                       Color="Color.Primary" Size="Size.Small" />
+    </div>
+}
+
 @code {
+    /// <summary>Размер страницы реестра. 25 — столько помещается на экран без прокрутки шапки.</summary>
+    private const int PageSize = 25;
+
     private readonly List<DocumentListItem> _items = [];
     private readonly List<DocumentTypeItem> _types = [];
+    private IReadOnlyList<DivisionItem> _divisions = [];
+    private IReadOnlyList<UserItem> _users = [];
+
     private string? _filterText;
+    private DocumentGroup? _filterGroup;
     private int? _filterTypeId;
     private DocumentAggregatedStatus? _filterStatus;
+    private DocumentPriority? _filterPriority;
+    private int? _filterInspectorId;
+    private int? _filterDivisionId;
+    private DateTime? _filterFrom;
+    private DateTime? _filterTo;
+
+    private int _page = 1;
+    private int _total;
     private bool _busy;
     private string? _error;
+
+    private int PageCount => Math.Max(1, (int)Math.Ceiling(_total / (double)PageSize));
+
+    // Типы сужаются выбранной группой: «Исполнение» и «Хранение» — разные наборы, и предлагать
+    // тип чужой группы значит предлагать заведомо пустую выдачу.
+    private IEnumerable<DocumentTypeItem> VisibleTypes =>
+        _filterGroup is { } group ? _types.Where(t => t.Group == group) : _types;
 
     protected override async Task OnInitializedAsync()
     {
@@ -127,23 +200,79 @@
             _types.AddRange(types);
         }
 
+        var divisions = await Dispatcher.Send(new ListDivisionsQuery());
+        if (divisions is { Status: true, Data: { } divisionList })
+        {
+            _divisions = divisionList;
+        }
+
+        var users = await Dispatcher.Send(new ListUsersQuery());
+        if (users is { Status: true, Data: { } userList })
+        {
+            _users = userList;
+        }
+
         await ReloadAsync();
+    }
+
+    /// <summary>
+    /// Применить отбор. ВСЕГДА возвращает на первую страницу: после сужения фильтра пользователь
+    /// иначе остаётся на странице, которой в новой выборке уже нет, и видит пустоту вместо результатов.
+    /// </summary>
+    private Task SearchAsync()
+    {
+        _page = 1;
+        return ReloadAsync();
+    }
+
+    private Task GoToPageAsync(int page)
+    {
+        _page = page;
+        return ReloadAsync();
+    }
+
+    private void ResetFilters()
+    {
+        _filterText = null;
+        _filterGroup = null;
+        _filterTypeId = null;
+        _filterStatus = null;
+        _filterPriority = null;
+        _filterInspectorId = null;
+        _filterDivisionId = null;
+        _filterFrom = null;
+        _filterTo = null;
     }
 
     private async Task ReloadAsync()
     {
         _busy = true;
+        _error = null;
         try
         {
-            var response = await Dispatcher.Send(new ListDocumentsQuery(_filterText, _filterTypeId, _filterStatus));
+            var response = await Dispatcher.Send(new ListDocumentsQuery(
+                _filterText,
+                _filterGroup,
+                _filterTypeId,
+                _filterStatus,
+                _filterPriority,
+                _filterInspectorId,
+                _filterDivisionId,
+                _filterFrom is { } from ? DateOnly.FromDateTime(from) : null,
+                _filterTo is { } to ? DateOnly.FromDateTime(to) : null,
+                _page,
+                PageSize));
+
             _items.Clear();
-            if (response is { Status: true, Data: { } list })
+            if (response is { Status: true, Data: { } data })
             {
-                _items.AddRange(list);
+                _items.AddRange(data.Rows);
+                _total = data.TotalCount;
             }
             else if (response is { Status: false })
             {
                 _error = response.StatusMessage;
+                _total = 0;
             }
         }
         finally

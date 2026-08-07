@@ -44,7 +44,7 @@ public sealed class ReportDataSourceTests : IAsyncLifetime
 
         // Субъект с допуском 0 и только подразделением 5 видит в списке ровно один документ.
         var limited = new AccessContext("60", 0, [5]);
-        var visible = await store.ListAsync(new DocumentListFilter(), limited);
+        var visible = (await store.ListAsync(new DocumentListFilter(), limited)).Rows;
         visible.Select(d => d.RegNumber).ShouldBe(["О-1"]);
 
         // ОТЧЁТ ОБЯЗАН ВИДЕТЬ РОВНО СТОЛЬКО ЖЕ.
