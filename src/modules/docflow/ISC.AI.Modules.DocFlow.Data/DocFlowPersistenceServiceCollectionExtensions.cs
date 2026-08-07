@@ -51,6 +51,9 @@ public static class DocFlowPersistenceServiceCollectionExtensions
         // Уведомления (этап 2.2b, разд. 5): сроки, статусы, упоминания. Только в интерфейсе, без email.
         services.AddScoped<Domain.Services.INotificationStore, NotificationStore>();
 
+        // Данные отчётов (этап 5, разд. 6): разграничение — В ЗАПРОСЕ, отчёт это массовая выгрузка.
+        services.AddScoped<Domain.Services.IReportDataSource, ReportDataSource>();
+
         return services;
     }
 }
