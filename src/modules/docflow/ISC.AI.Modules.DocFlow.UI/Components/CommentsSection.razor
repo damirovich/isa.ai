@@ -1,0 +1,352 @@
+@namespace ISC.AI.Modules.DocFlow.UI
+@* Комментарии к документу (§4.8): обсуждение с ответами, упоминаниями, файлами, привязкой к версии
+   файла и скрытием решённых. Секция выделена из DocumentCard при разрезе страницы (2026-08-10):
+   лентой владеет сама — загружает, правит, удаляет; родителю от неё ничего не нужно. *@
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Modules.DocFlow.Application.Features.Documents
+@using ISC.AI.Modules.DocFlow.Application.Features.Assignments
+@using ISC.AI.Modules.DocFlow.Application.Features.Comments
+@using ISC.AI.Modules.DocFlow.Application.Features.Directory
+@using ISC.AI.Modules.DocFlow.Domain.Enums
+@using ISC.AI.Modules.DocFlow.Domain.Services
+@using Microsoft.AspNetCore.Components.Forms
+
+<MudPaper Outlined="true" Class="pa-4 mt-4">
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+    }
+
+    <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+        <MudText Typo="Typo.subtitle1">Комментарии (§4.8)</MudText>
+        @* Скрывает ВСЮ закрытую ветку вместе с ответами: реплики без вопроса читаются как обрывок.
+           Отсев делает сервер, а не разметка. *@
+        <MudSwitch T="bool" Value="_hideResolved" Color="Color.Primary"
+                   Label="Скрыть решённые" Disabled="_busy"
+                   ValueChanged="@(async (bool value) => { _hideResolved = value; await ReloadAsync(); })" />
+    </div>
+
+    @if (_comments.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">
+            @(_hideResolved ? "Открытых обсуждений нет." : "Комментариев пока нет.")
+        </MudText>
+    }
+    else
+    {
+        @* Корневые по порядку, ответы — под своим родителем (лента уже отсортирована сервером). *@
+        @foreach (var root in _comments.Where(c => c.ParentCommentId is null))
+        {
+            @RenderComment(root, 0)
+            @foreach (var reply in _comments.Where(c => c.ParentCommentId == root.Id))
+            {
+                @RenderComment(reply, 1)
+            }
+        }
+    }
+
+    <MudDivider Class="my-3" />
+    @if (_replyTo is { } replyTarget)
+    {
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-1">
+            Ответ на комментарий @replyTarget.AuthorName
+            <MudLink Typo="Typo.caption" Class="ml-2" OnClick="@(() => _replyTo = null)">отменить</MudLink>
+        </MudText>
+    }
+    <MudTextField @bind-Value="_commentText" Label="@(_editingCommentId is null ? "Новый комментарий" : "Изменение комментария")"
+                  Variant="Variant.Outlined" Lines="2" AutoGrow="true" MaxLines="10"
+                  MaxLength="AddCommentValidator.MaxContentLength" Class="mb-2" />
+    <div class="d-flex align-center gap-2 flex-wrap">
+        @* ПОДСТАНОВКА УПОМИНАНИЯ. Формат разметки — @[Имя](user:Id), и набирать его руками
+           человек не станет: ошибётся в скобках — упоминание не сработает и уведомление
+           не уйдёт, причём молча. Выбор из списка вставляет разметку целиком.
+           Выпадающий СПИСОК, а не автодополнение по вводу: подсказка-в-поле требует перехвата
+           ввода и позиции курсора, а сотрудников в организации немного. *@
+        <MudSelect T="int?" Value="@(null)" ValueChanged="InsertMention" Label="Упомянуть"
+                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="width:200px;"
+                   Disabled="_busy">
+            @foreach (var user in Users)
+            {
+                <MudSelectItem T="int?" Value="@user.Id">@user.Name</MudSelectItem>
+            }
+        </MudSelect>
+
+        @* Вид и файлы — только у НОВОГО комментария: при правке меняется лишь текст (как в СКИД). *@
+        @if (_editingCommentId is null)
+        {
+            <MudSelect T="CommentType" @bind-Value="_commentType" Label="Вид" Variant="Variant.Outlined"
+                       Dense="true" Margin="Margin.Dense" Style="width:180px;">
+                @foreach (var type in Enum.GetValues<CommentType>())
+                {
+                    <MudSelectItem T="CommentType" Value="@type">@type.Label()</MudSelectItem>
+                }
+            </MudSelect>
+            <MudFileUpload T="IReadOnlyList<IBrowserFile>" FilesChanged="@(files => _files = files)">
+                <ActivatorContent>
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.AttachFile">
+                        Файлы@(_files is { Count: > 0 } cf ? $" — {cf.Count}" : "")
+                    </MudButton>
+                </ActivatorContent>
+            </MudFileUpload>
+        }
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Send"
+                   Disabled="@(_busy || string.IsNullOrWhiteSpace(_commentText))" OnClick="SubmitAsync">
+            @(_editingCommentId is null ? "Отправить" : "Сохранить")
+        </MudButton>
+        @if (_editingCommentId is not null)
+        {
+            <MudButton Variant="Variant.Text" OnClick="CancelEdit">Отмена</MudButton>
+        }
+    </div>
+    <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1 d-block">
+        Упоминание участника — токеном <code>@@[Имя](user:ID)</code>; сохраняются только реально
+        упомянутые в тексте существующие пользователи. Файлы: PDF, DOCX, PNG, JPEG, до 10 МБ, не больше 5.
+    </MudText>
+</MudPaper>
+
+@* Один комментарий ленты; level=1 — ответ (визуальный отступ). Текст выводится ТОЛЬКО как текст
+   (MudText), без разметки: рендер Markdown в HTML сознательно не переносится — это прямой канал
+   stored-XSS (такие уже находили в предпросмотре файлов), а вводит текст пользователь. *@
+@code {
+    private RenderFragment RenderComment(CommentItem comment, int level) =>
+        @<div class="@(level > 0 ? "ml-8 mb-2" : "mb-2")">
+            <div class="d-flex align-center gap-2 flex-wrap">
+                <MudText Typo="Typo.body2"><b>@comment.AuthorName</b></MudText>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@comment.CommentType.ChipColor()">
+                    @comment.CommentType.Label()
+                </MudChip>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    @comment.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                </MudText>
+                @if (comment.IsEdited && !comment.IsDeleted)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">(изменено)</MudText>
+                }
+                @if (comment.IsResolved)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">закрыто</MudChip>
+                }
+                @* Отметка версии файла (§3.3/§4.8): замечание относится к ТОМУ тексту, который автор
+                   читал. После замены файла новой версией комментарий без пометки указывал бы не
+                   туда — читатель искал бы пункт, которого в новой редакции уже нет. *@
+                @if (comment.DocumentFileVersion is { } version)
+                {
+                    <MudTooltip Text="@(comment.IsAboutCurrentVersion
+                        ? "Относится к текущей версии файла"
+                        : "Относится к прежней версии файла — в актуальной редакции этого текста может не быть")">
+                        <MudChip T="string" Size="Size.Small" Class="ma-0"
+                                 Color="@(comment.IsAboutCurrentVersion ? Color.Default : Color.Warning)"
+                                 Variant="Variant.Text">
+                            к версии @version@(comment.IsAboutCurrentVersion ? string.Empty : " (прежней)")
+                        </MudChip>
+                    </MudTooltip>
+                }
+            </div>
+
+            @if (comment.IsDeleted)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary"><i>Комментарий удалён</i></MudText>
+            }
+            else
+            {
+                <MudText Typo="Typo.body2" Style="white-space:pre-wrap;">@comment.Content</MudText>
+
+                @if (comment.Mentions.Count > 0)
+                {
+                    <div class="d-flex align-center gap-1 flex-wrap mt-1">
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">Упомянуты:</MudText>
+                        @foreach (var mention in comment.Mentions)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text">@mention.Name</MudChip>
+                        }
+                    </div>
+                }
+
+                @foreach (var file in comment.Files)
+                {
+                    <div class="d-flex align-center gap-2 mt-1 flex-wrap">
+                        <MudIcon Icon="@Icons.Material.Filled.AttachFile" Size="Size.Small" />
+                        <MudText Typo="Typo.caption">@file.FileName</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@FileDisplay.FormatSize(file.FileSize)</MudText>
+                        <MudLink Href="@FileDisplay.Url(FileDisplay.Categories.Comments, DocumentId, file.StoredFileName, download: true)"
+                                 Typo="Typo.caption">Скачать</MudLink>
+                    </div>
+                }
+
+                <div class="d-flex align-center gap-2 mt-1">
+                    @* Ответ — только на корневой: ветка одноуровневая (в СКИД глубина не ограничена,
+                       но и смысла в ветках глубже одной нет — упрощение зафиксировано в Э4-35). *@
+                    @if (comment.ParentCommentId is null)
+                    {
+                        <MudLink Typo="Typo.caption" OnClick="@(() => StartReply(comment))">Ответить</MudLink>
+                        <MudLink Typo="Typo.caption"
+                                 OnClick="@(() => SetResolvedAsync(comment, !comment.IsResolved))">
+                            @(comment.IsResolved ? "Открыть заново" : "Закрыть обсуждение")
+                        </MudLink>
+                    }
+                    @if (comment.AuthorUserId == CurrentUserId)
+                    {
+                        <MudLink Typo="Typo.caption" OnClick="@(() => StartEdit(comment))">Изменить</MudLink>
+                        <MudLink Typo="Typo.caption" OnClick="@(() => DeleteAsync(comment))">Удалить</MudLink>
+                    }
+                </div>
+            }
+        </div>;
+
+    /// <summary>Идентификатор документа, чью ленту ведёт секция.</summary>
+    [Parameter]
+    public int DocumentId { get; set; }
+
+    /// <summary>Активные пользователи — для подстановки упоминания.</summary>
+    [Parameter]
+    public IReadOnlyList<UserItem> Users { get; set; } = [];
+
+    /// <summary>
+    /// Текущий пользователь — чтобы показать «Изменить»/«Удалить» только у своих комментариев.
+    /// Право на само действие проверяет СЕРВЕР (ICommentStore) — это лишь удобство UI.
+    /// </summary>
+    [Parameter]
+    public int? CurrentUserId { get; set; }
+
+    private readonly List<CommentItem> _comments = [];
+    private string _commentText = string.Empty;
+    private CommentType _commentType = CommentType.Question;
+    private IReadOnlyList<IBrowserFile>? _files;
+    private CommentItem? _replyTo;
+    private int? _editingCommentId;
+    private bool _busy;
+    private string? _error;
+
+    /// <summary>Скрывать закрытые обсуждения. По умолчанию показываются все.</summary>
+    private bool _hideResolved;
+
+    protected override Task OnInitializedAsync() => ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        var response = await Dispatcher.Send(new ListCommentsQuery(DocumentId, !_hideResolved));
+        _comments.Clear();
+        if (response is { Status: true, Data: { } list })
+        {
+            _comments.AddRange(list);
+        }
+    }
+
+    /// <summary>
+    /// Вставляет разметку упоминания в конец текста комментария.
+    /// </summary>
+    /// <remarks>
+    /// В КОНЕЦ, а не по месту курсора: позиция курсора в Blazor Server доступна только через
+    /// JS-взаимодействие, а неверно вычисленная позиция рвала бы уже набранный текст. Упоминания
+    /// почти всегда дописывают к готовой фразе, поэтому потеря невелика.
+    /// </remarks>
+    private void InsertMention(int? userId)
+    {
+        if (userId is not { } id || Users.FirstOrDefault(u => u.Id == id) is not { } user)
+        {
+            return;
+        }
+
+        var separator = string.IsNullOrEmpty(_commentText) || _commentText.EndsWith(' ') ? string.Empty : " ";
+        _commentText = $"{_commentText}{separator}@[{user.Name}](user:{id.ToString(System.Globalization.CultureInfo.InvariantCulture)}) ";
+    }
+
+    private void StartReply(CommentItem comment)
+    {
+        _replyTo = comment;
+        _editingCommentId = null;
+        _commentText = string.Empty;
+    }
+
+    private void StartEdit(CommentItem comment)
+    {
+        _editingCommentId = comment.Id;
+        _replyTo = null;
+        _commentText = comment.Content;
+    }
+
+    private void CancelEdit()
+    {
+        _editingCommentId = null;
+        _commentText = string.Empty;
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_commentText))
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            // Упоминания разбираем из ТЕКСТА той же функцией, что и сервер: сервер всё равно перепроверит
+            // (пересечение текст ∩ заявленные ∩ реестр) — клиент не источник истины, только удобство.
+            var mentioned = MentionTextParser.ExtractMentionedUserIds(_commentText);
+
+            ResponseDto<bool> response;
+            if (_editingCommentId is { } editingId)
+            {
+                response = await Dispatcher.Send(new UpdateCommentCommand(DocumentId, editingId, _commentText, mentioned));
+            }
+            else
+            {
+                var files = _files is { Count: > 0 } selected ? await BrowserFileReader.ReadAsync(selected) : null;
+                var added = await Dispatcher.Send(new AddCommentCommand(
+                    DocumentId, _replyTo?.Id, _commentText, _commentType, mentioned, files));
+                response = added.Status
+                    ? ResponseDto<bool>.Ok(true)
+                    : ResponseDto<bool>.Fail(added.StatusMessage ?? "Не удалось добавить комментарий.");
+            }
+
+            if (response.Status)
+            {
+                _commentText = string.Empty;
+                _files = null;
+                _replyTo = null;
+                _editingCommentId = null;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task DeleteAsync(CommentItem comment)
+    {
+        _error = null;
+        var response = await Dispatcher.Send(new DeleteCommentCommand(DocumentId, comment.Id));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task SetResolvedAsync(CommentItem comment, bool resolved)
+    {
+        _error = null;
+        var response = await Dispatcher.Send(new SetCommentResolvedCommand(DocumentId, comment.Id, resolved));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+}

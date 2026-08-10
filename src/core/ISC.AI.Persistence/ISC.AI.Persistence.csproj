@@ -12,6 +12,10 @@
     <PackageReference Include="Pgvector" />
     <PackageReference Include="Pgvector.EntityFrameworkCore" />
     <PackageReference Include="EFCore.NamingConventions" />
+    <!-- Argon2id для локальной идентичности (Э4-35 §6.5). Sodium.Core — MIT, нативный libsodium —
+         ISC (пермиссивная). Та же библиотека, которой хеширует СКИД: формат PHC совпадает, поэтому
+         перенесённые учётки входят без смены пароля. -->
+    <PackageReference Include="Sodium.Core" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

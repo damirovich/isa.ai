@@ -1,0 +1,77 @@
+@namespace ISC.AI.Modules.DocFlow.UI
+@* Колокольчик уведомлений (разд. 5 ТЗ СКИД). Встраивается в шапку хоста через нейтральный шов
+   IShellWidget: хост знает «слот + тип компонента» и остаётся доменно-нейтральным (ТС-003). *@
+@* Собственный @rendermode НЕ объявляется намеренно: виджет живёт в MainLayout, а режим для всего
+   дерева задаётся единой точкой в App.razor (Э3-08). Своё объявление в компоненте ЛЕЙАУТА — ровно тот
+   случай, от которого предостерегает комментарий в App.razor. *@
+@* СЧЁТЧИК СО ССЫЛКОЙ, а не выпадающий список. Раньше здесь был MudMenu с кастомным ActivatorContent
+   (бейдж + кнопка) — единственное такое место в проекте: остальные меню используют встроенный
+   активатор (Icon="…") и работают. Меню не открывалось: счётчик пользователь видел, а до самих
+   уведомлений добраться не мог. Список переехал на дашборд документооборота (NotificationsPanel), где он —
+   обычная разметка страницы и не зависит ни от поповеров, ни от порядка их провайдеров. *@
+@implements IAsyncDisposable
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Modules.DocFlow.Application.Features.Notifications
+@using Mediator
+@inject IMediator Dispatcher
+@inject NavigationManager Navigation
+
+<MudBadge Content="_unreadCount" Color="Color.Error" Overlap="true" Visible="_unreadCount > 0"
+          Max="99" Bordered="true">
+    <MudIconButton Icon="@Icons.Material.Filled.Notifications" Color="Color.Inherit"
+                   OnClick="OpenFeed" Title="@Title" aria-label="@Title" />
+</MudBadge>
+
+@code {
+    /// <summary>Маршрут ленты — дашборд документооборота, где она и живёт.</summary>
+    private const string FeedRoute = "/docflow/dashboard";
+
+    // Опрос счётчика: уведомления рождаются и фоновой проверкой сроков, и действиями ДРУГИХ
+    // пользователей — без периодического обновления колокольчик бы «просыпался» только при
+    // перезагрузке страницы. Минута — компромисс между свежестью и нагрузкой на БД.
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(1);
+
+    private int _unreadCount;
+
+    // Механика цикла (защита от предрендера, гашение ObjectDisposedException, остановка) — в общем
+    // ComponentPoller: колокольчик живёт в шапке, то есть на КАЖДОМ экране, и необработанное
+    // исключение его фоновой задачи роняло бы circuit при любом переходе.
+    private readonly ComponentPoller _poller = new(PollInterval);
+
+    private string Title => _unreadCount > 0
+        ? $"Непрочитанных уведомлений: {_unreadCount}. Открыть ленту"
+        : "Уведомления";
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+
+        // Всё, что трогает состояние компонента, — через InvokeAsync (свой поток рендера).
+        _poller.Start(() => InvokeAsync(async () =>
+        {
+            await RefreshAsync();
+            StateHasChanged();
+        }));
+    }
+
+    private void OpenFeed() => Navigation.NavigateTo(FeedRoute);
+
+    private async Task RefreshAsync()
+    {
+        try
+        {
+            var response = await Dispatcher.Send(new CountUnreadNotificationsQuery());
+            _unreadCount = response.Status ? response.Data : 0;
+        }
+        catch (Exception)
+        {
+            // Колокольчик — деталь шапки: его сбой не должен ронять оболочку целиком. Ошибку увидит
+            // и назовёт панель ленты на дашборде — там для неё есть место, а в шапке его нет.
+            _unreadCount = 0;
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask DisposeAsync() => _poller.DisposeAsync();
+}

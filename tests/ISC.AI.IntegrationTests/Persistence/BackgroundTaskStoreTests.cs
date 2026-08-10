@@ -16,37 +16,22 @@ namespace ISC.AI.IntegrationTests.Persistence;
 /// <remarks>Требуется запущенный Docker.</remarks>
 public sealed class BackgroundTaskStoreTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16").Build();
+    private readonly PostgreSqlContainer _postgres = TestPostgres.Create();
 
     public Task InitializeAsync() => _postgres.StartAsync();
 
     public Task DisposeAsync() => _postgres.DisposeAsync().AsTask();
 
-    private DbContextOptions<CoreDbContext> Options() =>
-        new DbContextOptionsBuilder<CoreDbContext>()
-            .UseNpgsql(_postgres.GetConnectionString(), npg =>
-            {
-                npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                npg.UseVector();
-            })
-            .UseSnakeCaseNamingConvention()
-            .Options;
-
-    private sealed class Factory(DbContextOptions<CoreDbContext> options) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() => new(options);
-    }
-
     [Fact(DisplayName = "Персист задач: жизненный цикл Queued→Running→Completed + восстановление осиротевших")]
     public async Task Lifecycle_and_recovery()
     {
-        var options = Options();
-        await using (var db = new CoreDbContext(options))
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
+        await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
         }
 
-        var store = new EfBackgroundTaskStore(new Factory(options));
+        var store = new EfBackgroundTaskStore(factory);
 
         // Жизненный цикл одной задачи.
         var done = Guid.NewGuid();

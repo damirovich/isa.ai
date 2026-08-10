@@ -27,6 +27,9 @@ public class InspectorDbContext(DbContextOptions<InspectorDbContext> options) : 
     public DbSet<ViolationCategory> ViolationCategories { get; set; } = null!;
     public DbSet<Violation> Violations { get; set; } = null!;
 
+    // Роли пользователей (§2.1 ТЗ СКИД, этап 6 Э4-35) — построчный доступ к докфлоу-документам.
+    public DbSet<UserRoleAssignment> UserRoleAssignments { get; set; } = null!;
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -17,7 +17,7 @@ namespace ISC.AI.IntegrationTests.Persistence;
 [Trait("Category", "Gate")]
 public sealed class ClearanceAccessReaderTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16").Build();
+    private readonly PostgreSqlContainer _postgres = TestPostgres.Create();
 
     public Task InitializeAsync() => _postgres.StartAsync();
 
@@ -26,7 +26,7 @@ public sealed class ClearanceAccessReaderTests : IAsyncLifetime
     [Fact(DisplayName = "Допуск сворачивается в AccessContext; отзыв и деактивация действуют немедленно")]
     public async Task Clearance_maps_to_access_context_and_revocation_is_immediate()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         int userId;
         await using (var db = factory.CreateDbContext())
         {
@@ -74,19 +74,5 @@ public sealed class ClearanceAccessReaderTests : IAsyncLifetime
 
         // Неизвестный пользователь — fail-closed.
         (await reader.ReadAsync(999_999)).ShouldBeNull();
-    }
-
-    // Контекст с теми же опциями, что в проде (snake_case + pgvector).
-    private sealed class TestContextFactory(string connectionString) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<CoreDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                {
-                    npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                    npg.UseVector();
-                })
-                .UseSnakeCaseNamingConvention()
-                .Options);
     }
 }

@@ -1,3 +1,4 @@
+using ISC.AI.Abstractions.Security;
 using ISC.AI.Persistence;
 using ISC.AI.Profile.Inspector.Domain.Services;
 using Microsoft.Extensions.Configuration;
@@ -26,6 +27,36 @@ public static class InspectorPersistenceServiceCollectionExtensions
 
         // Материализация статуса редакции НПА → флаг годности ядра по связкам (Э4-02, ADR-0013).
         services.AddScoped<IRevisionStatusMaterializer, RevisionStatusMaterializer>();
+
+        // Профиль отдаёт модулю документооборота свой справочник подразделений (вопрос 3 Э4-35):
+        // словарь id един с решёткой доступа, справочник ведёт профиль.
+        services.AddScoped<ISC.AI.Modules.DocFlow.Domain.Services.IDivisionDirectory, DocFlowDivisionDirectory>();
+
+        // Профиль отдаёт модулю ответ на вопрос «кто вправе вести его настройки» (§9): роль знает
+        // только профиль. Без этой регистрации право не имеет никто (fail-closed).
+        services.AddScoped<ISC.AI.Modules.DocFlow.Domain.Services.IDocFlowAdministration, DocFlowAdministration>();
+
+        // Кого предлагать в инспекторы и исполнители (§3.2/§4.1): ответ зависит от роли и допуска —
+        // и то и другое вне модуля.
+        services.AddScoped<
+            ISC.AI.Modules.DocFlow.Domain.Services.IAssignmentCandidateDirectory,
+            AssignmentCandidateDirectory>();
+
+        // Ведение справочника подразделений (§4.2) — страница «Территориальные».
+        services.AddScoped<IDivisionAdminStore, DivisionAdminStore>();
+
+        // Роли пользователей (§2.1 ТЗ СКИД, этап 6 Э4-35) — построчный доступ к докфлоу-документам.
+        services.AddScoped<IUserRoleStore, UserRoleStore>();
+
+        // Сверка допусков со справочником подразделений на старте: словарь номеров обязан быть общим
+        // у решётки ядра и справочника профиля, но ничем не проверяется (см. сам класс).
+        services.AddHostedService<ClearanceDivisionConsistencyCheck>();
+
+        // Переопределяет AllowAllAccessPolicy ядра (AddCoreRetrieval регистрируется РАНЬШЕ — Program.cs)
+        // тем же приёмом, что и ICitationExtractor/ICitationNormalizer: явная замена дефолта повторной
+        // регистрацией, не вторая параллельная. Singleton — как у дефолта; IDbContextFactory сам по себе
+        // потокобезопасен, конкретный DbContext создаётся заново на каждый вызов BuildFilter.
+        services.AddSingleton<IAccessPolicy, InspectorAccessPolicy>();
 
         return services;
     }

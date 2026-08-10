@@ -35,6 +35,12 @@
     <PackageVersion Include="Scriban" Version="7.2.4" />
     <PackageVersion Include="DocumentFormat.OpenXml" Version="3.5.1" />
     <PackageVersion Include="Tesseract" Version="5.2.0" />
+    <!-- Отчёты документооборота (разд. 6 ТЗ СКИД, этап 5 Э4-35). Обе — MIT (ТСТ-001).
+         PDFsharp — ЗАМЕНА QuestPDF (двойная лицензия, у нас запрещена): в СКИД он уже использовался
+         для штампа печати, PDF-ветка отчётов переписывается на него (см. реестр лицензионных замен).
+         ClosedXML — Excel-ветка, переносится как есть. -->
+    <PackageVersion Include="PDFsharp" Version="6.2.4" />
+    <PackageVersion Include="ClosedXML" Version="0.105.0" />
     <!-- Парсинг HTML для сборщика вне контура (Harvester, Э4-08). MIT. (≥1.4.0 — требование bunit). -->
     <PackageVersion Include="AngleSharp" Version="1.5.2" />
     <!-- Headless-браузер для рендеринга JS-сайтов (SPA, Э4-15). MIT. Только в сборщике (вне контура). -->
@@ -48,6 +54,10 @@
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.9" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.10" />
+    <!-- Источники конфигурации для консольных инструментов (перенос учёток §6.5): файл + окружение,
+         чтобы секреты задавались так же, как приложению, и не приходили аргументами командной строки. -->
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.9" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.9" />
     <!-- Тесты: xUnit + NSubstitute + Shouldly + Testcontainers; Blazor — bUnit -->

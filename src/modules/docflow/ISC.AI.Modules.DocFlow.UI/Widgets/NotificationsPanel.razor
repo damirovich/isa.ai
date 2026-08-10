@@ -1,0 +1,204 @@
+@namespace ISC.AI.Modules.DocFlow.UI
+@* Панель «Мои уведомления» (разд. 5 ТЗ СКИД) на дашборде документооборота (/docflow/dashboard).
+
+   Почему панель, а не выпадающий список у колокольчика: выпадающее меню MudBlazor с кастомным
+   активатором в шапке НЕ ОТКРЫВАЛОСЬ — счётчик было видно, а список получить нельзя. Лента,
+   размещённая на странице, не зависит ни от поповеров, ни от порядка их провайдеров: это обычная
+   разметка, которая работает всегда. Колокольчик в шапке остался счётчиком и ведёт сюда. *@
+@implements IAsyncDisposable
+@using Microsoft.AspNetCore.Components.Web
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Modules.DocFlow.Application.Features.Notifications
+@using ISC.AI.Modules.DocFlow.Domain.Services
+@using Mediator
+@inject IMediator Dispatcher
+@inject NavigationManager Navigation
+
+<MudPaper Outlined="true" Class="pa-0 h-100 d-flex flex-column">
+    <div class="d-flex align-center justify-space-between px-4 py-3">
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.Notifications" Color="Color.Primary" />
+            <MudText Typo="Typo.h6">Мои уведомления</MudText>
+            @if (_unreadCount > 0)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled" Class="ma-0">
+                    @_unreadCount
+                </MudChip>
+            }
+        </div>
+        <div class="d-flex align-center gap-1">
+            <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" Color="Color.Default"
+                           OnClick="ReloadAsync" Disabled="_busy" aria-label="Обновить" />
+            @if (_items.Count > 0)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="MarkAllReadAsync" Disabled="_busy">
+                    Прочитать все
+                </MudButton>
+            }
+        </div>
+    </div>
+    <MudDivider />
+
+    @if (_busy)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+
+    @if (_error is not null)
+    {
+        @* Ошибку показываем, а не превращаем в пустой список: «уведомлений нет» и «не удалось их
+           прочитать» — разные вещи, и молчаливая подмена одного другим прячет неисправность. *@
+        <MudAlert Severity="Severity.Error" Variant="Variant.Text" Dense="true" Class="ma-3">@_error</MudAlert>
+    }
+    else if (_items.Count == 0 && !_busy)
+    {
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Непрочитанных уведомлений нет.</MudText>
+    }
+    else
+    {
+        @* Обычная разметка, а НЕ MudList/MudListItem. Список с обработчиком клика и ссылочным типом
+           элемента — единственная конструкция такого рода в проекте (остальные MudList в системе
+           статические, T="string", без OnClick), и именно она уронила circuit при открытии экрана.
+           Лента должна открываться всегда, поэтому здесь нет ничего, кроме div'ов и кнопок. *@
+        <div class="flex-grow-1" style="overflow-y:auto;max-height:420px;">
+            @foreach (var item in _items)
+            {
+                <div class="d-flex align-start gap-3 px-4 py-3 docflow-feed-item">
+                    <MudIcon Icon="@IconOf(item.Type)" Color="@ColorOf(item.Type)" Size="Size.Small" Class="mt-1" />
+                    <div class="flex-grow-1">
+                        <MudText Typo="Typo.body2" Style="white-space:normal;">@item.Message</MudText>
+                        <div class="d-flex align-center gap-2 mt-1">
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                @item.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm",
+                                    System.Globalization.CultureInfo.InvariantCulture)
+                            </MudText>
+                            @if (item.DocumentId is not null)
+                            {
+                                <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                                           EndIcon="@Icons.Material.Filled.ArrowForward"
+                                           OnClick="@(() => OpenAsync(item))">Открыть документ</MudButton>
+                            }
+                            @* Уведомление без документа никуда не ведёт (например, массовое действие) —
+                               убрать его из ленты можно только явной кнопкой. *@
+                            <MudButton Size="Size.Small" Variant="Variant.Text"
+                                       OnClick="@(() => MarkReadAsync(item))">Прочитано</MudButton>
+                        </div>
+                    </div>
+                </div>
+                <MudDivider />
+            }
+        </div>
+    }
+</MudPaper>
+
+@code {
+    // Опрос: уведомления рождаются фоновой проверкой сроков и действиями ДРУГИХ пользователей —
+    // без обновления панель «просыпалась» бы только при перезагрузке страницы.
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(1);
+
+    /// <summary>Сколько уведомлений показывать. По умолчанию — как в ленте СКИД.</summary>
+    [Parameter]
+    public int MaxCount { get; set; } = 20;
+
+    private IReadOnlyList<NotificationItem> _items = [];
+    private int _unreadCount;
+    private bool _busy;
+    private string? _error;
+    // Механика цикла (защита от предрендера, гашение ObjectDisposedException, остановка) — в общем
+    // ComponentPoller, том же, что у колокольчика в шапке.
+    private readonly ComponentPoller _poller = new(PollInterval);
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+
+        // Всё, что трогает состояние компонента, — через InvokeAsync (поток рендера).
+        _poller.Start(() => InvokeAsync(async () =>
+        {
+            await ReloadAsync();
+            StateHasChanged();
+        }));
+    }
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var list = await Dispatcher.Send(new ListNotificationsQuery(MaxCount));
+            if (!list.Status || list.Data is null)
+            {
+                _error = list.StatusMessage;
+                _items = [];
+                _unreadCount = 0;
+                return;
+            }
+
+            _items = list.Data;
+
+            var count = await Dispatcher.Send(new CountUnreadNotificationsQuery());
+            _unreadCount = count.Status ? count.Data : _items.Count;
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+            _items = [];
+            _unreadCount = 0;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task OpenAsync(NotificationItem item)
+    {
+        if (item.DocumentId is not { } documentId)
+        {
+            return;
+        }
+
+        await Dispatcher.Send(new MarkNotificationReadCommand(item.Id));
+
+        // Переход — ПОСЛЕ пометки: иначе уведомление осталось бы непрочитанным при уходе со страницы.
+        // Комментарий открывается в карточке документа: отдельного маршрута у ленты нет.
+        Navigation.NavigateTo($"/docflow/documents/{documentId}");
+    }
+
+    private async Task MarkReadAsync(NotificationItem item)
+    {
+        await Dispatcher.Send(new MarkNotificationReadCommand(item.Id));
+        await ReloadAsync();
+    }
+
+    private async Task MarkAllReadAsync()
+    {
+        await Dispatcher.Send(new MarkAllNotificationsReadCommand());
+        await ReloadAsync();
+    }
+
+    private static string IconOf(Domain.Enums.NotificationType type) => type switch
+    {
+        Domain.Enums.NotificationType.DeadlineApproaching => Icons.Material.Filled.Schedule,
+        Domain.Enums.NotificationType.DeadlineToday => Icons.Material.Filled.Today,
+        Domain.Enums.NotificationType.Overdue => Icons.Material.Filled.ErrorOutline,
+        Domain.Enums.NotificationType.Assigned or Domain.Enums.NotificationType.Reassigned
+            => Icons.Material.Filled.AssignmentInd,
+        Domain.Enums.NotificationType.StatusChanged => Icons.Material.Filled.SwapHoriz,
+        Domain.Enums.NotificationType.DeadlineExtended => Icons.Material.Filled.MoreTime,
+        _ => Icons.Material.Filled.Comment,
+    };
+
+    private static Color ColorOf(Domain.Enums.NotificationType type) => type switch
+    {
+        Domain.Enums.NotificationType.Overdue => Color.Error,
+        Domain.Enums.NotificationType.DeadlineToday => Color.Warning,
+        Domain.Enums.NotificationType.DeadlineApproaching => Color.Warning,
+        _ => Color.Primary,
+    };
+
+    /// <inheritdoc />
+    public ValueTask DisposeAsync() => _poller.DisposeAsync();
+}

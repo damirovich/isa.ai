@@ -13,6 +13,8 @@
     <ProjectReference Include="..\..\src\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.Persistence\ISC.AI.Persistence.csproj" />
     <ProjectReference Include="..\..\src\profiles\inspector\ISC.AI.Profile.Inspector.Data\ISC.AI.Profile.Inspector.Data.csproj" />
+    <!-- Пакет модулей документооборота (Э4-35): хранилище справочника + DocFlowDbContext. -->
+    <ProjectReference Include="..\..\src\modules\docflow\ISC.AI.Modules.DocFlow.Data\ISC.AI.Modules.DocFlow.Data.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.AI\ISC.AI.AI.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.Ingestion\ISC.AI.Ingestion.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.Web\ISC.AI.Web.csproj" />

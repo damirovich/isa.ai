@@ -1,0 +1,105 @@
+@namespace ISC.AI.Profile.Inspector.UI
+@* Роли пользователей (§2.1 ТЗ СКИД, этап 6 Э4-35) — построчный доступ к докфлоу-документам поверх
+   IAccessPolicy (ADR-0014): Администратор и Руководитель видят все документы (для Администратора —
+   осознанное отклонение от ТЗ, решение заказчика 2026-08-06, см. UserRole.cs), Инспектор —
+   только свои, Исполнитель — только свои назначения. Сама страница видна всем (ReadPolicy как везде —
+   в системе сегодня нет claim'а под роль, см. Э4-35 этап 6), но обработчики (RoleScenarios.cs) сами
+   решают, вправе ли вызывающий: Администратор — всегда; любой вошедший — ТОЛЬКО пока Администратора
+   в системе нет (режим первичной настройки, 6.4.1). На «кнопку не покажем» не полагаемся. *@
+@page "/admin/roles"
+@rendermode InteractiveServer
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Profile.Inspector.Application.Features.Roles
+@using ISC.AI.Profile.Inspector.Domain.Enums
+@using ISC.AI.Profile.Inspector.Domain.Services
+
+<PageHeader Title="Роли пользователей" Subtitle="Построчный доступ к документам (§2.1 ТЗ СКИД) · ведёт Администратор"
+            Icon="@Icons.Material.Filled.AdminPanelSettings" />
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@* Условие ТО ЖЕ, что на сервере (нет Администратора), иначе баннер и правило разъедутся. *@
+@if (_rows.Count > 0 && _rows.All(r => r.Role != UserRole.Administrator))
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-3">
+        <MudText Typo="Typo.body2"><b>Режим первичной настройки: Администратор не назначен.</b></MudText>
+        <MudText Typo="Typo.body2">
+            Пока в системе нет ни одного Администратора, эта страница открыта любому вошедшему — иначе
+            назначить первого Администратора было бы некому. Как только Администратор появится,
+            страница станет доступна только ему.
+        </MudText>
+        <MudText Typo="Typo.body2" Class="mt-1">
+            Назначьте себе <b>Администратора</b> — он ведёт пользователей и справочники и при этом видит
+            все документы. Иначе управление ролями останется открытым любому вошедшему.
+        </MudText>
+    </MudAlert>
+}
+
+<MudTable T="UserRoleRow" Items="_rows" Hover="true" Dense="true" Outlined="true" Loading="_busy">
+    <HeaderContent>
+        <MudTh>Пользователь</MudTh>
+        <MudTh>Роль</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Пользователь">@context.DisplayName</MudTd>
+        <MudTd DataLabel="Роль">
+            <MudSelect T="UserRole?" Value="@context.Role" ValueChanged="@(role => SetRoleAsync(context.UserId, role))"
+                       Variant="Variant.Outlined" Dense="true" Margin="Margin.Dense" Clearable="true"
+                       Style="min-width:220px;" Placeholder="Роль не назначена">
+                @foreach (var role in Enum.GetValues<UserRole>())
+                {
+                    <MudSelectItem T="UserRole?" Value="@role">@role.Label()</MudSelectItem>
+                }
+            </MudSelect>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Активных пользователей нет.</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    private readonly List<UserRoleRow> _rows = [];
+    private bool _busy;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ListUserRolesQuery());
+            _rows.Clear();
+            if (response is { Status: true, Data: { } list })
+            {
+                _rows.AddRange(list);
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SetRoleAsync(int userId, UserRole? role)
+    {
+        _error = null;
+        var response = await Dispatcher.Send(new SetUserRoleCommand(userId, role));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+}

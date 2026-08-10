@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- DocFlowDbContext (схема docflow) и миграции. Единственное место модуля, ссылающееся на конкретный
+       проект ядра (Persistence) ради общего EF-слоя — то же правило, что и у слоя данных профиля. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+    <ProjectReference Include="..\ISC.AI.Modules.DocFlow.Domain\ISC.AI.Modules.DocFlow.Domain.csproj" />
+    <ProjectReference Include="..\..\..\core\ISC.AI.Persistence\ISC.AI.Persistence.csproj" />
+  </ItemGroup>
+
+  <!-- Раздача файлов (этап 4.3, §3.3) — сырой HTTP-эндпоинт, не Blazor-страница: нужны типы
+       Minimal API (IEndpointRouteBuilder/IResult), они не пакетируются отдельным NuGet — только
+       в shared framework ASP.NET Core (без перехода на Sdk.Web). -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="EFCore.NamingConventions" />
+    <!-- Отчёты разд. 6 ТЗ (этап 5). Обе MIT: ClosedXML — Excel, PDFsharp — PDF (замена QuestPDF,
+         у которого двойная лицензия). Word рисуется OpenXml, он уже есть транзитивно. -->
+    <PackageReference Include="ClosedXML" />
+    <PackageReference Include="PDFsharp" />
+    <PackageReference Include="DocumentFormat.OpenXml" />
+    <!-- Фоновая проверка сроков (BackgroundService) — как очередь ИИ-задач ядра. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <!-- PMC-командлеты Update-Database / Add-Migration (dev-only). -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

@@ -17,7 +17,7 @@ namespace ISC.AI.IntegrationTests.Persistence;
 /// <remarks>Требуется Docker. Эмбеддер — фиксированный фейк (проверяется конвейер/инвариант, не качество).</remarks>
 public sealed class IngestionPipelineTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16").Build();
+    private readonly PostgreSqlContainer _postgres = TestPostgres.Create();
 
     public Task InitializeAsync() => _postgres.StartAsync();
 
@@ -26,7 +26,7 @@ public sealed class IngestionPipelineTests : IAsyncLifetime
     [Fact(DisplayName = "Загрузка с грифом индексирует документ/чанки/эмбеддинги; повтор без дублей; без грифа — отказ")]
     public async Task Ingestion_is_fail_closed_and_idempotent()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
@@ -72,7 +72,7 @@ public sealed class IngestionPipelineTests : IAsyncLifetime
     [Fact(DisplayName = "ТНД-002: конкурентный импорт одного содержимого создаёт РОВНО один документ (уникальный индекс)")]
     public async Task Concurrent_ingestion_of_same_content_creates_single_document()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
@@ -101,7 +101,7 @@ public sealed class IngestionPipelineTests : IAsyncLifetime
     [Fact(DisplayName = "ТО-инф-03: доменные метаданные пакета (идентификатор нормы, статус редакции) сохраняются, а не теряются")]
     public async Task Ingestion_persists_document_metadata()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
@@ -122,44 +122,6 @@ public sealed class IngestionPipelineTests : IAsyncLifetime
             document.Metadata.ShouldNotBeNull();
             document.Metadata!["normId"].ShouldBe("ЗКР-123");
             document.Metadata["edition"].ShouldBe("действующая");
-        }
-    }
-
-    private sealed class TestContextFactory(string connectionString) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<CoreDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                {
-                    npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                    npg.UseVector();
-                })
-                .UseSnakeCaseNamingConvention()
-                .Options);
-    }
-
-    private sealed class FixedEmbeddingGenerator(int dimensions) : IEmbeddingGenerator<string, Embedding<float>>
-    {
-        private readonly ReadOnlyMemory<float> _vector = BuildVector(dimensions);
-
-        private static float[] BuildVector(int dimensions)
-        {
-            var values = new float[dimensions];
-            values[0] = 1f;
-            return values;
-        }
-
-        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
-            IEnumerable<string> values,
-            EmbeddingGenerationOptions? options = null,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult(new GeneratedEmbeddings<Embedding<float>>(
-                values.Select(_ => new Embedding<float>(_vector)).ToList()));
-
-        public object? GetService(Type serviceType, object? serviceKey = null) => null;
-
-        public void Dispose()
-        {
         }
     }
 }

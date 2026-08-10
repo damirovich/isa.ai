@@ -1,4 +1,4 @@
-using ISC.AI.Profile.Inspector.Application.Generation;
+using ISC.AI.Profile.Inspector.Application.Features.Generation;
 using Shouldly;
 
 namespace ISC.AI.UnitTests.Profiles;

@@ -17,8 +17,9 @@ namespace ISC.AI.UnitTests.Chat;
 /// </summary>
 public sealed class ChatServiceTests
 {
-    private static GroundedResponse Response(string answer, short classification) =>
-        new(answer, new GroundingResult([], AllConfirmed: true), Array.Empty<RetrievedChunk>(), classification);
+    private static GroundedResponse Response(
+        string answer, short classification, IReadOnlyList<RetrievedChunk>? fragments = null) =>
+        new(answer, new GroundingResult([], AllConfirmed: true), fragments ?? Array.Empty<RetrievedChunk>(), classification);
 
     [Fact(DisplayName = "Чат: новый диалог создаётся, сохраняются реплика пользователя и грунтованный ответ")]
     public async Task Send_creates_conversation_and_saves_both_turns()
@@ -66,6 +67,56 @@ public sealed class ChatServiceTests
         captured!.History.ShouldNotBeNull();
         captured.History!.Count.ShouldBe(1);
         captured.History[0].Text.ShouldBe("прошлый вопрос");
+    }
+
+    [Fact(DisplayName = "Чат: использованные фрагменты передаются в ChatReply.UsedFragments — источники для UI (этап 7.2 Э4-35)")]
+    public async Task Send_passes_used_fragments_to_reply()
+    {
+        var store = Substitute.For<IConversationStore>();
+        store.CreateAsync(42, Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(7);
+        store.GetHistoryAsync(7, 42, Arg.Any<CancellationToken>()).Returns(new List<ChatTurn>());
+        store.AppendMessageAsync(7, 42, Arg.Any<ConversationMessageRole>(), Arg.Any<string>(), Arg.Any<short>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        var fragments = new[] { new RetrievedChunk(1, 100, "текст фрагмента", 0, 7, true, 0.1) };
+        var generator = Substitute.For<IGroundedGenerator>();
+        generator.GenerateAsync(Arg.Any<GroundedRequest>(), Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
+            .Returns(Response("ответ", 0, fragments));
+
+        var service = new ChatService(generator, Substitute.For<IConversationalGenerator>(), store);
+
+        var reply = await service.SendAsync(new ChatMessageRequest(null, "вопрос"), new AccessContext("42", 2, [7]));
+
+        reply.UsedFragments.ShouldBe(fragments);
+    }
+
+    [Fact(DisplayName = "Чат-стриминг: использованные фрагменты передаются в финальный ChatReply (этап 7.2 Э4-35)")]
+    public async Task SendStreaming_passes_used_fragments_to_final_reply()
+    {
+        var store = Substitute.For<IConversationStore>();
+        store.CreateAsync(42, Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(7);
+        store.GetHistoryAsync(7, 42, Arg.Any<CancellationToken>()).Returns(new List<ChatTurn>());
+        store.AppendMessageAsync(7, 42, Arg.Any<ConversationMessageRole>(), Arg.Any<string>(), Arg.Any<short>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        var fragments = new[] { new RetrievedChunk(1, 100, "текст фрагмента", 0, 7, true, 0.1) };
+        var generator = Substitute.For<IGroundedGenerator>();
+        generator.GenerateStreamingAsync(Arg.Any<GroundedRequest>(), Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
+            .Returns(_ => DraftStreamWithFragments(fragments));
+
+        var service = new ChatService(generator, Substitute.For<IConversationalGenerator>(), store);
+
+        ChatReply? final = null;
+        await foreach (var update in service.SendStreamingAsync(new ChatMessageRequest(null, "вопрос"), new AccessContext("42", 2, [7])))
+        {
+            if (update.Final is { } reply)
+            {
+                final = reply;
+            }
+        }
+
+        final.ShouldNotBeNull();
+        final!.UsedFragments.ShouldBe(fragments);
     }
 
     [Fact(DisplayName = "Чат fail-closed: чужой диалог — отказ ДО обращения к модели")]
@@ -189,5 +240,14 @@ public sealed class ChatServiceTests
         yield return new GroundedStreamUpdate(
             TextDelta: null,
             Final: new GroundedResponse("Служебная", new GroundingResult([], AllConfirmed: true), Array.Empty<RetrievedChunk>(), 2));
+    }
+
+    private static async IAsyncEnumerable<GroundedStreamUpdate> DraftStreamWithFragments(
+        IReadOnlyList<RetrievedChunk> fragments)
+    {
+        yield return new GroundedStreamUpdate(
+            TextDelta: null,
+            Final: new GroundedResponse("ответ", new GroundingResult([], AllConfirmed: true), fragments, 0));
+        await Task.Yield();
     }
 }

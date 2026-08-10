@@ -1,4 +1,4 @@
-using ISC.AI.Profile.Inspector.Application.Grounding;
+using ISC.AI.Profile.Inspector.Application.Features.Grounding;
 using Shouldly;
 
 namespace ISC.AI.UnitTests.Profiles.Grounding;

@@ -108,6 +108,13 @@ public sealed class LoginService(
                 new Claim(AuthClaims.ExternalId, external.ExternalId),
                 new Claim(AuthClaims.SecurityStamp, external.SecurityStamp),
                 new Claim(AuthClaims.DisplayName, external.DisplayName ?? external.Login),
+
+                // Временный пароль (создание учётки, сброс администратором, учётка по умолчанию):
+                // до смены оболочка не пускает никуда, кроме страницы смены пароля. Флаг берётся из
+                // ЛОКАЛЬНОЙ учётки, а не из внешнего ответа: после §6.5 источник истины здесь.
+                new Claim(
+                    AuthClaims.MustChangePassword,
+                    user.MustChangePassword ? "1" : "0"),
                 new Claim(AuthClaims.ValidatedAt, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)),
             ],
             CookieAuthenticationDefaults.AuthenticationScheme);

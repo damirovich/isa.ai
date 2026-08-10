@@ -1,9 +1,15 @@
 @inherits LayoutComponentBase
 @inject IProfile Profile
+@inject IJSRuntime JS
+@using Microsoft.JSInterop
 @using ISC.AI.Web.Common
 
 @* Оболочка хоста: тема, шапка, боковое меню. Доменно-нейтральна — название, подзаголовок и состав
    меню берутся из манифеста профиля (ТС-003, ТС-007). Хост не знает слова «инспекция». *@
+
+@* Временный пароль известен посторонним (администратору, выдавшему его, либо всем, кто видел
+   конфигурацию учётки по умолчанию) — до смены работать в системе нельзя. *@
+<RequirePasswordChange />
 
 <MudThemeProvider Theme="IscTheme.Default" IsDarkMode="_isDarkMode" />
 <MudPopoverProvider />
@@ -25,6 +31,20 @@
         <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined"
                  Icon="@Icons.Material.Filled.Lock" Class="mr-3 d-none d-sm-flex">изолированный контур</MudChip>
         <MudText Typo="Typo.body2" Class="mud-text-secondary mr-2 d-none d-sm-flex">@DateTime.Now.ToString("dd.MM.yyyy")</MudText>
+
+        @* Виджеты шапки объявляет ПРОФИЛЬ (ТС-003): хост знает про «слот» и «тип компонента», но не
+           про их содержимое. Только аутентифицированному — как и состав меню (ТБ-010). *@
+        <AuthorizeView>
+            <Authorized>
+                @foreach (var widget in Profile.ShellWidgets
+                    .Where(w => w.Slot == ShellWidgetSlot.AppBarRight)
+                    .OrderBy(w => w.Order))
+                {
+                    <DynamicComponent Type="widget.ComponentType" @key="widget.Id" />
+                }
+            </Authorized>
+        </AuthorizeView>
+
         <MudIconButton Icon="@(_isDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
                        Color="Color.Inherit" OnClick="ToggleTheme" aria-label="Переключить тему" />
 
@@ -108,8 +128,46 @@
 
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
 
-    private void ToggleTheme() 
+    /// <summary>
+    /// Читает запомненную тему ПОСЛЕ первого рендера.
+    /// </summary>
+    /// <remarks>
+    /// Не в OnInitialized: при предрендере браузерного хранилища ещё нет, и обращение к нему на
+    /// этом этапе бросает. Отсутствие запомненного выбора — не ошибка: остаётся тёмная по умолчанию.
+    /// </remarks>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        _isDarkMode = !_isDarkMode; 
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            var stored = await JS.InvokeAsync<bool?>("iscaiTheme.read");
+            if (stored is { } isDark && isDark != _isDarkMode)
+            {
+                _isDarkMode = isDark;
+                StateHasChanged();
+            }
+        }
+        catch (JSException)
+        {
+            // Скрипт не загрузился — оболочка обязана работать и без запоминания темы.
+        }
+    }
+
+    private async Task ToggleTheme()
+    {
+        _isDarkMode = !_isDarkMode;
+
+        try
+        {
+            await JS.InvokeVoidAsync("iscaiTheme.write", _isDarkMode);
+        }
+        catch (JSException)
+        {
+            // Невозможность запомнить выбор не должна отменять само переключение.
+        }
     }
 }

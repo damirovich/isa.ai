@@ -24,7 +24,7 @@ namespace ISC.AI.IntegrationTests.Persistence;
 [Trait("Category", "Gate")]
 public sealed class RetrieverAccessFilterTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16").Build();
+    private readonly PostgreSqlContainer _postgres = TestPostgres.Create();
 
     public Task InitializeAsync() => _postgres.StartAsync();
 
@@ -33,7 +33,7 @@ public sealed class RetrieverAccessFilterTests : IAsyncLifetime
     [Fact(DisplayName = "GATE-1: выше допуска / чужое подразделение / устаревшее не выдаётся; нет доступа = пусто")]
     public async Task Retriever_enforces_access_filter_on_db_side()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
@@ -59,6 +59,38 @@ public sealed class RetrieverAccessFilterTests : IAsyncLifetime
         // Неразличимость (по контенту): субъект без подходящего допуска получает ПУСТО.
         var noAccess = new AccessContext("u2", MaxClassification: 0, AllowedDivisions: [999]);
         (await retriever.RetrieveAsync("любой запрос", noAccess, topK: 50)).ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Retriever: метаданные документа доезжают до RetrievedChunk.Metadata (этап 7.2 Э4-35 — ссылки-источники в чате)")]
+    public async Task Retriever_projects_document_metadata_onto_chunk()
+    {
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
+        DocumentEntity doc;
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+
+            doc = new DocumentEntity
+            {
+                DocType = "поручение",
+                Title = "П-1 · Тест",
+                Classification = 0,
+                DivisionId = 7,
+                Metadata = new Dictionary<string, string> { ["docflow_document_id"] = "555", ["reg_number"] = "П-1" },
+            };
+            db.Documents.Add(doc);
+            await db.SaveChangesAsync();
+            await AddChunkWithEmbeddingAsync(db, doc.Id, ordinal: 0, classification: 0, divisionId: 7, isCurrent: true);
+        }
+
+        var retriever = new PgVectorRetriever(
+            factory, new FixedEmbeddingGenerator(EmbeddingEntity.Dimensions), new AllowAllAccessPolicy(), RetrievalOptions.None);
+        var access = new AccessContext("u1", MaxClassification: 5, AllowedDivisions: [7]);
+
+        var chunk = (await retriever.RetrieveAsync("любой запрос", access, topK: 10)).ShouldHaveSingleItem();
+        chunk.Metadata.ShouldNotBeNull();
+        chunk.Metadata!["docflow_document_id"].ShouldBe("555");
+        chunk.Metadata["reg_number"].ShouldBe("П-1");
     }
 
     private static async Task SeedAsync(CoreDbContext db)
@@ -100,45 +132,5 @@ public sealed class RetrieverAccessFilterTests : IAsyncLifetime
             IsCurrent = isCurrent,
         });
         await db.SaveChangesAsync();
-    }
-
-    // Контекст с теми же опциями, что в проде (snake_case + pgvector).
-    private sealed class TestContextFactory(string connectionString) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<CoreDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                {
-                    npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                    npg.UseVector();
-                })
-                .UseSnakeCaseNamingConvention()
-                .Options);
-    }
-
-    // Фейковый эмбеддер: всегда один и тот же вектор (тест проверяет фильтрацию, не качество поиска).
-    private sealed class FixedEmbeddingGenerator(int dimensions) : IEmbeddingGenerator<string, Embedding<float>>
-    {
-        private readonly ReadOnlyMemory<float> _vector = BuildVector(dimensions);
-
-        private static float[] BuildVector(int dimensions)
-        {
-            var values = new float[dimensions];
-            values[0] = 1f;
-            return values;
-        }
-
-        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
-            IEnumerable<string> values,
-            EmbeddingGenerationOptions? options = null,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult(new GeneratedEmbeddings<Embedding<float>>(
-                values.Select(_ => new Embedding<float>(_vector)).ToList()));
-
-        public object? GetService(Type serviceType, object? serviceKey = null) => null;
-
-        public void Dispose()
-        {
-        }
     }
 }

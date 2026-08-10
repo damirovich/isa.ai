@@ -1,5 +1,6 @@
 using ISC.AI.Abstractions.Enums;
 using ISC.AI.Abstractions.Grounding;
+using ISC.AI.Abstractions.Retrieval;
 using ISC.AI.Abstractions.Security;
 
 namespace ISC.AI.Abstractions.Conversations;
@@ -24,11 +25,18 @@ public sealed record ChatMessageRequest(
 /// <param name="Answer">Текст ответа.</param>
 /// <param name="Grounding">Итог грунтовки (статусы ссылок на НПА); <see langword="null"/> в свободном режиме (не сверялось).</param>
 /// <param name="Classification">Гриф ответа (максимум грифов использованных фрагментов; 0 в свободном режиме).</param>
+/// <param name="UsedFragments">
+/// Фрагменты, на которых построен ответ (для ссылок на документы-источники в UI, Э4-35 этап 7.2) —
+/// <see langword="null"/> в свободном режиме (извлечение не выполнялось). Ядро не интерпретирует
+/// <see cref="RetrievedChunk.Metadata"/> — доменный смысл (напр. <c>docflow_document_id</c>) знает
+/// только слой, который решает, куда вести ссылку.
+/// </param>
 public sealed record ChatReply(
     int ConversationId,
     string Answer,
     GroundingResult? Grounding,
-    short Classification);
+    short Classification,
+    IReadOnlyList<RetrievedChunk>? UsedFragments = null);
 
 /// <summary>
 /// Обновление потокового ответа чата. Промежуточные — сырой ЧЕРНОВИК по кускам (<see cref="TextDelta"/>);

@@ -26,28 +26,7 @@ public sealed class ChatService(
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(access);
 
-        // Диалог требует идентифицированного владельца (числовой субъект) — историю нужно к кому-то привязать.
-        if (access.NumericSubjectId is not { } subjectId)
-        {
-            throw new InvalidOperationException("Чат доступен только идентифицированному пользователю (субъекту).");
-        }
-
-        // Новый диалог (заголовок — из первого запроса) или существующий.
-        var conversationId = request.ConversationId
-            ?? await conversations.CreateAsync(subjectId, request.Text, cancellationToken);
-
-        // История ПРЕДЫДУЩИХ реплик (для нового диалога — пусто; для чужого — тоже пусто, разграничение).
-        var history = await conversations.GetHistoryAsync(conversationId, subjectId, cancellationToken);
-
-        // Реплика пользователя в журнал диалога. Fail-closed: если диалог субъекту не принадлежит — отказ
-        // ДО обращения к модели (чужой диалог недоступен, история его не подмешивается).
-        var appended = await conversations.AppendMessageAsync(
-            conversationId, subjectId, ConversationMessageRole.User, request.Text,
-            classification: 0, groundingJson: null, cancellationToken);
-        if (!appended)
-        {
-            throw new InvalidOperationException("Диалог не найден или недоступен.");
-        }
+        var (conversationId, subjectId, history) = await PrepareConversationAsync(request, access, cancellationToken);
 
         // Грунтованная генерация с учётом истории (фильтр доступа/грунтовка/аудит — внутри генератора).
         var response = await generator.GenerateAsync(
@@ -60,7 +39,8 @@ public sealed class ChatService(
             conversationId, subjectId, ConversationMessageRole.Assistant, response.Answer,
             response.ResultClassification, JsonSerializer.Serialize(response.Grounding), cancellationToken);
 
-        return new ChatReply(conversationId, response.Answer, response.Grounding, response.ResultClassification);
+        return new ChatReply(
+            conversationId, response.Answer, response.Grounding, response.ResultClassification, response.UsedFragments);
     }
 
     /// <inheritdoc />
@@ -70,23 +50,7 @@ public sealed class ChatService(
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(access);
 
-        if (access.NumericSubjectId is not { } subjectId)
-        {
-            throw new InvalidOperationException("Чат доступен только идентифицированному пользователю (субъекту).");
-        }
-
-        var conversationId = request.ConversationId
-            ?? await conversations.CreateAsync(subjectId, request.Text, cancellationToken);
-
-        var history = await conversations.GetHistoryAsync(conversationId, subjectId, cancellationToken);
-
-        var appended = await conversations.AppendMessageAsync(
-            conversationId, subjectId, ConversationMessageRole.User, request.Text,
-            classification: 0, groundingJson: null, cancellationToken);
-        if (!appended)
-        {
-            throw new InvalidOperationException("Диалог не найден или недоступен.");
-        }
+        var (conversationId, subjectId, history) = await PrepareConversationAsync(request, access, cancellationToken);
 
         // СВОБОДНЫЙ режим: обычный ассистент без извлечения/грунтовки (правило запрещает юр-утверждения).
         if (request.Mode == ChatMode.Free)
@@ -139,6 +103,44 @@ public sealed class ChatService(
 
         yield return new ChatStreamUpdate(
             TextDelta: null,
-            Final: new ChatReply(conversationId, final.Answer, final.Grounding, final.ResultClassification));
+            Final: new ChatReply(
+                conversationId, final.Answer, final.Grounding, final.ResultClassification, final.UsedFragments));
+    }
+
+    /// <summary>
+    /// Общая преамбула обоих путей (обычного и потокового): владелец, диалог, история, реплика
+    /// пользователя. Была продублирована в двух методах — инвариантная логика разграничения
+    /// расходиться не должна.
+    /// </summary>
+    /// <remarks>
+    /// Fail-closed: диалог требует идентифицированного владельца (числовой субъект — историю нужно
+    /// к кому-то привязать); чужой диалог недоступен — история не подмешивается
+    /// (<c>GetHistoryAsync</c> для чужого возвращает пусто), а запись реплики отклоняется ДО
+    /// обращения к модели.
+    /// </remarks>
+    private async Task<(int ConversationId, int SubjectId, IReadOnlyList<ChatTurn> History)>
+        PrepareConversationAsync(
+            ChatMessageRequest request, AccessContext access, CancellationToken cancellationToken)
+    {
+        if (access.NumericSubjectId is not { } subjectId)
+        {
+            throw new InvalidOperationException("Чат доступен только идентифицированному пользователю (субъекту).");
+        }
+
+        // Новый диалог (заголовок — из первого запроса) или существующий.
+        var conversationId = request.ConversationId
+            ?? await conversations.CreateAsync(subjectId, request.Text, cancellationToken);
+
+        var history = await conversations.GetHistoryAsync(conversationId, subjectId, cancellationToken);
+
+        var appended = await conversations.AppendMessageAsync(
+            conversationId, subjectId, ConversationMessageRole.User, request.Text,
+            classification: 0, groundingJson: null, cancellationToken);
+        if (!appended)
+        {
+            throw new InvalidOperationException("Диалог не найден или недоступен.");
+        }
+
+        return (conversationId, subjectId, history);
     }
 }

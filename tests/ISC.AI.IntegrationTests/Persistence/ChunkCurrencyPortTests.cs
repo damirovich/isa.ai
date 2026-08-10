@@ -15,7 +15,7 @@ namespace ISC.AI.IntegrationTests.Persistence;
 /// </summary>
 public sealed class ChunkCurrencyPortTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16").Build();
+    private readonly PostgreSqlContainer _postgres = TestPostgres.Create();
 
     public Task InitializeAsync() => _postgres.StartAsync();
 
@@ -52,18 +52,5 @@ public sealed class ChunkCurrencyPortTests : IAsyncLifetime
         await using var verify = factory.CreateDbContext();
         (await verify.Chunks.FirstAsync(c => c.Id == chunkId)).IsCurrent.ShouldBeFalse();
         (await verify.Embeddings.FirstAsync(e => e.ChunkId == chunkId)).IsCurrent.ShouldBeFalse();
-    }
-
-    private sealed class CoreContextFactory(string connectionString) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<CoreDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                {
-                    npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                    npg.UseVector();
-                })
-                .UseSnakeCaseNamingConvention()
-                .Options);
     }
 }

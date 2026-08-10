@@ -26,7 +26,7 @@ namespace ISC.AI.IntegrationTests.Persistence;
 [Trait("Category", "Gate")]
 public sealed class Gate3RevisionVisibilityTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16").Build();
+    private readonly PostgreSqlContainer _postgres = TestPostgres.Create();
 
     public Task InitializeAsync() => _postgres.StartAsync();
 
@@ -35,7 +35,7 @@ public sealed class Gate3RevisionVisibilityTests : IAsyncLifetime
     [Fact(DisplayName = "GATE-3: утратившая силу не выдаётся как действующая; видна только при IncludeSuperseded")]
     public async Task Superseded_revision_is_not_served_as_current()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
@@ -100,45 +100,5 @@ public sealed class Gate3RevisionVisibilityTests : IAsyncLifetime
             IsCurrent = isCurrent,
         });
         await db.SaveChangesAsync();
-    }
-
-    // Контекст с теми же опциями, что в проде (snake_case + pgvector).
-    private sealed class TestContextFactory(string connectionString) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<CoreDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                {
-                    npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                    npg.UseVector();
-                })
-                .UseSnakeCaseNamingConvention()
-                .Options);
-    }
-
-    // Фейковый эмбеддер: всегда один и тот же вектор (тест проверяет видимость по редакции, не качество поиска).
-    private sealed class FixedEmbeddingGenerator(int dimensions) : IEmbeddingGenerator<string, Embedding<float>>
-    {
-        private readonly ReadOnlyMemory<float> _vector = BuildVector(dimensions);
-
-        private static float[] BuildVector(int dimensions)
-        {
-            var values = new float[dimensions];
-            values[0] = 1f;
-            return values;
-        }
-
-        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
-            IEnumerable<string> values,
-            EmbeddingGenerationOptions? options = null,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult(new GeneratedEmbeddings<Embedding<float>>(
-                values.Select(_ => new Embedding<float>(_vector)).ToList()));
-
-        public object? GetService(Type serviceType, object? serviceKey = null) => null;
-
-        public void Dispose()
-        {
-        }
     }
 }

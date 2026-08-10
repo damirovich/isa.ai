@@ -1,0 +1,354 @@
+@namespace ISC.AI.Profile.Inspector.UI
+@* Учётные записи (Э4-35 §6.5): создание, сброс пароля, включение/отключение. После перехода на
+   локальную идентичность это единственное место, где заводят доступ и восстанавливают забытый
+   пароль. Как страницы ролей и допусков, видна всем, но обработчики сами решают, вправе ли
+   вызывающий: Администратор — всегда; любой вошедший — только пока Администратора нет. *@
+@page "/admin/users"
+@rendermode InteractiveServer
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Abstractions.Security
+@using ISC.AI.Profile.Inspector.Application.Features.Accounts
+@using ISC.AI.Profile.Inspector.Domain.Enums
+
+<PageHeader Title="Учётные записи"
+            Subtitle="Создание, сброс пароля, отключение · ведёт Администратор"
+            Icon="@Icons.Material.Filled.ManageAccounts" />
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@* Временный пароль показывается ОДИН раз: в базе лежит только хеш, восстановить его нельзя.
+   Если администратор закроет сообщение не записав — останется лишь сбросить пароль заново. *@
+@if (_issuedPassword is not null)
+{
+    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Class="mb-3">
+        <MudText Typo="Typo.body2"><b>Временный пароль для «@_issuedFor»:</b></MudText>
+        <MudText Typo="Typo.h6" Class="my-1" Style="font-family:monospace;">@_issuedPassword</MudText>
+        <MudText Typo="Typo.body2">
+            Показывается один раз — сохранить его система не может, в базе только хеш. Передайте
+            лично; при первом входе пользователь обязан сменить пароль.
+        </MudText>
+        <MudButton Size="Size.Small" Variant="Variant.Text" Class="mt-1"
+                   OnClick="@(() => { _issuedPassword = null; _issuedFor = null; })">
+            Я записал
+        </MudButton>
+    </MudAlert>
+}
+
+<MudPaper Outlined="true" Class="pa-3 mb-4">
+    <MudText Typo="Typo.subtitle2" Class="mb-2">Новая учётная запись</MudText>
+    <div class="d-flex gap-3 align-center flex-wrap">
+        <MudTextField @bind-Value="_newUserName" Label="Имя входа *" Variant="Variant.Outlined"
+                      Style="width:220px;" Immediate="true"
+                      HelperText="Латиница, цифры, точка, дефис" />
+        <MudTextField @bind-Value="_newDisplayName" Label="ФИО" Variant="Variant.Outlined"
+                      Style="min-width:260px;" Class="flex-grow-1" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd"
+                   Disabled="@(_busy || string.IsNullOrWhiteSpace(_newUserName))"
+                   OnClick="CreateAsync">Создать</MudButton>
+    </div>
+</MudPaper>
+
+@* --- Отбор --- *@
+<MudPaper Outlined="true" Class="pa-3 mb-4">
+    <div class="d-flex gap-3 align-end flex-wrap">
+        <MudTextField @bind-Value="_filterText" Label="ФИО, имя входа или должность" Variant="Variant.Outlined"
+                      Style="min-width:260px;" Class="flex-grow-1" Immediate="true"
+                      OnKeyDown="@(async e => { if (e.Key == "Enter") { await SearchAsync(); } })" />
+        <MudSelect T="UserRole?" @bind-Value="_filterRole" Label="Роль" Variant="Variant.Outlined"
+                   Clearable="true" Style="width:200px;">
+            @foreach (var role in Enum.GetValues<UserRole>())
+            {
+                <MudSelectItem T="UserRole?" Value="@role">@role.Label()</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="bool?" @bind-Value="_filterActive" Label="Состояние" Variant="Variant.Outlined"
+                   Clearable="true" Style="width:180px;">
+            <MudSelectItem T="bool?" Value="@(true)">Только активные</MudSelectItem>
+            <MudSelectItem T="bool?" Value="@(false)">Только отключённые</MudSelectItem>
+        </MudSelect>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Search"
+                   OnClick="SearchAsync" Disabled="_busy">Найти</MudButton>
+    </div>
+</MudPaper>
+
+<MudTable T="UserAccountView" Items="_rows" Hover="true" Dense="true" Outlined="true" Loading="_busy">
+    <HeaderContent>
+        <MudTh>Пользователь</MudTh>
+        <MudTh>Должность</MudTh>
+        <MudTh>Имя входа</MudTh>
+        <MudTh>Роль</MudTh>
+        <MudTh>Состояние</MudTh>
+        <MudTh Style="width:1%;"></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Пользователь">@(context.Account.DisplayName ?? "—")</MudTd>
+        <MudTd DataLabel="Должность">@(context.Account.Position ?? "—")</MudTd>
+        <MudTd DataLabel="Имя входа">@context.Account.UserName</MudTd>
+        <MudTd DataLabel="Роль">
+            @* Роль показываем, но правим на своём экране: это другое полномочие с другими
+               последствиями, и менять его заодно с исправлением опечатки в фамилии нельзя. *@
+            @(context.Role is { } role ? role.Label() : "не назначена")
+        </MudTd>
+        <MudTd DataLabel="Состояние">
+            @if (!context.Account.IsActive)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Text">отключена</MudChip>
+                @if (!string.IsNullOrWhiteSpace(context.Account.DeactivationReason))
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                        @context.Account.DeactivationReason
+                    </MudText>
+                }
+            }
+            else if (!context.Account.HasLocalPassword)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text">
+                    без локального пароля
+                </MudChip>
+            }
+            else if (context.Account.MustChangePassword)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Text">
+                    временный пароль
+                </MudChip>
+            }
+            else
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">активна</MudChip>
+            }
+        </MudTd>
+        <MudTd>
+            <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Dense="true">
+                <MudMenuItem OnClick="@(() => StartEdit(context))">Изменить ФИО и должность</MudMenuItem>
+                <MudMenuItem OnClick="@(() => ResetAsync(context))">Сбросить пароль</MudMenuItem>
+                @if (context.Account.IsActive)
+                {
+                    <MudMenuItem OnClick="@(() => StartDisable(context))">Отключить…</MudMenuItem>
+                }
+                else
+                {
+                    <MudMenuItem OnClick="@(() => SetActiveAsync(context, true, null))">Включить</MudMenuItem>
+                }
+            </MudMenu>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+            По этому отбору учётных записей нет.
+        </MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@if (_total > 0)
+{
+    <div class="d-flex align-center justify-space-between mt-3 flex-wrap gap-2">
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+            Учётных записей: @_total · страница @_page из @PageCount
+        </MudText>
+        <MudPagination Count="@PageCount" Selected="_page" SelectedChanged="GoToPageAsync"
+                       Color="Color.Primary" Size="Size.Small" />
+    </div>
+}
+
+@* --- Правка ФИО и должности --- *@
+<MudDialog @bind-Visible="_editOpen" Options="@(new DialogOptions { CloseOnEscapeKey = true })">
+    <TitleContent>Изменение учётной записи</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_editDisplayName" Label="ФИО" Variant="Variant.Outlined"
+                      MaxLength="200" Class="mb-3" />
+        <MudTextField @bind-Value="_editPosition" Label="Должность" Variant="Variant.Outlined"
+                      MaxLength="200" />
+        <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2">
+            Роль и допуск здесь не меняются — для них отдельные экраны: «Роли пользователей»
+            и «Допуски пользователей».
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _editOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveEditAsync"
+                   Disabled="_busy">Сохранить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* --- Отключение с причиной --- *@
+<MudDialog @bind-Visible="_disableOpen" Options="@(new DialogOptions { CloseOnEscapeKey = true })">
+    <TitleContent>Отключение учётной записи</TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            Сессии пользователя «@(_target?.Account.DisplayName ?? _target?.Account.UserName)»
+            завершатся немедленно.
+        </MudText>
+        <MudTextField @bind-Value="_disableReason" Label="Причина" Variant="Variant.Outlined"
+                      MaxLength="200" HelperText="Например: уволен, переведён, длительный отпуск" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _disableOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Filled" Disabled="_busy"
+                   OnClick="@(async () => { if (_target is { } t) { _disableOpen = false; await SetActiveAsync(t, false, _disableReason); } })">
+            Отключить
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudText Typo="Typo.caption" Class="mud-text-secondary mt-3 d-block">
+    Сброс пароля и отключение завершают все сессии пользователя немедленно — не по истечении времени
+    неактивности. «Без локального пароля» означает учётку, которая ещё не перенесена из внешней
+    системы: войти по ней нельзя, пока не задан пароль.
+</MudText>
+
+@code {
+    private const int PageSize = 25;
+
+    private readonly List<UserAccountView> _rows = [];
+    private string _newUserName = string.Empty;
+    private string? _newDisplayName;
+    private string? _issuedPassword;
+    private string? _issuedFor;
+    private bool _busy;
+    private string? _error;
+
+    private string? _filterText;
+    private UserRole? _filterRole;
+    private bool? _filterActive;
+    private int _page = 1;
+    private int _total;
+
+    private UserAccountView? _target;
+    private bool _editOpen;
+    private string? _editDisplayName;
+    private string? _editPosition;
+    private bool _disableOpen;
+    private string? _disableReason;
+
+    private int PageCount => Math.Max(1, (int)Math.Ceiling(_total / (double)PageSize));
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    /// <summary>Применить отбор — всегда с первой страницы (см. реестр документов).</summary>
+    private Task SearchAsync()
+    {
+        _page = 1;
+        return ReloadAsync();
+    }
+
+    private Task GoToPageAsync(int page)
+    {
+        _page = page;
+        return ReloadAsync();
+    }
+
+    private void StartEdit(UserAccountView row)
+    {
+        _target = row;
+        _editDisplayName = row.Account.DisplayName;
+        _editPosition = row.Account.Position;
+        _editOpen = true;
+    }
+
+    private void StartDisable(UserAccountView row)
+    {
+        _target = row;
+        _disableReason = null;
+        _disableOpen = true;
+    }
+
+    private async Task SaveEditAsync()
+    {
+        if (_target is not { } row)
+        {
+            return;
+        }
+
+        _error = null;
+        var response = await Dispatcher.Send(
+            new UpdateUserAccountCommand(row.Account.UserId, _editDisplayName, _editPosition));
+
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+            return;
+        }
+
+        _editOpen = false;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new SearchUserAccountsQuery(
+                _filterText, _filterRole, DivisionId: null, _filterActive, _page, PageSize));
+
+            _rows.Clear();
+            if (response is { Status: true, Data: { } data })
+            {
+                _rows.AddRange(data.Rows);
+                _total = data.TotalCount;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+                _total = 0;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        _error = null;
+        var response = await Dispatcher.Send(new CreateUserAccountCommand(_newUserName.Trim(), _newDisplayName));
+        if (response is { Status: true, Data: { } password })
+        {
+            _issuedPassword = password;
+            _issuedFor = _newUserName.Trim();
+            _newUserName = string.Empty;
+            _newDisplayName = null;
+        }
+        else
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task ResetAsync(UserAccountView row)
+    {
+        _error = null;
+        var response = await Dispatcher.Send(new ResetUserPasswordCommand(row.Account.UserId));
+        if (response is { Status: true, Data: { } password })
+        {
+            _issuedPassword = password;
+            _issuedFor = row.Account.DisplayName ?? row.Account.UserName;
+        }
+        else
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task SetActiveAsync(UserAccountView row, bool isActive, string? reason)
+    {
+        _error = null;
+        var response = await Dispatcher.Send(
+            new SetUserAccountActiveCommand(row.Account.UserId, isActive, reason));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+}
