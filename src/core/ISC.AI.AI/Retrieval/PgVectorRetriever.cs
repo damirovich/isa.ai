@@ -93,7 +93,8 @@ public sealed class PgVectorRetriever(
                 s.Embedding.Classification,
                 s.Embedding.DivisionId,
                 s.Embedding.IsCurrent,
-                s.Distance))
+                s.Distance,
+                s.Embedding.Chunk.Document!.Metadata))
             .ToListAsync(cancellationToken);
     }
 }

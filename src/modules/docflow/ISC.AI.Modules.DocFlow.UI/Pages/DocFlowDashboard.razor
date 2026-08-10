@@ -1,0 +1,232 @@
+@namespace ISC.AI.Modules.DocFlow.UI
+@* Дашборд документооборота (перенос экрана Dashboard СКИД). СВОЙ экран у модуля, а не панель на
+   дашборде профиля: у документооборота своя сводка, и смешивать её с показателями инспекции значит
+   заставлять читателя разбирать, что из чисел про что.
+   Всё, что здесь показано, посчитано В ПРЕДЕЛАХ ДОПУСКА: счётчик — тоже выдача данных, «просрочено: 7»
+   при пустом реестре сообщало бы о существовании семи недоступных поручений. *@
+@page "/docflow/dashboard"
+@rendermode InteractiveServer
+@inject NavigationManager Navigation
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Modules.DocFlow.Application.Features.Dashboard
+@using ISC.AI.Modules.DocFlow.Application.Features.Documents
+@using ISC.AI.Modules.DocFlow.Application.Features.Assignments
+@using ISC.AI.Modules.DocFlow.Application.Features.Comments
+@using ISC.AI.Modules.DocFlow.Application.Features.Directory
+@using ISC.AI.Modules.DocFlow.Domain.Services
+
+<div class="d-flex align-center justify-space-between flex-wrap gap-2">
+    <div>
+        <MudText Typo="Typo.h5">Документооборот</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            Сводка по поручениям · только то, что доступно вам по грифу и подразделению
+        </MudText>
+    </div>
+    <MudIconButton Icon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync" Disabled="_busy"
+                   aria-label="Обновить" />
+</div>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@if (_busy && _data is null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-4" />
+}
+
+@if (_data is not null)
+{
+    @* --- Личный срез идёт ПЕРВЫМ: человек открывает дашборд, чтобы понять, что должен он сам. --- *@
+    <MudText Typo="Typo.subtitle1" Class="mt-4 mb-2">Мои поручения</MudText>
+    <MudGrid Class="mb-2">
+        <MudItem xs="6" md="3">
+            <Tile Value="@_data.Mine.Active" Label="В работе" Color="Color.Info"
+                  Icon="@Icons.Material.Filled.PlayCircleOutline" />
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <Tile Value="@_data.Mine.Overdue" Label="Просрочено" Color="Color.Error"
+                  Icon="@Icons.Material.Filled.ErrorOutline" />
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <Tile Value="@_data.Mine.DueToday" Label="Срок сегодня" Color="Color.Warning"
+                  Icon="@Icons.Material.Filled.Today" />
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <Tile Value="@_data.Mine.DueSoon" Label="Срок скоро" Color="Color.Default"
+                  Icon="@Icons.Material.Filled.Schedule" />
+        </MudItem>
+    </MudGrid>
+
+    <MudText Typo="Typo.subtitle1" Class="mt-5 mb-2">Всё доступное мне</MudText>
+    <MudGrid Class="mb-2">
+        <MudItem xs="6" md="3">
+            <Tile Value="@_data.All.Active" Label="В работе" Color="Color.Info"
+                  Icon="@Icons.Material.Filled.PlayCircleOutline" />
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <Tile Value="@_data.All.Overdue" Label="Просрочено" Color="Color.Error"
+                  Icon="@Icons.Material.Filled.ErrorOutline" />
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <Tile Value="@_data.All.DueToday" Label="Срок сегодня" Color="Color.Warning"
+                  Icon="@Icons.Material.Filled.Today" />
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <Tile Value="@_data.All.Done" Label="Исполнено" Color="Color.Success"
+                  Icon="@Icons.Material.Filled.CheckCircleOutline" />
+        </MudItem>
+    </MudGrid>
+
+    <MudGrid Class="mt-2">
+        <MudItem xs="12" md="7">
+            <MudPaper Outlined="true" Class="pa-4 h-100">
+                <MudText Typo="Typo.subtitle1" Class="mb-3">Ближайшие сроки</MudText>
+                @if (_data.Upcoming.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                        Поручений с приближающимся сроком нет.
+                    </MudText>
+                }
+                else
+                {
+                    <MudTable T="UpcomingDeadline" Items="_data.Upcoming" Dense="true" Hover="true"
+                              Elevation="0" RowClass="cursor-pointer"
+                              OnRowClick="@(row => Open(row.Item!.DocumentId))">
+                        <HeaderContent>
+                            <MudTh>Срок</MudTh>
+                            <MudTh>Документ</MudTh>
+                            <MudTh>Подразделение</MudTh>
+                            <MudTh>Статус</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="Срок">
+                                <MudText Typo="Typo.body2" Color="@DeadlineColor(context.Deadline)">
+                                    @context.Deadline.ToString("dd.MM.yyyy",
+                                        System.Globalization.CultureInfo.InvariantCulture)
+                                </MudText>
+                            </MudTd>
+                            <MudTd DataLabel="Документ" Style="max-width:320px;">
+                                <MudText Typo="Typo.body2"
+                                         Style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                                    @(context.RegNumber ?? "б/н") · @context.ShortContent
+                                </MudText>
+                            </MudTd>
+                            <MudTd DataLabel="Подразделение">@DivisionName(context.DivisionId)</MudTd>
+                            <MudTd DataLabel="Статус">
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                                         Color="@context.Status.ChipColor()" Class="ma-0">
+                                    @context.Status.Label()
+                                </MudChip>
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                }
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="5">
+            <MudPaper Outlined="true" Class="pa-4 h-100">
+                <MudText Typo="Typo.subtitle1" Class="mb-3">По подразделениям</MudText>
+                @if (_data.ByDivision.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">Поручений нет.</MudText>
+                }
+                else
+                {
+                    @foreach (var row in _data.ByDivision)
+                    {
+                        <div class="d-flex align-center justify-space-between py-2">
+                            <MudText Typo="Typo.body2">@DivisionName(row.DivisionId)</MudText>
+                            <div class="d-flex align-center gap-2">
+                                <MudTooltip Text="В работе">
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Info"
+                                             Variant="Variant.Text" Class="ma-0">@row.Active</MudChip>
+                                </MudTooltip>
+                                @if (row.Overdue > 0)
+                                {
+                                    <MudTooltip Text="Просрочено">
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Error"
+                                                 Variant="Variant.Filled" Class="ma-0">@row.Overdue</MudChip>
+                                    </MudTooltip>
+                                }
+                            </div>
+                        </div>
+                        <MudDivider />
+                    }
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@* Лента уведомлений — здесь же: это единственное место, где документооборот сообщает пользователю
+   о событиях, и держать её на другом экране значит заставлять переключаться. *@
+<div class="mt-4">
+    <NotificationsPanel />
+</div>
+
+@code {
+    private DashboardData? _data;
+    private IReadOnlyDictionary<int, string> _divisions = new Dictionary<int, string>();
+    private bool _busy;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var divisions = await Dispatcher.Send(new ListDivisionsQuery());
+        if (divisions.Status && divisions.Data is not null)
+        {
+            _divisions = divisions.Data.ToDictionary(d => d.Id, d => d.Name);
+        }
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new GetDocFlowDashboardQuery());
+            if (!response.Status || response.Data is null)
+            {
+                _error = response.StatusMessage;
+                return;
+            }
+
+            _data = response.Data;
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Open(int documentId) => Navigation.NavigateTo($"/docflow/documents/{documentId}");
+
+    // Подразделение вне справочника показывается номером, а не пропадает: строка есть, значит
+    // поручение существует, и молча его прятать нельзя.
+    private string DivisionName(int id) =>
+        _divisions.TryGetValue(id, out var name)
+            ? name
+            : $"подразделение №{id.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+
+    private static Color DeadlineColor(DateOnly deadline)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        if (deadline < today)
+        {
+            return Color.Error;
+        }
+
+        return deadline == today ? Color.Warning : Color.Default;
+    }
+}

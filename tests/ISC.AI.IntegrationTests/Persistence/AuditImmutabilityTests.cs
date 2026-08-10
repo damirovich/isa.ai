@@ -16,30 +16,16 @@ namespace ISC.AI.IntegrationTests.Persistence;
 /// <remarks>Требуется запущенный Docker (образ pgvector/pgvector — InitialCore включает расширение vector).</remarks>
 public sealed class AuditImmutabilityTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16").Build();
+    private readonly PostgreSqlContainer _postgres = TestPostgres.Create();
 
     public Task InitializeAsync() => _postgres.StartAsync();
 
     public Task DisposeAsync() => _postgres.DisposeAsync().AsTask();
 
-    // Фабрика контекста для AuditWriter с теми же опциями, что в проде (snake_case + pgvector).
-    private sealed class TestContextFactory(string connectionString) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<CoreDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                {
-                    npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                    npg.UseVector();
-                })
-                .UseSnakeCaseNamingConvention()
-                .Options);
-    }
-
     [Fact(DisplayName = "Аудит: записи добавляются и связываются в хеш-цепочку (ТБ-031)")]
     public async Task Audit_records_are_chained()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
@@ -61,7 +47,7 @@ public sealed class AuditImmutabilityTests : IAsyncLifetime
     [Fact(DisplayName = "Аудит: record_hash пересчитывается из ПРОЧИТАННЫХ из БД полей и совпадает (обнаружение подмены, ТБ-031)")]
     public async Task Record_hash_recomputes_from_persisted_fields()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
@@ -93,7 +79,7 @@ public sealed class AuditImmutabilityTests : IAsyncLifetime
     [Fact(DisplayName = "Аудит append-only: UPDATE и DELETE проваливаются (ТБ-031)")]
     public async Task Audit_is_append_only()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         await using var db = factory.CreateDbContext();
         await db.Database.MigrateAsync();
 

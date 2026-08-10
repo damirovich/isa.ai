@@ -2,7 +2,7 @@ using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Grounding;
 using ISC.AI.Abstractions.Rag;
 using ISC.AI.Abstractions.Security;
-using ISC.AI.Profile.Inspector.Application.Generation;
+using ISC.AI.Profile.Inspector.Application.Features.Generation;
 using NSubstitute;
 using Shouldly;
 

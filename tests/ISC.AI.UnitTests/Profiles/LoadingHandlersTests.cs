@@ -1,6 +1,6 @@
 using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Ingestion;
-using ISC.AI.Profile.Inspector.Application.Loading;
+using ISC.AI.Profile.Inspector.Application.Features.Loading;
 using NSubstitute;
 using Shouldly;
 

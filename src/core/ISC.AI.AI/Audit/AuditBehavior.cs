@@ -27,6 +27,7 @@ namespace ISC.AI.AI.Audit;
 public sealed class AuditBehavior<TMessage, TResponse>(
     IAuditWriter auditWriter,
     IAccessContextProvider accessContextProvider,
+    ISubjectProvider subjectProvider,
     ILogger<AuditBehavior<TMessage, TResponse>> logger)
     : IPipelineBehavior<TMessage, TResponse>
     where TMessage : notnull, IMessage, IAuditableRequest
@@ -83,6 +84,12 @@ public sealed class AuditBehavior<TMessage, TResponse>(
             // Контекст доступа недоступен — фиксируем обращение под МАКСИМАЛЬНЫМ грифом (fail-closed по грифу).
             AuditBehaviorLog.AccessUnavailable(logger, ex, typeof(TMessage).Name);
             subjectCeiling = RestrictedClassificationOnUnknownAccess;
+
+            // «Кто» известен из сессии и БЕЗ допуска. Без этого запасного пути самая чувствительная
+            // операция системы — ПЕРВАЯ выдача допуска на чистом контуре (её совершает субъект, у
+            // которого допуска ещё нет, поэтому GetCurrentAsync выше бросает) — попадала бы в
+            // неизменяемый журнал БЕЗ субъекта, то есть без ответа на вопрос «кто открыл доступ» (ТБ-030).
+            subjectId = await ResolveSubjectWithoutClearanceAsync(cancellationToken);
         }
 
         // Не ниже и допуска субъекта, и объявленного грифа объекта (напр. грифа загружаемого документа).
@@ -92,5 +99,23 @@ public sealed class AuditBehavior<TMessage, TResponse>(
             new AuditEntry(message.AuditAction, classification, SubjectId: subjectId,
                 PayloadSensitive: message.AuditSummary),
             cancellationToken);
+    }
+
+    /// <summary>
+    /// Субъект по аутентифицированной сессии, когда контекст ДОПУСКА недоступен. Собственный
+    /// перехват: запасной путь не имеет права помешать записи журнала — лучше запись без субъекта,
+    /// чем отказ в записи (а при fail-closed — и отказ в самой операции).
+    /// </summary>
+    private async Task<int?> ResolveSubjectWithoutClearanceAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await subjectProvider.GetCurrentUserIdAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            AuditBehaviorLog.SubjectUnavailable(logger, ex, typeof(TMessage).Name);
+            return null;
+        }
     }
 }

@@ -1,0 +1,85 @@
+@namespace ISC.AI.Modules.DocFlow.UI
+@* Переназначение исполнителя (§4.7): срок и статус сохраняются, основание необязательно.
+   Выделен из AssignmentsSection (2026-08-10), конструкция — как у ChangeStatusDialog. *@
+@using ISC.AI.Modules.DocFlow.Application.Features.Assignments
+@using ISC.AI.Modules.DocFlow.Domain.Services
+
+<MudDialog @bind-Visible="_open" Options="AssignmentDialogs.Options">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Переназначить исполнителя</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudSelect T="int?" @bind-Value="_userId" Label="Новый исполнитель *" Variant="Variant.Outlined"
+                   Class="mb-2">
+            @* Текущий исполнитель из списка исключён: переназначение на него самого — не изменение
+               (в СКИД он оставался в списке, и такой выбор порождал ложное уведомление).
+               Кандидаты — по подразделению ЭТОГО назначения: переназначать можно только на того,
+               кто увидит документ. *@
+            @foreach (var user in Candidates(_target?.DivisionId)
+                .Where(u => u.Id != _target?.AssigneeUserId))
+            {
+                <MudSelectItem T="int?" Value="@user.Id">@user.Name</MudSelectItem>
+            }
+        </MudSelect>
+        <MudTextField @bind-Value="_reason" Label="Основание (необязательно)" Variant="Variant.Outlined"
+                      MaxLength="2000" Lines="2" AutoGrow="true" />
+        <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2 d-block">
+            Срок и статус назначения не меняются: новый исполнитель наследует срок прежнего.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _open = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_userId is null)"
+                   OnClick="ConfirmAsync">Переназначить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    /// <summary>Кандидаты-исполнители по подразделению — общий кэш секции (см. AddAssignmentDialog).</summary>
+    [Parameter]
+    public Func<int?, IReadOnlyList<UserItem>> Candidates { get; set; } = _ => [];
+
+    /// <summary>Назначения изменились — владелец перечитывает карточку.</summary>
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    /// <summary>Отказ или сбой — текст показывает владелец.</summary>
+    [Parameter]
+    public EventCallback<string?> OnError { get; set; }
+
+    private bool _open;
+    private AssignmentDetails? _target;
+    private int? _userId;
+    private string? _reason;
+
+    /// <summary>Открывает диалог переназначения конкретного назначения.</summary>
+    public void Open(AssignmentDetails assignment)
+    {
+        _target = assignment;
+        _userId = null;
+        _reason = null;
+        _open = true;
+        StateHasChanged();
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (_target is not { } target || _userId is not { } newAssignee)
+        {
+            return;
+        }
+
+        _open = false;
+
+        // Прежняя ошибка гаснет при новой попытке (аналог _error = null старой секции).
+        await OnError.InvokeAsync(null);
+
+        var response = await Dispatcher.Send(new ReassignAssigneeCommand(target.Id, newAssignee, _reason));
+        if (!response.Status)
+        {
+            await OnError.InvokeAsync(response.StatusMessage);
+        }
+
+        await OnChanged.InvokeAsync();
+    }
+}

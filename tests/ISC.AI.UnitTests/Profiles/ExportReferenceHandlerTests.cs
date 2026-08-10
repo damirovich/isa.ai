@@ -1,6 +1,6 @@
 using ISC.AI.Abstractions.Documents;
 using ISC.AI.Abstractions.Security;
-using ISC.AI.Profile.Inspector.Application.Generation;
+using ISC.AI.Profile.Inspector.Application.Features.Generation;
 using NSubstitute;
 using Shouldly;
 

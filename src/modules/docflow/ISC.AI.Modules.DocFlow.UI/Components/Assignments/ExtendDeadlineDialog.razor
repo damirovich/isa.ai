@@ -1,0 +1,86 @@
+@namespace ISC.AI.Modules.DocFlow.UI
+@* Диалог продления срока назначения (§4.6: основание обязательно, файлы-обоснования опциональны).
+   Выделен из AssignmentsSection (2026-08-10), конструкция — как у ChangeStatusDialog. *@
+@using ISC.AI.Modules.DocFlow.Application.Features.Assignments
+@using ISC.AI.Modules.DocFlow.Domain.Services
+@using Microsoft.AspNetCore.Components.Forms
+
+<MudDialog @bind-Visible="_open" Options="AssignmentDialogs.Options">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Продление срока назначения</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudDatePicker @bind-Date="_date" Label="Новый срок *" Variant="Variant.Outlined" Class="mb-2" />
+        <MudTextField @bind-Value="_reason" Label="Основание продления *" Variant="Variant.Outlined"
+                      MaxLength="2000" Lines="2" AutoGrow="true" Class="mb-2" />
+        <MudFileUpload T="IReadOnlyList<IBrowserFile>" FilesChanged="@(files => _files = files)">
+            <ActivatorContent>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.AttachFile">
+                    Файлы-обоснования (§4.6)@(_files is { Count: > 0 } ef ? $" — {ef.Count}" : "")
+                </MudButton>
+            </ActivatorContent>
+        </MudFileUpload>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _open = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@(_date is null || string.IsNullOrWhiteSpace(_reason))"
+                   OnClick="ConfirmAsync">Продлить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    /// <summary>Назначения изменились — владелец перечитывает карточку.</summary>
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    /// <summary>Отказ или сбой — текст показывает владелец.</summary>
+    [Parameter]
+    public EventCallback<string?> OnError { get; set; }
+
+    private bool _open;
+    private AssignmentDetails? _target;
+    private DateTime? _date;
+    private string? _reason;
+    private IReadOnlyList<IBrowserFile>? _files;
+
+    /// <summary>Открывает диалог продления срока конкретного назначения.</summary>
+    public void Open(AssignmentDetails assignment)
+    {
+        _target = assignment;
+        _date = null;
+        _reason = null;
+        _files = null;
+        _open = true;
+        StateHasChanged();
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (_target is not { } target || _date is not { } date || string.IsNullOrWhiteSpace(_reason))
+        {
+            return;
+        }
+
+        _open = false;
+
+        // Прежняя ошибка гаснет при новой попытке (аналог _error = null старой секции).
+        await OnError.InvokeAsync(null);
+        try
+        {
+            var files = _files is { Count: > 0 } selected ? await BrowserFileReader.ReadAsync(selected) : null;
+            var response = await Dispatcher.Send(new ExtendAssignmentDeadlineCommand(
+                target.Id, DateOnly.FromDateTime(date), _reason, files));
+            if (!response.Status)
+            {
+                await OnError.InvokeAsync(response.StatusMessage);
+            }
+        }
+        catch (Exception ex)
+        {
+            await OnError.InvokeAsync($"Ошибка: {ex.Message}");
+        }
+
+        await OnChanged.InvokeAsync();
+    }
+}

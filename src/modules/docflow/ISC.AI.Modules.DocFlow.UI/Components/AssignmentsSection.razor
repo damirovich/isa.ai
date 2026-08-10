@@ -1,0 +1,126 @@
+@namespace ISC.AI.Modules.DocFlow.UI
+@* Назначения документа (§4.1): таблица, смена статуса по матрице §4.5, продление §4.6,
+   переназначение §4.7, добавление и лента событий §4.8. Секция выделена из DocumentCard при разрезе
+   страницы (2026-08-10); диалоги операций вынесены в Components/Assignments/ — у каждого своя
+   машина состояний, и пять их в одном файле читались хуже, чем таблица с пятью точками вызова.
+   Секции остались таблица, общее место ошибок и кэш кандидатов (им пользуются два диалога). *@
+@using ISC.AI.Modules.DocFlow.Application.Features.Assignments
+@using ISC.AI.Modules.DocFlow.Domain.Enums
+@using ISC.AI.Modules.DocFlow.Domain.Services
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+<div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+    <MudText Typo="Typo.subtitle1">Назначения (§4.1) — каждое исполняется независимо</MudText>
+    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PersonAdd"
+               OnClick="@(() => _addDialog?.Open())">Добавить назначение</MudButton>
+</div>
+<MudTable T="AssignmentDetails" Items="Assignments" Dense="true" Outlined="true" Hover="true">
+    <HeaderContent>
+        <MudTh>Подразделение</MudTh>
+        <MudTh>Исполнитель</MudTh>
+        <MudTh>Срок</MudTh>
+        <MudTh>Статус</MudTh>
+        <MudTh Style="width:1%;"></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Подразделение">@DivisionName(context.DivisionId)</MudTd>
+        <MudTd DataLabel="Исполнитель">@(context.AssigneeUserId is { } assignee ? UserName(assignee) : "—")</MudTd>
+        <MudTd DataLabel="Срок">@(context.Deadline?.ToString("dd.MM.yyyy") ?? "—")</MudTd>
+        <MudTd DataLabel="Статус">
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@context.Status.ChipColor()">
+                @context.Status.Label()
+            </MudChip>
+            @if (context.Status == AssignmentStatus.InControl && context.ControllerUserId is { } controller)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">контролёр: @UserName(controller)</MudText>
+            }
+        </MudTd>
+        <MudTd>
+            <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Dense="true">
+                @foreach (var next in StatusTransitionMatrix.AllowedFrom(context.Status))
+                {
+                    <MudMenuItem OnClick="@(() => _statusDialog?.Open(context, next))">→ @next.Label()</MudMenuItem>
+                }
+                @if (context.Status != AssignmentStatus.Closed && context.Deadline is not null)
+                {
+                    <MudMenuItem OnClick="@(() => _extendDialog?.Open(context))">Продлить срок (§4.6)</MudMenuItem>
+                }
+                @* §4.7: исполненное и снятое переназначать нельзя — кнопку не рисуем, но
+                   решает всё равно сервер (на «кнопку не покажем» не полагаемся). *@
+                @if (context.Status is not (AssignmentStatus.Done or AssignmentStatus.Closed))
+                {
+                    <MudMenuItem OnClick="@(() => _reassignDialog?.Open(context))">
+                        Переназначить исполнителя (§4.7)
+                    </MudMenuItem>
+                }
+                <MudMenuItem OnClick="@(() => OpenTimelineAsync(context))">История назначения (§4.8)</MudMenuItem>
+            </MudMenu>
+        </MudTd>
+    </RowTemplate>
+</MudTable>
+
+<ChangeStatusDialog @ref="_statusDialog" OnChanged="OnChanged" OnError="ShowError" />
+<ExtendDeadlineDialog @ref="_extendDialog" OnChanged="OnChanged" OnError="ShowError" />
+<AddAssignmentDialog @ref="_addDialog" DocumentId="DocumentId" DivisionNames="DivisionNames"
+                     Candidates="Candidates" OnChanged="OnChanged" OnError="ShowError" />
+<ReassignDialog @ref="_reassignDialog" Candidates="Candidates" OnChanged="OnChanged" OnError="ShowError" />
+<AssignmentTimelineDialog @ref="_timelineDialog" UserNames="UserNames" OnPreview="OnPreview"
+                          OnError="ShowError" />
+
+@code {
+    /// <summary>Идентификатор документа-владельца назначений.</summary>
+    [Parameter]
+    public int DocumentId { get; set; }
+
+    /// <summary>Назначения документа — источником остаётся карточка (родитель).</summary>
+    [Parameter]
+    public IReadOnlyList<AssignmentDetails> Assignments { get; set; } = [];
+
+    /// <summary>Названия подразделений (родитель загружает один раз на карточку).</summary>
+    [Parameter]
+    public IReadOnlyDictionary<int, string> DivisionNames { get; set; } = new Dictionary<int, string>();
+
+    /// <summary>Имена пользователей (родитель загружает один раз на карточку).</summary>
+    [Parameter]
+    public IReadOnlyDictionary<int, string> UserNames { get; set; } = new Dictionary<int, string>();
+
+    /// <summary>Назначения изменились — родитель перечитывает карточку.</summary>
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    /// <summary>Запрос предпросмотра файла ленты — диалог держит родитель.</summary>
+    [Parameter]
+    public EventCallback<FilePreviewRequest> OnPreview { get; set; }
+
+    private string? _error;
+
+    private ChangeStatusDialog? _statusDialog;
+    private ExtendDeadlineDialog? _extendDialog;
+    private AddAssignmentDialog? _addDialog;
+    private ReassignDialog? _reassignDialog;
+    private AssignmentTimelineDialog? _timelineDialog;
+
+    /// <summary>Кандидаты в исполнители по подразделению (§4.1) — общий кэш с защитой от повторных запросов.</summary>
+    private AssigneeCandidatesCache? _candidatesCache;
+
+    private string DivisionName(int id) =>
+        DivisionNames.TryGetValue(id, out var name) ? name : $"подразделение №{id}";
+
+    private string UserName(int id) =>
+        UserNames.TryGetValue(id, out var name) ? name : $"пользователь №{id}";
+
+    private IReadOnlyList<UserItem> Candidates(int? divisionId) =>
+        (_candidatesCache ??= new AssigneeCandidatesCache(Dispatcher, StateHasChanged)).Get(divisionId);
+
+    // Ошибки всех диалогов показываются одним местом над таблицей: у каждого диалога свой алерт
+    // означал бы пять копий одной и той же разметки.
+    private void ShowError(string? message) => _error = message;
+
+    private Task OpenTimelineAsync(AssignmentDetails assignment) =>
+        _timelineDialog?.OpenAsync(assignment) ?? Task.CompletedTask;
+}

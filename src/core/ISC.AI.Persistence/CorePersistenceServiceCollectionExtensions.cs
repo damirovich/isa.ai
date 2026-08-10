@@ -43,6 +43,10 @@ public static class CorePersistenceServiceCollectionExtensions
         // Неизменяемый журнал аудита (ТБ-030/031), append-only с хеш-цепочкой.
         services.AddScoped<IAuditWriter, AuditWriter>();
 
+        // Чтение журнала — ОТДЕЛЬНЫМ портом от записи: писать обязаны все сценарии, читать — единицы
+        // (ТБ-032; право просмотра по роли проверяет сценарий профиля).
+        services.AddScoped<IAuditReader, Audit.AuditReader>();
+
         // Материализация флага годности чанков (Э4-02, ADR-0013): профиль ставит видимость по редакциям.
         services.AddScoped<IChunkCurrencyPort, ChunkCurrencyPort>();
 
@@ -54,6 +58,14 @@ public static class CorePersistenceServiceCollectionExtensions
 
         // Per-op чтение допуска (Э3-08, ТБ-012/016): без кэша — отзыв действует немедленно.
         services.AddScoped<ClearanceAccessReader>();
+
+        // Ведение допусков из интерфейса (ТБ-011/030): раньше гриф и подразделения правились только
+        // SQL'ем по живой базе — мимо неизменяемого журнала.
+        services.AddScoped<Abstractions.Security.IClearanceStore, ClearanceStore>();
+
+        // Ведение учётных записей и смена пароля (Э4-35 §6.5): после перехода на локальную
+        // идентичность это единственное место, где заводят и восстанавливают доступ.
+        services.AddScoped<Abstractions.Security.IUserAccountStore, UserAccountStore>();
 
         // Хранилище диалогов чата (сохранение истории общения), разграничение по владельцу-субъекту.
         services.AddScoped<IConversationStore, ConversationStore>();

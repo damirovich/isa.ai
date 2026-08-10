@@ -1,0 +1,369 @@
+@namespace ISC.AI.Modules.DocFlow.UI
+@* Регистрация документа (ТЗ СКИД §3.2): тип определяет группу; для «Исполнения» обязательны приоритет,
+   инспектор и назначения (единый срок §4.1). Гриф и подразделение ОБЯЗАТЕЛЬНЫ (ADR-0017 п.5). *@
+@page "/docflow/documents/new"
+@rendermode InteractiveServer
+@inject NavigationManager Navigation
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Modules.DocFlow.Application.Features.Documents
+@using ISC.AI.Modules.DocFlow.Application.Features.Assignments
+@using ISC.AI.Modules.DocFlow.Application.Features.Comments
+@using ISC.AI.Modules.DocFlow.Application.Features.Directory
+@using ISC.AI.Modules.DocFlow.Application.Features.DocumentTypes
+@using ISC.AI.Modules.DocFlow.Domain.Enums
+@using ISC.AI.Modules.DocFlow.Domain.Services
+
+<MudText Typo="Typo.h5">Регистрация документа</MudText>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-4">
+    Группа типа определяет поведение: «Хранение» — только регистрация; «Исполнение» — назначения по подразделениям
+</MudText>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+<MudPaper Outlined="true" Class="pa-4 mb-4">
+    <MudText Typo="Typo.subtitle1" Class="mb-2">Атрибуты (§3.2)</MudText>
+    <div class="d-flex gap-3 flex-wrap">
+        <MudSelect T="int?" @bind-Value="_typeId" Label="Тип документа *" Variant="Variant.Outlined" Style="width:260px;">
+            @foreach (var type in _types)
+            {
+                <MudSelectItem T="int?" Value="@type.Id">@($"{type.Name} ({type.Group.Label()})")</MudSelectItem>
+            }
+        </MudSelect>
+        <MudTextField @bind-Value="_regNumber" Label="Рег. номер (уникален)" Variant="Variant.Outlined" MaxLength="200"
+                      Style="width:200px;" />
+        <MudDatePicker @bind-Date="_regDate" Label="Дата регистрации *" Variant="Variant.Outlined" Style="width:190px;" />
+        <MudSelect T="DocumentDirection" @bind-Value="_direction" Label="Направленность" Variant="Variant.Outlined"
+                   Style="width:190px;">
+            @foreach (var direction in Enum.GetValues<DocumentDirection>())
+            {
+                <MudSelectItem T="DocumentDirection" Value="@direction">@direction.Label()</MudSelectItem>
+            }
+        </MudSelect>
+        <MudTextField @bind-Value="_source" Label="Источник" Variant="Variant.Outlined" MaxLength="500"
+                      Class="flex-grow-1" Style="min-width:220px;" />
+    </div>
+    <MudTextField @bind-Value="_shortContent" Label="Краткое содержание *" Variant="Variant.Outlined" MaxLength="2000"
+                  Lines="2" AutoGrow="true" Class="mt-3" />
+    <MudTextField @bind-Value="_fullText" Label="Полный текст (для поиска и ИИ-индексации)" Variant="Variant.Outlined"
+                  Lines="4" AutoGrow="true" MaxLines="14" Class="mt-3" />
+    <MudTextField @bind-Value="_notes" Label="Примечания" Variant="Variant.Outlined" MaxLength="2000" Class="mt-3" />
+</MudPaper>
+
+<MudPaper Outlined="true" Class="pa-4 mb-4">
+    <MudText Typo="Typo.subtitle1" Class="mb-2">Режимные метаданные (обязательны — ADR-0017)</MudText>
+    <div class="d-flex gap-3 flex-wrap">
+        @* Без предзаполненного значения — сознательный выбор (2026-08-06, вопрос 2): предзаполненный
+           0 предлагал бы «самый открытый» гриф по умолчанию для ДСП-системы, что противоречит
+           fail-closed; пользователь обязан выбрать явно.
+           Список ограничен СОБСТВЕННЫМ допуском: документ выше своего грифа зарегистрировать нельзя
+           (он сразу пропал бы из виду), и предлагать заведомо отказной вариант незачем. Проверка на
+           сервере при этом остаётся — она ловит запрос в обход формы и отзыв допуска на открытой форме. *@
+        <MudSelect T="short?" @bind-Value="_classification" Label="Гриф *" Variant="Variant.Outlined"
+                   Style="width:220px;" Placeholder="Выберите гриф" Disabled="_maxClassification is null">
+            @for (short level = 0; level <= SelectableClassificationLimit; level++)
+            {
+                var value = level;
+                <MudSelectItem T="short?" Value="@value">@(value == 0 ? "0 — открытый" : value.ToString())</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="int?" @bind-Value="_divisionId" Label="Подразделение-владелец *" Variant="Variant.Outlined"
+                   Style="min-width:280px;" Class="flex-grow-1" Disabled="_ownerDivisions.Count == 0">
+            @foreach (var division in _ownerDivisions)
+            {
+                <MudSelectItem T="int?" Value="@division.Id">@division.Name</MudSelectItem>
+            }
+        </MudSelect>
+    </div>
+
+    @* Подпись показывает ФАКТИЧЕСКИЙ потолок списка, а не «сырой» допуск: при допуске выше шкалы
+       (ошибочная строка в core.clearance) подпись «до 12» противоречила бы списку 0..9. *@
+    @if (SelectableClassificationLimit >= 0)
+    {
+        <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1 d-block">
+            Ваш допуск: гриф до @SelectableClassificationLimit включительно;
+            подразделений-владельцев доступно: @_ownerDivisions.Count.
+        </MudText>
+    }
+
+    @if (_scopeError is not null)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-2">
+            @_scopeError
+        </MudAlert>
+    }
+</MudPaper>
+
+@if (IsExecution)
+{
+    <MudPaper Outlined="true" Class="pa-4 mb-4">
+        <MudText Typo="Typo.subtitle1" Class="mb-2">Исполнение (§3.2, §4.1)</MudText>
+        <div class="d-flex gap-3 flex-wrap mb-3">
+            <MudSelect T="DocumentPriority?" @bind-Value="_priority" Label="Приоритет *" Variant="Variant.Outlined"
+                       Style="width:200px;">
+                @foreach (var priority in Enum.GetValues<DocumentPriority>())
+                {
+                    <MudSelectItem T="DocumentPriority?" Value="@priority">@priority.Label()</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="int?" @bind-Value="_inspectorUserId" Label="Инспектор (контроль исполнения) *"
+                       Variant="Variant.Outlined" Style="min-width:280px;" Class="flex-grow-1">
+                @* Только те, кому инспекторство положено по роли (§3.2). *@
+                @foreach (var user in _inspectors)
+                {
+                    <MudSelectItem T="int?" Value="@user.Id">@user.Name</MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+
+        <MudText Typo="Typo.subtitle2" Class="mb-1">Назначения по подразделениям *</MudText>
+        <MudCheckBox T="bool" @bind-Value="_useCommonDeadline" Label="Единый срок для всех подразделений (§4.1)" />
+        @if (_useCommonDeadline)
+        {
+            <MudDatePicker @bind-Date="_commonDeadline" Label="Единый срок исполнения *" Variant="Variant.Outlined"
+                           Style="width:220px;" Class="mb-2" />
+        }
+
+        @* Здесь список подразделений ПОЛНЫЙ, в отличие от подразделения-владельца. Назначение —
+           это «кому поручено исполнить», а не поле видимости: видимость документа определяет только
+           его подразделение-владелец. Инспекция и должна раздавать поручения В ДРУГИЕ подразделения
+           (§4.1) — сузить этот список значило бы сломать основной сценарий. *@
+        @foreach (var row in _assignments)
+        {
+            <div class="d-flex gap-3 align-center flex-wrap mb-2">
+                <MudSelect T="int?" @bind-Value="row.DivisionId" Label="Подразделение" Variant="Variant.Outlined"
+                           Style="min-width:260px;" Class="flex-grow-1">
+                    @foreach (var division in _divisions)
+                    {
+                        <MudSelectItem T="int?" Value="@division.Id">@division.Name</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudSelect T="int?" @bind-Value="row.AssigneeUserId" Label="Исполнитель (опц.)" Variant="Variant.Outlined"
+                           Clearable="true" Style="min-width:240px;" Disabled="@(row.DivisionId is null)"
+                           HelperText="@(row.DivisionId is null ? "Сначала выберите подразделение" : null)">
+                    @* Только те, кому доступно подразделение назначения: иначе исполнитель не увидит
+                       документ, который ему поручают, и узнает о поручении только от инспектора. *@
+                    @foreach (var user in Candidates(row.DivisionId))
+                    {
+                        <MudSelectItem T="int?" Value="@user.Id">@user.Name</MudSelectItem>
+                    }
+                </MudSelect>
+                @if (!_useCommonDeadline)
+                {
+                    <MudDatePicker @bind-Date="row.Deadline" Label="Срок" Variant="Variant.Outlined" Style="width:180px;" />
+                }
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                               OnClick="@(() => _assignments.Remove(row))" />
+            </div>
+        }
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" Size="Size.Small"
+                   OnClick="@(() => _assignments.Add(new AssignmentRow()))">
+            Добавить подразделение
+        </MudButton>
+    </MudPaper>
+}
+
+<div class="d-flex gap-2">
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+               Disabled="_busy || !CanRegister" OnClick="SubmitAsync">Зарегистрировать</MudButton>
+    <MudButton Variant="Variant.Text" OnClick="@(() => Navigation.NavigateTo("/docflow/documents"))">Отмена</MudButton>
+</div>
+
+@code {
+    private sealed class AssignmentRow
+    {
+        public int? DivisionId { get; set; }
+        public int? AssigneeUserId { get; set; }
+        public DateTime? Deadline { get; set; }
+    }
+
+    private readonly List<DocumentTypeItem> _types = [];
+
+    // ПОЛНЫЙ справочник — для назначений (§4.1: поручение уходит в другое подразделение).
+    private readonly List<DivisionItem> _divisions = [];
+
+    // Только те, где субъект вправе быть ВЛАДЕЛЬЦЕМ документа (пересечение с его допуском).
+    private readonly List<DivisionItem> _ownerDivisions = [];
+
+    private readonly List<UserItem> _users = [];
+    private readonly List<AssignmentRow> _assignments = [new()];
+
+    private int? _typeId;
+    private string? _regNumber;
+    private DateTime? _regDate = DateTime.Today;
+    private DocumentDirection _direction = DocumentDirection.Incoming;
+    private string? _source;
+    private string _shortContent = string.Empty;
+    private string? _fullText;
+    private string? _notes;
+    private short? _classification;
+    private int? _divisionId;
+    private DocumentPriority? _priority;
+    private int? _inspectorUserId;
+    private bool _useCommonDeadline = true;
+    private DateTime? _commonDeadline;
+    private bool _busy;
+    private string? _error;
+
+    // Потолок шкалы в интерфейсе — как было до сужения (0..9). Нужен, чтобы ошибочно выставленный
+    // в БД допуск (скажем, 1000) не превратил выпадающий список в тысячу строк.
+    private const short MaxSelectableClassification = 9;
+
+    // null = пределы допуска не получены; форма в этом состоянии НИЧЕГО не предлагает (fail-closed).
+    private short? _maxClassification;
+    private string? _scopeError;
+
+    // Отличает «справочник действительно пуст» от «запрос справочника не удался»: подсказки разные,
+    // и посылать человека наполнять непустой справочник — худшее, что тут можно сделать.
+    private bool _divisionsLoaded;
+
+    // -1 => цикл не выполнится ни разу: без известного допуска грифов на выбор нет.
+    private int SelectableClassificationLimit =>
+        _maxClassification is { } max ? Math.Min((int)max, MaxSelectableClassification) : -1;
+
+    private bool IsExecution =>
+        _typeId is { } id && _types.FirstOrDefault(t => t.Id == id)?.Group == DocumentGroup.Execution;
+
+    // Регистрировать нечем, если неизвестен допуск либо нет ни одного своего подразделения-владельца:
+    // любой такой документ был бы отвергнут сервером, поэтому кнопка не активна.
+    private bool CanRegister => _maxClassification is not null && _ownerDivisions.Count > 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Только действующие типы (§3.1: неактивный не предлагается при регистрации).
+        var types = await Dispatcher.Send(new ListDocumentTypesQuery(IsActive: true));
+        if (types is { Status: true, Data: { } typeList })
+        {
+            _types.AddRange(typeList);
+        }
+
+        var divisions = await Dispatcher.Send(new ListDivisionsQuery());
+        if (divisions is { Status: true, Data: { } divisionList })
+        {
+            _divisionsLoaded = true;
+            _divisions.AddRange(divisionList);
+        }
+
+        var users = await Dispatcher.Send(new ListUsersQuery());
+        if (users is { Status: true, Data: { } userList })
+        {
+            _users.AddRange(userList);
+        }
+
+        var inspectors = await Dispatcher.Send(new ListInspectorCandidatesQuery());
+        if (inspectors is { Status: true, Data: { } inspectorList })
+        {
+            _inspectors.AddRange(inspectorList);
+        }
+
+        await LoadScopeAsync();
+    }
+
+    /// <summary>Кандидаты в инспекторы: те, кому инспекторство положено по роли (§3.2).</summary>
+    private readonly List<UserItem> _inspectors = [];
+
+    /// <summary>
+    /// Кандидаты в исполнители по подразделению — общий кэш <see cref="AssigneeCandidatesCache"/>
+    /// (тот же, что в карточке): один запрос на подразделение, пусто — пока список в пути.
+    /// </summary>
+    private AssigneeCandidatesCache? _candidatesCache;
+
+    private IReadOnlyList<UserItem> Candidates(int? divisionId) =>
+        (_candidatesCache ??= new AssigneeCandidatesCache(Dispatcher, StateHasChanged)).Get(divisionId);
+
+    /// <summary>Пределы регистрации субъекта: до какого грифа и в каких подразделениях он вправе создать документ.</summary>
+    private async Task LoadScopeAsync()
+    {
+        var scope = await Dispatcher.Send(new GetRegistrationScopeQuery());
+        if (scope is not { Status: true, Data: { } limits })
+        {
+            _scopeError = "Не удалось определить ваш допуск — регистрация недоступна. Обратитесь к администратору.";
+            return;
+        }
+
+        _maxClassification = limits.MaxClassification;
+        _ownerDivisions.AddRange(limits.OwnerDivisions);
+
+        _scopeError = (_ownerDivisions.Count, _divisionsLoaded, _divisions.Count) switch
+        {
+            ( > 0, _, _) => null,
+            (0, false, _) => "Справочник подразделений не загрузился — повторите позже.",
+            (0, true, 0) => "Справочник подразделений пуст — его ведёт профиль (раздел «Подразделения»).",
+            _ => "Вам не разрешено ни одно подразделение-владелец, поэтому регистрировать документы нельзя. "
+                + "Расширение допуска выдаёт администратор.",
+        };
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (_typeId is not { } typeId || _regDate is not { } regDate)
+        {
+            _error = "Выберите тип документа и дату регистрации.";
+            return;
+        }
+
+        if (_divisionId is not { } divisionId)
+        {
+            _error = "Укажите подразделение-владельца (обязательно, ADR-0017).";
+            return;
+        }
+
+        if (_classification is not { } classification)
+        {
+            _error = "Укажите гриф документа (обязательно — вопрос 2 решён 2026-08-06: без умолчания).";
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            var assignments = IsExecution
+                ? _assignments
+                    .Where(r => r.DivisionId is not null)
+                    .Select(r => new AssignmentDraft(
+                        r.DivisionId!.Value,
+                        r.AssigneeUserId,
+                        r.Deadline is { } d ? DateOnly.FromDateTime(d) : null))
+                    .ToList()
+                : [];
+
+            // «Единый срок» имеет смысл только для «Исполнения»: у «Хранения» скрытый чекбокс
+            // не должен требовать срок (найдено живой проверкой формы).
+            var useCommonDeadline = IsExecution && _useCommonDeadline;
+
+            var response = await Dispatcher.Send(new RegisterDocumentCommand(
+                string.IsNullOrWhiteSpace(_regNumber) ? null : _regNumber,
+                DateOnly.FromDateTime(regDate),
+                typeId,
+                _direction,
+                _source,
+                _shortContent,
+                string.IsNullOrWhiteSpace(_fullText) ? null : _fullText,
+                string.IsNullOrWhiteSpace(_notes) ? null : _notes,
+                _priority,
+                _inspectorUserId,
+                classification,
+                divisionId,
+                assignments,
+                useCommonDeadline,
+                useCommonDeadline && _commonDeadline is { } common ? DateOnly.FromDateTime(common) : null));
+
+            if (response is { Status: true })
+            {
+                Navigation.NavigateTo($"/docflow/documents/{response.Data}");
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

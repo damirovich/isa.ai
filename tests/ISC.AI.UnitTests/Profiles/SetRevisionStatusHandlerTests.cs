@@ -1,4 +1,4 @@
-using ISC.AI.Profile.Inspector.Application.Revisions;
+using ISC.AI.Profile.Inspector.Application.Features.Revisions;
 using ISC.AI.Profile.Inspector.Domain.Enums;
 using ISC.AI.Profile.Inspector.Domain.Services;
 using NSubstitute;

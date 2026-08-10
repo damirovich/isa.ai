@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Манифест пакета модулей: собирает Application, Data, UI и отдаёт профилю реестр страниц. -->
+  <ItemGroup>
+    <ProjectReference Include="..\ISC.AI.Modules.DocFlow.Application\ISC.AI.Modules.DocFlow.Application.csproj" />
+    <ProjectReference Include="..\ISC.AI.Modules.DocFlow.Data\ISC.AI.Modules.DocFlow.Data.csproj" />
+    <ProjectReference Include="..\ISC.AI.Modules.DocFlow.UI\ISC.AI.Modules.DocFlow.UI.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
+  </ItemGroup>
+
+  <!-- MapEndpoints делегирует в Data (см. её csproj) — сигнатура несёт IEndpointRouteBuilder. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

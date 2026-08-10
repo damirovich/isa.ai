@@ -78,6 +78,10 @@ namespace ISC.AI.Profile.Inspector.Data.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -219,6 +223,41 @@ namespace ISC.AI.Profile.Inspector.Data.Migrations
                         .HasDatabaseName("ix_norm_revision_norm_id_status");
 
                     b.ToTable("norm_revision", "inspector");
+                });
+
+            modelBuilder.Entity("ISC.AI.Profile.Inspector.Domain.Entities.UserRoleAssignment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("Role")
+                        .HasColumnType("integer")
+                        .HasColumnName("role");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_user_role_assignment");
+
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_user_role_assignment_user_id");
+
+                    b.ToTable("user_role_assignment", "inspector");
                 });
 
             modelBuilder.Entity("ISC.AI.Profile.Inspector.Domain.Entities.Violation", b =>

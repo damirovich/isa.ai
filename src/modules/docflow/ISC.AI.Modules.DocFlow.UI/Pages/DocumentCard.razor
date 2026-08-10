@@ -1,0 +1,204 @@
+@namespace ISC.AI.Modules.DocFlow.UI
+@* Карточка документа (ТЗ СКИД §3.2, §4.1–4.8) — ТОНКИЙ ОРКЕСТРАТОР после разреза страницы на
+   компоненты (2026-08-10; до разреза здесь было ~1500 строк). Сама страница владеет только шапкой,
+   содержанием и загрузкой общих справочников; файлы, назначения и комментарии — самостоятельные
+   секции (Components/), предпросмотр — один диалог на карточку, который секции зовут колбэком. *@
+@page "/docflow/documents/{Id:int}"
+@rendermode InteractiveServer
+@inject NavigationManager Navigation
+@inject ISC.AI.Abstractions.Security.IAccessContextProvider AccessProvider
+@using ISC.AI.Modules.DocFlow.Application.Features.Documents
+@using ISC.AI.Modules.DocFlow.Application.Features.Assignments
+@using ISC.AI.Modules.DocFlow.Application.Features.Comments
+@using ISC.AI.Modules.DocFlow.Application.Features.Directory
+@using ISC.AI.Modules.DocFlow.Domain.Enums
+@using ISC.AI.Modules.DocFlow.Domain.Services
+
+@if (_details is null)
+{
+    <MudText Typo="Typo.h5">Документ</MudText>
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3">@_error</MudAlert>
+    }
+    else
+    {
+        <MudProgressLinear Indeterminate="true" Class="my-4" />
+    }
+}
+else
+{
+    <div class="d-flex align-center justify-space-between flex-wrap gap-2">
+        <div>
+            <MudText Typo="Typo.h5">
+                @(_details.RegNumber is { } number ? $"Документ {number}" : "Документ (без номера)")
+            </MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                @_details.TypeName · @_details.Group.Label() · @_details.Direction.Label() ·
+                зарегистрирован @_details.RegDate.ToString("dd.MM.yyyy")
+            </MudText>
+        </div>
+        <div class="d-flex align-center gap-2">
+            <MudChip T="string" Variant="Variant.Text" Color="@_details.AggregatedStatus.ChipColor()">
+                @_details.AggregatedStatus.Label()
+            </MudChip>
+            @if (_details.Classification > 0)
+            {
+                <MudChip T="string" Color="Color.Warning" Variant="Variant.Text">гриф @_details.Classification</MudChip>
+            }
+            @* Этап 7 Э4-35: документ в корпусе ИИ — чат может отвечать по нему (грунтованный режим). *@
+            @if (_details.IndexedAt is { } indexedAt)
+            {
+                <MudTooltip Text="@($"Проиндексирован {indexedAt.ToLocalTime():dd.MM.yyyy HH:mm} — доступен ИИ-ассистенту")">
+                    <MudChip T="string" Color="Color.Success" Variant="Variant.Text"
+                             Icon="@Icons.Material.Filled.AutoAwesome">в корпусе ИИ</MudChip>
+                </MudTooltip>
+            }
+            else
+            {
+                <MudTooltip Text="Индексация выполняется фоном после регистрации; можно запустить вручную">
+                    <MudChip T="string" Color="Color.Default" Variant="Variant.Text">не в корпусе</MudChip>
+                </MudTooltip>
+            }
+            @* Правка реквизитов — отдельной страницей (§3.2). Проверку «кому можно» делает сценарий:
+               кнопку видно всем, но недоступный документ и сохранить нельзя. *@
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit"
+                       OnClick="@(() => Navigation.NavigateTo($"/docflow/documents/{Id}/edit"))">
+                Изменить
+            </MudButton>
+            <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true">
+                <MudMenuItem OnClick="ReindexAsync">Переиндексировать в корпусе ИИ</MudMenuItem>
+            </MudMenu>
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack"
+                       OnClick="@(() => Navigation.NavigateTo("/docflow/documents"))">К списку</MudButton>
+        </div>
+    </div>
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+    }
+
+    <MudPaper Outlined="true" Class="pa-4 my-4">
+        <MudText Typo="Typo.subtitle1" Class="mb-2">Содержание</MudText>
+        <MudText Typo="Typo.body1" Style="white-space:pre-wrap;">@_details.ShortContent</MudText>
+        @if (!string.IsNullOrWhiteSpace(_details.FullText))
+        {
+            <MudDivider Class="my-3" />
+            <MudText Typo="Typo.body2" Style="white-space:pre-wrap;">@_details.FullText</MudText>
+        }
+        <div class="d-flex gap-4 flex-wrap mt-3">
+            @if (_details.Source is { } source)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Источник: @source</MudText>
+            }
+            @if (_details.Priority is { } priority)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Приоритет: @priority.Label()</MudText>
+            }
+            @if (_details.InspectorUserId is { } inspector)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Инспектор: @UserName(inspector)</MudText>
+            }
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">Подразделение: @DivisionName(_details.DivisionId)</MudText>
+            @if (_details.Notes is { } notes)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Примечания: @notes</MudText>
+            }
+        </div>
+    </MudPaper>
+
+    <DocumentFilesSection DocumentId="Id" Files="_details.Files" Attachments="_details.Attachments"
+                          OnChanged="ReloadAsync" OnPreview="OpenPreview" />
+
+    @if (_details.Group == DocumentGroup.Execution)
+    {
+        <AssignmentsSection DocumentId="Id" Assignments="_details.Assignments"
+                            DivisionNames="_divisionNames" UserNames="_userNames"
+                            OnChanged="ReloadAsync" OnPreview="OpenPreview" />
+    }
+
+    <CommentsSection DocumentId="Id" Users="_users" CurrentUserId="_currentUserId" />
+}
+
+@* Диалог предпросмотра ОДИН на карточку: JS-модуль, blob-URL и поколения живут в нём, а секции
+   передают готовую ссылку. Два независимых диалога делили бы один JS-модуль браузера и отзывали
+   бы blob-URL друг друга при уходе со страницы. *@
+<FilePreviewDialog @ref="_filePreview" />
+
+@code {
+    /// <summary>Идентификатор документа из маршрута.</summary>
+    [Parameter]
+    public int Id { get; set; }
+
+    private DocumentDetails? _details;
+    private readonly Dictionary<int, string> _divisionNames = [];
+    private readonly Dictionary<int, string> _userNames = [];
+    private IReadOnlyList<UserItem> _users = [];
+    private int? _currentUserId;
+    private string? _error;
+    private FilePreviewDialog? _filePreview;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var divisions = await Dispatcher.Send(new ListDivisionsQuery());
+        if (divisions is { Status: true, Data: { } divisionList })
+        {
+            foreach (var division in divisionList)
+            {
+                _divisionNames[division.Id] = division.Name;
+            }
+        }
+
+        var users = await Dispatcher.Send(new ListUsersQuery());
+        if (users is { Status: true, Data: { } userList })
+        {
+            _users = userList;
+            foreach (var user in userList)
+            {
+                _userNames[user.Id] = user.Name;
+            }
+        }
+
+        // Свой идентификатор — секция комментариев показывает «Изменить»/«Удалить» только у своих.
+        // Право на само действие проверяет СЕРВЕР (ICommentStore) — это лишь удобство UI.
+        _currentUserId = (await AccessProvider.GetCurrentAsync()).NumericSubjectId;
+
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        var response = await Dispatcher.Send(new GetDocumentQuery(Id));
+        if (response is { Status: true, Data: { } details })
+        {
+            _details = details;
+        }
+        else
+        {
+            _error = response.StatusMessage;
+        }
+    }
+
+    private void OpenPreview(FilePreviewRequest request) => _filePreview?.Open(request);
+
+    private async Task ReindexAsync()
+    {
+        _error = null;
+        var response = await Dispatcher.Send(new ReindexDocumentCommand(Id));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        // Индексация фоновая — карточка обновит чип при следующем открытии/перезагрузке.
+        await ReloadAsync();
+    }
+
+    private string DivisionName(int id) =>
+        _divisionNames.TryGetValue(id, out var name) ? name : $"подразделение №{id}";
+
+    private string UserName(int id) =>
+        _userNames.TryGetValue(id, out var name) ? name : $"пользователь №{id}";
+}

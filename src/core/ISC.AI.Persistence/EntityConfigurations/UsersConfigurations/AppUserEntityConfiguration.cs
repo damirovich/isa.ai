@@ -13,6 +13,11 @@ public class AppUserEntityConfiguration : IEntityTypeConfiguration<AppUserEntity
         builder.Property(e => e.DisplayName).HasMaxLength(200);
         builder.Property(e => e.ExternalId).HasMaxLength(100);
 
+        // Локальная идентичность (Э4-35 §6.5). PHC-строка Argon2id — ~100 символов, берём с запасом.
+        // Оба поля НЕобязательны: до переноса учёток вход остаётся внешним, локального пароля нет.
+        builder.Property(e => e.PasswordHash).HasMaxLength(255);
+        builder.Property(e => e.SecurityStamp).HasMaxLength(64);
+
         // Частичный индекс: уникальность имени входа — только среди ЖИВЫХ учёток (is_deleted = false).
         // Без фильтра мягко удалённая учётка занимает имя навечно — JIT-создание при переиспользовании
         // логина во внешней системе падает на уникальном индексе вместо единого отказа (ТД-003).

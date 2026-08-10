@@ -1,6 +1,6 @@
 using ISC.AI.Abstractions.Retrieval;
 using ISC.AI.Abstractions.Security;
-using ISC.AI.Profile.Inspector.Application.Search;
+using ISC.AI.Profile.Inspector.Application.Features.Search;
 using NSubstitute;
 using Shouldly;
 

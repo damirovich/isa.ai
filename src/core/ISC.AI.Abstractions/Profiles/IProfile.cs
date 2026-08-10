@@ -39,6 +39,12 @@ public interface IProfile
     IReadOnlyList<IModule> Modules { get; }
 
     /// <summary>
+    /// Виджеты оболочки (например, колокольчик уведомлений): постоянные элементы шапки без
+    /// собственного маршрута. По умолчанию пусто — профилю не обязательно ничего встраивать.
+    /// </summary>
+    IReadOnlyList<IShellWidget> ShellWidgets => [];
+
+    /// <summary>
     /// Поставщики привязок моделей по ролям (keyed): draft / analysis / embeddings (ТО-прог-03).
     /// Применяются хостом на шаге keyed-регистрации.
     /// </summary>

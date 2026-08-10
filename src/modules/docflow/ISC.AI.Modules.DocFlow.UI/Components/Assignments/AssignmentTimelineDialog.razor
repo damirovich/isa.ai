@@ -1,0 +1,156 @@
+@namespace ISC.AI.Modules.DocFlow.UI
+@* История назначения (§4.8): переходы статусов, продления сроков и смены исполнителя ОДНОЙ
+   хронологией. Системные переходы («Просрочено» ставит фоновая проверка) помечаются явно — у них
+   нет пользователя-автора. Самый автономный из диалогов секции: сам грузит ленту и сам строит
+   ссылки на файлы событий. Выделен из AssignmentsSection (2026-08-10). *@
+@inject NavigationManager Navigation
+@using ISC.AI.Modules.DocFlow.Application.Features.Assignments
+@using ISC.AI.Modules.DocFlow.Domain.Enums
+@using ISC.AI.Modules.DocFlow.Domain.Services
+
+<MudDialog @bind-Visible="_open" Options="AssignmentDialogs.Options">
+    <TitleContent>
+        <MudText Typo="Typo.h6">История назначения</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_busy)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (_timeline.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Событий пока нет.</MudText>
+        }
+        else
+        {
+            <MudTimeline TimelinePosition="TimelinePosition.Start">
+                @foreach (var item in _timeline)
+                {
+                    <MudTimelineItem Color="@TimelineColor(item)" Size="Size.Small">
+                        <MudText Typo="Typo.body2"><b>@TimelineTitle(item)</b></MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                            @item.OccurredAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm",
+                                System.Globalization.CultureInfo.InvariantCulture)
+                            ·
+                            @(item.ActorUserId is { } actor ? UserName(actor) : "система")
+                        </MudText>
+                        @if (!string.IsNullOrWhiteSpace(item.Comment))
+                        {
+                            <MudText Typo="Typo.body2" Class="mt-1">@item.Comment</MudText>
+                        }
+                        @foreach (var file in item.Files)
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Text"
+                                       StartIcon="@Icons.Material.Filled.AttachFile" Class="mt-1"
+                                       OnClick="@(() => OpenFileAsync(file))">
+                                @file.FileName
+                            </MudButton>
+                        }
+                    </MudTimelineItem>
+                }
+            </MudTimeline>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _open = false)">Закрыть</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    /// <summary>Имена пользователей (владелец загружает один раз на карточку).</summary>
+    [Parameter]
+    public IReadOnlyDictionary<int, string> UserNames { get; set; } = new Dictionary<int, string>();
+
+    /// <summary>Запрос предпросмотра файла события — диалог предпросмотра держит страница.</summary>
+    [Parameter]
+    public EventCallback<FilePreviewRequest> OnPreview { get; set; }
+
+    /// <summary>Лента не загрузилась — текст показывает владелец.</summary>
+    [Parameter]
+    public EventCallback<string?> OnError { get; set; }
+
+    // Идентификатор нужен и для загрузки, и для ссылок на файлы — у файлов переходов/продлений
+    // родитель в маршруте раздачи именно назначение.
+    private IReadOnlyList<AssignmentTimelineEvent> _timeline = [];
+    private int _assignmentId;
+    private bool _open;
+    private bool _busy;
+
+    private string UserName(int id) =>
+        UserNames.TryGetValue(id, out var name) ? name : $"пользователь №{id}";
+
+    /// <summary>Открывает ленту событий назначения (§4.8) и загружает её.</summary>
+    public async Task OpenAsync(AssignmentDetails assignment)
+    {
+        _assignmentId = assignment.Id;
+        _timeline = [];
+        _open = true;
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            var response = await Dispatcher.Send(new GetAssignmentTimelineQuery(assignment.Id));
+            if (response is { Status: true, Data: { } events })
+            {
+                _timeline = events;
+            }
+            else
+            {
+                _open = false;
+                await OnError.InvokeAsync(response.StatusMessage);
+            }
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>Заголовок события ленты — человеческим языком, а не именем перечисления.</summary>
+    private string TimelineTitle(AssignmentTimelineEvent item) => item.Kind switch
+    {
+        AssignmentEventKind.Created => "Назначение создано",
+        AssignmentEventKind.DeadlineExtended =>
+            $"Срок продлён: {item.OldDeadline:dd.MM.yyyy} → {item.NewDeadline:dd.MM.yyyy}",
+        AssignmentEventKind.Reassigned =>
+            $"Исполнитель: {(item.FromUserId is { } from ? UserName(from) : "не назначен")} → "
+            + $"{(item.ToUserId is { } to ? UserName(to) : "—")}",
+        _ => item.FromStatus is { } from
+            ? $"{from.Label()} → {item.ToStatus?.Label()}"
+            : item.ToStatus?.Label() ?? "Смена статуса",
+    };
+
+    // Просрочка выделяется цветом: это единственное событие, которое ставит система, и именно его
+    // ищут глазами при разборе «почему сорвали срок».
+    private static Color TimelineColor(AssignmentTimelineEvent item) => item switch
+    {
+        { ToStatus: AssignmentStatus.Overdue } => Color.Error,
+        { Kind: AssignmentEventKind.DeadlineExtended } => Color.Warning,
+        { ToStatus: AssignmentStatus.Done or AssignmentStatus.Closed } => Color.Success,
+        _ => Color.Primary,
+    };
+
+    /// <summary>
+    /// Открывает файл события ленты. Лента ЗАКРЫВАЕТСЯ: диалог поверх диалога — источник ровно тех
+    /// гонок рендера, которые уже чинились в предпросмотре (контейнер рисует другой компонент).
+    /// Родитель в ссылке — НАЗНАЧЕНИЕ, а не документ (см. FileDisplay.Url).
+    /// </summary>
+    private async Task OpenFileAsync(AssignmentTimelineFile file)
+    {
+        _open = false;
+
+        if (FilePreviewDialog.SupportsInline(file.FileName))
+        {
+            await OnPreview.InvokeAsync(new FilePreviewRequest(
+                FileDisplay.Url(file.Category, _assignmentId, file.StoredFileName), file.FileName));
+        }
+        else
+        {
+            // Формат без встроенного просмотра — отдаём на скачивание тем же защищённым маршрутом.
+            Navigation.NavigateTo(
+                FileDisplay.Url(file.Category, _assignmentId, file.StoredFileName, download: true),
+                forceLoad: true);
+        }
+    }
+}

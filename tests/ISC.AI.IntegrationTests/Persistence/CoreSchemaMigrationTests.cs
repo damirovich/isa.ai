@@ -16,8 +16,7 @@ namespace ISC.AI.IntegrationTests.Persistence;
 /// <remarks>Требуется запущенный Docker. Образ pgvector/pgvector — готов и под Э3-02 (vector).</remarks>
 public sealed class CoreSchemaMigrationTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16")
-        .Build();
+    private readonly PostgreSqlContainer _postgres = TestPostgres.Create();
 
     public Task InitializeAsync() => _postgres.StartAsync();
 
