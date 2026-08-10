@@ -65,7 +65,8 @@ public sealed class RevisionStatusMaterializerTests : IAsyncLifetime
             await inspector.SaveChangesAsync();
         }
 
-        var materializer = new RevisionStatusMaterializer(inspectorFactory, new ChunkCurrencyPort(coreFactory));
+        var materializer = new RevisionStatusMaterializer(
+            inspectorFactory, coreFactory, new ChunkCurrencyPort(coreFactory));
         var affected = await materializer.SetStatusAsync(revisionId, RevisionStatus.Repealed);
 
         affected.ShouldBe(2);

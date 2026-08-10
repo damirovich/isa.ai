@@ -3,6 +3,7 @@ using System;
 using ISC.AI.Profile.Inspector.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ISC.AI.Profile.Inspector.Data.Migrations
 {
     [DbContext(typeof(InspectorDbContext))]
-    partial class InspectorDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260810121827_NormIdentifierUnique")]
+    partial class NormIdentifierUnique
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -54,9 +57,8 @@ namespace ISC.AI.Profile.Inspector.Data.Migrations
                     b.HasIndex("ChunkId")
                         .HasDatabaseName("ix_chunk_revision_link_chunk_id");
 
-                    b.HasIndex("NormRevisionId", "ChunkId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_chunk_revision_link_norm_revision_id_chunk_id");
+                    b.HasIndex("NormRevisionId")
+                        .HasDatabaseName("ix_chunk_revision_link_norm_revision_id");
 
                     b.ToTable("chunk_revision_link", "inspector");
                 });
@@ -179,9 +181,8 @@ namespace ISC.AI.Profile.Inspector.Data.Migrations
                     b.HasIndex("DocumentId")
                         .HasDatabaseName("ix_norm_document_link_document_id");
 
-                    b.HasIndex("LegalNormId", "DocumentId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_norm_document_link_legal_norm_id_document_id");
+                    b.HasIndex("LegalNormId")
+                        .HasDatabaseName("ix_norm_document_link_legal_norm_id");
 
                     b.ToTable("norm_document_link", "inspector");
                 });

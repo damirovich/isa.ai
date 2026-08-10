@@ -1,0 +1,387 @@
+@namespace ISC.AI.Profile.Inspector.UI
+@* Карточка нормы (ТФ-НПА-02): реквизиты, редакции со статусами, привязанные документы корпуса.
+   Смена статуса редакции зовёт существующую команду материализации (Э4-02): «утратила силу» гасит
+   связанные чанки, и поиск/грунтовка перестают выдавать их как действующие (GATE-3). *@
+@page "/norms/{NormId:int}"
+@rendermode InteractiveServer
+@inject NavigationManager Navigation
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Profile.Inspector.Application.Features.Norms
+@using ISC.AI.Profile.Inspector.Domain.Enums
+@using ISC.AI.Profile.Inspector.Domain.Services
+
+<PageHeader Title="@(_details?.Identifier ?? "Норма")"
+            Subtitle="@(_details?.Title ?? "Карточка нормы")"
+            Icon="@Icons.Material.Filled.Gavel" />
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@if (_notice is not null)
+{
+    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _notice = null)">@_notice</MudAlert>
+}
+
+@if (_busy && _details is null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-2" />
+}
+else if (_details is null)
+{
+    <MudPaper Outlined="true" Class="pa-6">
+        <MudText Typo="Typo.body1">Норма не найдена.</MudText>
+        <MudButton Class="mt-2" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ArrowBack"
+                   OnClick="@(() => Navigation.NavigateTo("/norms"))">К картотеке</MudButton>
+    </MudPaper>
+}
+else
+{
+    <div class="d-flex gap-2 mb-3 flex-wrap">
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.ArrowBack"
+                   OnClick="@(() => Navigation.NavigateTo("/norms"))">К картотеке</MudButton>
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Edit"
+                   OnClick="OpenEdit">Изменить реквизиты</MudButton>
+    </div>
+
+    @* --- Редакции --- *@
+    <MudPaper Outlined="true" Class="pa-3 mb-4">
+        <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+            <MudText Typo="Typo.subtitle1">Редакции — новые первыми</MudText>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="@(() => _addRevisionOpen = true)">Добавить редакцию</MudButton>
+        </div>
+        <MudTable T="NormRevisionItem" Items="_details.Revisions" Dense="true" Hover="true" Outlined="true">
+            <HeaderContent>
+                <MudTh>Вступила в силу</MudTh>
+                <MudTh>Статус</MudTh>
+                <MudTh>Утратила силу</MudTh>
+                <MudTh>Фрагментов корпуса</MudTh>
+                <MudTh Style="width:1%;"></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Вступила в силу">@context.EffectiveDate.ToString("dd.MM.yyyy")</MudTd>
+                <MudTd DataLabel="Статус">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                             Color="@NpaRegistry.StatusColor(context.Status)" Class="ma-0">
+                        @context.Status.Label()
+                    </MudChip>
+                </MudTd>
+                <MudTd DataLabel="Утратила силу">@(context.RepealedDate?.ToString("dd.MM.yyyy") ?? "—")</MudTd>
+                <MudTd DataLabel="Фрагментов корпуса">
+                    @context.ChunkCount
+                    @if (context.ChunkCount == 0)
+                    {
+                        <MudTooltip Text="Без привязанных фрагментов смена статуса не влияет на выдачу — привяжите документ корпуса.">
+                            <MudIcon Icon="@Icons.Material.Filled.Info" Size="Size.Small"
+                                     Class="mud-text-secondary ml-1" Style="vertical-align:middle;" />
+                        </MudTooltip>
+                    }
+                </MudTd>
+                <MudTd>
+                    <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Dense="true">
+                        @if (context.Status != RevisionStatus.Repealed)
+                        {
+                            <MudMenuItem OnClick="@(() => SetStatusAsync(context, RevisionStatus.Repealed))">
+                                Утратила силу — скрыть из выдачи
+                            </MudMenuItem>
+                        }
+                        @if (context.Status != RevisionStatus.Active)
+                        {
+                            <MudMenuItem OnClick="@(() => SetStatusAsync(context, RevisionStatus.Active))">
+                                Действующая — вернуть в выдачу
+                            </MudMenuItem>
+                        }
+                        <MudMenuItem OnClick="@(() => OpenLinkDialog(context))">Привязать документ корпуса…</MudMenuItem>
+                    </MudMenu>
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                    Редакций пока нет — добавьте первую, чтобы привязать к ней документы корпуса.
+                </MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+
+    @* --- Документы корпуса --- *@
+    <MudPaper Outlined="true" Class="pa-3">
+        <MudText Typo="Typo.subtitle1" Class="mb-2">Привязанные документы корпуса</MudText>
+        <MudTable T="LinkedCorpusDocument" Items="_details.Documents" Dense="true" Hover="true" Outlined="true">
+            <HeaderContent>
+                <MudTh>Документ</MudTh>
+                <MudTh>Тип</MudTh>
+                <MudTh>Дата</MudTh>
+                <MudTh>Гриф</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Документ">
+                    @if (context.IsAlive)
+                    {
+                        @(context.Title ?? $"документ №{context.DocumentId}")
+                    }
+                    else
+                    {
+                        @* Слабая ссылка (ТО-инф-06): документ удалён из корпуса гарантированным
+                           удалением — связка осталась, честно показываем. *@
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                            документ №@context.DocumentId — удалён из корпуса
+                        </MudText>
+                    }
+                </MudTd>
+                <MudTd DataLabel="Тип">@(context.DocType ?? "—")</MudTd>
+                <MudTd DataLabel="Дата">@(context.DocDate?.ToString("dd.MM.yyyy") ?? "—")</MudTd>
+                <MudTd DataLabel="Гриф">
+                    @(context.Classification is { } grif ? grif == 0 ? "открыто" : $"ДСП · {grif}" : "—")
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                    Документы не привязаны. Привязка — через меню редакции: фрагменты документа
+                    связываются с конкретной редакцией, и её статус управляет их выдачей.
+                </MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+}
+
+@* --- Диалог правки реквизитов --- *@
+<MudDialog @bind-Visible="_editOpen" Options="DialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Изменить реквизиты нормы</MudText></TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_editIdentifier" Label="Номер НПА *" Variant="Variant.Outlined"
+                      MaxLength="200" Immediate="true" AutoFocus="true" Class="mb-2"
+                      HelperText="На номер ссылается грунтовка — менять осторожно" />
+        <MudTextField @bind-Value="_editTitle" Label="Название *" Variant="Variant.Outlined"
+                      MaxLength="1000" Immediate="true" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _editOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@(string.IsNullOrWhiteSpace(_editIdentifier) || string.IsNullOrWhiteSpace(_editTitle))"
+                   OnClick="ConfirmEditAsync">Сохранить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* --- Диалог новой редакции --- *@
+<MudDialog @bind-Visible="_addRevisionOpen" Options="DialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Добавить редакцию</MudText></TitleContent>
+    <DialogContent>
+        <MudDatePicker @bind-Date="_revisionDate" Label="Дата вступления в силу *" Variant="Variant.Outlined" />
+        <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2 d-block">
+            Новая редакция создаётся «Действующей». Прежняя редакция сама силу НЕ утрачивает —
+            переведите её вручную, когда её текст погашен: это меняет выдачу для всех.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _addRevisionOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_revisionDate is null)"
+                   OnClick="ConfirmAddRevisionAsync">Добавить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* --- Диалог привязки документа корпуса --- *@
+<MudDialog @bind-Visible="_linkOpen" Options="LinkDialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            Привязать документ к редакции от @(_linkRevision?.EffectiveDate.ToString("dd.MM.yyyy"))
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_linkSearchText" Label="Заголовок или тип документа" Variant="Variant.Outlined"
+                      Immediate="true" Class="mb-2"
+                      OnKeyDown="@(async e => { if (e.Key == "Enter") { await SearchCandidatesAsync(); } })" />
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Search"
+                   OnClick="SearchCandidatesAsync" Disabled="_busy" Class="mb-2">Найти в корпусе</MudButton>
+        @if (_candidates.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                Кандидатов нет. Ищутся действующие документы корпуса в пределах вашего допуска,
+                ещё не привязанные к этой норме.
+            </MudText>
+        }
+        else
+        {
+            @* Простые строки-кнопки, НЕ MudList: MudList с OnClick уже ронял circuit в этом
+               проекте (лента уведомлений) и был заменён на обычную разметку — тот же урок здесь. *@
+            @foreach (var candidate in _candidates)
+            {
+                <MudPaper Outlined="true" Class="pa-2 mb-1 cursor-pointer"
+                          @onclick="@(() => ConfirmLinkAsync(candidate))">
+                    <MudText Typo="Typo.body2"><b>@candidate.Title</b></MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        @candidate.DocType
+                        · @(candidate.DocDate?.ToString("dd.MM.yyyy") ?? "без даты")
+                        · @(candidate.Classification == 0 ? "открыто" : $"ДСП · {candidate.Classification}")
+                    </MudText>
+                </MudPaper>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _linkOpen = false)">Закрыть</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    /// <summary>Идентификатор нормы из маршрута.</summary>
+    [Parameter]
+    public int NormId { get; set; }
+
+    private static readonly DialogOptions DialogOptions =
+        new() { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, CloseOnEscapeKey = true };
+
+    private static readonly DialogOptions LinkDialogOptions =
+        new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true };
+
+    private NormDetails? _details;
+    private bool _busy;
+    private string? _error;
+    private string? _notice;
+
+    private bool _editOpen;
+    private string _editIdentifier = string.Empty;
+    private string _editTitle = string.Empty;
+
+    private bool _addRevisionOpen;
+    private DateTime? _revisionDate;
+
+    private bool _linkOpen;
+    private NormRevisionItem? _linkRevision;
+    private string? _linkSearchText;
+    private IReadOnlyList<CorpusDocumentCandidate> _candidates = [];
+
+    protected override Task OnParametersSetAsync() => ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new GetNormQuery(NormId));
+            _details = response is { Status: true, Data: { } details } ? details : null;
+            if (response is { Status: false })
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void OpenEdit()
+    {
+        if (_details is not { } details)
+        {
+            return;
+        }
+
+        _editIdentifier = details.Identifier;
+        _editTitle = details.Title;
+        _editOpen = true;
+    }
+
+    private async Task ConfirmEditAsync()
+    {
+        _editOpen = false;
+        _error = null;
+        var response = await Dispatcher.Send(new UpdateNormCommand(NormId, _editIdentifier, _editTitle));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task ConfirmAddRevisionAsync()
+    {
+        if (_revisionDate is not { } date)
+        {
+            return;
+        }
+
+        _addRevisionOpen = false;
+        _error = null;
+        var response = await Dispatcher.Send(new AddNormRevisionCommand(NormId, DateOnly.FromDateTime(date)));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        _revisionDate = null;
+        await ReloadAsync();
+    }
+
+    private async Task SetStatusAsync(NormRevisionItem revision, RevisionStatus status)
+    {
+        _error = null;
+        _notice = null;
+        var response = await Dispatcher.Send(new SetRevisionStatusCommand(revision.Id, status));
+        if (response.Status)
+        {
+            // Число затронутых чанков — обратная связь оператору: 0 означает, что к редакции
+            // не привязано ни одного фрагмента и статус на выдачу не повлиял.
+            _notice = response.StatusMessage;
+        }
+        else
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task OpenLinkDialog(NormRevisionItem revision)
+    {
+        _linkRevision = revision;
+        _linkSearchText = null;
+        _candidates = [];
+        _linkOpen = true;
+        await SearchCandidatesAsync();
+    }
+
+    private async Task SearchCandidatesAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new SearchCorpusDocumentsQuery(NormId, _linkSearchText));
+            _candidates = response is { Status: true, Data: { } list } ? list : [];
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ConfirmLinkAsync(CorpusDocumentCandidate candidate)
+    {
+        // Защита от двойного клика: вторая привязка и так отскочит от уникального индекса,
+        // но незачем даже отправлять её.
+        if (_linkRevision is not { } revision || _busy)
+        {
+            return;
+        }
+
+        _linkOpen = false;
+        _error = null;
+        _notice = null;
+        var response = await Dispatcher.Send(new LinkNormDocumentCommand(NormId, revision.Id, candidate.DocumentId));
+        if (response.Status)
+        {
+            _notice = response.StatusMessage;
+        }
+        else
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+}

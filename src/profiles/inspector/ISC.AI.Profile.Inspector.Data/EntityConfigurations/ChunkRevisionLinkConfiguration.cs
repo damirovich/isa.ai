@@ -19,5 +19,8 @@ public class ChunkRevisionLinkConfiguration : IEntityTypeConfiguration<ChunkRevi
         // Слабая ссылка на core.chunk.Id (по значению, без FK). Индекс — для материализации is_current и очистки (ТБ-064).
         builder.Property(e => e.ChunkId).IsRequired();
         builder.HasIndex(e => e.ChunkId);
+
+        // УНИКАЛЬНО: чанк у редакции — одна связка (иначе гонка привязки задваивает материализацию).
+        builder.HasIndex(e => new { e.NormRevisionId, e.ChunkId }).IsUnique();
     }
 }

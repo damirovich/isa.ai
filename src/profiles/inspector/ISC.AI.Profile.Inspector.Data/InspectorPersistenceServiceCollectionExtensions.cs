@@ -28,6 +28,10 @@ public static class InspectorPersistenceServiceCollectionExtensions
         // Материализация статуса редакции НПА → флаг годности ядра по связкам (Э4-02, ADR-0013).
         services.AddScoped<IRevisionStatusMaterializer, RevisionStatusMaterializer>();
 
+        // Картотека НПА (ТФ-НПА-02): реестр норм, редакции, привязка документов корпуса — то,
+        // что наполняет связки ChunkRevisionLink и делает материализацию статуса рабочей.
+        services.AddScoped<INormRegistryStore, NormRegistryStore>();
+
         // Профиль отдаёт модулю документооборота свой справочник подразделений (вопрос 3 Э4-35):
         // словарь id един с решёткой доступа, справочник ведёт профиль.
         services.AddScoped<ISC.AI.Modules.DocFlow.Domain.Services.IDivisionDirectory, DocFlowDivisionDirectory>();

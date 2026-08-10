@@ -1,0 +1,201 @@
+@namespace ISC.AI.Profile.Inspector.UI
+@* Картотека НПА (ТФ-НПА-02): реестр норм с редакциями. Именно картотека делает механику
+   актуальности рабочей: без её связок смена статуса редакции гасит 0 чанков (GATE-3).
+   Страница видна всем под inspector.read; кто вправе ВЕСТИ — решают обработчики (NormGuard),
+   как на страницах ролей, допусков и учёток. Образцы: реестр — Documents.razor документооборота,
+   ведение — TerritorialDivisions.razor. *@
+@page "/norms"
+@rendermode InteractiveServer
+@inject NavigationManager Navigation
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Profile.Inspector.Application.Features.Norms
+@using ISC.AI.Profile.Inspector.Domain.Enums
+@using ISC.AI.Profile.Inspector.Domain.Services
+
+<PageHeader Title="Картотека НПА"
+            Subtitle="Нормы, редакции и их действие · ведёт Администратор"
+            Icon="@Icons.Material.Filled.LibraryBooks" />
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@* --- Новая норма --- *@
+<MudPaper Outlined="true" Class="pa-3 mb-4">
+    <MudText Typo="Typo.subtitle2" Class="mb-2">Новая норма</MudText>
+    <div class="d-flex gap-3 align-center flex-wrap">
+        <MudTextField @bind-Value="_newIdentifier" Label="Номер НПА *" Variant="Variant.Outlined"
+                      MaxLength="200" Immediate="true" Style="width:220px;"
+                      HelperText="Уникальный: на него ссылается грунтовка" />
+        <MudTextField @bind-Value="_newTitle" Label="Название *" Variant="Variant.Outlined"
+                      MaxLength="1000" Immediate="true" Style="min-width:280px;" Class="flex-grow-1" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                   Disabled="@(_busy || string.IsNullOrWhiteSpace(_newIdentifier) || string.IsNullOrWhiteSpace(_newTitle))"
+                   OnClick="CreateAsync">Создать</MudButton>
+    </div>
+</MudPaper>
+
+@* --- Отбор --- *@
+<MudPaper Outlined="true" Class="pa-3 mb-4">
+    <div class="d-flex gap-3 align-end flex-wrap">
+        <MudTextField @bind-Value="_filterText" Label="Номер или название" Variant="Variant.Outlined"
+                      Style="min-width:260px;" Class="flex-grow-1" Immediate="true"
+                      OnKeyDown="@(async e => { if (e.Key == "Enter") { await SearchAsync(); } })" />
+        <MudSelect T="RevisionStatus?" @bind-Value="_filterStatus" Label="Действие" Variant="Variant.Outlined"
+                   Clearable="true" Style="width:200px;">
+            <MudSelectItem T="RevisionStatus?" Value="@(RevisionStatus.Active)">Действующие</MudSelectItem>
+            <MudSelectItem T="RevisionStatus?" Value="@(RevisionStatus.Repealed)">Утратившие силу</MudSelectItem>
+        </MudSelect>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Search"
+                   OnClick="SearchAsync" Disabled="_busy">Найти</MudButton>
+    </div>
+</MudPaper>
+
+<MudTable T="NormListItem" Items="_rows" Hover="true" Dense="true" Outlined="true" Loading="_busy"
+          LoadingProgressColor="Color.Primary" OnRowClick="OpenCard" RowClass="cursor-pointer">
+    <HeaderContent>
+        <MudTh>Номер</MudTh>
+        <MudTh>Название</MudTh>
+        <MudTh>Действие</MudTh>
+        <MudTh>Редакций</MudTh>
+        <MudTh>Последняя от</MudTh>
+        <MudTh>Документов корпуса</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Номер">@context.Identifier</MudTd>
+        <MudTd DataLabel="Название" Style="max-width:420px;">
+            <MudText Typo="Typo.body2" Style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                @context.Title
+            </MudText>
+        </MudTd>
+        <MudTd DataLabel="Действие">
+            @if (context.CurrentStatus is { } status)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@StatusColor(status)"
+                         Class="ma-0">@status.Label()</MudChip>
+            }
+            else
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">редакций нет</MudText>
+            }
+        </MudTd>
+        <MudTd DataLabel="Редакций">@context.RevisionCount</MudTd>
+        <MudTd DataLabel="Последняя от">@(context.LatestEffectiveDate?.ToString("dd.MM.yyyy") ?? "—")</MudTd>
+        <MudTd DataLabel="Документов корпуса">@(context.LinkedDocuments > 0 ? context.LinkedDocuments.ToString() : "—")</MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+            По этому отбору норм нет. Картотека наполняется вручную: создайте норму и привяжите
+            к ней документы корпуса — тогда смена статуса редакции начнёт управлять выдачей.
+        </MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@if (_total > 0)
+{
+    <div class="d-flex align-center justify-space-between mt-3 flex-wrap gap-2">
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+            Норм: @_total · страница @_page из @PageCount
+        </MudText>
+        <MudPagination Count="@PageCount" Selected="_page" SelectedChanged="GoToPageAsync"
+                       Color="Color.Primary" Size="Size.Small" />
+    </div>
+}
+
+@code {
+    private const int PageSize = 25;
+
+    private IReadOnlyList<NormListItem> _rows = [];
+    private int _total;
+    private int _page = 1;
+
+    private string? _filterText;
+    private RevisionStatus? _filterStatus;
+
+    private string _newIdentifier = string.Empty;
+    private string _newTitle = string.Empty;
+
+    private bool _busy;
+    private string? _error;
+
+    private int PageCount => Math.Max(1, (int)Math.Ceiling(_total / (double)PageSize));
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    internal static Color StatusColor(RevisionStatus status) => status switch
+    {
+        RevisionStatus.Active => Color.Success,
+        RevisionStatus.Repealed => Color.Error,
+        _ => Color.Default,
+    };
+
+    private Task SearchAsync()
+    {
+        // Новый отбор — всегда с первой страницы, иначе после сужения фильтра пользователь
+        // остаётся на несуществующей странице.
+        _page = 1;
+        return LoadAsync();
+    }
+
+    private Task GoToPageAsync(int page)
+    {
+        _page = page;
+        return LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ListNormsQuery(_filterText, _filterStatus, _page, PageSize));
+            if (response is { Status: true, Data: { } data })
+            {
+                _rows = data.Rows;
+                _total = data.TotalCount;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new CreateNormCommand(_newIdentifier, _newTitle));
+            if (response is { Status: true, Data: var normId })
+            {
+                // Сразу в карточку: следующий шаг оператора — редакция и привязка документов.
+                Navigation.NavigateTo($"/norms/{normId}");
+                return;
+            }
+
+            _error = response.StatusMessage;
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await LoadAsync();
+    }
+
+    private void OpenCard(TableRowClickEventArgs<NormListItem> args)
+    {
+        if (args.Item is { } item)
+        {
+            Navigation.NavigateTo($"/norms/{item.Id}");
+        }
+    }
+}
