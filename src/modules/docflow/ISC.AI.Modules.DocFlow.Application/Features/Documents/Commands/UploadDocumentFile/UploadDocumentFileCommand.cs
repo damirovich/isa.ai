@@ -1,10 +1,12 @@
 using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Audit;
+using ISC.AI.Abstractions.BackgroundTasks;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.DocFlow.Application.Features.Notifications;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 using ISC.AI.Modules.DocFlow.Domain.Services;
 using Mediator;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ISC.AI.Modules.DocFlow.Application.Features.Documents;
 
@@ -20,7 +22,8 @@ public sealed record UploadDocumentFileCommand(
     public string? AuditSummary => $"docflow:document:{DocumentId}:file:{FileName}";
 
     /// <inheritdoc cref="UploadDocumentFileCommand" />
-    public sealed class Handler(IDocumentStore store, IAccessContextProvider accessProvider)
+    public sealed class Handler(
+        IDocumentStore store, IAccessContextProvider accessProvider, IBackgroundTaskQueue taskQueue)
         : IRequestHandler<UploadDocumentFileCommand, ResponseDto<bool>>
     {
         /// <inheritdoc />
@@ -33,9 +36,21 @@ public sealed record UploadDocumentFileCommand(
                 command.DocumentId,
                 new UploadedFile(command.FileName, command.ContentType, command.Content),
                 command.Language, access, cancellationToken);
-            return result == DocumentWriteStatus.Ok
-                ? ResponseDto<bool>.Ok(true)
-                : ResponseDto<bool>.NotFound("Документ не найден.");
+            if (result != DocumentWriteStatus.Ok)
+            {
+                return ResponseDto<bool>.NotFound("Документ не найден.");
+            }
+
+            // Новая версия файла — это новый ТЕКСТ документа в корпусе: содержимое актуальных файлов
+            // индексируется вместе с карточкой (этап 7 Э4-35). Фоном, как при регистрации и правке —
+            // загрузка не ждёт извлечение текста и эмбеддинги; прежняя корпусная версия гасится supersede.
+            var documentId = command.DocumentId;
+            await taskQueue.EnqueueAsync(
+                "Индексация документа в корпус ИИ",
+                async (sp, ct) => await sp.GetRequiredService<IDocumentIndexer>().IndexAsync(documentId, ct),
+                cancellationToken);
+
+            return ResponseDto<bool>.Ok(true);
         }
     }
 }

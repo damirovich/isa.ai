@@ -1,6 +1,8 @@
+using System.Text;
 using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.AI.Security;
+using ISC.AI.Documents.Extraction;
 using ISC.AI.Ingestion;
 using ISC.AI.Modules.DocFlow.Data;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
@@ -8,8 +10,8 @@ using ISC.AI.Modules.DocFlow.Domain.Services;
 using ISC.AI.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
-using Pgvector.EntityFrameworkCore;
 using Shouldly;
 using Testcontainers.PostgreSql;
 
@@ -52,7 +54,9 @@ public sealed class DocFlowIndexerTests : IAsyncLifetime
             docFlowFactory, Substitute.For<IDocFlowFileStorage>(), new AllowAllAccessPolicy(), TestUserDirectory.AllowAll);
         var port = new IngestionPort(coreFactory, new FixedEmbeddingGenerator(768), new SimpleTextChunker());
         var indexer = new DocFlowDocumentIndexer(
-            docFlowFactory, coreFactory, port, Substitute.For<IAuditWriter>());
+            docFlowFactory, coreFactory, port, Substitute.For<IAuditWriter>(),
+            new CompositeTextExtractor([new PlainTextExtractor()]), Substitute.For<IDocFlowFileStorage>(),
+            NullLogger<DocFlowDocumentIndexer>.Instance);
 
         var typeId = await typeStore.CreateAsync("Поручение", DocumentGroup.Execution, isActive: true);
         var created = await documentStore.CreateAsync(
@@ -114,6 +118,80 @@ public sealed class DocFlowIndexerTests : IAsyncLifetime
         {
             var link = await db.DocumentIndexLinks.SingleAsync(l => l.DocumentId == created.DocumentId);
             link.CoreDocumentId.ShouldBe(newCoreId);
+        }
+    }
+
+    [Fact(DisplayName = "Индексация файлов: текст актуальной версии попадает в чанки, замена файла переиндексирует без прежнего текста")]
+    public async Task Latest_file_content_is_indexed_and_replacement_reindexes()
+    {
+        var connectionString = _postgres.GetConnectionString();
+        var docFlowFactory = new DocFlowContextFactory(connectionString);
+        var coreFactory = new CoreContextFactory(connectionString);
+        await using (var db = docFlowFactory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+        }
+
+        await using (var db = coreFactory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+        }
+
+        // Настоящее файловое хранилище: индексатор читает содержимое тем же путём, что и раздача.
+        var storage = new TempFileStorage();
+        var typeStore = new DocumentTypeStore(docFlowFactory);
+        var documentStore = new DocumentStore(
+            docFlowFactory, storage, new AllowAllAccessPolicy(), TestUserDirectory.AllowAll);
+        var port = new IngestionPort(coreFactory, new FixedEmbeddingGenerator(768), new SimpleTextChunker());
+        var indexer = new DocFlowDocumentIndexer(
+            docFlowFactory, coreFactory, port, Substitute.For<IAuditWriter>(),
+            new CompositeTextExtractor([new PlainTextExtractor()]), storage,
+            NullLogger<DocFlowDocumentIndexer>.Instance);
+
+        var typeId = await typeStore.CreateAsync("Приказ", DocumentGroup.Execution, isActive: true);
+        var created = await documentStore.CreateAsync(
+            new DocumentDraft("П-9", new DateOnly(2026, 8, 5), typeId!.Value, DocumentDirection.Incoming,
+                null, "Приказ о проверке", null, null, DocumentPriority.High, 77, 2, 10, 42),
+            [new AssignmentDraft(10, null, new DateOnly(2026, 9, 1))],
+            useCommonDeadline: true, commonDeadline: new DateOnly(2026, 9, 1), FullAccess);
+        created.Status.ShouldBe(DocumentWriteStatus.Ok);
+
+        // 1) Версия 1: текст файла доезжает до чанков корпуса (в карточке этого текста НЕТ).
+        (await documentStore.AddDocumentFileAsync(
+            created.DocumentId,
+            new UploadedFile("приказ.txt", "text/plain",
+                Encoding.UTF8.GetBytes("Провести инвентаризацию склада горючего до конца месяца.")),
+            DocumentLanguage.Russian, FullAccess)).ShouldBe(DocumentWriteStatus.Ok);
+
+        var first = await indexer.IndexAsync(created.DocumentId);
+        first.Status.ShouldBe(DocumentIndexStatus.Indexed);
+        var firstCoreId = first.CoreDocumentId!.Value;
+        await using (var core = coreFactory.CreateDbContext())
+        {
+            (await core.Chunks.Where(c => c.DocumentId == firstCoreId)
+                .AnyAsync(c => c.Text.Contains("инвентаризацию склада горючего"))).ShouldBeTrue();
+        }
+
+        // 2) Версия 2 того же языка: прежняя теряет IsLatest — в корпусе остаётся ТОЛЬКО новый текст,
+        //    прежний корпусный документ погашен (supersede).
+        (await documentStore.AddDocumentFileAsync(
+            created.DocumentId,
+            new UploadedFile("приказ-v2.txt", "text/plain",
+                Encoding.UTF8.GetBytes("Сроки инвентаризации продлены до октября.")),
+            DocumentLanguage.Russian, FullAccess)).ShouldBe(DocumentWriteStatus.Ok);
+
+        var second = await indexer.IndexAsync(created.DocumentId);
+        second.Status.ShouldBe(DocumentIndexStatus.Indexed);
+        var secondCoreId = second.CoreDocumentId!.Value;
+        secondCoreId.ShouldNotBe(firstCoreId);
+        await using (var core = coreFactory.CreateDbContext())
+        {
+            var currentTexts = await core.Chunks.Where(c => c.DocumentId == secondCoreId)
+                .Select(c => c.Text).ToListAsync();
+            currentTexts.ShouldContain(t => t.Contains("продлены до октября"));
+            currentTexts.ShouldNotContain(t => t.Contains("инвентаризацию склада горючего"));
+            (await core.Documents.SingleAsync(d => d.Id == firstCoreId))
+                .SupersededByDocumentId.ShouldBe(secondCoreId);
         }
     }
 }

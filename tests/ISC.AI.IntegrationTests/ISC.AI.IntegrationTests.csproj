@@ -16,6 +16,7 @@
     <!-- Пакет модулей документооборота (Э4-35): хранилище справочника + DocFlowDbContext. -->
     <ProjectReference Include="..\..\src\modules\docflow\ISC.AI.Modules.DocFlow.Data\ISC.AI.Modules.DocFlow.Data.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.AI\ISC.AI.AI.csproj" />
+    <ProjectReference Include="..\..\src\core\ISC.AI.Documents\ISC.AI.Documents.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.Ingestion\ISC.AI.Ingestion.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.Web\ISC.AI.Web.csproj" />
   </ItemGroup>

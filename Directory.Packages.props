@@ -35,6 +35,11 @@
     <PackageVersion Include="Scriban" Version="7.2.4" />
     <PackageVersion Include="DocumentFormat.OpenXml" Version="3.5.1" />
     <PackageVersion Include="Tesseract" Version="5.2.0" />
+    <!-- Извлечение текста из PDF с текстовым слоем (индексация файлов в корпус). Apache-2.0 (ТСТ-001).
+         PDFsharp для ЧТЕНИЯ текста не годится: у него нет обработки ToUnicode CMap, и кириллица из
+         CID-шрифтов (обычный экспорт из Word) вернулась бы мусором. Сканы без текстового слоя этот
+         извлекатель не читает — их путь OCR (Tesseract). -->
+    <PackageVersion Include="PdfPig" Version="0.1.15" />
     <!-- Отчёты документооборота (разд. 6 ТЗ СКИД, этап 5 Э4-35). Обе — MIT (ТСТ-001).
          PDFsharp — ЗАМЕНА QuestPDF (двойная лицензия, у нас запрещена): в СКИД он уже использовался
          для штампа печати, PDF-ветка отчётов переписывается на него (см. реестр лицензионных замен).
