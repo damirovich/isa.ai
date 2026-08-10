@@ -83,17 +83,4 @@ public sealed class ClearanceStoreTests : IAsyncLifetime
         (await store.SetAsync(disabledId, 5, [5])).ShouldBeFalse();
         (await reader.ReadAsync(disabledId)).ShouldBeNull();
     }
-
-    private sealed class CoreContextFactory(string connectionString) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<CoreDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                {
-                    npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                    npg.UseVector();
-                })
-                .UseSnakeCaseNamingConvention()
-                .Options);
-    }
 }

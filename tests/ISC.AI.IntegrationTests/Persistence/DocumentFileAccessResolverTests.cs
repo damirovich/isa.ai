@@ -28,7 +28,7 @@ public sealed class DocumentFileAccessResolverTests : IAsyncLifetime
     [Fact(DisplayName = "Резолвер: 4 категории отдают гриф/подразделение документа; подмена parentId — null")]
     public async Task Resolve_returns_owning_document_access_and_rejects_wrong_parent()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new DocFlowContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
@@ -98,49 +98,5 @@ public sealed class DocumentFileAccessResolverTests : IAsyncLifetime
         // Неизвестная категория / несуществующее имя — тоже null, не исключение.
         (await resolver.ResolveAsync("unknown", doc.DocumentId, documentFileName)).ShouldBeNull();
         (await resolver.ResolveAsync(FileCategories.Documents, doc.DocumentId, "нет-такого.docx")).ShouldBeNull();
-    }
-
-    private sealed class TempFileStorage : IDocFlowFileStorage
-    {
-        private readonly string _root = Path.Combine(
-            Path.GetTempPath(), "iscai-docflow-tests", Guid.NewGuid().ToString("N"));
-
-        public async Task<string> SaveAsync(
-            Stream content, string extension, string category, string subPath,
-            CancellationToken cancellationToken = default)
-        {
-            var storedFileName = Guid.NewGuid().ToString("N") + extension;
-            var directory = Path.Combine(_root, category, subPath);
-            Directory.CreateDirectory(directory);
-            await using var fileStream = File.Create(Path.Combine(directory, storedFileName));
-            await content.CopyToAsync(fileStream, cancellationToken);
-            return storedFileName;
-        }
-
-        public Task<Stream> OpenReadAsync(
-            string storedFileName, string category, string subPath, CancellationToken cancellationToken = default) =>
-            Task.FromResult<Stream>(File.OpenRead(Path.Combine(_root, category, subPath, storedFileName)));
-
-        public Task DeleteAsync(
-            string storedFileName, string category, string subPath, CancellationToken cancellationToken = default)
-        {
-            var path = Path.Combine(_root, category, subPath, storedFileName);
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-
-            return Task.CompletedTask;
-        }
-    }
-
-    private sealed class TestContextFactory(string connectionString) : IDbContextFactory<DocFlowDbContext>
-    {
-        public DocFlowDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<DocFlowDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                    npg.MigrationsHistoryTable("__ef_migrations_history", DocFlowDbContext.Schema))
-                .UseSnakeCaseNamingConvention()
-                .Options);
     }
 }

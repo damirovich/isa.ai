@@ -77,26 +77,4 @@ public sealed class RevisionStatusMaterializerTests : IAsyncLifetime
         await using var inspectorVerify = inspectorFactory.CreateDbContext();
         (await inspectorVerify.NormRevisions.FirstAsync(r => r.Id == revisionId)).Status.ShouldBe(RevisionStatus.Repealed);
     }
-
-    private sealed class CoreContextFactory(string connectionString) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<CoreDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                {
-                    npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                    npg.UseVector();
-                })
-                .UseSnakeCaseNamingConvention()
-                .Options);
-    }
-
-    private sealed class InspectorContextFactory(string connectionString) : IDbContextFactory<InspectorDbContext>
-    {
-        public InspectorDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<InspectorDbContext>()
-                .UseNpgsql(connectionString, npg => npg.MigrationsHistoryTable("__ef_migrations_history", InspectorDbContext.Schema))
-                .UseSnakeCaseNamingConvention()
-                .Options);
-    }
 }

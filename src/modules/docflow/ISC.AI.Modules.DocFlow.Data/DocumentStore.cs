@@ -27,19 +27,13 @@ public sealed partial class DocumentStore(
     public const int MaxPageSize = 200;
 
     /// <summary>
-    /// Виден ли документ субъекту — ЕДИНСТВЕННОЕ место, где записан предикат доступа (решётка
-    /// ТБ-020/021 + сужающая политика профиля ADR-0014). И чтение (<c>ListAsync</c>/<c>GetAsync</c>),
-    /// и все проверки записи (<see cref="WriteAccessRule"/>) идут через него, чтобы правила не
-    /// разъехались: раньше они и разъехались — чтение сузили, запись забыли (6.4.2).
+    /// Виден ли документ субъекту. Сам предикат — в <see cref="AccessFilterExtensions.VisibleTo"/>
+    /// (единственное место, общее с отчётами, дашбордом и уведомлениями); и чтение
+    /// (<c>ListAsync</c>/<c>GetAsync</c>), и все проверки записи идут через него, чтобы правила не
+    /// разъехались: однажды они и разъехались — чтение сузили, запись забыли (6.4.2).
     /// </summary>
-    private IQueryable<Document> VisibleDocuments(DocFlowDbContext db, AccessContext access)
-    {
-        var allowedDivisions = access.AllowedDivisions;
-        return db.Documents
-            .Where(d => d.Classification <= access.MaxClassification
-                && allowedDivisions.Contains(d.DivisionId))
-            .Where(accessPolicy.BuildFilter<Document>(access));
-    }
+    private IQueryable<Document> VisibleDocuments(DocFlowDbContext db, AccessContext access) =>
+        db.Documents.VisibleTo(access, accessPolicy);
 
     /// <summary>Виден ли субъекту документ-владелец: недоступный неотличим от несуществующего.</summary>
     private Task<bool> IsDocumentVisibleAsync(

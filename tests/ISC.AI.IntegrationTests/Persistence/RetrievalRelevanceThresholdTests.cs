@@ -35,7 +35,7 @@ public sealed class RetrievalRelevanceThresholdTests : IAsyncLifetime
     [Fact(DisplayName = "ТО-мат-04: MaxDistance отсекает дальний фрагмент; без порога отдаются оба")]
     public async Task MaxDistance_excludes_far_fragment_only_when_configured()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
@@ -62,7 +62,7 @@ public sealed class RetrievalRelevanceThresholdTests : IAsyncLifetime
     [Fact(DisplayName = "ТО-мат-04: метрика ранжирования из конфигурации применяется (Euclidean ≠ Cosine на тех же данных)")]
     public async Task Configured_metric_is_applied_to_ranking()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
@@ -142,45 +142,5 @@ public sealed class RetrievalRelevanceThresholdTests : IAsyncLifetime
             IsCurrent = true,
         });
         await db.SaveChangesAsync();
-    }
-
-    // Контекст с теми же опциями, что в проде (snake_case + pgvector).
-    private sealed class TestContextFactory(string connectionString) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<CoreDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                {
-                    npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                    npg.UseVector();
-                })
-                .UseSnakeCaseNamingConvention()
-                .Options);
-    }
-
-    // Фейковый эмбеддер запроса: всегда вектор values[0]=1 — совпадает с «релевантным» фрагментом.
-    private sealed class FixedEmbeddingGenerator(int dimensions) : IEmbeddingGenerator<string, Embedding<float>>
-    {
-        private readonly ReadOnlyMemory<float> _vector = BuildVector(dimensions);
-
-        private static float[] BuildVector(int dimensions)
-        {
-            var values = new float[dimensions];
-            values[0] = 1f;
-            return values;
-        }
-
-        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
-            IEnumerable<string> values,
-            EmbeddingGenerationOptions? options = null,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult(new GeneratedEmbeddings<Embedding<float>>(
-                values.Select(_ => new Embedding<float>(_vector)).ToList()));
-
-        public object? GetService(Type serviceType, object? serviceKey = null) => null;
-
-        public void Dispose()
-        {
-        }
     }
 }

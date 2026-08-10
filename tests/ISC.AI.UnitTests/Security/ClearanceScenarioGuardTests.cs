@@ -1,5 +1,5 @@
 using ISC.AI.Abstractions.Security;
-using ISC.AI.Profile.Inspector.Application.Clearances;
+using ISC.AI.Profile.Inspector.Application.Features.Clearances;
 using ISC.AI.Profile.Inspector.Domain.Enums;
 using ISC.AI.Profile.Inspector.Domain.Services;
 using NSubstitute;

@@ -118,8 +118,8 @@ public sealed class AssignmentCandidateTests : IAsyncLifetime
     private async Task<(AssignmentCandidateDirectory Candidates, IUserRoleStore Roles,
         IDbContextFactory<CoreDbContext> Factory)> BuildAsync()
     {
-        var core = new CoreFactory(_postgres.GetConnectionString());
-        var inspector = new InspectorFactory(_postgres.GetConnectionString());
+        var core = new CoreContextFactory(_postgres.GetConnectionString());
+        var inspector = new InspectorContextFactory(_postgres.GetConnectionString());
 
         await using (var db = core.CreateDbContext())
         {
@@ -133,28 +133,5 @@ public sealed class AssignmentCandidateTests : IAsyncLifetime
 
         var roles = new UserRoleStore(core, inspector);
         return (new AssignmentCandidateDirectory(core, roles), roles, core);
-    }
-
-    private sealed class InspectorFactory(string connectionString) : IDbContextFactory<InspectorDbContext>
-    {
-        public InspectorDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<InspectorDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                    npg.MigrationsHistoryTable("__ef_migrations_history", InspectorDbContext.Schema))
-                .UseSnakeCaseNamingConvention()
-                .Options);
-    }
-
-    private sealed class CoreFactory(string connectionString) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<CoreDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                {
-                    npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                    npg.UseVector();
-                })
-                .UseSnakeCaseNamingConvention()
-                .Options);
     }
 }

@@ -154,17 +154,4 @@ public sealed class LocalIdentityProviderTests : IAsyncLifetime
 
         PasswordHashing.NewSecurityStamp().ShouldNotBe(PasswordHashing.NewSecurityStamp());
     }
-
-    private sealed class CoreContextFactory(string connectionString) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<CoreDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                {
-                    npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                    npg.UseVector();
-                })
-                .UseSnakeCaseNamingConvention()
-                .Options);
-    }
 }

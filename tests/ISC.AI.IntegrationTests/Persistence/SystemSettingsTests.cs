@@ -116,14 +116,4 @@ public sealed class SystemSettingsTests : IAsyncLifetime
         await db.Database.MigrateAsync();
         return factory;
     }
-
-    private sealed class DocFlowContextFactory(string connectionString) : IDbContextFactory<DocFlowDbContext>
-    {
-        public DocFlowDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<DocFlowDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                    npg.MigrationsHistoryTable("__ef_migrations_history", DocFlowDbContext.Schema))
-                .UseSnakeCaseNamingConvention()
-                .Options);
-    }
 }

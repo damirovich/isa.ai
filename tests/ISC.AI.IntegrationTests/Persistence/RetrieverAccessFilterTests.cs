@@ -33,7 +33,7 @@ public sealed class RetrieverAccessFilterTests : IAsyncLifetime
     [Fact(DisplayName = "GATE-1: выше допуска / чужое подразделение / устаревшее не выдаётся; нет доступа = пусто")]
     public async Task Retriever_enforces_access_filter_on_db_side()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
@@ -64,7 +64,7 @@ public sealed class RetrieverAccessFilterTests : IAsyncLifetime
     [Fact(DisplayName = "Retriever: метаданные документа доезжают до RetrievedChunk.Metadata (этап 7.2 Э4-35 — ссылки-источники в чате)")]
     public async Task Retriever_projects_document_metadata_onto_chunk()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         DocumentEntity doc;
         await using (var db = factory.CreateDbContext())
         {
@@ -132,45 +132,5 @@ public sealed class RetrieverAccessFilterTests : IAsyncLifetime
             IsCurrent = isCurrent,
         });
         await db.SaveChangesAsync();
-    }
-
-    // Контекст с теми же опциями, что в проде (snake_case + pgvector).
-    private sealed class TestContextFactory(string connectionString) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<CoreDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                {
-                    npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                    npg.UseVector();
-                })
-                .UseSnakeCaseNamingConvention()
-                .Options);
-    }
-
-    // Фейковый эмбеддер: всегда один и тот же вектор (тест проверяет фильтрацию, не качество поиска).
-    private sealed class FixedEmbeddingGenerator(int dimensions) : IEmbeddingGenerator<string, Embedding<float>>
-    {
-        private readonly ReadOnlyMemory<float> _vector = BuildVector(dimensions);
-
-        private static float[] BuildVector(int dimensions)
-        {
-            var values = new float[dimensions];
-            values[0] = 1f;
-            return values;
-        }
-
-        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
-            IEnumerable<string> values,
-            EmbeddingGenerationOptions? options = null,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult(new GeneratedEmbeddings<Embedding<float>>(
-                values.Select(_ => new Embedding<float>(_vector)).ToList()));
-
-        public object? GetService(Type serviceType, object? serviceKey = null) => null;
-
-        public void Dispose()
-        {
-        }
     }
 }

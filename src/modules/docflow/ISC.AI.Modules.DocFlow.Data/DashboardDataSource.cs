@@ -37,15 +37,9 @@ public sealed class DashboardDataSource(
 
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
 
-        var allowedDivisions = access.AllowedDivisions;
-
-        // ТОТ ЖЕ предикат, что у DocumentStore.VisibleDocuments и ReportDataSource. Дублируется
-        // выражением, а не вызовом (у каждого свой контекст); от расхождения страхует тест
+        // Решётка — общим предикатом AccessFilterExtensions.VisibleTo; от регресса страхует тест
         // «дашборд не считает того, чего не показывает список документов».
-        var visibleDocuments = db.Documents
-            .Where(d => d.Classification <= access.MaxClassification
-                && allowedDivisions.Contains(d.DivisionId))
-            .Where(accessPolicy.BuildFilter<Document>(access));
+        var visibleDocuments = db.Documents.VisibleTo(access, accessPolicy);
 
         // Доступные назначения отбираются ПОДЗАПРОСОМ по идентификаторам, а не соединением таблиц.
         // Причина техническая и обязательная: EF не переводит GroupBy с агрегатами поверх результата

@@ -17,12 +17,7 @@ public sealed class NotificationStore(
     /// </summary>
     private IQueryable<Notification> VisibleUnread(DocFlowDbContext db, AccessContext access, int recipientUserId)
     {
-        var allowedDivisions = access.AllowedDivisions;
-        var visibleDocuments = db.Documents
-            .Where(d => d.Classification <= access.MaxClassification
-                && allowedDivisions.Contains(d.DivisionId))
-            .Where(accessPolicy.BuildFilter<Document>(access))
-            .Select(d => d.Id);
+        var visibleDocuments = db.Documents.VisibleTo(access, accessPolicy).Select(d => d.Id);
 
         return db.Notifications
             .Where(n => n.RecipientUserId == recipientUserId && !n.IsRead)

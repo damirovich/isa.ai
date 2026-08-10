@@ -134,17 +134,4 @@ public sealed class UserAccountStoreTests : IAsyncLifetime
         (await accounts.ListAsync()).Single(a => a.UserName == "external-only")
             .HasLocalPassword.ShouldBeFalse();
     }
-
-    private sealed class CoreContextFactory(string connectionString) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<CoreDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                {
-                    npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                    npg.UseVector();
-                })
-                .UseSnakeCaseNamingConvention()
-                .Options);
-    }
 }

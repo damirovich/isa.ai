@@ -95,7 +95,7 @@ public sealed class DivisionAdminTests : IAsyncLifetime
 
     private async Task GiveClearanceAsync(int divisionId)
     {
-        var factory = new CoreFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         await using var db = factory.CreateDbContext();
 
         var user = new AppUserEntity { UserName = $"user{divisionId}", DisplayName = "Пользователь" };
@@ -113,8 +113,8 @@ public sealed class DivisionAdminTests : IAsyncLifetime
 
     private async Task<DivisionAdminStore> BuildAsync(IDivisionUsage usage, bool migrate = true)
     {
-        var inspector = new InspectorFactory(_postgres.GetConnectionString());
-        var core = new CoreFactory(_postgres.GetConnectionString());
+        var inspector = new InspectorContextFactory(_postgres.GetConnectionString());
+        var core = new CoreContextFactory(_postgres.GetConnectionString());
 
         if (migrate)
         {
@@ -138,28 +138,5 @@ public sealed class DivisionAdminTests : IAsyncLifetime
         public Task<IReadOnlyDictionary<int, DivisionUsage>> CountAsync(
             CancellationToken cancellationToken = default) =>
             Task.FromResult(counts ?? new Dictionary<int, DivisionUsage>());
-    }
-
-    private sealed class InspectorFactory(string connectionString) : IDbContextFactory<InspectorDbContext>
-    {
-        public InspectorDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<InspectorDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                    npg.MigrationsHistoryTable("__ef_migrations_history", InspectorDbContext.Schema))
-                .UseSnakeCaseNamingConvention()
-                .Options);
-    }
-
-    private sealed class CoreFactory(string connectionString) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<CoreDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                {
-                    npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                    npg.UseVector();
-                })
-                .UseSnakeCaseNamingConvention()
-                .Options);
     }
 }

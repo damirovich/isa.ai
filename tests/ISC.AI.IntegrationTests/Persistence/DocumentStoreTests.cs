@@ -30,7 +30,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
     [Fact(DisplayName = "Документы: регистрация двух групп, переходы §4.5, продление §4.6, агрегат §4.3")]
     public async Task Document_lifecycle_end_to_end()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new DocFlowContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
@@ -157,7 +157,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
     [Fact(DisplayName = "Авто-«Просрочено» (§4.2): истёкшие метятся системой, Done/Closed не трогаются, повтор пуст")]
     public async Task Mark_overdue_flags_expired_assignments_only()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new DocFlowContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
@@ -230,7 +230,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
     [Fact(DisplayName = "Файлы (§3.3): замена создаёт новую версию, прежняя теряет актуальность; вложение прикрепляется")]
     public async Task Document_file_versioning_and_attachments()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new DocFlowContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
@@ -273,7 +273,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
     [Fact(DisplayName = "Решётка доступа (6.1, ТБ-020/021): чужой гриф/подразделение не выдаются ни списком, ни карточкой")]
     public async Task List_and_get_enforce_classification_and_division()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new DocFlowContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
@@ -313,51 +313,5 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         var noDivisions = new AccessContext("42", MaxClassification: 10, AllowedDivisions: []);
         (await store.ListAsync(new DocumentListFilter(), noDivisions)).Rows.ShouldBeEmpty();
         (await store.GetAsync(visibleId, noDivisions)).ShouldBeNull();
-    }
-
-    // Временное файловое хранилище: настоящие байты на диске, каталог убирается после теста.
-    private sealed class TempFileStorage : IDocFlowFileStorage
-    {
-        private readonly string _root = Path.Combine(
-            Path.GetTempPath(), "iscai-docflow-tests", Guid.NewGuid().ToString("N"));
-
-        public async Task<string> SaveAsync(
-            Stream content, string extension, string category, string subPath,
-            CancellationToken cancellationToken = default)
-        {
-            var storedFileName = Guid.NewGuid().ToString("N") + extension;
-            var directory = Path.Combine(_root, category, subPath);
-            Directory.CreateDirectory(directory);
-            await using var fileStream = File.Create(Path.Combine(directory, storedFileName));
-            await content.CopyToAsync(fileStream, cancellationToken);
-            return storedFileName;
-        }
-
-        public Task<Stream> OpenReadAsync(
-            string storedFileName, string category, string subPath, CancellationToken cancellationToken = default) =>
-            Task.FromResult<Stream>(File.OpenRead(Path.Combine(_root, category, subPath, storedFileName)));
-
-        public Task DeleteAsync(
-            string storedFileName, string category, string subPath, CancellationToken cancellationToken = default)
-        {
-            var path = Path.Combine(_root, category, subPath, storedFileName);
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-
-            return Task.CompletedTask;
-        }
-    }
-
-    // Контекст с теми же опциями, что в проде (snake_case + история миграций в схеме docflow).
-    private sealed class TestContextFactory(string connectionString) : IDbContextFactory<DocFlowDbContext>
-    {
-        public DocFlowDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<DocFlowDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                    npg.MigrationsHistoryTable("__ef_migrations_history", DocFlowDbContext.Schema))
-                .UseSnakeCaseNamingConvention()
-                .Options);
     }
 }

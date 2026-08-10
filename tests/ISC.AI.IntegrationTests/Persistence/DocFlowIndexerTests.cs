@@ -116,47 +116,4 @@ public sealed class DocFlowIndexerTests : IAsyncLifetime
             link.CoreDocumentId.ShouldBe(newCoreId);
         }
     }
-
-    private sealed class DocFlowContextFactory(string connectionString) : IDbContextFactory<DocFlowDbContext>
-    {
-        public DocFlowDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<DocFlowDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                    npg.MigrationsHistoryTable("__ef_migrations_history", DocFlowDbContext.Schema))
-                .UseSnakeCaseNamingConvention()
-                .Options);
-    }
-
-    private sealed class CoreContextFactory(string connectionString) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<CoreDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                {
-                    npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                    npg.UseVector();
-                })
-                .UseSnakeCaseNamingConvention()
-                .Options);
-    }
-
-    // Фиксированный эмбеддер (как в IngestionPipelineTests): проверяется конвейер, не качество векторов.
-    private sealed class FixedEmbeddingGenerator(int dimensions) : IEmbeddingGenerator<string, Embedding<float>>
-    {
-        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
-            IEnumerable<string> values, EmbeddingGenerationOptions? options = null,
-            CancellationToken cancellationToken = default)
-        {
-            var vector = new float[dimensions];
-            vector[0] = 1f;
-            var list = values.Select(_ => new Embedding<float>(vector)).ToList();
-            return Task.FromResult(new GeneratedEmbeddings<Embedding<float>>(list));
-        }
-
-        public object? GetService(Type serviceType, object? serviceKey = null) => null;
-
-        public void Dispose()
-        {
-        }
-    }
 }

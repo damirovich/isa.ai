@@ -3,8 +3,8 @@ using ISC.AI.Abstractions.Grounding;
 using ISC.AI.Abstractions.Ingestion;
 using ISC.AI.Ingestion;
 using ISC.AI.Profile.Inspector.Application;
-using ISC.AI.Profile.Inspector.Application.Grounding;
-using ISC.AI.Profile.Inspector.Application.Ingestion;
+using ISC.AI.Profile.Inspector.Application.Features.Grounding;
+using ISC.AI.Profile.Inspector.Application.Features.Ingestion;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 

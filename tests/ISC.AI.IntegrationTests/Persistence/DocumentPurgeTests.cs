@@ -32,7 +32,7 @@ public sealed class DocumentPurgeTests : IAsyncLifetime
     [Fact(DisplayName = "ТБ-064: документ и все производные удалены физически, факт записан в аудит")]
     public async Task Purge_removes_document_and_all_derivatives_and_audits()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         int targetId, supersededDocId;
         await using (var db = factory.CreateDbContext())
         {
@@ -70,7 +70,7 @@ public sealed class DocumentPurgeTests : IAsyncLifetime
     [Fact(DisplayName = "ТБ-064: удаление несуществующего документа идемпотентно и не пишет аудит")]
     public async Task Purge_of_missing_document_is_idempotent_without_audit()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
@@ -146,19 +146,5 @@ public sealed class DocumentPurgeTests : IAsyncLifetime
             DivisionId = 7,
         });
         await db.SaveChangesAsync();
-    }
-
-    // Контекст с теми же опциями, что в проде (snake_case + pgvector).
-    private sealed class TestContextFactory(string connectionString) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<CoreDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                {
-                    npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                    npg.UseVector();
-                })
-                .UseSnakeCaseNamingConvention()
-                .Options);
     }
 }

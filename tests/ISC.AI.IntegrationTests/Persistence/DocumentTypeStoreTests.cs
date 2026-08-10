@@ -24,7 +24,7 @@ public sealed class DocumentTypeStoreTests : IAsyncLifetime
     [Fact(DisplayName = "Типы документов: уникальность имени, фильтры, правка, смена группы")]
     public async Task Document_type_dictionary_lifecycle()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new DocFlowContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
@@ -67,7 +67,7 @@ public sealed class DocumentTypeStoreTests : IAsyncLifetime
     [Fact(DisplayName = "Смена группы запрещена при наличии документов типа (ТЗ СКИД §3.1)")]
     public async Task Group_change_rejected_when_documents_exist()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new DocFlowContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
@@ -96,16 +96,5 @@ public sealed class DocumentTypeStoreTests : IAsyncLifetime
         (await store.ChangeGroupAsync(typeId.Value, DocumentGroup.Storage))
             .ShouldBe(DocumentTypeWriteResult.HasDocuments);
         (await store.ListAsync(group: DocumentGroup.Execution)).ShouldHaveSingleItem();
-    }
-
-    // Контекст с теми же опциями, что в проде (snake_case + история миграций в схеме docflow).
-    private sealed class TestContextFactory(string connectionString) : IDbContextFactory<DocFlowDbContext>
-    {
-        public DocFlowDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<DocFlowDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                    npg.MigrationsHistoryTable("__ef_migrations_history", DocFlowDbContext.Schema))
-                .UseSnakeCaseNamingConvention()
-                .Options);
     }
 }

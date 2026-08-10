@@ -29,16 +29,10 @@ public sealed class ReportDataSource(
 
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
 
-        var allowedDivisions = access.AllowedDivisions;
-
-        // ТОТ ЖЕ предикат, что у DocumentStore.VisibleDocuments — решётка гриф/подразделение плюс
-        // сужающая политика профиля. Дублируется выражением, а не вызовом: у отчётов свой контекст,
-        // а править правило в двух местах нельзя — поэтому оно закреплено тестом «отчёт не выдаёт
-        // того, чего не выдаёт список документов».
-        var visibleDocuments = db.Documents
-            .Where(d => d.Classification <= access.MaxClassification
-                && allowedDivisions.Contains(d.DivisionId))
-            .Where(accessPolicy.BuildFilter<Document>(access));
+        // Решётка — общим предикатом AccessFilterExtensions.VisibleTo: тем же, что у списка
+        // документов. Равенство выдач дополнительно закреплено тестом «отчёт не выдаёт того,
+        // чего не выдаёт список».
+        var visibleDocuments = db.Documents.VisibleTo(access, accessPolicy);
 
         var query =
             from assignment in db.DocumentAssignments

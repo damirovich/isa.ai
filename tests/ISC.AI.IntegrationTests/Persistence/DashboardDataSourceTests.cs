@@ -145,30 +145,4 @@ public sealed class DashboardDataSourceTests : IAsyncLifetime
             new DashboardDataSource(factory, policy),
             new DocumentTypeStore(factory));
     }
-
-    private sealed class NoFileStorage : IDocFlowFileStorage
-    {
-        public Task<string> SaveAsync(
-            Stream content, string extension, string category, string subPath,
-            CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException("Тест дашборда не загружает файлы.");
-
-        public Task<Stream> OpenReadAsync(
-            string storedFileName, string category, string subPath, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException("Тест дашборда не читает файлы.");
-
-        public Task DeleteAsync(
-            string storedFileName, string category, string subPath, CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
-    }
-
-    private sealed class DocFlowContextFactory(string connectionString) : IDbContextFactory<DocFlowDbContext>
-    {
-        public DocFlowDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<DocFlowDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                    npg.MigrationsHistoryTable("__ef_migrations_history", DocFlowDbContext.Schema))
-                .UseSnakeCaseNamingConvention()
-                .Options);
-    }
 }

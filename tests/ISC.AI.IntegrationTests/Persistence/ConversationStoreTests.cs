@@ -24,7 +24,7 @@ public sealed class ConversationStoreTests : IAsyncLifetime
     [Fact(DisplayName = "Диалоги: история по порядку, гриф=max, разграничение по владельцу, мягкое удаление")]
     public async Task Conversation_lifecycle_and_owner_isolation()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
@@ -66,19 +66,5 @@ public sealed class ConversationStoreTests : IAsyncLifetime
         (await store.DeleteAsync(conversationId, owner)).ShouldBeTrue();
         (await store.ListAsync(owner)).ShouldBeEmpty();
         (await store.GetHistoryAsync(conversationId, owner)).ShouldBeEmpty();
-    }
-
-    // Контекст с теми же опциями, что в проде (snake_case + pgvector-маппинг).
-    private sealed class TestContextFactory(string connectionString) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<CoreDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                {
-                    npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                    npg.UseVector();
-                })
-                .UseSnakeCaseNamingConvention()
-                .Options);
     }
 }

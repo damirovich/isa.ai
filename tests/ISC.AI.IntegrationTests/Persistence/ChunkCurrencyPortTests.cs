@@ -53,17 +53,4 @@ public sealed class ChunkCurrencyPortTests : IAsyncLifetime
         (await verify.Chunks.FirstAsync(c => c.Id == chunkId)).IsCurrent.ShouldBeFalse();
         (await verify.Embeddings.FirstAsync(e => e.ChunkId == chunkId)).IsCurrent.ShouldBeFalse();
     }
-
-    private sealed class CoreContextFactory(string connectionString) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<CoreDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                {
-                    npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                    npg.UseVector();
-                })
-                .UseSnakeCaseNamingConvention()
-                .Options);
-    }
 }

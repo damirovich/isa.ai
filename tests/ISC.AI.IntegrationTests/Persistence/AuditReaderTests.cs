@@ -89,25 +89,12 @@ public sealed class AuditReaderTests : IAsyncLifetime
 
     private async Task<(AuditWriter Writer, AuditReader Reader)> BuildAsync()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
         }
 
         return (new AuditWriter(factory), new AuditReader(factory));
-    }
-
-    private sealed class TestContextFactory(string connectionString) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<CoreDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                {
-                    npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                    npg.UseVector();
-                })
-                .UseSnakeCaseNamingConvention()
-                .Options);
     }
 }

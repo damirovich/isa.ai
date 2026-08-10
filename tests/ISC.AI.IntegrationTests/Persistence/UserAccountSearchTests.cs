@@ -104,7 +104,7 @@ public sealed class UserAccountSearchTests : IAsyncLifetime
     [Fact(DisplayName = "Правка ФИО и должности не обрывает сессию пользователя")]
     public async Task Profile_update_keeps_security_stamp()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         var store = await BuildAsync();
         var userId = (await store.CreateAsync("user1", "Иванов", "Vremenniy-1"))!.Value;
 
@@ -125,22 +125,9 @@ public sealed class UserAccountSearchTests : IAsyncLifetime
 
     private async Task<UserAccountStore> BuildAsync()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         await using var db = factory.CreateDbContext();
         await db.Database.MigrateAsync();
         return new UserAccountStore(factory);
-    }
-
-    private sealed class TestContextFactory(string connectionString) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<CoreDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                {
-                    npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                    npg.UseVector();
-                })
-                .UseSnakeCaseNamingConvention()
-                .Options);
     }
 }
