@@ -1,0 +1,4 @@
+@* Общая обвязка компонентов карточки документа — тот же набор, что у Pages/_Imports.razor:
+   компоненты шлют команды через Mediator сами, а не через каскад колбэков к странице. *@
+@using Mediator
+@inject IMediator Dispatcher
