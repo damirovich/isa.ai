@@ -1,4 +1,4 @@
-using ISC.AI.Modules.DocFlow.Application.Notifications;
+using ISC.AI.Modules.DocFlow.Application.Features.Notifications;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 using ISC.AI.Modules.DocFlow.Domain.Services;
 using NSubstitute;

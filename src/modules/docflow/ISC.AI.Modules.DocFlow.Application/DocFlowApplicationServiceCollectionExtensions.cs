@@ -1,5 +1,5 @@
 using FluentValidation;
-using ISC.AI.Modules.DocFlow.Application.Notifications;
+using ISC.AI.Modules.DocFlow.Application.Features.Notifications;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ISC.AI.Modules.DocFlow.Application;

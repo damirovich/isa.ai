@@ -1,4 +1,4 @@
-using ISC.AI.Modules.DocFlow.Application.DocumentTypes;
+using ISC.AI.Modules.DocFlow.Application.Features.DocumentTypes;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 using Shouldly;
 

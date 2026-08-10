@@ -1,6 +1,9 @@
 using ISC.AI.Abstractions.Security;
-using ISC.AI.Modules.DocFlow.Application.Documents;
-using ISC.AI.Modules.DocFlow.Application.Notifications;
+using ISC.AI.Modules.DocFlow.Application.Features.Documents;
+using ISC.AI.Modules.DocFlow.Application.Features.Assignments;
+using ISC.AI.Modules.DocFlow.Application.Features.Comments;
+using ISC.AI.Modules.DocFlow.Application.Features.Directory;
+using ISC.AI.Modules.DocFlow.Application.Features.Notifications;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 using ISC.AI.Modules.DocFlow.Domain.Services;
 using NSubstitute;
