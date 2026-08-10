@@ -17,7 +17,11 @@ namespace ISC.AI.Modules.DocFlow.Application.Documents;
 /// </summary>
 
 /// <summary>Лента комментариев документа (§4.8).</summary>
-public sealed record ListCommentsQuery(int DocumentId) : IRequest<ResponseDto<IReadOnlyList<CommentItem>>>
+/// <param name="IncludeResolved">
+/// Показывать закрытые обсуждения. Отсев выполняет хранилище — В ЗАПРОСЕ, а не в разметке.
+/// </param>
+public sealed record ListCommentsQuery(int DocumentId, bool IncludeResolved = true)
+    : IRequest<ResponseDto<IReadOnlyList<CommentItem>>>
 {
     /// <inheritdoc cref="ListCommentsQuery" />
     public sealed class Handler(
@@ -36,7 +40,8 @@ public sealed record ListCommentsQuery(int DocumentId) : IRequest<ResponseDto<IR
                 return ResponseDto<IReadOnlyList<CommentItem>>.NotFound("Документ не найден.");
             }
 
-            var items = await comments.ListAsync(query.DocumentId, cancellationToken);
+            var items = await comments.ListAsync(
+                query.DocumentId, query.IncludeResolved, cancellationToken);
             return ResponseDto<IReadOnlyList<CommentItem>>.Ok(items, items.Count);
         }
     }

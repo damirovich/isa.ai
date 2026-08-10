@@ -17,15 +17,43 @@ public sealed class CommentStore(
 {
     /// <inheritdoc />
     public async Task<IReadOnlyList<CommentItem>> ListAsync(
-        int documentId, CancellationToken cancellationToken = default)
+        int documentId, bool includeResolved = true, CancellationToken cancellationToken = default)
     {
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Текущая версия файла документа — по ней в ленте отмечаются комментарии к ПРЕЖНЕЙ редакции.
+        var currentFileId = await db.DocumentFiles.AsNoTracking()
+            .Where(f => f.DocumentId == documentId && f.IsLatest)
+            .Select(f => (int?)f.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        // Номера версий по идентификатору файла: комментарий хранит идентификатор, а читателю нужен
+        // человеческий номер («к версии 2»).
+        var versions = await db.DocumentFiles.AsNoTracking()
+            .Where(f => f.DocumentId == documentId)
+            .ToDictionaryAsync(f => f.Id, f => f.Version, cancellationToken);
 
         // Глобальный query-filter ISoftDeletable скрыл бы удалённые целиком — но ветка ответов должна
         // остаться связной (ответ на удалённый комментарий продолжает читаться), поэтому берём ВСЕ и
         // обнуляем содержимое удалённых ниже (перенос контракта СКИД).
-        var rows = await db.DocumentComments.AsNoTracking().IgnoreQueryFilters()
-            .Where(c => c.DocumentId == documentId)
+        var query = db.DocumentComments.AsNoTracking().IgnoreQueryFilters()
+            .Where(c => c.DocumentId == documentId);
+
+        if (!includeResolved)
+        {
+            // Скрывается ВСЯ ветка: закрыт корень — уходят и ответы, иначе в ленте остаются реплики
+            // без вопроса, к которому они относились. Отсев В ЗАПРОСЕ, а не в разметке: на документе
+            // с длинной перепиской закрытые ветки — бо́льшая часть ленты.
+            var resolvedRoots = db.DocumentComments.IgnoreQueryFilters()
+                .Where(c => c.DocumentId == documentId && c.IsResolved)
+                .Select(c => c.Id);
+
+            query = query.Where(c =>
+                !c.IsResolved
+                && (c.ParentCommentId == null || !resolvedRoots.Contains(c.ParentCommentId.Value)));
+        }
+
+        var rows = await query
             .OrderBy(c => c.CreatedAt).ThenBy(c => c.Id)
             .Select(c => new
             {
@@ -41,6 +69,7 @@ public sealed class CommentStore(
                 c.IsDeleted,
                 c.CreatedAt,
                 c.UpdatedAt,
+                c.DocumentFileId,
                 Mentions = c.Mentions.Select(m => m.UserId).ToList(),
                 Files = c.Files
                     .Select(f => new CommentFileItem(f.Id, f.FileName, f.ContentType, f.FileSize, f.StoredFileName))
@@ -75,7 +104,12 @@ public sealed class CommentStore(
             r.CreatedAt,
             r.UpdatedAt,
             r.IsDeleted ? [] : r.Mentions.Select(id => new CommentMentionItem(id, NameOf(names, id))).ToList(),
-            r.IsDeleted ? [] : r.Files))
+            r.IsDeleted ? [] : r.Files,
+            r.DocumentFileId is { } fileId && versions.TryGetValue(fileId, out var version) ? version : null,
+
+            // «К текущей версии» — если файла тогда не было (обсуждали сам документ) либо это та же
+            // версия, что сейчас. Иначе замечание относится к тексту, которого в документе уже нет.
+            r.DocumentFileId is null || r.DocumentFileId == currentFileId))
             .ToList();
     }
 
@@ -113,6 +147,15 @@ public sealed class CommentStore(
 
         var mentions = await ValidateMentionsAsync(draft.Content, draft.MentionedUserIds, cancellationToken);
 
+        // СНИМОК текущей версии файла (§3.3): замечание относится к тому тексту, который автор читал.
+        // Файл документа версионируется, и после замены комментарий без этой отметки начинал бы
+        // указывать не туда. Значение проставляется ОДИН раз и больше не меняется — правка текста
+        // комментария его не трогает.
+        var documentFileId = await db.DocumentFiles.AsNoTracking()
+            .Where(f => f.DocumentId == draft.DocumentId && f.IsLatest)
+            .Select(f => (int?)f.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
         var comment = new DocumentComment
         {
             DocumentId = draft.DocumentId,
@@ -120,6 +163,7 @@ public sealed class CommentStore(
             ParentCommentId = draft.ParentCommentId,
             Content = draft.Content,
             CommentType = draft.CommentType,
+            DocumentFileId = documentFileId,
             Mentions = [.. mentions.Select(id => new DocumentCommentMention { UserId = id })],
         };
         db.DocumentComments.Add(comment);

@@ -27,7 +27,9 @@ public sealed record CommentItem(
     DateTime CreatedAt,
     DateTime? UpdatedAt,
     IReadOnlyList<CommentMentionItem> Mentions,
-    IReadOnlyList<CommentFileItem> Files);
+    IReadOnlyList<CommentFileItem> Files,
+    int? DocumentFileVersion = null,
+    bool IsAboutCurrentVersion = true);
 
 /// <summary>Черновик комментария: текст, вид, заявленные клиентом упоминания и файлы.</summary>
 public sealed record CommentDraft(
@@ -70,8 +72,18 @@ public enum CommentWriteStatus
 /// </summary>
 public interface ICommentStore
 {
-    /// <summary>Лента комментариев документа в хронологическом порядке (ответы — тем же списком, по <c>ParentCommentId</c>).</summary>
-    Task<IReadOnlyList<CommentItem>> ListAsync(int documentId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Лента комментариев документа в хронологическом порядке (ответы — тем же списком,
+    /// по <c>ParentCommentId</c>).
+    /// </summary>
+    /// <param name="includeResolved">
+    /// Показывать закрытые обсуждения. Отсев идёт В ЗАПРОСЕ, а не в разметке: на документе с длинной
+    /// перепиской закрытые ветки составляют бо́льшую часть ленты, и тянуть их из базы, чтобы тут же
+    /// спрятать, бессмысленно. Скрывается ВСЯ ветка вместе с ответами — закрытое обсуждение без своих
+    /// ответов читается как обрывок.
+    /// </param>
+    Task<IReadOnlyList<CommentItem>> ListAsync(
+        int documentId, bool includeResolved = true, CancellationToken cancellationToken = default);
 
     /// <summary>Добавляет комментарий (при <c>ParentCommentId</c> — ответ). Возвращает статус и идентификатор.</summary>
     Task<(CommentWriteStatus Status, int CommentId)> AddAsync(

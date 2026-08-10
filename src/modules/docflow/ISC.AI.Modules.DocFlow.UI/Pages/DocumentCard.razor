@@ -587,6 +587,21 @@ else
                 {
                     <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">закрыто</MudChip>
                 }
+                @* Отметка версии файла (§3.3/§4.8): замечание относится к ТОМУ тексту, который автор
+                   читал. После замены файла новой версией комментарий без пометки указывал бы не
+                   туда — читатель искал бы пункт, которого в новой редакции уже нет. *@
+                @if (comment.DocumentFileVersion is { } version)
+                {
+                    <MudTooltip Text="@(comment.IsAboutCurrentVersion
+                        ? "Относится к текущей версии файла"
+                        : "Относится к прежней версии файла — в актуальной редакции этого текста может не быть")">
+                        <MudChip T="string" Size="Size.Small" Class="ma-0"
+                                 Color="@(comment.IsAboutCurrentVersion ? Color.Default : Color.Warning)"
+                                 Variant="Variant.Text">
+                            к версии @version@(comment.IsAboutCurrentVersion ? string.Empty : " (прежней)")
+                        </MudChip>
+                    </MudTooltip>
+                }
             </div>
 
             @if (comment.IsDeleted)
@@ -723,6 +738,9 @@ else
     private const string CommentsCategory = "comments";
     private readonly List<CommentItem> _comments = [];
     private string _commentText = string.Empty;
+
+    /// <summary>Скрывать закрытые обсуждения. По умолчанию показываются все — так было до сих пор.</summary>
+    private bool _hideResolvedComments;
 
     /// <summary>Активные пользователи — для подстановки упоминания в комментарий (§4.8).</summary>
     private IReadOnlyList<UserItem> _users = [];
@@ -1110,7 +1128,7 @@ else
 
     private async Task ReloadCommentsAsync()
     {
-        var response = await Dispatcher.Send(new ListCommentsQuery(Id));
+        var response = await Dispatcher.Send(new ListCommentsQuery(Id, !_hideResolvedComments));
         _comments.Clear();
         if (response is { Status: true, Data: { } list })
         {
