@@ -27,6 +27,61 @@ public static class DocFlowModule
     public const string MenuGroup = "Документооборот";
 
     /// <summary>
+    /// ЧТО ПРОФИЛЬ ОБЯЗАН ПРЕДОСТАВИТЬ, подключая этот пакет.
+    /// </summary>
+    /// <remarks>
+    /// Это ВЕСЬ внешний контракт модуля — три порта, которые он объявляет, но реализовать не может,
+    /// потому что ответы на них знает только эксплуатант:
+    /// <list type="bullet">
+    /// <item><c>IDivisionDirectory</c> — справочник подразделений (словарь идентификаторов един
+    /// с решёткой доступа ядра; свой справочник модуль не заводит, вопрос 3 Э4-35);</item>
+    /// <item><c>IDocFlowAdministration</c> — кто вправе вести настройки и справочники модуля
+    /// (право определяется РОЛЬЮ, а роли ведёт профиль);</item>
+    /// <item><c>IAssignmentCandidateDirectory</c> — кого предлагать в инспекторы и исполнители
+    /// (тоже роль плюс допуск).</item>
+    /// </list>
+    /// Забыл профиль любой из них — приложение НЕ ЗАПУСТИТСЯ: контейнер не соберёт обработчик.
+    /// Это намеренно: молчаливая заглушка вместо правила о доступе опаснее остановки, а разбираться
+    /// с ней пришлось бы уже по следам чужих действий.
+    ///
+    /// Сверх этого модуль пользуется НЕЙТРАЛЬНЫМИ службами ядра, которые даёт хост:
+    /// <c>IAccessPolicy</c>, <c>IAccessContextProvider</c>, <c>ISubjectProvider</c>,
+    /// <c>IAuditWriter</c>, <c>IBackgroundTaskQueue</c>.
+    ///
+    /// Список закреплён тестом <c>DocFlowContractTests</c>: он не должен разрастаться незаметно —
+    /// каждый новый пункт удорожает подключение модуля к следующему профилю.
+    /// </remarks>
+    public static IReadOnlyList<Type> RequiredServices { get; } =
+    [
+        typeof(Domain.Services.IDivisionDirectory),
+        typeof(Domain.Services.IDocFlowAdministration),
+        typeof(Domain.Services.IAssignmentCandidateDirectory),
+    ];
+
+    /// <summary>
+    /// Ключи конфигурации, которые читает модуль (все — необязательные, у каждого есть значение
+    /// по умолчанию, кроме строки подключения).
+    /// </summary>
+    /// <remarks>
+    /// Перечислены здесь, чтобы при подключении к новому профилю их не искали по коду:
+    /// <c>ConnectionStrings:DocFlow</c> (при отсутствии — <c>ConnectionStrings:Core</c>),
+    /// <c>DocFlow:Storage:BasePath</c>, <c>DocFlow:TimeZone</c>,
+    /// <c>DocFlow:DeadlineCheckIntervalMinutes</c>, <c>DocFlow:NotificationHorizonDays</c>
+    /// (запасной вариант для системной настройки §9), <c>DocFlow:Reports:PdfFont:Regular</c> и
+    /// <c>:Bold</c>.
+    /// </remarks>
+    public static IReadOnlyList<string> ConfigurationKeys { get; } =
+    [
+        "ConnectionStrings:DocFlow",
+        "DocFlow:Storage:BasePath",
+        "DocFlow:TimeZone",
+        "DocFlow:DeadlineCheckIntervalMinutes",
+        "DocFlow:NotificationHorizonDays",
+        "DocFlow:Reports:PdfFont:Regular",
+        "DocFlow:Reports:PdfFont:Bold",
+    ];
+
+    /// <summary>
     /// Политика доступа страниц модуля. Пока — «аутентифицирован» (регистрируется хостом из реестра);
     /// ролевое разграничение по ТЗ СКИД §2.1 (справочники — Администратор, построчные правила — через
     /// <c>IAccessPolicy</c>) — этап 6 Э4-35.

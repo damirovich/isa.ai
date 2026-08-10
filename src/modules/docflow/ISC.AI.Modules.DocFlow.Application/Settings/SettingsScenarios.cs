@@ -90,7 +90,8 @@ public sealed record SetNotificationHorizonCommand(int Days)
             ArgumentNullException.ThrowIfNull(command);
 
             // Право — через нейтральный порт: роли ведёт ПРОФИЛЬ, модуль на него не ссылается
-            // (ADR-0017). Fail-closed: нет реализации порта — нет и права.
+            // (ADR-0017). Реализацию обязан дать профиль: без неё приложение не запустится —
+            // отсутствие правила о доступе должно быть заметно сразу (см. DocFlowModule.RequiredServices).
             if (!await administration.CanManageAsync(cancellationToken))
             {
                 return ResponseDto<bool>.BadRequest(SettingsGuard.Denied);
