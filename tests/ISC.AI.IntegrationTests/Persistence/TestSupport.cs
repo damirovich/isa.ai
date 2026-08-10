@@ -11,6 +11,7 @@ using ISC.AI.Profile.Inspector.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using Pgvector.EntityFrameworkCore;
+using Testcontainers.PostgreSql;
 
 namespace ISC.AI.IntegrationTests.Persistence;
 
@@ -21,6 +22,20 @@ namespace ISC.AI.IntegrationTests.Persistence;
 // Тестовые дублёры с СОБСТВЕННЫМ поведением, на котором построена проверка (например,
 // RecordingStorage в DocFlowDeletionTests, запоминающий удалённые файлы), остаются локальными —
 // их смысл виден только рядом с тестом.
+
+/// <summary>
+/// Единственное место, где записан docker-образ тестовой БД. Раньше имя образа было захардкожено
+/// в каждом тестовом классе (38 копий): переход на новый Postgres означал бы правку всех файлов,
+/// а опечатка в одном — тихую проверку на другой версии, чем у остальных.
+/// Контейнер — ПО-ПРЕЖНЕМУ на каждый тестовый класс (изоляция дороже секунд старта).
+/// </summary>
+internal static class TestPostgres
+{
+    /// <summary>Образ с pgvector: ядро хранит эмбеддинги, обычного postgres недостаточно.</summary>
+    public const string Image = "pgvector/pgvector:pg16";
+
+    public static PostgreSqlContainer Create() => new PostgreSqlBuilder(Image).Build();
+}
 
 /// <summary>
 /// Фабрика <see cref="CoreDbContext"/> для тестов над настоящим Postgres (Testcontainers,

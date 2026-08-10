@@ -168,42 +168,30 @@ public sealed class CommentStore(
         };
         db.DocumentComments.Add(comment);
 
-        // Файлы — в хранилище ДО записи в БД; при сбое БД компенсирующе удаляются (как в остальных
-        // файловых операциях модуля, этап 4.2).
-        var storedFiles = new List<(string StoredFileName, string SubPath)>();
+        // Файлы — общий приём UploadedFileSaver: в хранилище ДО записи в БД, при сбое БД —
+        // компенсирующее удаление (как в остальных файловых операциях модуля, этап 4.2).
+        var savedFiles = new List<string>();
+        var subPath = draft.DocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture);
         try
         {
-            if (draft.Files is { Count: > 0 })
-            {
-                foreach (var file in draft.Files)
+            await UploadedFileSaver.SaveAsync(
+                fileStorage, draft.Files, FileCategories.Comments, subPath, savedFiles,
+                (file, storedFileName) => comment.Files.Add(new DocumentCommentFile
                 {
-                    var subPath = draft.DocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                    using var content = new MemoryStream(file.Content);
-                    var storedFileName = await fileStorage.SaveAsync(
-                        content, Path.GetExtension(file.FileName), FileCategories.Comments, subPath, cancellationToken);
-                    storedFiles.Add((storedFileName, subPath));
-
-                    comment.Files.Add(new DocumentCommentFile
-                    {
-                        FileName = file.FileName,
-                        StoredFileName = storedFileName,
-                        ContentType = file.ContentType,
-                        FileSize = file.Content.LongLength,
-                        UploadedByUserId = authorUserId,
-                    });
-                }
-            }
+                    FileName = file.FileName,
+                    StoredFileName = storedFileName,
+                    ContentType = file.ContentType,
+                    FileSize = file.Content.LongLength,
+                    UploadedByUserId = authorUserId,
+                }),
+                cancellationToken);
 
             await db.SaveChangesAsync(cancellationToken);
             return (CommentWriteStatus.Ok, comment.Id);
         }
         catch
         {
-            foreach (var (storedFileName, subPath) in storedFiles)
-            {
-                await fileStorage.DeleteAsync(storedFileName, FileCategories.Comments, subPath, CancellationToken.None);
-            }
-
+            await UploadedFileSaver.CleanupAsync(fileStorage, savedFiles, FileCategories.Comments, subPath);
             throw;
         }
     }

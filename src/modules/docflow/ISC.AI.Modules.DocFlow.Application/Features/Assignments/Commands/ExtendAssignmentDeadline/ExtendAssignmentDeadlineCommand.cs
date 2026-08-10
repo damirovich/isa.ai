@@ -1,12 +1,10 @@
 using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Audit;
-using ISC.AI.Abstractions.BackgroundTasks;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.DocFlow.Application.Features.Notifications;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 using ISC.AI.Modules.DocFlow.Domain.Services;
 using Mediator;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace ISC.AI.Modules.DocFlow.Application.Features.Assignments;
 

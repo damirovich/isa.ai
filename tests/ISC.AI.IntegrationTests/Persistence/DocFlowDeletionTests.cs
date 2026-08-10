@@ -20,7 +20,7 @@ public sealed class DocFlowDeletionTests : IAsyncLifetime
 {
     private static readonly AccessContext Access = new("42", 9, [5]);
 
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16").Build();
+    private readonly PostgreSqlContainer _postgres = TestPostgres.Create();
 
     public Task InitializeAsync() => _postgres.StartAsync();
 

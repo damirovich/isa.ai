@@ -104,56 +104,21 @@
     private int _unreadCount;
     private bool _busy;
     private string? _error;
-    private PeriodicTimer? _timer;
-    private CancellationTokenSource? _pollCts;
+    // Механика цикла (защита от предрендера, гашение ObjectDisposedException, остановка) — в общем
+    // ComponentPoller, том же, что у колокольчика в шапке.
+    private readonly ComponentPoller _poller = new(PollInterval);
 
     /// <inheritdoc />
     protected override async Task OnInitializedAsync()
     {
         await ReloadAsync();
-        StartPolling();
-    }
 
-    private void StartPolling()
-    {
-        // Предрендер выполняет OnInitializedAsync ДВАЖДЫ; второй запуск цикла оставил бы «сироту»,
-        // который никто не остановит.
-        if (_pollCts is not null)
+        // Всё, что трогает состояние компонента, — через InvokeAsync (поток рендера).
+        _poller.Start(() => InvokeAsync(async () =>
         {
-            return;
-        }
-
-        _pollCts = new CancellationTokenSource();
-        _timer = new PeriodicTimer(PollInterval);
-        var token = _pollCts.Token;
-
-        // Цикл НЕ ждётся здесь намеренно: он живёт столько же, сколько компонент.
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                while (await _timer.WaitForNextTickAsync(token))
-                {
-                    // Всё, что трогает состояние компонента, — через InvokeAsync (поток рендера).
-                    await InvokeAsync(async () =>
-                    {
-                        await ReloadAsync();
-                        StateHasChanged();
-                    });
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Компонент уничтожен — штатное завершение цикла.
-            }
-            catch (ObjectDisposedException)
-            {
-                // Гонка ухода со страницы: тик уже случился, а рендерер (или таймер) уже уничтожен.
-                // InvokeAsync на уничтоженном рендерере бросает именно это, и НЕОБРАБОТАННОЕ
-                // исключение из фоновой задачи роняет весь circuit — пользователь видит «произошла
-                // необработанная ошибка» на ровном месте, просто уйдя с экрана.
-            }
-        }, token);
+            await ReloadAsync();
+            StateHasChanged();
+        }));
     }
 
     private async Task ReloadAsync()
@@ -235,16 +200,5 @@
     };
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
-    {
-        if (_pollCts is not null)
-        {
-            await _pollCts.CancelAsync();
-            _pollCts.Dispose();
-            _pollCts = null;
-        }
-
-        _timer?.Dispose();
-        _timer = null;
-    }
+    public ValueTask DisposeAsync() => _poller.DisposeAsync();
 }

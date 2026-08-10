@@ -265,46 +265,14 @@
     /// <summary>Кандидаты в инспекторы: те, кому инспекторство положено по роли (§3.2).</summary>
     private readonly List<UserItem> _inspectors = [];
 
-    /// <summary>Кандидаты в исполнители по подразделению — подгружаются по мере выбора подразделения.</summary>
-    private readonly Dictionary<int, IReadOnlyList<UserItem>> _assigneeCandidates = [];
-
     /// <summary>
-    /// Кандидаты в исполнители для подразделения строки назначения.
+    /// Кандидаты в исполнители по подразделению — общий кэш <see cref="AssigneeCandidatesCache"/>
+    /// (тот же, что в карточке): один запрос на подразделение, пусто — пока список в пути.
     /// </summary>
-    /// <remarks>
-    /// Список для КАЖДОГО подразделения запрашивается один раз и запоминается: назначений в форме
-    /// бывает с десяток, и спрашивать сервер на каждую перерисовку значило бы дёргать его при вводе
-    /// любого другого поля. Пока ответ не пришёл, показывается пусто — выбор станет доступен, когда
-    /// список загрузится.
-    /// </remarks>
-    private IReadOnlyList<UserItem> Candidates(int? divisionId)
-    {
-        if (divisionId is not { } id)
-        {
-            return [];
-        }
+    private AssigneeCandidatesCache? _candidatesCache;
 
-        if (_assigneeCandidates.TryGetValue(id, out var cached))
-        {
-            return cached;
-        }
-
-        // Пустой ответ кладём сразу: он же служит отметкой «запрос уже в пути», иначе перерисовка
-        // отправила бы второй такой же.
-        _assigneeCandidates[id] = [];
-        _ = LoadCandidatesAsync(id);
-        return [];
-    }
-
-    private async Task LoadCandidatesAsync(int divisionId)
-    {
-        var response = await Dispatcher.Send(new ListAssigneeCandidatesQuery(divisionId));
-        if (response is { Status: true, Data: { } list })
-        {
-            _assigneeCandidates[divisionId] = list;
-            StateHasChanged();
-        }
-    }
+    private IReadOnlyList<UserItem> Candidates(int? divisionId) =>
+        (_candidatesCache ??= new AssigneeCandidatesCache(Dispatcher, StateHasChanged)).Get(divisionId);
 
     /// <summary>Пределы регистрации субъекта: до какого грифа и в каких подразделениях он вправе создать документ.</summary>
     private async Task LoadScopeAsync()

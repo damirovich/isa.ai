@@ -32,8 +32,11 @@
     private static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(1);
 
     private int _unreadCount;
-    private PeriodicTimer? _timer;
-    private CancellationTokenSource? _pollCts;
+
+    // Механика цикла (защита от предрендера, гашение ObjectDisposedException, остановка) — в общем
+    // ComponentPoller: колокольчик живёт в шапке, то есть на КАЖДОМ экране, и необработанное
+    // исключение его фоновой задачи роняло бы circuit при любом переходе.
+    private readonly ComponentPoller _poller = new(PollInterval);
 
     private string Title => _unreadCount > 0
         ? $"Непрочитанных уведомлений: {_unreadCount}. Открыть ленту"
@@ -43,48 +46,13 @@
     protected override async Task OnInitializedAsync()
     {
         await RefreshAsync();
-        StartPolling();
-    }
 
-    private void StartPolling()
-    {
-        // Предрендер выполняет OnInitializedAsync ДВАЖДЫ; второй запуск оставил бы цикл-сироту,
-        // который некому остановить.
-        if (_pollCts is not null)
+        // Всё, что трогает состояние компонента, — через InvokeAsync (свой поток рендера).
+        _poller.Start(() => InvokeAsync(async () =>
         {
-            return;
-        }
-
-        _pollCts = new CancellationTokenSource();
-        _timer = new PeriodicTimer(PollInterval);
-        var token = _pollCts.Token;
-
-        // Опрос НЕ ждётся здесь намеренно: это фоновый цикл на время жизни компонента.
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                while (await _timer.WaitForNextTickAsync(token))
-                {
-                    // Всё, что трогает состояние компонента, — через InvokeAsync (свой поток рендера).
-                    await InvokeAsync(async () =>
-                    {
-                        await RefreshAsync();
-                        StateHasChanged();
-                    });
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Компонент уничтожен — штатное завершение цикла.
-            }
-            catch (ObjectDisposedException)
-            {
-                // Гонка ухода со страницы: тик уже случился, а рендерер (или таймер) уже уничтожен.
-                // НЕОБРАБОТАННОЕ исключение из фоновой задачи роняет весь circuit, а колокольчик
-                // живёт в шапке — то есть на КАЖДОМ экране, и ронял бы систему при любом переходе.
-            }
-        }, token);
+            await RefreshAsync();
+            StateHasChanged();
+        }));
     }
 
     private void OpenFeed() => Navigation.NavigateTo(FeedRoute);
@@ -105,16 +73,5 @@
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
-    {
-        if (_pollCts is not null)
-        {
-            await _pollCts.CancelAsync();
-            _pollCts.Dispose();
-            _pollCts = null;
-        }
-
-        _timer?.Dispose();
-        _timer = null;
-    }
+    public ValueTask DisposeAsync() => _poller.DisposeAsync();
 }

@@ -21,7 +21,7 @@ public sealed class DocumentStoreTests : IAsyncLifetime
     // встречаются ниже, включая заведомо «чужое» 99 из теста решётки.
     private static readonly AccessContext FullAccess = new("42", 10, [5, 10, 20, 30, 99]);
 
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16").Build();
+    private readonly PostgreSqlContainer _postgres = TestPostgres.Create();
 
     public Task InitializeAsync() => _postgres.StartAsync();
 

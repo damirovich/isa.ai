@@ -1,0 +1,87 @@
+@namespace ISC.AI.Modules.DocFlow.UI
+@* Диалог смены статуса назначения (§4.2: комментарий и файлы на переходе). Выделен из
+   AssignmentsSection (2026-08-10): у каждого диалога секции своя машина состояний, и пять их
+   в одном файле читались хуже, чем таблица с пятью точками вызова. Конструкция — как у
+   FilePreviewDialog: родитель зовёт Open(...) по @ref, итог возвращается через OnChanged/OnError. *@
+@using ISC.AI.Modules.DocFlow.Application.Features.Assignments
+@using ISC.AI.Modules.DocFlow.Domain.Enums
+@using ISC.AI.Modules.DocFlow.Domain.Services
+@using Microsoft.AspNetCore.Components.Forms
+
+<MudDialog @bind-Visible="_open" Options="AssignmentDialogs.Options">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Переход: @(_target?.Status.Label()) → @(_next?.Label())</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_comment" Label="Комментарий к переходу (опц.)" Variant="Variant.Outlined"
+                      MaxLength="2000" Lines="2" AutoGrow="true" AutoFocus="true" Class="mb-2" />
+        <MudFileUpload T="IReadOnlyList<IBrowserFile>" FilesChanged="@(files => _files = files)">
+            <ActivatorContent>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.AttachFile">
+                    Файлы к переходу (§4.2)@(_files is { Count: > 0 } sf ? $" — {sf.Count}" : "")
+                </MudButton>
+            </ActivatorContent>
+        </MudFileUpload>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _open = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="ConfirmAsync">Сменить статус</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    /// <summary>Назначения изменились — владелец перечитывает карточку.</summary>
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    /// <summary>Отказ или сбой — текст показывает владелец (у секции одно место для ошибок).</summary>
+    [Parameter]
+    public EventCallback<string?> OnError { get; set; }
+
+    private bool _open;
+    private AssignmentDetails? _target;
+    private AssignmentStatus? _next;
+    private string? _comment;
+    private IReadOnlyList<IBrowserFile>? _files;
+
+    /// <summary>Открывает диалог перехода конкретного назначения в статус <paramref name="next"/>.</summary>
+    public void Open(AssignmentDetails assignment, AssignmentStatus next)
+    {
+        _target = assignment;
+        _next = next;
+        _comment = null;
+        _files = null;
+        _open = true;
+        StateHasChanged();
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (_target is not { } target || _next is not { } next)
+        {
+            return;
+        }
+
+        _open = false;
+
+        // Прежняя ошибка гаснет при новой попытке (аналог _error = null старой секции): иначе после
+        // одного отказа красный алерт пережил бы и следующую УСПЕШНУЮ операцию.
+        await OnError.InvokeAsync(null);
+        try
+        {
+            var files = _files is { Count: > 0 } selected ? await BrowserFileReader.ReadAsync(selected) : null;
+            var response = await Dispatcher.Send(
+                new ChangeAssignmentStatusCommand(target.Id, next, _comment, files));
+            if (!response.Status)
+            {
+                await OnError.InvokeAsync(response.StatusMessage);
+            }
+        }
+        catch (Exception ex)
+        {
+            await OnError.InvokeAsync($"Ошибка: {ex.Message}");
+        }
+
+        await OnChanged.InvokeAsync();
+    }
+}

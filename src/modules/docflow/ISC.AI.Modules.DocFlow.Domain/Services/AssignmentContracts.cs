@@ -1,12 +1,10 @@
-using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 
 namespace ISC.AI.Modules.DocFlow.Domain.Services;
 
-/// <summary>
-/// Контракты НАЗНАЧЕНИЙ (ТЗ СКИД §4): черновик, участники, лента событий, итоги операций.
-/// Разрез по агрегату — см. DocumentContracts.cs.
-/// </summary>
+// Контракты НАЗНАЧЕНИЙ (ТЗ СКИД §4): черновик, участники, лента событий, итоги операций.
+// Разрез по агрегату — см. DocumentContracts.cs.
+
 /// <summary>Черновик назначения при регистрации (§4.1): подразделение + исполнитель + индивидуальный срок.</summary>
 public sealed record AssignmentDraft(int DivisionId, int? AssigneeUserId, DateOnly? Deadline);
 

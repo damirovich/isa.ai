@@ -19,7 +19,7 @@ public sealed class DocumentFileAccessResolverTests : IAsyncLifetime
     // Допуск автора документа: тесту нужен сам резолвинг, решётка здесь не предмет проверки.
     private static readonly AccessContext FullAccess = new("42", 10, [20]);
 
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16").Build();
+    private readonly PostgreSqlContainer _postgres = TestPostgres.Create();
 
     public Task InitializeAsync() => _postgres.StartAsync();
 

@@ -62,7 +62,7 @@
                    Clearable="true" Style="width:200px;">
             @foreach (var role in Enum.GetValues<UserRole>())
             {
-                <MudSelectItem T="UserRole?" Value="@role">@RoleLabel(role)</MudSelectItem>
+                <MudSelectItem T="UserRole?" Value="@role">@role.Label()</MudSelectItem>
             }
         </MudSelect>
         <MudSelect T="bool?" @bind-Value="_filterActive" Label="Состояние" Variant="Variant.Outlined"
@@ -91,7 +91,7 @@
         <MudTd DataLabel="Роль">
             @* Роль показываем, но правим на своём экране: это другое полномочие с другими
                последствиями, и менять его заодно с исправлением опечатки в фамилии нельзя. *@
-            @(context.Role is { } role ? RoleLabel(role) : "не назначена")
+            @(context.Role is { } role ? role.Label() : "не назначена")
         </MudTd>
         <MudTd DataLabel="Состояние">
             @if (!context.Account.IsActive)
@@ -302,15 +302,6 @@
             _busy = false;
         }
     }
-
-    private static string RoleLabel(UserRole role) => role switch
-    {
-        UserRole.Administrator => "Администратор",
-        UserRole.Manager => "Руководитель",
-        UserRole.Inspector => "Инспектор",
-        UserRole.Performer => "Исполнитель",
-        _ => role.ToString(),
-    };
 
     private async Task CreateAsync()
     {

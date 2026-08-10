@@ -10,14 +10,9 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace ISC.AI.Modules.DocFlow.Application.Features.Documents;
 
-/// <summary>
-/// Сценарии ДОКУМЕНТОВ (ТЗ СКИД §3): регистрация, правка, реестр, карточка, файлы, индексация.
-/// Сценарии назначений (§4) — в AssignmentScenarios.cs (разрез по агрегату, 2026-08-10). Перенос <c>Features/Documents</c> и
-/// <c>Features/Assignments</c> СКИД (Э4-35, этап 3.1). Отличия от исходника — как в
-/// <c>DocumentTypeScenarios</c> (MediatR→Mediator, сквозной аудит, порт вместо DbContext);
-/// дополнительно: гриф и подразделение ОБЯЗАТЕЛЬНЫ при регистрации (ADR-0017 п.5); файлы
-/// переходов/продлений — этап 4 (хранилище файлов); роли «кто может» — этап 6.
-/// </summary>
+// Перенос из СКИД (Э4-35, этап 3.1) с отличиями: MediatR→Mediator, сквозной аудит, порт вместо
+// DbContext; гриф и подразделение ОБЯЗАТЕЛЬНЫ при регистрации (ADR-0017 п.5). Остальные сценарии
+// документов и назначений — соседние срезы Features/Documents и Features/Assignments.
 
 /// <summary>Зарегистрировать документ (§3.2); для «Исполнения» — сразу с назначениями (§4.1).</summary>
 public sealed record RegisterDocumentCommand(

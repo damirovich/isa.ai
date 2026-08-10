@@ -22,7 +22,7 @@ public sealed class DocumentUpdateTests : IAsyncLifetime
 {
     private static readonly AccessContext Author = new("42", 5, [5, 9]);
 
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16").Build();
+    private readonly PostgreSqlContainer _postgres = TestPostgres.Create();
 
     public Task InitializeAsync() => _postgres.StartAsync();
 

@@ -1,11 +1,9 @@
-using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 
 namespace ISC.AI.Modules.DocFlow.Domain.Services;
 
-/// <summary>
-/// Контракты файлов документа (§3.3): версионируемый файл и сопутствующее вложение.
-/// </summary>
+// Контракты файлов документа (§3.3): версионируемый файл и сопутствующее вложение.
+
 /// <summary>
 /// Файл документа в карточке (§3.3): версия, актуальность, язык. <see cref="StoredFileName"/> —
 /// для построения ссылки просмотра/скачивания (этап 4.3).

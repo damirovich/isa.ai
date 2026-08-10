@@ -76,21 +76,15 @@ public sealed partial class DocumentStore
         };
         db.AssignmentStatusHistories.Add(historyEntry);
 
-        // §4.2: на каждом переходе можно приложить файлы — сохраняем ДО SaveChanges,
-        // при сбое БД компенсирующе удаляем (как в СКИД).
+        // §4.2: на каждом переходе можно приложить файлы — общий приём «в хранилище ДО SaveChanges,
+        // при сбое БД компенсирующее удаление» (UploadedFileSaver, перенос решения СКИД).
         var savedFiles = new List<string>();
         var subPath = assignment.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
         try
         {
-            foreach (var file in files ?? [])
-            {
-                using var content = new MemoryStream(file.Content);
-                var storedFileName = await fileStorage.SaveAsync(
-                    content, Path.GetExtension(file.FileName), FileCategories.StatusHistory, subPath,
-                    cancellationToken);
-                savedFiles.Add(storedFileName);
-
-                db.StatusHistoryFiles.Add(new StatusHistoryFile
+            await UploadedFileSaver.SaveAsync(
+                fileStorage, files, FileCategories.StatusHistory, subPath, savedFiles,
+                (file, storedFileName) => db.StatusHistoryFiles.Add(new StatusHistoryFile
                 {
                     StatusHistory = historyEntry,
                     FileName = file.FileName,
@@ -98,33 +92,25 @@ public sealed partial class DocumentStore
                     ContentType = file.ContentType,
                     FileSize = file.Content.LongLength,
                     UploadedByUserId = changedByUserId ?? 0,
-                });
-            }
+                }),
+                cancellationToken);
 
             // Атомарно: статус + история + файлы (один SaveChanges); конкуренцию ловит xmin назначения.
             await db.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
         {
-            await CleanupFilesAsync(savedFiles, FileCategories.StatusHistory, subPath);
+            await UploadedFileSaver.CleanupAsync(fileStorage, savedFiles, FileCategories.StatusHistory, subPath);
             return DocumentWriteStatus.Conflict;
         }
         catch
         {
-            await CleanupFilesAsync(savedFiles, FileCategories.StatusHistory, subPath);
+            await UploadedFileSaver.CleanupAsync(fileStorage, savedFiles, FileCategories.StatusHistory, subPath);
             throw;
         }
 
         await RecalculateAggregateAsync(db, assignment.DocumentId, cancellationToken);
         return DocumentWriteStatus.Ok;
-    }
-
-    private async Task CleanupFilesAsync(List<string> storedFileNames, string category, string subPath)
-    {
-        foreach (var storedFileName in storedFileNames)
-        {
-            await fileStorage.DeleteAsync(storedFileName, category, subPath, CancellationToken.None);
-        }
     }
 
     /// <inheritdoc />
@@ -181,28 +167,6 @@ public sealed partial class DocumentStore
         };
         db.DeadlineExtensions.Add(extension);
 
-        // §4.6: к продлению можно приложить файлы-обоснования (компенсация — как у переходов).
-        var savedFiles = new List<string>();
-        var filesSubPath = assignment.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        foreach (var file in files ?? [])
-        {
-            using var content = new MemoryStream(file.Content);
-            var storedFileName = await fileStorage.SaveAsync(
-                content, Path.GetExtension(file.FileName), FileCategories.DeadlineExtensions, filesSubPath,
-                cancellationToken);
-            savedFiles.Add(storedFileName);
-
-            db.DeadlineExtensionFiles.Add(new DeadlineExtensionFile
-            {
-                Extension = extension,
-                FileName = file.FileName,
-                StoredFileName = storedFileName,
-                ContentType = file.ContentType,
-                FileSize = file.Content.LongLength,
-                UploadedByUserId = initiatedByUserId,
-            });
-        }
-
         assignment.Deadline = newDeadline;
 
         // §4.6: после продления назначение автоматически возвращается «В работу» (переход — в историю).
@@ -219,18 +183,35 @@ public sealed partial class DocumentStore
             assignment.Status = AssignmentStatus.InProgress;
         }
 
+        // §4.6: к продлению можно приложить файлы-обоснования — общий приём UploadedFileSaver
+        // (в хранилище ДО SaveChanges, при сбое — компенсирующее удаление, как у переходов §4.2).
+        var savedFiles = new List<string>();
+        var filesSubPath = assignment.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
         try
         {
+            await UploadedFileSaver.SaveAsync(
+                fileStorage, files, FileCategories.DeadlineExtensions, filesSubPath, savedFiles,
+                (file, storedFileName) => db.DeadlineExtensionFiles.Add(new DeadlineExtensionFile
+                {
+                    Extension = extension,
+                    FileName = file.FileName,
+                    StoredFileName = storedFileName,
+                    ContentType = file.ContentType,
+                    FileSize = file.Content.LongLength,
+                    UploadedByUserId = initiatedByUserId,
+                }),
+                cancellationToken);
+
             await db.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
         {
-            await CleanupFilesAsync(savedFiles, FileCategories.DeadlineExtensions, filesSubPath);
+            await UploadedFileSaver.CleanupAsync(fileStorage, savedFiles, FileCategories.DeadlineExtensions, filesSubPath);
             return DocumentWriteStatus.Conflict;
         }
         catch
         {
-            await CleanupFilesAsync(savedFiles, FileCategories.DeadlineExtensions, filesSubPath);
+            await UploadedFileSaver.CleanupAsync(fileStorage, savedFiles, FileCategories.DeadlineExtensions, filesSubPath);
             throw;
         }
 

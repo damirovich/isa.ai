@@ -25,7 +25,7 @@ public sealed class DocFlowIndexerTests : IAsyncLifetime
     // Допуск автора: проверяется индексация, не разграничение (оно — в InspectorAccessPolicyTests).
     private static readonly AccessContext FullAccess = new("42", 10, [10]);
 
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16").Build();
+    private readonly PostgreSqlContainer _postgres = TestPostgres.Create();
 
     public Task InitializeAsync() => _postgres.StartAsync();
 

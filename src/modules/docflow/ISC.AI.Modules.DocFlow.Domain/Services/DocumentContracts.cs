@@ -1,12 +1,10 @@
-using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 
 namespace ISC.AI.Modules.DocFlow.Domain.Services;
 
-/// <summary>
-/// Контракты ДОКУМЕНТА (ТЗ СКИД §3): черновики регистрации и правки, реестр, карточка.
-/// Разрез по агрегату — тем же швом, что partial-файлы DocumentStore (2026-08-10).
-/// </summary>
+// Контракты ДОКУМЕНТА (ТЗ СКИД §3): черновики регистрации и правки, реестр, карточка.
+// Разрез по агрегату — тем же швом, что partial-файлы DocumentStore (2026-08-10).
+
 /// <summary>Черновик регистрации документа (ТЗ СКИД §3.2). Гриф и подразделение ОБЯЗАТЕЛЬНЫ (ADR-0017 п.5).</summary>
 public sealed record DocumentDraft(
     string? RegNumber,

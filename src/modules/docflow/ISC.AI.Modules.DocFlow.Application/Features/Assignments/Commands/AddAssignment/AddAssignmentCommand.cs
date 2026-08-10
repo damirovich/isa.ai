@@ -1,20 +1,15 @@
 using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Audit;
-using ISC.AI.Abstractions.BackgroundTasks;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.DocFlow.Application.Features.Notifications;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 using ISC.AI.Modules.DocFlow.Domain.Services;
 using Mediator;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace ISC.AI.Modules.DocFlow.Application.Features.Assignments;
 
-/// <summary>
-/// Сценарии НАЗНАЧЕНИЙ (ТЗ СКИД §4): добавление §4.1, смена статуса §4.2/§4.5, продление §4.6,
-/// переназначение §4.7, лента событий §4.8. Выделены из DocumentScenarios по агрегату (2026-08-10) —
-/// тем же разрезом, что partial-файлы DocumentStore.
-/// </summary>
+// Сценарии НАЗНАЧЕНИЙ (ТЗ СКИД §4) лежат соседними срезами: добавление §4.1 (здесь), смена
+// статуса §4.2/§4.5, продление §4.6, переназначение §4.7, лента событий §4.8.
 
 /// <summary>Добавить назначение к уже зарегистрированному документу (§4.1).</summary>
 public sealed record AddAssignmentCommand(int DocumentId, int DivisionId, int? AssigneeUserId, DateOnly? Deadline)

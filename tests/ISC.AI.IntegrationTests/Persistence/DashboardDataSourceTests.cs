@@ -23,7 +23,7 @@ public sealed class DashboardDataSourceTests : IAsyncLifetime
     private static readonly AccessContext Author = new("42", 9, [5, 9]);
     private static readonly DateOnly Today = new(2026, 6, 1);
 
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16").Build();
+    private readonly PostgreSqlContainer _postgres = TestPostgres.Create();
 
     public Task InitializeAsync() => _postgres.StartAsync();
 

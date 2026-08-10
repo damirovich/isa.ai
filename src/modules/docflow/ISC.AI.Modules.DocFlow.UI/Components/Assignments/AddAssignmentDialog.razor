@@ -1,0 +1,103 @@
+@namespace ISC.AI.Modules.DocFlow.UI
+@* Добавление назначения к уже зарегистрированному документу (§4.1). Список подразделений ПОЛНЫЙ:
+   назначение — «кому поручено исполнить», а не поле видимости. Срок здесь всегда индивидуальный —
+   «единый срок» действует только на назначения, созданные при регистрации.
+   Выделен из AssignmentsSection (2026-08-10), конструкция — как у ChangeStatusDialog. *@
+@using ISC.AI.Modules.DocFlow.Application.Features.Assignments
+@using ISC.AI.Modules.DocFlow.Domain.Services
+
+<MudDialog @bind-Visible="_open" Options="AssignmentDialogs.Options">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Добавить назначение</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudSelect T="int?" @bind-Value="_divisionId" Label="Подразделение *" Variant="Variant.Outlined"
+                   Class="mb-2">
+            @foreach (var division in DivisionNames)
+            {
+                <MudSelectItem T="int?" Value="@division.Key">@division.Value</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="int?" @bind-Value="_assigneeUserId" Label="Исполнитель (необязательно)"
+                   Variant="Variant.Outlined" Clearable="true" Class="mb-2"
+                   Disabled="@(_divisionId is null)">
+            @* Только те, кому доступно выбранное подразделение (§4.1). *@
+            @foreach (var user in Candidates(_divisionId))
+            {
+                <MudSelectItem T="int?" Value="@user.Id">@user.Name</MudSelectItem>
+            }
+        </MudSelect>
+        <MudDatePicker @bind-Date="_deadline" Label="Срок (необязательно)" Variant="Variant.Outlined" />
+        <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2 d-block">
+            Исполнителю должно быть разрешено это подразделение — иначе он не увидит порученный документ.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _open = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_divisionId is null)"
+                   OnClick="ConfirmAsync">Добавить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    /// <summary>Идентификатор документа, к которому добавляется назначение.</summary>
+    [Parameter]
+    public int DocumentId { get; set; }
+
+    /// <summary>Названия подразделений (владелец загружает один раз на карточку).</summary>
+    [Parameter]
+    public IReadOnlyDictionary<int, string> DivisionNames { get; set; } = new Dictionary<int, string>();
+
+    /// <summary>
+    /// Кандидаты-исполнители по подразделению — кэш остаётся у секции: им пользуются и этот диалог,
+    /// и переназначение, и держать два кэша значило бы спрашивать сервер дважды об одном.
+    /// </summary>
+    [Parameter]
+    public Func<int?, IReadOnlyList<UserItem>> Candidates { get; set; } = _ => [];
+
+    /// <summary>Назначения изменились — владелец перечитывает карточку.</summary>
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    /// <summary>Отказ или сбой — текст показывает владелец.</summary>
+    [Parameter]
+    public EventCallback<string?> OnError { get; set; }
+
+    private bool _open;
+    private int? _divisionId;
+    private int? _assigneeUserId;
+    private DateTime? _deadline;
+
+    /// <summary>Открывает диалог с чистой формой.</summary>
+    public void Open()
+    {
+        _divisionId = null;
+        _assigneeUserId = null;
+        _deadline = null;
+        _open = true;
+        StateHasChanged();
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (_divisionId is not { } divisionId)
+        {
+            return;
+        }
+
+        _open = false;
+
+        // Прежняя ошибка гаснет при новой попытке (аналог _error = null старой секции).
+        await OnError.InvokeAsync(null);
+
+        var response = await Dispatcher.Send(new AddAssignmentCommand(
+            DocumentId, divisionId, _assigneeUserId,
+            _deadline is { } deadline ? DateOnly.FromDateTime(deadline) : null));
+        if (!response.Status)
+        {
+            await OnError.InvokeAsync(response.StatusMessage);
+        }
+
+        await OnChanged.InvokeAsync();
+    }
+}

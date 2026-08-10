@@ -1,12 +1,12 @@
 using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.Security;
+using ISC.AI.IntegrationTests.Persistence;
 using ISC.AI.Persistence;
 using ISC.AI.Persistence.Entities;
 using ISC.AI.Web.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
-using Pgvector.EntityFrameworkCore;
 using Shouldly;
 using Testcontainers.PostgreSql;
 
@@ -21,7 +21,7 @@ namespace ISC.AI.IntegrationTests.Security;
 [Trait("Category", "Gate")]
 public sealed class LoginServiceTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:pg16").Build();
+    private readonly PostgreSqlContainer _postgres = TestPostgres.Create();
 
     public Task InitializeAsync() => _postgres.StartAsync();
 
@@ -30,7 +30,7 @@ public sealed class LoginServiceTests : IAsyncLifetime
     [Fact(DisplayName = "Переиспользованный логин с чужим ExternalId НЕ наследует допуск — вход отклонён")]
     public async Task Reused_login_with_foreign_ExternalId_is_rejected_not_rebound()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         int predecessorUserId;
         await using (var db = factory.CreateDbContext())
         {
@@ -76,7 +76,7 @@ public sealed class LoginServiceTests : IAsyncLifetime
     [Fact(DisplayName = "Новый ExternalId без коллизии имени — JIT-создание БЕЗ допуска (default-deny)")]
     public async Task New_external_id_without_collision_creates_user_without_clearance()
     {
-        var factory = new TestContextFactory(_postgres.GetConnectionString());
+        var factory = new CoreContextFactory(_postgres.GetConnectionString());
         await using (var db = factory.CreateDbContext())
         {
             await db.Database.MigrateAsync();
@@ -99,17 +99,4 @@ public sealed class LoginServiceTests : IAsyncLifetime
         user.Clearance.ShouldBeNull(); // default-deny: retrieval невозможен до назначения допуска
     }
 
-    // Контекст с теми же опциями, что в проде (snake_case + pgvector).
-    private sealed class TestContextFactory(string connectionString) : IDbContextFactory<CoreDbContext>
-    {
-        public CoreDbContext CreateDbContext() =>
-            new(new DbContextOptionsBuilder<CoreDbContext>()
-                .UseNpgsql(connectionString, npg =>
-                {
-                    npg.MigrationsHistoryTable("__ef_migrations_history", CoreDbContext.Schema);
-                    npg.UseVector();
-                })
-                .UseSnakeCaseNamingConvention()
-                .Options);
-    }
 }
