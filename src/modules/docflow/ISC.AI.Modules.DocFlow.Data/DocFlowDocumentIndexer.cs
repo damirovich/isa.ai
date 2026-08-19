@@ -87,7 +87,7 @@ public sealed class DocFlowDocumentIndexer(
                 text,
                 document.Classification,
                 document.DivisionId,
-                Source: "Документооборот",
+                Source: CorpusSources.DocFlow,
                 DocDate: document.RegDate,
                 Metadata: new Dictionary<string, string>
                 {

@@ -64,10 +64,9 @@
             <MudTextField @bind-Value="_docType" Label="Тип документа" Variant="Variant.Outlined" Disabled="Runner.IsRunning"
                           HelperText="для API берётся из данных источника, если пусто" />
         </MudItem>
-        <MudItem xs="6" sm="4">
-            <MudNumericField @bind-Value="_divisionId" Label="Подразделение (DivisionId)" Variant="Variant.Outlined" Min="0" Disabled="Runner.IsRunning" />
-        </MudItem>
-        <MudItem xs="6" sm="4">
+        @* Подразделения здесь нет намеренно: сборщик вне контура и справочника не видит —
+           его выбирают при импорте пакета в «Загрузке корпуса» (см. SourceConfig). *@
+        <MudItem xs="12" sm="8">
             <MudNumericField @bind-Value="_maxDocuments" Label="Максимум документов" Variant="Variant.Outlined" Min="1" Disabled="@(Runner.IsRunning || _collectAll)" />
         </MudItem>
         <MudItem xs="12">
@@ -189,7 +188,6 @@ else if (Runner.Status == HarvestStatus.Failed)
     private string _connectorId = string.Empty;
     private string _seedUrl = string.Empty;
     private string _docType = "нпа";
-    private int _divisionId = 1;
     private int _maxDocuments = 20;
     private bool _collectAll;
     private const short OpenClassification = 0; // вне контура — только открытые материалы
@@ -253,7 +251,7 @@ else if (Runner.Status == HarvestStatus.Failed)
             : null;
 
         var config = new SourceConfig(
-            _seedUrl, _docType, OpenClassification, _divisionId,
+            _seedUrl, _docType, OpenClassification,
             MaxDocuments: _collectAll ? int.MaxValue : _maxDocuments,
             Rules: rules,
             StartPage: startPage);

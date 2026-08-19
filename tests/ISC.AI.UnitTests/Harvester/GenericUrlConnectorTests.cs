@@ -15,7 +15,7 @@ public sealed class GenericUrlConnectorTests
         var pages = new Dictionary<string, string> { ["http://example/doc"] = html };
         var connector = new GenericUrlConnector(new FakePageFetcherFactory(pages), new HtmlContentExtractor());
 
-        var config = new SourceConfig("http://example/doc", DocType: "положение", Classification: 0, DivisionId: 7, Language: "ru");
+        var config = new SourceConfig("http://example/doc", DocType: "положение", Classification: 0, Language: "ru");
 
         var docs = new List<HarvestedDocument>();
         await foreach (var doc in connector.HarvestAsync(config))
@@ -28,7 +28,7 @@ public sealed class GenericUrlConnectorTests
         docs[0].Text.ShouldContain("Текст НПА.");
         docs[0].DocType.ShouldBe("положение");
         docs[0].Classification.ShouldBe((short?)0);
-        docs[0].DivisionId.ShouldBe(7);
+        docs[0].DivisionId.ShouldBeNull(); // подразделение выбирается при импорте внутри контура
         docs[0].SourceUrl.ShouldBe("http://example/doc");
         docs[0].ContentHash.ShouldNotBeNullOrWhiteSpace();
     }

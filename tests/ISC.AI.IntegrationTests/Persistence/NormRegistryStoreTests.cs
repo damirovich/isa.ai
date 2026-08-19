@@ -117,6 +117,18 @@ public sealed class NormRegistryStoreTests : IAsyncLifetime
         // 7) Чужая редакция: привязка к редакции другой нормы отклоняется.
         var (_, otherNormId) = await store.CreateAsync("КЗ-1", "Другой закон");
         (await store.LinkDocumentAsync(otherNormId, revisionId, coreDocumentId)).Result.ShouldBe(NormWriteResult.NotFound);
+
+        // 8) Документ ДОКУМЕНТООБОРОТА (Source = CorpusSources.DocFlow) — не нормативный материал:
+        //    не предлагается кандидатом и не привязывается даже прямым вызовом (мимо диалога).
+        var docflowIngested = await port.IngestAsync(new IngestionRequest(
+            "поручение", "П-7 · Проверить склад", "Поручаю провести проверку склада до 1 сентября.",
+            Classification: 0, DivisionId: 10, Source: CorpusSources.DocFlow));
+        var docflowDocumentId = docflowIngested.DocumentId!.Value;
+        (await store.SearchCorpusDocumentsAsync(otherNormId, "склад", FullAccess))
+            .ShouldNotContain(c => c.DocumentId == docflowDocumentId);
+        var (_, otherRevisionId) = await store.AddRevisionAsync(otherNormId, new DateOnly(2026, 2, 1));
+        (await store.LinkDocumentAsync(otherNormId, otherRevisionId, docflowDocumentId)).Result
+            .ShouldBe(NormWriteResult.NotFound);
     }
 
     [Fact(DisplayName = "GATE-3 на привязке: документ, привязанный к УТРАТИВШЕЙ СИЛУ редакции, гаснет сразу (hide-first)")]

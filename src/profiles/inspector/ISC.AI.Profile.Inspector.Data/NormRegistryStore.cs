@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ISC.AI.Abstractions.Corpus;
+using ISC.AI.Abstractions.Ingestion;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Persistence;
 using ISC.AI.Profile.Inspector.Domain.Entities;
@@ -307,9 +308,18 @@ public sealed class NormRegistryStore(
         {
             var document = await core.Documents.AsNoTracking()
                 .Where(d => d.Id == coreDocumentId)
-                .Select(d => new { d.SupersededByDocumentId })
+                .Select(d => new { d.SupersededByDocumentId, d.Source })
                 .FirstOrDefaultAsync(cancellationToken);
             if (document is null || document.SupersededByDocumentId is not null)
+            {
+                return (NormWriteResult.NotFound, 0);
+            }
+
+            // Документы ДОКУМЕНТООБОРОТА к норме не привязываются (и не предлагаются диалогом):
+            // поручение или письмо — делопроизводство, а не редакция закона; утрата силы нормы
+            // не должна прятать их из поиска. Проверка ЗДЕСЬ, а не только в диалоге, — команду
+            // можно вызвать и мимо диалога.
+            if (document.Source == CorpusSources.DocFlow)
             {
                 return (NormWriteResult.NotFound, 0);
             }
@@ -376,6 +386,8 @@ public sealed class NormRegistryStore(
             // Погашенные заменой не предлагаются (текст уже заменён), пустые — тоже (привязка
             // без единого фрагмента ничего не даёт и всё равно будет отклонена).
             .Where(d => d.SupersededByDocumentId == null && d.Chunks.Any())
+            // Документы документооборота — не нормативный материал (см. LinkDocumentAsync).
+            .Where(d => d.Source != CorpusSources.DocFlow)
             .Where(d => !linkedIds.Contains(d.Id));
 
         if (!string.IsNullOrWhiteSpace(text))

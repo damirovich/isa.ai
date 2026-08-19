@@ -30,7 +30,7 @@ public sealed class ConfigurableSiteConnectorTests
     {
         var connector = new ConfigurableSiteConnector(new FakePageFetcherFactory(Pages));
         var rules = new SiteRules(ItemLinkSelector: "a.doc", TitleSelector: "h1.t", BodySelector: "div.c", MaxPages: 1);
-        var config = new SourceConfig("http://site/list", "закон", Classification: 0, DivisionId: 7, MaxDocuments: 10, Language: "ru", Rules: rules);
+        var config = new SourceConfig("http://site/list", "закон", Classification: 0, MaxDocuments: 10, Language: "ru", Rules: rules);
 
         var docs = new List<HarvestedDocument>();
         await foreach (var doc in connector.HarvestAsync(config))
@@ -43,7 +43,7 @@ public sealed class ConfigurableSiteConnectorTests
         docs[0].Title.ShouldBe("Закон 1");
         docs[0].Text.ShouldContain("Текст закона 1.");
         docs[0].DocType.ShouldBe("закон");
-        docs[0].DivisionId.ShouldBe(7);
+        docs[0].DivisionId.ShouldBeNull(); // подразделение выбирается при импорте внутри контура
         docs[1].Title.ShouldBe("Закон 2");
     }
 
@@ -62,7 +62,7 @@ public sealed class ConfigurableSiteConnectorTests
         };
 
         var rules = new SiteRules(ItemLinkSelector: "a.doc", TitleSelector: "h1.t", BodySelector: "div.c", PageParam: "page");
-        var config = new SourceConfig("http://site/list?page=1", "закон", Classification: 0, DivisionId: 1, MaxDocuments: 3, Rules: rules);
+        var config = new SourceConfig("http://site/list?page=1", "закон", Classification: 0, MaxDocuments: 3, Rules: rules);
 
         var docs = new List<HarvestedDocument>();
         await foreach (var doc in new ConfigurableSiteConnector(new FakePageFetcherFactory(pages)).HarvestAsync(config))
@@ -87,7 +87,7 @@ public sealed class ConfigurableSiteConnectorTests
         };
 
         var rules = new SiteRules(ItemLinkSelector: "a.doc", TitleSelector: "h1.t", BodySelector: "div.c", PageParam: "page");
-        var config = new SourceConfig("http://site/list?page=1", "закон", Classification: 0, DivisionId: 1, MaxDocuments: 100, Rules: rules);
+        var config = new SourceConfig("http://site/list?page=1", "закон", Classification: 0, MaxDocuments: 100, Rules: rules);
 
         var docs = new List<HarvestedDocument>();
         await foreach (var doc in new ConfigurableSiteConnector(new FakePageFetcherFactory(pages)).HarvestAsync(config))
@@ -102,7 +102,7 @@ public sealed class ConfigurableSiteConnectorTests
     public async Task Without_rules_throws()
     {
         var connector = new ConfigurableSiteConnector(new FakePageFetcherFactory(Pages));
-        var config = new SourceConfig("http://site/list", "закон", Classification: 0, DivisionId: 7);
+        var config = new SourceConfig("http://site/list", "закон", Classification: 0);
 
         await Should.ThrowAsync<InvalidOperationException>(async () =>
         {
@@ -119,7 +119,7 @@ public sealed class ConfigurableSiteConnectorTests
         var rules = new SiteRules(
             ItemLinkSelector: "a.doc", TitleSelector: "h1.t", BodySelector: "div.c", MaxPages: 1,
             RenderMode: RenderMode.Headless, ReadySelector: "div.c");
-        var config = new SourceConfig("http://site/list", "закон", Classification: 0, DivisionId: 7, MaxDocuments: 10, Rules: rules);
+        var config = new SourceConfig("http://site/list", "закон", Classification: 0, MaxDocuments: 10, Rules: rules);
 
         var docs = new List<HarvestedDocument>();
         await foreach (var doc in new ConfigurableSiteConnector(factory).HarvestAsync(config))
@@ -151,7 +151,7 @@ public sealed class ConfigurableSiteConnectorTests
         };
 
         var preset = SitePresets.All.First(p => p.Name.Contains("gov.kg", StringComparison.Ordinal));
-        var config = new SourceConfig(preset.SuggestedSeedUrl, preset.DocType, Classification: 0, DivisionId: 7, MaxDocuments: 10, Rules: preset.Rules);
+        var config = new SourceConfig(preset.SuggestedSeedUrl, preset.DocType, Classification: 0, MaxDocuments: 10, Rules: preset.Rules);
 
         var docs = new List<HarvestedDocument>();
         await foreach (var doc in new ConfigurableSiteConnector(new FakePageFetcherFactory(pages)).HarvestAsync(config))

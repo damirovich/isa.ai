@@ -77,7 +77,7 @@ public sealed class CbdApiConnector(HttpClient httpClient, IContentExtractor ext
                     DocType: string.IsNullOrWhiteSpace(item.Vid) ? config.DocType : item.Vid!,
                     ContentHash: Hash(text),
                     Classification: config.Classification,
-                    DivisionId: config.DivisionId,
+                    DivisionId: null, // выбирается при импорте внутри контура (SourceConfig)
                     Language: "ru",
                     Metadata: new Dictionary<string, string>
                     {

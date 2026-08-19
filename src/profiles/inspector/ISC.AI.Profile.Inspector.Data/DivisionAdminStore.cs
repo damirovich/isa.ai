@@ -13,6 +13,12 @@ public sealed class DivisionAdminStore(
     IDivisionUsage divisionUsage) : IDivisionAdminStore
 {
     /// <inheritdoc />
+    public async Task<bool> ExistsActiveAsync(int id, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        return await db.Divisions.AsNoTracking().AnyAsync(d => d.Id == id && d.IsActive, cancellationToken);
+    }
+
     public async Task<IReadOnlyList<DivisionNode>> ListAsync(CancellationToken cancellationToken = default)
     {
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);

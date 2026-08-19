@@ -19,7 +19,8 @@ public sealed class BundleImporter(IIngestionPort port) : IBundleImporter
     private static readonly JsonSerializerOptions Options = new() { PropertyNameCaseInsensitive = true };
 
     /// <inheritdoc />
-    public async Task<BundleImportResult> ImportAsync(string manifestPath, CancellationToken cancellationToken = default)
+    public async Task<BundleImportResult> ImportAsync(
+        string manifestPath, int? divisionId = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);
 
@@ -37,7 +38,8 @@ public sealed class BundleImporter(IIngestionPort port) : IBundleImporter
                     Title: document.Title,
                     Text: document.Text,
                     Classification: document.Classification,
-                    DivisionId: document.DivisionId,
+                    // Перекрытие оператора важнее номера из пакета (см. IBundleImporter).
+                    DivisionId: divisionId ?? document.DivisionId,
                     Source: document.SourceUrl,
                     Metadata: document.Metadata),
                 cancellationToken);

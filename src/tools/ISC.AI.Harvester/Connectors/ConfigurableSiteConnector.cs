@@ -76,7 +76,7 @@ public sealed class ConfigurableSiteConnector(IPageFetcherFactory fetcherFactory
                     DocType: config.DocType,
                     ContentHash: Hash(text),
                     Classification: config.Classification,
-                    DivisionId: config.DivisionId,
+                    DivisionId: null, // выбирается при импорте внутри контура (SourceConfig)
                     Language: config.Language);
             }
 
