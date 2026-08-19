@@ -41,6 +41,9 @@ public sealed class BundleImporter(IIngestionPort port) : IBundleImporter
                     // Перекрытие оператора важнее номера из пакета (см. IBundleImporter).
                     DivisionId: divisionId ?? document.DivisionId,
                     Source: document.SourceUrl,
+                    // Пакет даты не несёт (ЦБД отдаёт только заголовок) — берём из заголовка, где она
+                    // у НПА всегда есть («от 28 октября 2021 года»); не распознана — null, не отказ.
+                    DocDate: TitleDateParser.TryParse(document.Title),
                     Metadata: document.Metadata),
                 cancellationToken);
 

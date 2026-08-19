@@ -1,0 +1,78 @@
+/* «Лист документа»: вид НПА как на сайте ЦБД Минюста — белый лист, засечки, документная вёрстка.
+   Стиль намеренно локален этому компоненту (scoped): остальные страницы профиля — в общей теме MudBlazor,
+   а читать закон удобнее на «бумаге», независимо от тёмной/светлой темы приложения. */
+.legal-sheet {
+    background: #fff;
+    color: #111;
+    font-family: "Times New Roman", Times, Georgia, serif;
+    font-size: 15px;
+    line-height: 1.45;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 40px 56px 48px;
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: 4px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .12);
+}
+
+.emblem {
+    display: block;
+    width: 96px;
+    height: auto;
+    margin: 0 auto 18px;
+}
+
+.fragment {
+    position: relative;
+    margin-bottom: 2px;
+}
+
+.fragment-superseded {
+    opacity: .6;
+}
+
+.fragment-mark {
+    display: block;
+    text-align: right;
+    font-family: system-ui, sans-serif;
+    font-size: .65rem;
+    color: #888;
+    margin: 2px 0 6px;
+}
+
+.legal-sheet p {
+    margin: 0 0 6px;
+}
+
+/* Шапка акта и части: «КОДЕКС КЫРГЫЗСКОЙ РЕСПУБЛИКИ», «от 31 июля 2025 года № 178», «ОБЩАЯ ЧАСТЬ» */
+.title {
+    text-align: center;
+    font-weight: bold;
+    margin: 14px 0 10px !important;
+}
+
+/* Разделы и главы: «РАЗДЕЛ I. …», «Глава 1. Общие положения» */
+.section {
+    text-align: center;
+    font-weight: bold;
+    margin: 18px 0 8px !important;
+}
+
+/* Статьи: «Статья 1. Определение основных понятий…» */
+.article {
+    font-weight: bold;
+    margin: 14px 0 4px !important;
+    text-indent: 2em;
+}
+
+/* Абзацы — по ширине, с красной строкой */
+.para {
+    text-align: justify;
+    text-indent: 2em;
+}
+
+/* Примечания о редакциях — курсивом, как на сайте */
+.note {
+    font-style: italic;
+    text-indent: 2em;
+}

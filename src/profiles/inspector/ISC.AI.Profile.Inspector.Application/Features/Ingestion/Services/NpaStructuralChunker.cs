@@ -112,11 +112,7 @@ public sealed partial class NpaStructuralChunker : ITextChunker
             if (paragraph.Length > HardMaxChars)
             {
                 Flush(chunks, current);
-                for (var offset = 0; offset < paragraph.Length; offset += HardMaxChars)
-                {
-                    chunks.Add(paragraph.Substring(offset, Math.Min(HardMaxChars, paragraph.Length - offset)));
-                }
-
+                chunks.AddRange(SplitLongParagraph(paragraph));
                 continue;
             }
 
@@ -137,6 +133,59 @@ public sealed partial class NpaStructuralChunker : ITextChunker
         return chunks;
     }
 
+    /// <summary>
+    /// Длинный абзац (без пустых строк внутри) режется по ГРАНИЦАМ, не по длине: сначала по концу
+    /// предложения, если его нет в окне — по пробелу, и только для слова длиннее окна — по длине.
+    /// Раньше резалось Substring'ом по HardMaxChars — посреди слова («…бюджет Кыргызско» / «й Республики…»),
+    /// и такой обрывок был мусором для поиска.
+    /// </summary>
+    private static List<string> SplitLongParagraph(string paragraph)
+    {
+        var pieces = new List<string>();
+        var start = 0;
+        while (start < paragraph.Length)
+        {
+            var remaining = paragraph.Length - start;
+            if (remaining <= HardMaxChars)
+            {
+                pieces.Add(paragraph[start..].Trim());
+                break;
+            }
+
+            var windowEnd = start + HardMaxChars;
+            var cut = LastBoundary(paragraph, start, windowEnd, SentenceEnd)
+                ?? LastBoundary(paragraph, start, windowEnd, char.IsWhiteSpace)
+                ?? windowEnd;
+            var piece = paragraph[start..cut].Trim();
+            if (piece.Length > 0)
+            {
+                pieces.Add(piece);
+            }
+
+            start = cut;
+        }
+
+        return pieces;
+    }
+
+    // Последняя позиция в окне [from, to), ПОСЛЕ которой можно резать; не ближе половины окна к началу —
+    // иначе один ранний знак препинания давал бы крошечный кусок и гигантский хвост.
+    private static int? LastBoundary(string text, int from, int to, Func<char, bool> isBoundary)
+    {
+        var minimum = from + HardMaxChars / 2;
+        for (var i = to - 1; i > minimum; i--)
+        {
+            if (isBoundary(text[i]))
+            {
+                return i + 1;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool SentenceEnd(char ch) => ch is '.' or ';' or '!' or '?';
+
     private static void Flush(List<string> chunks, StringBuilder buffer)
     {
         if (buffer.Length > 0)
@@ -146,8 +195,11 @@ public sealed partial class NpaStructuralChunker : ITextChunker
         }
     }
 
-    // Заголовок структурной единицы НПА в начале строки: «Статья 5», «Глава 2», «Раздел 3».
-    [GeneratedRegex(@"^[ \t]*(?:Стать[яи]|Глава|Раздел)\b[ \t]+\d+", RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    // Заголовок структурной единицы НПА: «Статья 5.», «Глава II», «Раздел 3» — в начале строки ИЛИ
+    // внутри строки (пакеты, собранные до сохранения структуры, шли одной строкой). Внутри строки
+    // требуется заглавная буква и точка/перенос после номера — ссылка «в статье 3 настоящего Закона»
+    // (строчная, без точки) заголовком не считается. Номер главы/раздела может быть римским.
+    [GeneratedRegex(@"(?:^[ \t]*|(?<=[\s.;:)]))(?:Статья|Глава|Раздел|СТАТЬЯ|ГЛАВА|РАЗДЕЛ)\s+(?:\d+|[IVXLC]+)(?:[-–]\d+)?(?=\s*[.\n]|\s*$)", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex StructureHeader();
 
     // Разделитель абзацев — пустая строка.

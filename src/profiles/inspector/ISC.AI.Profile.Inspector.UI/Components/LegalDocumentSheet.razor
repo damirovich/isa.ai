@@ -1,0 +1,165 @@
+@namespace ISC.AI.Profile.Inspector.UI
+@* «Лист документа» — текст НПА в привычном юристам виде, как на сайте ЦБД Минюста: белый лист,
+   шрифт с засечками, центрированные шапка/разделы/главы, жирные «Статья N.», абзацы с красной
+   строкой по ширине, термины в перечнях определений («1) термин - …») — жирным. Данные — чистый
+   текст фрагментов корпуса; вся «вёрстка» — правила показа, в корпусе разметка не хранится
+   (осознанно: корпус — для поиска). Метки фрагментов — мелко справа: по ним видно, какой кусок
+   погашен или процитирован в справке. Утративший силу фрагмент — приглушён и помечен. *@
+@using ISC.AI.Profile.Inspector.Domain.Services
+
+<div class="legal-sheet">
+    @if (!string.IsNullOrWhiteSpace(EmblemUrl))
+    {
+        <img class="emblem" src="@EmblemUrl" alt="" />
+    }
+    @foreach (var fragment in Fragments)
+    {
+        <div class="@(fragment.IsCurrent ? "fragment" : "fragment fragment-superseded")">
+            @if (!fragment.IsCurrent)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Class="ma-0 mb-1">УТРАТИЛ СИЛУ</MudChip>
+            }
+            @foreach (var rawLine in fragment.Text.Split('\n'))
+            {
+                var line = rawLine.Trim();
+                @if (line.Length == 0)
+                {
+                    continue;
+                }
+                @switch (Classify(line))
+                {
+                    case LineKind.Title:
+                        <p class="title">@line</p>
+                        break;
+                    case LineKind.Section:
+                        <p class="section">@line</p>
+                        break;
+                    case LineKind.Article:
+                        <p class="article">@line</p>
+                        break;
+                    case LineKind.Definition:
+                        var (number, term, definition) = SplitDefinition(line);
+                        <p class="para">@number<b>@term</b>@definition</p>
+                        break;
+                    case LineKind.Note:
+                        <p class="note">@line</p>
+                        break;
+                    default:
+                        <p class="para">@line</p>
+                        break;
+                }
+            }
+            <span class="fragment-mark">фрагмент @(fragment.Ordinal + 1) из @Fragments.Count</span>
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>Фрагменты документа по порядку (единицы корпуса).</summary>
+    [Parameter]
+    public IReadOnlyList<CorpusDocumentFragment> Fragments { get; set; } = [];
+
+    /// <summary>Герб над текстом (как на сайте ЦБД); путь задаёт страница — компонент о статике хоста не знает.</summary>
+    [Parameter]
+    public string? EmblemUrl { get; set; }
+
+    private enum LineKind { Para, Title, Section, Article, Definition, Note }
+
+    // Правила показа — те же формы, что распознаёт чанкер НПА (Статья/Глава/Раздел), плюс две
+    // чисто визуальные: строка в ВЕРХНЕМ РЕГИСТРЕ — заголовок шапки («КОДЕКС КЫРГЫЗСКОЙ РЕСПУБЛИКИ»,
+    // «ОБЩАЯ ЧАСТЬ»), скобочная строка «(В редакции … )» — примечание курсивом.
+    private static LineKind Classify(string line)
+    {
+        if (line.Length <= 120)
+        {
+            if (line.StartsWith("Статья ", StringComparison.Ordinal) || line.StartsWith("СТАТЬЯ ", StringComparison.Ordinal))
+            {
+                return LineKind.Article;
+            }
+
+            if (line.StartsWith("Глава ", StringComparison.Ordinal) || line.StartsWith("Раздел ", StringComparison.Ordinal)
+                || line.StartsWith("ГЛАВА ", StringComparison.Ordinal) || line.StartsWith("РАЗДЕЛ ", StringComparison.Ordinal)
+                || line.StartsWith("Часть ", StringComparison.Ordinal) || line.StartsWith("ЧАСТЬ ", StringComparison.Ordinal)
+                || line.StartsWith("Параграф ", StringComparison.Ordinal) || line.StartsWith("§", StringComparison.Ordinal))
+            {
+                return LineKind.Section;
+            }
+
+            if (line.StartsWith("от ", StringComparison.Ordinal) && line.Contains(" года", StringComparison.Ordinal))
+            {
+                return LineKind.Title; // «от 31 июля 2025 года № 178» под названием акта
+            }
+
+            if (IsUpperHeading(line))
+            {
+                return LineKind.Title;
+            }
+        }
+
+        if (line.StartsWith('(') && line.EndsWith(')') && line.Contains("редакци", StringComparison.OrdinalIgnoreCase))
+        {
+            return LineKind.Note;
+        }
+
+        return IsDefinition(line) ? LineKind.Definition : LineKind.Para;
+    }
+
+    // Строка целиком в верхнем регистре с хотя бы одной буквой — заголовок шапки/части.
+    private static bool IsUpperHeading(string line)
+    {
+        var letters = 0;
+        foreach (var ch in line)
+        {
+            if (char.IsLetter(ch))
+            {
+                if (char.IsLower(ch))
+                {
+                    return false;
+                }
+
+                letters++;
+            }
+        }
+
+        return letters >= 3;
+    }
+
+    // Перечень определений: «3) аккредитация удостоверяющего центра - признание …» — термин до тире.
+    private static bool IsDefinition(string line) =>
+        line.Length > 4 && char.IsDigit(line[0]) && line.Contains(") ", StringComparison.Ordinal)
+        && DefinitionSeparatorIndex(line) > 0;
+
+    private static int DefinitionSeparatorIndex(string line)
+    {
+        var close = line.IndexOf(") ", StringComparison.Ordinal);
+        if (close < 0 || close > 5)
+        {
+            return -1;
+        }
+
+        // Тире-разделитель — в первых ~120 символах после номера, иначе это не определение, а пункт.
+        foreach (var separator in new[] { " - ", " — ", " – " })
+        {
+            var index = line.IndexOf(separator, close, StringComparison.Ordinal);
+            if (index > close && index - close <= 120)
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    // «3) аккредитация центра - признание…» → номер «3) » обычным, термин жирным, определение обычным (как на сайте).
+    private static (string Number, string Term, string Definition) SplitDefinition(string line)
+    {
+        var index = DefinitionSeparatorIndex(line);
+        if (index <= 0)
+        {
+            return (string.Empty, line, string.Empty);
+        }
+
+        var numberEnd = line.IndexOf(") ", StringComparison.Ordinal) + 2;
+        return (line[..numberEnd], line[numberEnd..index], line[index..]);
+    }
+}

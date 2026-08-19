@@ -1,0 +1,169 @@
+@namespace ISC.AI.Profile.Inspector.UI
+@* Содержимое карточки документа корпуса НПА: статус, реквизиты, нормы картотеки, лист документа.
+   Один компонент — два места показа: страница /npa/documents/{id} (прямые ссылки из чата и поиска)
+   и диалог на каталоге «Базы НПА» (быстрый просмотр без ухода со списка). Загрузку делает сам:
+   владельцу достаточно передать DocumentId. *@
+@inject NavigationManager Navigation
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Profile.Inspector.Application.Features.Catalog
+@using ISC.AI.Profile.Inspector.Domain.Services
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@if (_busy && _details is null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-2" />
+}
+else if (_details is null)
+{
+    @if (_error is null)
+    {
+        <MudText Typo="Typo.body1" Class="pa-4">Документ не найден.</MudText>
+    }
+}
+else
+{
+    @* Шапка, реквизиты и лист — одной колонкой ширины листа (960px, как .legal-sheet), по центру:
+       растянутая на весь экран шапка над узким листом выглядела чужой. *@
+    <div style="max-width:960px; margin:0 auto;">
+    <div class="d-flex gap-2 mb-3 flex-wrap align-center">
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                 Color="@NpaSearch.CurrencyColor(_details.Currency)"
+                 Icon="@NpaSearch.CurrencyIcon(_details.Currency)">
+            @NpaSearch.CurrencyLabel(_details.Currency)
+        </MudChip>
+        @if (_details.SupersededByDocumentId is { } successorId)
+        {
+            <MudButton Variant="Variant.Text" Size="Size.Small" EndIcon="@Icons.Material.Filled.ArrowForward"
+                       OnClick="@(() => OnNavigateToDocument.InvokeAsync(successorId))">
+                Заменён новой версией — документ #@successorId
+            </MudButton>
+        }
+    </div>
+
+    <MudPaper Outlined="true" Class="pa-3 mb-3">
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="6" md="3">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Вид акта</MudText>
+                <MudText Typo="Typo.body2">@_details.DocType</MudText>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Дата</MudText>
+                <MudText Typo="Typo.body2">@(_details.DocDate?.ToString("dd.MM.yyyy") ?? "—")</MudText>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Гриф</MudText>
+                <MudText Typo="Typo.body2">@(_details.Classification == 0 ? "открыто" : $"ДСП · {_details.Classification}")</MudText>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Загружен в корпус</MudText>
+                <MudText Typo="Typo.body2">@_details.LoadedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudText>
+            </MudItem>
+            @if (!string.IsNullOrWhiteSpace(_details.Source))
+            {
+                <MudItem xs="12">
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">Источник</MudText>
+                    <MudText Typo="Typo.body2" Style="word-break:break-all;">@_details.Source</MudText>
+                </MudItem>
+            }
+            @if (_details.LinkedNorms.Count > 0)
+            {
+                <MudItem xs="12">
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">В картотеке НПА</MudText>
+                    <div class="d-flex gap-2 flex-wrap mt-1">
+                        @foreach (var norm in _details.LinkedNorms)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                     OnClick="@(() => Navigation.NavigateTo($"/norms/{norm.NormId}"))">
+                                @norm.Identifier — @norm.Title
+                            </MudChip>
+                        }
+                    </div>
+                </MudItem>
+            }
+        </MudGrid>
+    </MudPaper>
+
+    @if (_details.Currency != CorpusDocumentCurrency.Current)
+    {
+        <MudAlert Severity="@(_details.Currency == CorpusDocumentCurrency.NoText ? Severity.Info : Severity.Warning)"
+                  Variant="Variant.Outlined" Dense="true" Class="mb-3">
+            @(_details.Currency switch
+            {
+                CorpusDocumentCurrency.Superseded => "Текст утратил силу: в поиске по смыслу и ответах ассистента он не выдаётся как действующий.",
+                CorpusDocumentCurrency.NoText => "Текст не извлёкся при загрузке (например, скан без текстового слоя): в поиск документ не попадает.",
+                _ => "Часть фрагментов утратила силу — они помечены ниже и не выдаются как действующие.",
+            })
+        </MudAlert>
+    }
+
+    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-1">Фрагментов корпуса: @_details.Fragments.Count</MudText>
+    <LegalDocumentSheet Fragments="_details.Fragments" EmblemUrl="@EmblemUrl" />
+    </div>
+}
+
+@code {
+    /// <summary>Идентификатор документа корпуса.</summary>
+    [Parameter]
+    public int DocumentId { get; set; }
+
+    /// <summary>Герб над текстом (путь в статике хоста); пусто — без герба.</summary>
+    [Parameter]
+    public string? EmblemUrl { get; set; }
+
+    /// <summary>Переход к другому документу (преемнику) — владелец решает, как: сменить маршрут или перезагрузить диалог.</summary>
+    [Parameter]
+    public EventCallback<int> OnNavigateToDocument { get; set; }
+
+    /// <summary>Заголовок загруженного документа — владельцу для шапки страницы/диалога.</summary>
+    [Parameter]
+    public EventCallback<CorpusDocumentDetails> OnLoaded { get; set; }
+
+    private CorpusDocumentDetails? _details;
+    private bool _busy;
+    private string? _error;
+    private int _loadedId;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Перезагрузка только при смене документа — не на каждом рендере владельца.
+        if (_loadedId != DocumentId)
+        {
+            _loadedId = DocumentId;
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _busy = true;
+        _error = null;
+        _details = null;
+        try
+        {
+            var response = await Dispatcher.Send(new GetCorpusDocumentQuery(DocumentId));
+            _details = response is { Status: true, Data: { } details } ? details : null;
+            if (response is { Status: false } && response.StatusCode != ResponseStatusCode.NotFound)
+            {
+                _error = response.StatusMessage;
+            }
+
+            if (_details is not null)
+            {
+                await OnLoaded.InvokeAsync(_details);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка загрузки: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

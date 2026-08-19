@@ -65,8 +65,10 @@ public sealed class ConfigurableSiteConnector(IPageFetcherFactory fetcherFactory
                 var document = Parser.ParseDocument(await fetcher.GetHtmlAsync(documentUrl, rules.ReadySelector, cancellationToken));
 
                 var title = SelectText(document, rules.TitleSelector) ?? document.Title ?? documentUrl;
-                var rawText = SelectText(document, rules.BodySelector) ?? document.Body?.TextContent ?? string.Empty;
-                var text = TextNormalizer.Collapse(rawText);
+                // Текст — СО СТРУКТУРОЙ (абзацы, строки таблиц): иначе слова на стыках блоков
+                // склеиваются, а чанкер НПА не находит «Статья N» в начале строки (см. HtmlContentExtractor).
+                var bodyNode = (INode?)SelectNode(document, rules.BodySelector) ?? document.Body;
+                var text = bodyNode is null ? string.Empty : HtmlContentExtractor.StructuredText(bodyNode);
 
                 collected++;
                 yield return new HarvestedDocument(
@@ -86,6 +88,9 @@ public sealed class ConfigurableSiteConnector(IPageFetcherFactory fetcherFactory
 
     private static string? SelectText(IDocument document, string? selector) =>
         string.IsNullOrWhiteSpace(selector) ? null : document.QuerySelector(selector)?.TextContent;
+
+    private static IElement? SelectNode(IDocument document, string? selector) =>
+        string.IsNullOrWhiteSpace(selector) ? null : document.QuerySelector(selector);
 
     private static string? NextPage(IDocument listDocument, SiteRules rules, string currentUrl)
     {
