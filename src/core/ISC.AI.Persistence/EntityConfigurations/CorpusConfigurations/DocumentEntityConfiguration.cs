@@ -36,6 +36,12 @@ public class DocumentEntityConfiguration : IEntityTypeConfiguration<DocumentEnti
         // Индекс под фильтр доступа на извлечении (ТБ-020).
         builder.HasIndex(e => new { e.Classification, e.DivisionId });
 
+        // Под каталог НПА на корпусе 200К+ (2026-08-19): фильтр по виду акта и сортировка по дате.
+        // Поиск по заголовку (ILIKE '%…%') ускоряет trigram-индекс — он в миграции CorpusCatalogIndexes
+        // прямым SQL (pg_trgm), EF-модель его не описывает.
+        builder.HasIndex(e => e.DocType);
+        builder.HasIndex(e => e.DocDate);
+
         // Дедупликация (ТНД-002) — УНИКАЛЬНЫЙ частичный индекс: БД сама отклоняет повторную загрузку того
         // же содержимого, поэтому идемпотентность держится и под КОНКУРЕНТНЫМ импортом (не только при
         // последовательном check-then-insert). Частичный (IS NOT NULL): документы без хеша не конфликтуют.

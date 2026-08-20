@@ -21,6 +21,10 @@ public class ChunkEntityConfiguration : IEntityTypeConfiguration<ChunkEntity>
         builder.HasOne(e => e.Document).WithMany(d => d.Chunks)
                .HasForeignKey(e => e.DocumentId).OnDelete(DeleteBehavior.Cascade);
 
+        // Под агрегаты каталога НПА («все фрагменты действуют / все погашены») и материализацию
+        // статуса редакций: на корпусе 200К+ документов это миллионы чанков (2026-08-19).
+        builder.HasIndex(e => new { e.DocumentId, e.IsCurrent });
+
         // Нейтральный флаг годности источника (ADR-0013): по умолчанию актуален.
         builder.Property(e => e.IsCurrent).IsRequired().HasDefaultValue(true);
     }

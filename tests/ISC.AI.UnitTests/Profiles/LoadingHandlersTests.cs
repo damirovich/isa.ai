@@ -1,4 +1,5 @@
 using ISC.AI.Abstractions.Application;
+using ISC.AI.Abstractions.BackgroundTasks;
 using ISC.AI.Abstractions.Ingestion;
 using ISC.AI.Profile.Inspector.Application.Features.Loading;
 using ISC.AI.Profile.Inspector.Domain.Services;
@@ -76,8 +77,8 @@ public sealed class LoadingHandlersTests
     public async Task Import_missing_manifest_not_found()
     {
         var importer = Substitute.For<IBundleImporter>();
-
-        var response = await new ImportBundleCommand.Handler(importer, Divisions(1))
+        var taskQueue = Substitute.For<IBackgroundTaskQueue>();
+        var response = await new ImportBundleCommand.Handler(importer, Divisions(1), taskQueue)
             .Handle(new ImportBundleCommand(@"C:\nope\does-not-exist\manifest.json", DivisionId: 1), CancellationToken.None);
 
         response.Status.ShouldBeFalse();
@@ -89,8 +90,8 @@ public sealed class LoadingHandlersTests
     public async Task Import_with_unknown_division_is_rejected()
     {
         var importer = Substitute.For<IBundleImporter>();
-
-        var response = await new ImportBundleCommand.Handler(importer, Divisions(1, 2, 3))
+        var taskQueue = Substitute.For<IBackgroundTaskQueue>();
+        var response = await new ImportBundleCommand.Handler(importer, Divisions(1, 2, 3), taskQueue)
             .Handle(new ImportBundleCommand(@"C:\any\manifest.json", DivisionId: 10), CancellationToken.None);
 
         response.Status.ShouldBeFalse();
@@ -106,10 +107,11 @@ public sealed class LoadingHandlersTests
         try
         {
             var importer = Substitute.For<IBundleImporter>();
-            importer.ImportAsync(path, 2, Arg.Any<CancellationToken>())
+        var taskQueue = Substitute.For<IBackgroundTaskQueue>();
+        importer.ImportAsync(path, 2, Arg.Any<CancellationToken>())
                 .Returns(new BundleImportResult(Total: 3, Imported: 2, Duplicates: 1, Rejected: 0));
 
-            var response = await new ImportBundleCommand.Handler(importer, Divisions(1, 2))
+            var response = await new ImportBundleCommand.Handler(importer, Divisions(1, 2), taskQueue)
                 .Handle(new ImportBundleCommand(path, DivisionId: 2), CancellationToken.None);
 
             response.Status.ShouldBeTrue();
@@ -117,6 +119,8 @@ public sealed class LoadingHandlersTests
             response.Data.Duplicates.ShouldBe(1);
             // Подразделение оператора ПЕРЕКРЫВАЕТ записанное в пакете — именно оно уходит импортёру.
             await importer.Received(1).ImportAsync(path, 2, Arg.Any<CancellationToken>());
+            // После успешного импорта картотека достраивается фоном (синхронизация из метаданных ЦБД).
+            await taskQueue.ReceivedWithAnyArgs(1).EnqueueAsync(default!, default!, default);
         }
         finally
         {

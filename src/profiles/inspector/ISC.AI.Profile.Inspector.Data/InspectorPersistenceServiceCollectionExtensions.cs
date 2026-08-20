@@ -36,6 +36,9 @@ public static class InspectorPersistenceServiceCollectionExtensions
         // с текстом — вид «как в ЦБД Минюста»; дополняет семантический поиск.
         services.AddScoped<ICorpusCatalog, CorpusCatalog>();
 
+        // Автонаполнение картотеки из корпуса (метаданные ЦБД): нормы/редакции/связки без ручного ввода.
+        services.AddScoped<INpaRegistrySynchronizer, NpaRegistrySynchronizer>();
+
         // Профиль отдаёт модулю документооборота свой справочник подразделений (вопрос 3 Э4-35):
         // словарь id един с решёткой доступа, справочник ведёт профиль.
         services.AddScoped<ISC.AI.Modules.DocFlow.Domain.Services.IDivisionDirectory, DocFlowDivisionDirectory>();

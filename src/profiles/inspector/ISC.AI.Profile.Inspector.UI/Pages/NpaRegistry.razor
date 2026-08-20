@@ -22,6 +22,19 @@
               ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
 }
 
+@if (_notice is not null)
+{
+    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _notice = null)">@_notice</MudAlert>
+}
+
+@* Автонаполнение из корпуса: нормы/редакции/связки по метаданным ЦБД. Запускается и фоном после
+   импорта пакета — кнопка нужна для достройки по уже загруженному и для проверки руками. *@
+<div class="d-flex justify-end mb-2">
+    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Sync"
+               OnClick="SyncAsync" Disabled="_busy">Синхронизировать с корпусом</MudButton>
+</div>
+
 @* --- Новая норма --- *@
 <MudPaper Outlined="true" Class="pa-3 mb-4">
     <MudText Typo="Typo.subtitle2" Class="mb-2">Новая норма</MudText>
@@ -119,6 +132,7 @@
 
     private bool _busy;
     private string? _error;
+    private string? _notice;
 
     private int PageCount => Math.Max(1, (int)Math.Ceiling(_total / (double)PageSize));
 
@@ -182,6 +196,35 @@
             }
 
             _error = response.StatusMessage;
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await LoadAsync();
+    }
+
+    private async Task SyncAsync()
+    {
+        _busy = true;
+        _error = null;
+        _notice = null;
+        try
+        {
+            var response = await Dispatcher.Send(new SyncNpaRegistryCommand());
+            if (response.Status)
+            {
+                _notice = response.StatusMessage;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка синхронизации: {ex.Message}";
         }
         finally
         {

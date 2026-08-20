@@ -22,4 +22,12 @@ public class NormRevision : AuditableEntity
 
     /// <summary>Дата утраты силы (если применимо).</summary>
     public DateOnly? RepealedDate { get; set; }
+
+    /// <summary>
+    /// Ключ редакции во внешнем источнике (editionId ЦБД Минюста) — для сопоставления при
+    /// автонаполнении картотеки из корпуса: повторный импорт того же акта узнаёт свою редакцию,
+    /// а приход НОВОГО editionId того же акта означает, что прежняя редакция утратила силу
+    /// (ЦБД отдаёт только действующие). <see langword="null"/> — редакция заведена вручную.
+    /// </summary>
+    public string? ExternalEditionId { get; set; }
 }
