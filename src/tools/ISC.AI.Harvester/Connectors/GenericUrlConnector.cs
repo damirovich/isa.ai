@@ -36,7 +36,7 @@ public sealed class GenericUrlConnector(IPageFetcherFactory fetcherFactory, ICon
             DocType: config.DocType,
             ContentHash: Hash(content.Text),
             Classification: config.Classification,
-            DivisionId: config.DivisionId,
+            DivisionId: null, // выбирается при импорте внутри контура (SourceConfig)
             Language: config.Language);
     }
 

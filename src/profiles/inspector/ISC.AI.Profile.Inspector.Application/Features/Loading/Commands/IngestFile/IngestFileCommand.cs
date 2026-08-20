@@ -1,6 +1,7 @@
 using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.Ingestion;
+using ISC.AI.Profile.Inspector.Domain.Services;
 using Mediator;
 
 namespace ISC.AI.Profile.Inspector.Application.Features.Loading;
@@ -15,7 +16,7 @@ using ResModel = ResponseDto<IngestFileResult>;
 /// <param name="FileName">Имя файла (по нему выбирается извлекатель).</param>
 /// <param name="DocType">Тип документа.</param>
 /// <param name="Classification">Гриф (объявляется оператором; для открытых данных — 0).</param>
-/// <param name="DivisionId">Подразделение.</param>
+/// <param name="DivisionId">Подразделение — ДЕЙСТВУЮЩЕЕ из справочника (иначе отказ, <see cref="DivisionRule"/>).</param>
 /// <param name="SupersedesDocumentId">Если это новая версия — идентификатор заменяемого документа (Э4-14).</param>
 public sealed record IngestFileCommand(
     byte[] Content, string FileName, string DocType, short Classification, int DivisionId,
@@ -31,13 +32,21 @@ public sealed record IngestFileCommand(
     /// <remarks>Объявленный оператором гриф документа может быть ВЫШЕ его допуска — запись журнала не ниже него.</remarks>
     public short? AuditClassification => Classification;
 
-    /// <summary>Обработчик: оборачивает байты в поток и передаёт в файловый загрузчик корпуса.</summary>
-    public sealed class Handler(IFileIngestor fileIngestor) : IRequestHandler<IngestFileCommand, ResModel>
+    /// <summary>Обработчик: проверяет подразделение, оборачивает байты в поток и передаёт в файловый загрузчик корпуса.</summary>
+    public sealed class Handler(IFileIngestor fileIngestor, IDivisionAdminStore divisions)
+        : IRequestHandler<IngestFileCommand, ResModel>
     {
         /// <inheritdoc />
         public async ValueTask<ResModel> Handle(IngestFileCommand command, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(command);
+
+            // Подразделение-призрак отклоняется до порта: материал под номером, которого нет
+            // в справочнике, не увидит никто (см. DivisionRule).
+            if (!await DivisionRule.ExistsAsync(divisions, command.DivisionId, cancellationToken))
+            {
+                return ResModel.BadRequest(DivisionRule.Missing(command.DivisionId));
+            }
 
             using var stream = new MemoryStream(command.Content);
             var result = await fileIngestor.IngestFileAsync(

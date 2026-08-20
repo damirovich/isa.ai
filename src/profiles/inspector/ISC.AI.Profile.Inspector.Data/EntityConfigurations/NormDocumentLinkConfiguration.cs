@@ -19,5 +19,10 @@ public class NormDocumentLinkConfiguration : IEntityTypeConfiguration<NormDocume
         // Слабая ссылка на core.document.Id (по значению, без FK). Индекс — для очистки осиротевших связок (ТБ-064).
         builder.Property(e => e.DocumentId).IsRequired();
         builder.HasIndex(e => e.DocumentId);
+
+        // УНИКАЛЬНО: один документ у нормы — одна связка. Предварительная проверка в хранилище
+        // не переживает гонку (двойной клик, два оператора), а дубль связки нечем чинить —
+        // операции отвязки в картотеке нет (ревью 2026-08-10).
+        builder.HasIndex(e => new { e.LegalNormId, e.DocumentId }).IsUnique();
     }
 }

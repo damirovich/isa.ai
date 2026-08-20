@@ -49,6 +49,11 @@ public sealed class InspectorProfile : IProfile
             typeof(ChatAssistant), ReadPolicy, GroupMain),
         new ModuleDescriptor("npa-search", "/npa", "База НПА", Icons.Material.Filled.Gavel,
             typeof(NpaSearch), ReadPolicy, GroupMain),
+        // Картотека НПА (ТФ-НПА-02): ведение норм/редакций и связок с корпусом — то, что делает
+        // смену статуса редакции действенной (GATE-3). Маршрут /norms, НЕ /npa/*: NavMenu подсвечивает
+        // пункты по префиксу, и вложенный маршрут подсвечивал бы «Базу НПА» вместе с картотекой.
+        new ModuleDescriptor("npa-registry", "/norms", "Картотека НПА", Icons.Material.Filled.LibraryBooks,
+            typeof(NpaRegistry), ReadPolicy, GroupMain),
 
         // --- Модули §5.2, ещё не реализованные (страницы-заглушки) ---
         new ModuleDescriptor("archive", "/archive", "Архив", Icons.Material.Filled.Inventory2,

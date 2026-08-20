@@ -21,9 +21,13 @@
 
 ## Результат
 - Ядро: [`IChunkCurrencyPort`](../../src/core/ISC.AI.Abstractions/Corpus/IChunkCurrencyPort.cs) + [`ChunkCurrencyPort`](../../src/core/ISC.AI.Persistence/Corpus/ChunkCurrencyPort.cs) — согласованно ставит `is_current` чанку и эмбеддингу (одной транзакцией).
-- Профиль: [`IRevisionStatusMaterializer`](../../src/profiles/inspector/ISC.AI.Profile.Inspector.Domain/Services/IRevisionStatusMaterializer.cs) (домен) + [`RevisionStatusMaterializer`](../../src/profiles/inspector/ISC.AI.Profile.Inspector.Data/RevisionStatusMaterializer.cs) (данные): по `ChunkRevisionLink` находит чанки редакции → ставит видимость → фиксирует статус. Use-case [`SetRevisionStatusCommand`](../../src/profiles/inspector/ISC.AI.Profile.Inspector.Application/Revisions/SetRevisionStatusCommand.cs).
+- Профиль: [`IRevisionStatusMaterializer`](../../src/profiles/inspector/ISC.AI.Profile.Inspector.Domain/Services/IRevisionStatusMaterializer.cs) (домен) + [`RevisionStatusMaterializer`](../../src/profiles/inspector/ISC.AI.Profile.Inspector.Data/RevisionStatusMaterializer.cs) (данные): по `ChunkRevisionLink` находит чанки редакции → ставит видимость → фиксирует статус (и дату утраты силы). Use-case [`SetRevisionStatusCommand`](../../src/profiles/inspector/ISC.AI.Profile.Inspector.Application/Features/Norms/Commands/SetRevisionStatus/SetRevisionStatusCommand.cs) — с картотекой (2026-08-10) получил гард ведения (`NormGuard`) и аудит (`IAuditableRequest`), а материализатор — два ограждения: поднятие не воскрешает погашенные заменой (supersede) документы, гашение не прячет чанки, действующие по другой редакции.
 - Тесты: handler (unit), [`ChunkCurrencyPortTests`](../../tests/ISC.AI.IntegrationTests/Persistence/ChunkCurrencyPortTests.cs), [`RevisionStatusMaterializerTests`](../../tests/ISC.AI.IntegrationTests/Persistence/RevisionStatusMaterializerTests.cs) (**write-side GATE-3**, две схемы в одной БД). Сборка 0/0; unit 51/51; интеграционные 9/9 (на живом Postgres).
 - **Порядок РЕЖИМНО-безопасный:** видимость в ядре материализуется ДО сохранения статуса (durable hide) — безопаснее единой транзакции (которая при откате оставила бы устаревшее видимым). Полноценная единая транзакция через два контекста — рефайнмент.
 
 ## Осталось
-- **Наполнение домена редакций** при загрузке: профиль создаёт `LegalNorm`/`NormRevision`/`ChunkRevisionLink` из метаданных реальных НПА (тогда механизм заработает на боевых данных).
+- ~~**Наполнение домена редакций**~~ — РУЧНОЕ наполнение закрыто картотекой НПА (2026-08-10,
+  ветка `feature/npa-registry`): экраны `/norms` и `/norms/{id}` создают нормы/редакции и привязывают
+  документы корпуса (`NormDocumentLink` + `ChunkRevisionLink`); привязка к утратившей силу редакции
+  гасит чанки сразу (hide-first). Остаётся АВТОМАТИЧЕСКОЕ наполнение из метаданных загрузки
+  (documentCode/editionId из пакетов ЦБД лежат в `core.document.metadata` непрочитанными).

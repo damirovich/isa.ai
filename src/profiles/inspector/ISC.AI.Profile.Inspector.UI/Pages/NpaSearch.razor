@@ -1,71 +1,323 @@
 @namespace ISC.AI.Profile.Inspector.UI
-@* Модуль «База НПА» (Э4-07, ТФ-НПА-01/02): семантический поиск по корпусу через ядровой IRetriever.
-   Фильтр доступа (GATE-1) и только актуальные (GATE-3) гарантирует ядро. *@
+@* Модуль «База НПА» (Э4-07, ТФ-НПА-01/02). Два инструмента на одном экране:
+   — ПОИСК ПО СМЫСЛУ (строка сверху): ядровой IRetriever — фильтр доступа (GATE-1) и только
+     актуальные (GATE-3) гарантирует ядро;
+   — КАТАЛОГ документов корпуса (ниже, вид «как в ЦБД Минюста», 2026-08-19): список с галочкой/
+     крестиком по действию, отбор по виду акта и статусу, сортировка, карточка с текстом.
+   Статус действия — только то, что знает система (картотека НПА / гашение при замене версии). *@
 @page "/npa"
 @rendermode InteractiveServer
+@inject NavigationManager Navigation
 @using ISC.AI.Abstractions.Application
+@using ISC.AI.Profile.Inspector.Application.Features.Catalog
 @using ISC.AI.Profile.Inspector.Application.Features.Search
+@using ISC.AI.Profile.Inspector.Domain.Services
 
-<PageTitle>База НПА — ИнспекторAI</PageTitle>
+<PageHeader Title="База НПА"
+            Subtitle="Поиск по смыслу и каталог документов корпуса · только в пределах вашего допуска"
+            Icon="@Icons.Material.Filled.Gavel" />
 
-<MudText Typo="Typo.h4" GutterBottom="true">База НПА — поиск по смыслу</MudText>
-
+@* --- Поиск по смыслу --- *@
 <MudPaper Class="pa-4 mb-4" Outlined="true">
-    <MudTextField @bind-Value="_query" Label="Поисковый запрос" Variant="Variant.Outlined"
-                  Immediate="true" Disabled="_busy" />
-    <MudButton Class="mt-2" Color="Color.Primary" Variant="Variant.Filled"
-               OnClick="SearchAsync" Disabled="@(_busy || string.IsNullOrWhiteSpace(_query))">
-        @(_busy ? "Ищу…" : "Найти")
-    </MudButton>
+    <div class="d-flex gap-3 align-center flex-wrap">
+        <MudTextField @bind-Value="_query" Label="Поиск по смыслу (вопрос или фраза)" Variant="Variant.Outlined"
+                      Immediate="true" Disabled="_searchBusy" Class="flex-grow-1" Style="min-width:300px;"
+                      OnKeyDown="@(async e => { if (e.Key == "Enter") { await SearchAsync(); } })" />
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Search"
+                   OnClick="SearchAsync" Disabled="@(_searchBusy || string.IsNullOrWhiteSpace(_query))">
+            @(_searchBusy ? "Ищу…" : "Найти по смыслу")
+        </MudButton>
+        @if (_result is not null)
+        {
+            <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _result = null)">Скрыть результаты</MudButton>
+        }
+    </div>
 </MudPaper>
 
-@if (_busy)
+@if (_searchBusy)
 {
     <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-2" />
 }
 
 @if (_error is not null)
 {
-    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_error</MudAlert>
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
 }
 
 @if (_result is not null)
 {
-    @if (_result.Hits.Count == 0)
-    {
-        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
-            Ничего не найдено в пределах вашего допуска.
-        </MudAlert>
-    }
-    else
-    {
-        <MudText Typo="Typo.subtitle2" Class="mb-2">Найдено: @_result.Hits.Count</MudText>
-        @foreach (var hit in _result.Hits)
+    <MudPaper Class="pa-3 mb-4" Outlined="true">
+        @if (_result.Hits.Count == 0)
         {
-            <MudPaper Class="pa-3 mb-2" Outlined="true">
-                <div class="d-flex align-center gap-2 mb-1">
-                    <MudChip T="string" Size="Size.Small" Color="Color.Default">Документ #@hit.DocumentId</MudChip>
-                    @if (!hit.IsCurrent)
-                    {
-                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">УТРАТИЛА СИЛУ</MudChip>
-                    }
-                    <MudText Typo="Typo.caption">релевантность: @hit.Score.ToString("F3")</MudText>
-                </div>
-                <MudText Typo="Typo.body2" Style="white-space: pre-wrap;">@hit.Text</MudText>
-            </MudPaper>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Ничего не найдено в пределах вашего допуска.</MudText>
         }
-    }
+        else
+        {
+            <MudText Typo="Typo.subtitle2" Class="mb-2">По смыслу найдено фрагментов: @_result.Hits.Count</MudText>
+            @foreach (var hit in _result.Hits)
+            {
+                <MudPaper Class="pa-3 mb-2" Outlined="true">
+                    <div class="d-flex align-center gap-2 mb-1">
+                        @* Поиск по смыслу идёт по ВСЕМУ корпусу — рядом с НПА лежат документы
+                           документооборота; их карточка — в документообороте, а не в каталоге НПА
+                           (тот же развод, что у источников в чате). *@
+                        @if (hit.DocFlowDocumentId is { } docflowId)
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Description"
+                                       OnClick="@(() => Navigation.NavigateTo($"/docflow/documents/{docflowId}"))">
+                                Документ документооборота #@docflowId
+                            </MudButton>
+                        }
+                        else
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Article"
+                                       OnClick="@(() => OpenDocumentDialog(hit.DocumentId))">
+                                Документ #@hit.DocumentId
+                            </MudButton>
+                        }
+                        @if (!hit.IsCurrent)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Warning">УТРАТИЛА СИЛУ</MudChip>
+                        }
+                        <MudText Typo="Typo.caption">релевантность: @hit.Score.ToString("F3")</MudText>
+                    </div>
+                    <MudText Typo="Typo.body2" Style="white-space: pre-wrap;">@hit.Text</MudText>
+                </MudPaper>
+            }
+        }
+    </MudPaper>
 }
 
+@* --- Каталог документов корпуса --- *@
+<MudPaper Outlined="true" Class="pa-3 mb-3">
+    <div class="d-flex gap-3 align-end flex-wrap">
+        <MudTextField @bind-Value="_filterText" Label="Уточнить: заголовок или источник" Variant="Variant.Outlined"
+                      Style="min-width:260px;" Class="flex-grow-1" Immediate="true"
+                      OnKeyDown="@(async e => { if (e.Key == "Enter") { await ApplyAsync(); } })" />
+        <MudSelect T="string" @bind-Value="_filterDocType" Label="Вид акта" Variant="Variant.Outlined"
+                   Clearable="true" Style="width:220px;">
+            @foreach (var docType in _docTypes)
+            {
+                <MudSelectItem T="string" Value="@docType">@docType</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="CorpusDocumentCurrency?" @bind-Value="_filterCurrency" Label="Статус" Variant="Variant.Outlined"
+                   Clearable="true" Style="width:200px;">
+            <MudSelectItem T="CorpusDocumentCurrency?" Value="@(CorpusDocumentCurrency.Current)">Действующие</MudSelectItem>
+            <MudSelectItem T="CorpusDocumentCurrency?" Value="@(CorpusDocumentCurrency.Superseded)">Утратившие силу</MudSelectItem>
+            <MudSelectItem T="CorpusDocumentCurrency?" Value="@(CorpusDocumentCurrency.Mixed)">Частично</MudSelectItem>
+            <MudSelectItem T="CorpusDocumentCurrency?" Value="@(CorpusDocumentCurrency.NoText)">Без текста</MudSelectItem>
+        </MudSelect>
+        <MudSelect T="CorpusCatalogSort" @bind-Value="_sort" Label="Сортировать" Variant="Variant.Outlined"
+                   Style="width:220px;">
+            <MudSelectItem T="CorpusCatalogSort" Value="@(CorpusCatalogSort.DateDesc)">По дате: новые первыми</MudSelectItem>
+            <MudSelectItem T="CorpusCatalogSort" Value="@(CorpusCatalogSort.DateAsc)">По дате: старые первыми</MudSelectItem>
+            <MudSelectItem T="CorpusCatalogSort" Value="@(CorpusCatalogSort.TitleAsc)">По названию А→Я</MudSelectItem>
+            <MudSelectItem T="CorpusCatalogSort" Value="@(CorpusCatalogSort.LoadedDesc)">По загрузке: свежие первыми</MudSelectItem>
+        </MudSelect>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ApplyAsync" Disabled="_busy">Применить</MudButton>
+    </div>
+</MudPaper>
+
+<MudTable T="CorpusCatalogItem" Items="_rows" Hover="true" Dense="true" Outlined="true" Loading="_busy"
+          LoadingProgressColor="Color.Primary" OnRowClick="OpenDocument" RowClass="cursor-pointer">
+    <HeaderContent>
+        <MudTh Style="width:1%;">Статус</MudTh>
+        <MudTh Style="width:1%; white-space:nowrap;">№</MudTh>
+        <MudTh>Название</MudTh>
+        <MudTh>Вид акта</MudTh>
+        <MudTh>Дата</MudTh>
+        <MudTh>Гриф</MudTh>
+        <MudTh>Фрагментов</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Статус">
+            <MudTooltip Text="@CurrencyLabel(context.Currency)">
+                <MudIcon Icon="@CurrencyIcon(context.Currency)" Color="@CurrencyColor(context.Currency)" />
+            </MudTooltip>
+        </MudTd>
+        <MudTd DataLabel="№" Style="white-space:nowrap;">@(context.Number ?? "—")</MudTd>
+        <MudTd DataLabel="Название" Style="max-width:520px;">
+            <MudText Typo="Typo.body2">@context.Title</MudText>
+        </MudTd>
+        <MudTd DataLabel="Вид акта">@context.DocType</MudTd>
+        <MudTd DataLabel="Дата">@(context.DocDate?.ToString("dd.MM.yyyy") ?? "—")</MudTd>
+        <MudTd DataLabel="Гриф">@(context.Classification == 0 ? "открыто" : $"ДСП · {context.Classification}")</MudTd>
+        <MudTd DataLabel="Фрагментов">@context.ChunkCount</MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+            По этому отбору документов нет в пределах вашего допуска.
+        </MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@if (_total > 0)
+{
+    <div class="d-flex align-center justify-space-between mt-3 flex-wrap gap-2">
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+            Документов: @_total · страница @_page из @PageCount
+        </MudText>
+        <MudPagination Count="@PageCount" Selected="_page" SelectedChanged="GoToPageAsync"
+                       Color="Color.Primary" Size="Size.Small" />
+    </div>
+}
+
+@* --- Просмотр документа поверх списка (вид «как на сайте»): клик по строке или по хиту поиска.
+   Прямая страница /npa/documents/{id} остаётся для ссылок из чата и картотеки. --- *@
+<MudDialog @bind-Visible="_documentOpen" Options="DocumentDialogOptions">
+    <TitleContent>
+        @* Заголовок — название целиком с переносом, но не больше двух строк (сверх — многоточие):
+           название акта должно читаться, а шапка — не раздуваться. *@
+        <div class="d-flex align-start gap-2" style="min-width:0;">
+            <MudIcon Icon="@Icons.Material.Filled.Article" Size="Size.Small" Class="mt-1" />
+            <MudText Typo="Typo.subtitle1" title="@_documentTitle"
+                     Style="min-width:0; line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">
+                @(_documentTitle ?? "Документ")
+            </MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        @if (_documentId is { } documentId)
+        {
+            <CorpusDocumentView DocumentId="documentId" EmblemUrl="@NpaDocument.EmblemUrl"
+                                OnLoaded="@(d => _documentTitle = d.Title)"
+                                OnNavigateToDocument="@(id => { _documentId = id; })" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.OpenInNew"
+                   OnClick="@(() => Navigation.NavigateTo($"/npa/documents/{_documentId}"))">
+            Открыть на отдельной странице
+        </MudButton>
+        <MudButton OnClick="@(() => _documentOpen = false)">Закрыть</MudButton>
+    </DialogActions>
+</MudDialog>
+
 @code {
+    private const int PageSize = 25;
+
+    // Диалог просмотра — широкое окно под лист документа (не во весь экран: заголовок и реквизиты
+    // на всю ширину монитора выглядели растянутыми), с прокруткой внутри — закон читают долго.
+    private static readonly DialogOptions DocumentDialogOptions =
+        new() { MaxWidth = MaxWidth.Large, FullWidth = true, CloseOnEscapeKey = true, CloseButton = true };
+
+    private bool _documentOpen;
+    private int? _documentId;
+    private string? _documentTitle;
+
+    private void OpenDocumentDialog(int documentId)
+    {
+        _documentTitle = null;
+        _documentId = documentId;
+        _documentOpen = true;
+    }
+
+
+    // Поиск по смыслу.
     private string _query = string.Empty;
-    private bool _busy;
-    private string? _error;
+    private bool _searchBusy;
     private SearchNpaResult? _result;
+
+    // Каталог.
+    private IReadOnlyList<CorpusCatalogItem> _rows = [];
+    private IReadOnlyList<string> _docTypes = [];
+    private int _total;
+    private int _page = 1;
+    private string? _filterText;
+    private string? _filterDocType;
+    private CorpusDocumentCurrency? _filterCurrency;
+    private CorpusCatalogSort _sort = CorpusCatalogSort.DateDesc;
+    private bool _busy;
+
+    private string? _error;
+
+    private int PageCount => Math.Max(1, (int)Math.Ceiling(_total / (double)PageSize));
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    internal static string CurrencyIcon(CorpusDocumentCurrency currency) => currency switch
+    {
+        CorpusDocumentCurrency.Current => Icons.Material.Filled.Check,
+        CorpusDocumentCurrency.Superseded => Icons.Material.Filled.Close,
+        CorpusDocumentCurrency.NoText => Icons.Material.Filled.HelpOutline,
+        _ => Icons.Material.Filled.Remove,
+    };
+
+    internal static Color CurrencyColor(CorpusDocumentCurrency currency) => currency switch
+    {
+        CorpusDocumentCurrency.Current => Color.Success,
+        CorpusDocumentCurrency.Superseded => Color.Error,
+        CorpusDocumentCurrency.NoText => Color.Default,
+        _ => Color.Warning,
+    };
+
+    internal static string CurrencyLabel(CorpusDocumentCurrency currency) => currency switch
+    {
+        CorpusDocumentCurrency.Current => "Действует",
+        CorpusDocumentCurrency.Superseded => "Утратил силу",
+        CorpusDocumentCurrency.NoText => "Нет текста (не извлёкся)",
+        _ => "Частично утратил силу",
+    };
+
+    private void OpenDocument(TableRowClickEventArgs<CorpusCatalogItem> args)
+    {
+        if (args.Item is { } item)
+        {
+            OpenDocumentDialog(item.DocumentId);
+        }
+    }
+
+    private Task ApplyAsync()
+    {
+        // Новый отбор — всегда с первой страницы.
+        _page = 1;
+        return LoadAsync();
+    }
+
+    private Task GoToPageAsync(int page)
+    {
+        _page = page;
+        return LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new ListCorpusDocumentsQuery(
+                _filterText, _filterDocType, _filterCurrency, _sort, _page, PageSize));
+            if (response is { Status: true, Data: { } data })
+            {
+                _rows = data.Rows;
+                _total = data.TotalCount;
+                _docTypes = data.DocTypes;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+                _rows = [];
+                _total = 0;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка загрузки каталога: {ex.Message}";
+            _rows = [];
+            _total = 0;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
     private async Task SearchAsync()
     {
-        _busy = true;
+        _searchBusy = true;
         _error = null;
         _result = null;
         try
@@ -86,7 +338,7 @@
         }
         finally
         {
-            _busy = false;
+            _searchBusy = false;
         }
     }
 }

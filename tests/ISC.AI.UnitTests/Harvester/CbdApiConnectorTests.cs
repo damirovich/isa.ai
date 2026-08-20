@@ -18,7 +18,7 @@ public sealed class CbdApiConnectorTests
     {
         using var client = new HttpClient(new CbdApiHandler());
         var connector = new CbdApiConnector(client, new HtmlContentExtractor());
-        var config = new SourceConfig("https://cbd.minjust.gov.kg", "нпа", Classification: 0, DivisionId: 3, MaxDocuments: 10);
+        var config = new SourceConfig("https://cbd.minjust.gov.kg", "нпа", Classification: 0, MaxDocuments: 10);
 
         var docs = new List<HarvestedDocument>();
         await foreach (var doc in connector.HarvestAsync(config))
@@ -33,7 +33,7 @@ public sealed class CbdApiConnectorTests
         d.Text.ShouldContain("Текст активного закона");
         d.Text.ShouldNotContain("MsoNormal"); // Word-стили сняты извлекателем
         d.DocType.ShouldBe("закон");
-        d.DivisionId.ShouldBe(3);
+        d.DivisionId.ShouldBeNull(); // подразделение выбирается при импорте внутри контура
         d.Language.ShouldBe("ru");
         d.SourceUrl.ShouldBe("https://cbd.minjust.gov.kg/1-1/edition/100/ru");
         d.Metadata!["status"].ShouldBe("Действует");

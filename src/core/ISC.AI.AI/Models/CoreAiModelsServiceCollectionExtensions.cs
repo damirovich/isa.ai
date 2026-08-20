@@ -25,9 +25,13 @@ namespace ISC.AI.AI.Models;
 /// </remarks>
 public static class CoreAiModelsServiceCollectionExtensions
 {
-    // Таймаут одного вызова (ТН-003): генерация (черновик/анализ) может быть долгой, эмбеддинг — короткий.
+    // Таймаут одного вызова (ТН-003): генерация (черновик/анализ) может быть долгой. Эмбеддинг одного
+    // запроса быстрый (~100 мс), но при импорте пакета НПА в один вызов уходят СОТНИ фрагментов
+    // кодекса — 30 с не хватало, документ отклонялся как «сервер недоступен» при живом сервере
+    // (2026-08-19). 120 с — запас под массовый импорт; интерактивному поиску это не мешает
+    // (один фрагмент-запрос по-прежнему отвечает за миллисекунды).
     private static readonly TimeSpan ChatCallTimeout = TimeSpan.FromSeconds(120);
-    private static readonly TimeSpan EmbeddingCallTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan EmbeddingCallTimeout = TimeSpan.FromSeconds(120);
 
     // Bulkhead по умолчанию: не больше N одновременных вызовов на роль к общему серверу инференса.
     private const int DefaultMaxConcurrencyPerRole = 4;

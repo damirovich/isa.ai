@@ -9,8 +9,14 @@ namespace ISC.AI.Abstractions.Ingestion;
 /// </summary>
 public interface IBundleImporter
 {
-    /// <summary>Импортирует документы из манифеста пакета в корпус.</summary>
-    Task<BundleImportResult> ImportAsync(string manifestPath, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Импортирует документы из манифеста пакета в корпус. <paramref name="divisionId"/> — подразделение,
+    /// ПЕРЕКРЫВАЮЩЕЕ записанное в пакете: пакет собран вне контура, где справочника подразделений нет,
+    /// и записанный там номер — лишь намерение сборщика; решение о том, чьим числится материал, принимает
+    /// оператор внутри контура, видя справочник. <see langword="null"/> — довериться пакету (как было).
+    /// </summary>
+    Task<BundleImportResult> ImportAsync(
+        string manifestPath, int? divisionId = null, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Итог импорта пакета.</summary>

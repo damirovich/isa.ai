@@ -13,3 +13,18 @@ public enum RevisionStatus
     /// <summary>Утратила силу.</summary>
     Repealed = 1,
 }
+
+/// <summary>
+/// Человекочитаемые подписи статуса — в домене, чтобы каждая страница не держала свою копию
+/// (тот же приём, что <c>UserRoleLabels</c>).
+/// </summary>
+public static class RevisionStatusLabels
+{
+    /// <summary>Подпись статуса по-русски.</summary>
+    public static string Label(this RevisionStatus status) => status switch
+    {
+        RevisionStatus.Active => "Действующая",
+        RevisionStatus.Repealed => "Утратила силу",
+        _ => status.ToString(),
+    };
+}

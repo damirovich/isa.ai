@@ -1,0 +1,6 @@
+@* Общая обвязка компонентов профиля, грузящих данные сами (CorpusDocumentView): тот же набор, что у
+   Pages/_Imports.razor — компонент шлёт запросы через Mediator, а не через каскад колбэков к странице. *@
+@using Mediator
+@using Microsoft.JSInterop
+@inject IMediator Dispatcher
+@inject IJSRuntime JS

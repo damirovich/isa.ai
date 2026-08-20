@@ -54,8 +54,9 @@ namespace ISC.AI.Profile.Inspector.Data.Migrations
                     b.HasIndex("ChunkId")
                         .HasDatabaseName("ix_chunk_revision_link_chunk_id");
 
-                    b.HasIndex("NormRevisionId")
-                        .HasDatabaseName("ix_chunk_revision_link_norm_revision_id");
+                    b.HasIndex("NormRevisionId", "ChunkId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_chunk_revision_link_norm_revision_id_chunk_id");
 
                     b.ToTable("chunk_revision_link", "inspector");
                 });
@@ -141,6 +142,7 @@ namespace ISC.AI.Profile.Inspector.Data.Migrations
                         .HasName("pk_legal_norm");
 
                     b.HasIndex("Identifier")
+                        .IsUnique()
                         .HasDatabaseName("ix_legal_norm_identifier");
 
                     b.ToTable("legal_norm", "inspector");
@@ -177,8 +179,9 @@ namespace ISC.AI.Profile.Inspector.Data.Migrations
                     b.HasIndex("DocumentId")
                         .HasDatabaseName("ix_norm_document_link_document_id");
 
-                    b.HasIndex("LegalNormId")
-                        .HasDatabaseName("ix_norm_document_link_legal_norm_id");
+                    b.HasIndex("LegalNormId", "DocumentId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_norm_document_link_legal_norm_id_document_id");
 
                     b.ToTable("norm_document_link", "inspector");
                 });

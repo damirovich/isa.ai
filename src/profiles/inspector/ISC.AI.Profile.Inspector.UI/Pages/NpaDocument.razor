@@ -1,0 +1,39 @@
+@namespace ISC.AI.Profile.Inspector.UI
+@* Карточка документа корпуса НПА (ТФ-НПА-02) — страница для прямых ссылок (из чата, поиска, картотеки).
+   Содержимое — общий компонент CorpusDocumentView, он же открывается диалогом на каталоге «Базы НПА».
+   Допуск — в запросе хранилища: недоступный документ неотличим от несуществующего. *@
+@page "/npa/documents/{DocumentId:int}"
+@rendermode InteractiveServer
+@inject NavigationManager Navigation
+@using ISC.AI.Profile.Inspector.Domain.Services
+
+<PageHeader Title="@(_title ?? "Документ")"
+            Subtitle="@(_subtitle ?? "Карточка документа корпуса")"
+            Icon="@Icons.Material.Filled.Article" />
+
+<div class="mb-3">
+    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.ArrowBack"
+               OnClick="@(() => Navigation.NavigateTo("/npa"))">К базе НПА</MudButton>
+</div>
+
+<CorpusDocumentView DocumentId="DocumentId" EmblemUrl="@EmblemUrl"
+                    OnLoaded="OnLoaded"
+                    OnNavigateToDocument="@(id => Navigation.NavigateTo($"/npa/documents/{id}"))" />
+
+@code {
+    /// <summary>Герб над текстом — статика хоста (wwwroot/images).</summary>
+    internal const string EmblemUrl = "/images/gerb.png";
+
+    /// <summary>Идентификатор документа корпуса из маршрута.</summary>
+    [Parameter]
+    public int DocumentId { get; set; }
+
+    private string? _title;
+    private string? _subtitle;
+
+    private void OnLoaded(CorpusDocumentDetails details)
+    {
+        _title = details.Title;
+        _subtitle = details.DocDate is { } date ? $"{details.DocType} от {date:dd.MM.yyyy}" : details.DocType;
+    }
+}
