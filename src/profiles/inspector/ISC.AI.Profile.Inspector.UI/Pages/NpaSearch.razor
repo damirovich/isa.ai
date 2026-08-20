@@ -124,6 +124,7 @@
           LoadingProgressColor="Color.Primary" OnRowClick="OpenDocument" RowClass="cursor-pointer">
     <HeaderContent>
         <MudTh Style="width:1%;">Статус</MudTh>
+        <MudTh Style="width:1%; white-space:nowrap;">№</MudTh>
         <MudTh>Название</MudTh>
         <MudTh>Вид акта</MudTh>
         <MudTh>Дата</MudTh>
@@ -136,6 +137,7 @@
                 <MudIcon Icon="@CurrencyIcon(context.Currency)" Color="@CurrencyColor(context.Currency)" />
             </MudTooltip>
         </MudTd>
+        <MudTd DataLabel="№" Style="white-space:nowrap;">@(context.Number ?? "—")</MudTd>
         <MudTd DataLabel="Название" Style="max-width:520px;">
             <MudText Typo="Typo.body2">@context.Title</MudText>
         </MudTd>

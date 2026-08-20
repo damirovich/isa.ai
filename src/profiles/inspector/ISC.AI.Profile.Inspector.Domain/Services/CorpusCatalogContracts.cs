@@ -48,9 +48,10 @@ public enum CorpusCatalogSort
     LoadedDesc,
 }
 
-/// <summary>Строка каталога.</summary>
+/// <summary>Строка каталога. <paramref name="Number"/> — номер акта из заголовка («№ 135»); нет — прочерк.</summary>
 public sealed record CorpusCatalogItem(
     int DocumentId,
+    string? Number,
     string Title,
     string DocType,
     DateOnly? DocDate,

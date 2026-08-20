@@ -110,7 +110,7 @@ public sealed class CorpusCatalog(
 
         var items = rows
             .Select(r => new CorpusCatalogItem(
-                r.Id, r.Title, r.DocType, r.DocDate, r.Classification,
+                r.Id, NpaActNumber.TryParse(r.Title), r.Title, r.DocType, r.DocDate, r.Classification,
                 Currency(r.SupersededByDocumentId, r.ChunkCount, r.CurrentCount), r.ChunkCount, r.CreatedAt))
             .ToList();
 
