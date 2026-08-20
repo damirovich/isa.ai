@@ -17,5 +17,12 @@ public class NormRevisionConfiguration : IEntityTypeConfiguration<NormRevision>
 
         // Быстрый выбор действующей редакции по умолчанию (ТО-инф-04, GATE-3).
         builder.HasIndex(e => new { e.NormId, e.Status });
+
+        // Сопоставление с редакцией внешнего источника (автонаполнение картотеки): у нормы
+        // не может быть двух редакций с одним внешним ключом (частичная уникальность — ручные
+        // редакции без ключа не ограничиваются).
+        builder.Property(e => e.ExternalEditionId).HasMaxLength(100);
+        builder.HasIndex(e => new { e.NormId, e.ExternalEditionId }).IsUnique()
+               .HasFilter("external_edition_id IS NOT NULL");
     }
 }

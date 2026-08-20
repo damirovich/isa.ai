@@ -1,8 +1,10 @@
 using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Audit;
+using ISC.AI.Abstractions.BackgroundTasks;
 using ISC.AI.Abstractions.Ingestion;
 using ISC.AI.Profile.Inspector.Domain.Services;
 using Mediator;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ISC.AI.Profile.Inspector.Application.Features.Loading;
 
@@ -28,7 +30,7 @@ public sealed record ImportBundleCommand(string ManifestPath, int DivisionId) : 
     public string? AuditSummary => $"Импорт пакета в корпус: {ManifestPath}; подразделение={DivisionId}";
 
     /// <summary>Обработчик: проверяет подразделение и манифест, запускает импорт.</summary>
-    public sealed class Handler(IBundleImporter importer, IDivisionAdminStore divisions)
+    public sealed class Handler(IBundleImporter importer, IDivisionAdminStore divisions, IBackgroundTaskQueue taskQueue)
         : IRequestHandler<ImportBundleCommand, ResModel>
     {
         /// <inheritdoc />
@@ -47,6 +49,17 @@ public sealed record ImportBundleCommand(string ManifestPath, int DivisionId) : 
             }
 
             var result = await importer.ImportAsync(command.ManifestPath, command.DivisionId, cancellationToken);
+
+            // Картотека достраивается ФОНОМ после импорта (нормы/редакции/связки из метаданных ЦБД):
+            // оператор не ждёт обход корпуса; синхронизация идемпотентна, повтор безопасен.
+            if (result.Imported > 0)
+            {
+                await taskQueue.EnqueueAsync(
+                    "Синхронизация картотеки НПА с корпусом",
+                    async (sp, ct) => await sp.GetRequiredService<INpaRegistrySynchronizer>().SyncFromCorpusAsync(ct),
+                    cancellationToken);
+            }
+
             return ResModel.Ok(result,
                 $"Импортировано: {result.Imported}, дублей: {result.Duplicates}, отклонено: {result.Rejected} (всего {result.Total}).");
         }
