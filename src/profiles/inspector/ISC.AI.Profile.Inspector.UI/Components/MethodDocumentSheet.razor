@@ -1,0 +1,93 @@
+@namespace ISC.AI.Profile.Inspector.UI
+@* «Лист методики» — сохранённый методический документ в документном виде (как лист НПА: белый лист,
+   засечки, герб, центрированная шапка). Текст модели приходит с лёгкой markdown-разметкой
+   (### заголовки, **жирный**, списки, ---) — здесь она превращается в документную вёрстку
+   ПОСТРОЧНО, без сырого HTML (MarkupString не используется — текст модели небезопасен по построению). *@
+
+<div class="method-sheet">
+    @if (!string.IsNullOrWhiteSpace(EmblemUrl))
+    {
+        <img class="emblem" src="@EmblemUrl" alt="" />
+    }
+    <p class="title">@Title.ToUpperInvariant()</p>
+    @if (!string.IsNullOrWhiteSpace(Subtitle))
+    {
+        <p class="subtitle">@Subtitle</p>
+    }
+
+    @foreach (var rawLine in (Body ?? string.Empty).Split('\n'))
+    {
+        var line = rawLine.TrimEnd();
+        var trimmed = line.TrimStart();
+        @if (trimmed.Length == 0)
+        {
+            continue;
+        }
+        @if (trimmed is "---" or "***")
+        {
+            <hr class="rule" />
+            continue;
+        }
+        @if (trimmed.StartsWith("###", StringComparison.Ordinal))
+        {
+            <p class="section">@RenderInline(trimmed.TrimStart('#').Trim())</p>
+            continue;
+        }
+        @if (trimmed.StartsWith('#'))
+        {
+            <p class="heading">@RenderInline(trimmed.TrimStart('#').Trim())</p>
+            continue;
+        }
+        @if (trimmed.StartsWith("* ", StringComparison.Ordinal) || trimmed.StartsWith("- ", StringComparison.Ordinal))
+        {
+            <p class="item">— @RenderInline(trimmed[2..])</p>
+            continue;
+        }
+        <p class="para">@RenderInline(trimmed)</p>
+    }
+</div>
+
+@code {
+    /// <summary>Заголовок листа (вид документа) — прописными по центру.</summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+
+    /// <summary>Подзаголовок (тип проверки · объект).</summary>
+    [Parameter] public string? Subtitle { get; set; }
+
+    /// <summary>Текст методики (лёгкий markdown от модели).</summary>
+    [Parameter, EditorRequired] public string? Body { get; set; }
+
+    /// <summary>Герб для шапки (как на листе НПА).</summary>
+    [Parameter] public string? EmblemUrl { get; set; }
+
+    // Инлайн-жирный: сегменты между «**» чередуются обычный/жирный. Разметка строится ЭЛЕМЕНТАМИ
+    // (не MarkupString): текст модели экранируется Razor'ом сам — HTML из модели листом не исполняется.
+    private static RenderFragment RenderInline(string text) => builder =>
+    {
+        var segments = text.Split("**");
+        var balanced = segments.Length % 2 == 1; // чётное число «**» → нечётное число сегментов.
+        for (var i = 0; i < segments.Length; i++)
+        {
+            if (segments[i].Length == 0)
+            {
+                continue;
+            }
+
+            if (i % 2 == 1 && balanced)
+            {
+                builder.OpenElement(0, "b");
+                builder.AddContent(1, segments[i]);
+                builder.CloseElement();
+            }
+            else if (i % 2 == 1)
+            {
+                // Непарные «**» — показываем как есть, не теряя текста.
+                builder.AddContent(2, "**" + segments[i]);
+            }
+            else
+            {
+                builder.AddContent(3, segments[i]);
+            }
+        }
+    };
+}

@@ -1,0 +1,70 @@
+/* «Лист методики» — та же «бумага», что у листа НПА (LegalDocumentSheet): белый лист, засечки,
+   документная вёрстка. Стиль scoped: читать методику удобнее на «бумаге», независимо от темы. */
+.method-sheet {
+    background: #fff;
+    color: #111;
+    font-family: "Times New Roman", Times, Georgia, serif;
+    font-size: 15px;
+    line-height: 1.45;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 40px 56px 48px;
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: 4px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .12);
+}
+
+.emblem {
+    display: block;
+    width: 96px;
+    height: auto;
+    margin: 0 auto 18px;
+}
+
+.method-sheet p {
+    margin: 0 0 6px;
+}
+
+/* Шапка: вид документа прописными, под ним тип · объект. */
+.title {
+    text-align: center;
+    font-weight: bold;
+    font-size: 17px;
+    margin: 14px 0 4px !important;
+}
+
+.subtitle {
+    text-align: center;
+    margin: 0 0 16px !important;
+}
+
+/* Разделы «### 1. Цель и правовые основания» — как разделы акта. */
+.section {
+    text-align: center;
+    font-weight: bold;
+    margin: 18px 0 8px !important;
+}
+
+.heading {
+    text-align: center;
+    font-weight: bold;
+    font-size: 16px;
+    margin: 16px 0 8px !important;
+}
+
+/* Абзацы — по ширине, с красной строкой; пункты перечней — с отступом. */
+.para {
+    text-align: justify;
+    text-indent: 2em;
+}
+
+.item {
+    text-align: justify;
+    padding-left: 2em;
+}
+
+.rule {
+    border: none;
+    border-top: 1px solid #bbb;
+    margin: 14px 0;
+}

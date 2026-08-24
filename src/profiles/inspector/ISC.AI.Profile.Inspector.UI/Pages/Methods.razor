@@ -138,7 +138,8 @@
                         </div>
 
                         <SectionCaption Text="Текст" Class="mb-1" />
-                        <MudPaper Class="pa-3 mb-3" Outlined="true">
+                        @* Длинный черновик не растягивает страницу — прокрутка внутри блока. *@
+                        <MudPaper Class="pa-3 mb-3" Outlined="true" Style="max-height:55vh; overflow-y:auto;">
                             <MudText Typo="Typo.body2" Style="white-space: pre-wrap;">@Result.DraftText</MudText>
                         </MudPaper>
 
@@ -263,26 +264,36 @@
                 </MudText>
             </div>
 
-            @* Правка — человеком; при правке утверждённая вернётся в черновики (об этом честно ниже). *@
-            <MudTextField @bind-Value="_cardBody" Variant="Variant.Outlined" Lines="16" Class="mb-1" />
-            @if (card.Status == MethodDocumentStatus.Approved)
+            @if (_cardEditing)
             {
-                <MudText Typo="Typo.caption" Class="mud-text-secondary mb-2 d-block">
-                    Сохранение правок вернёт методику в черновики: утверждение относится к конкретной редакции текста.
-                </MudText>
-            }
-
-            @if (CardCitations.Count > 0)
-            {
-                <SectionCaption Text="Ссылки (грунтовка на момент сохранения)" Class="mb-1" />
-                @foreach (var citation in CardCitations)
+                @* Режим правки: тот же текст в редакторе; при сохранении утверждённая вернётся в черновики. *@
+                <MudTextField @bind-Value="_cardBody" Variant="Variant.Outlined" Lines="20" Class="mb-1" />
+                @if (card.Status == MethodDocumentStatus.Approved)
                 {
-                    <div class="d-flex align-center gap-2 mb-1">
-                        <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@StatusColor(citation.Status)">
-                            @StatusLabel(citation.Status)
-                        </MudChip>
-                        <MudText Typo="Typo.body2">@citation.Citation</MudText>
-                    </div>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary mb-2 d-block">
+                        Сохранение правок вернёт методику в черновики: утверждение относится к конкретной редакции текста.
+                    </MudText>
+                }
+            }
+            else
+            {
+                @* Документный вид — как лист НПА: бумага, засечки, герб; читается, а не редактируется. *@
+                <MethodDocumentSheet Title="@card.ArtifactKind"
+                                     Subtitle="@($"{card.InspectionType} проверка · {card.Scope}")"
+                                     Body="@_cardBody" EmblemUrl="@NpaDocument.EmblemUrl" />
+
+                @if (CardCitations.Count > 0)
+                {
+                    <SectionCaption Text="Ссылки (грунтовка на момент сохранения)" Class="mt-3 mb-1" />
+                    @foreach (var citation in CardCitations)
+                    {
+                        <div class="d-flex align-center gap-2 mb-1">
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@StatusColor(citation.Status)">
+                                @StatusLabel(citation.Status)
+                            </MudChip>
+                            <MudText Typo="Typo.body2">@citation.Citation</MudText>
+                        </div>
+                    }
                 }
             }
         }
@@ -290,16 +301,29 @@
     <DialogActions>
         @if (_card is { } actions)
         {
-            @if (actions.Status == MethodDocumentStatus.Draft)
+            @if (_cardEditing)
             {
-                <MudButton Color="Color.Error" OnClick="DeleteCardAsync" Disabled="_cardBusy">Удалить</MudButton>
+                <MudButton OnClick="@(() => { _cardBody = actions.Body; _cardEditing = false; })" Disabled="_cardBusy">
+                    Отменить правку
+                </MudButton>
+                <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveCardBodyAsync" Disabled="_cardBusy">
+                    Сохранить правки
+                </MudButton>
             }
-            <MudButton OnClick="@(() => ExportAsync(actions.ArtifactKind, actions.Scope, _cardBody, actions.Classification))"
-                       Disabled="_exporting">Экспорт .docx</MudButton>
-            <MudButton OnClick="SaveCardBodyAsync" Disabled="_cardBusy">Сохранить правки</MudButton>
-            <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="ToggleApproveAsync" Disabled="_cardBusy">
-                @(actions.Status == MethodDocumentStatus.Approved ? "В черновики" : "Утвердить")
-            </MudButton>
+            else
+            {
+                @if (actions.Status == MethodDocumentStatus.Draft)
+                {
+                    <MudButton Color="Color.Error" OnClick="DeleteCardAsync" Disabled="_cardBusy">Удалить</MudButton>
+                }
+                <MudButton OnClick="@(() => ExportAsync(actions.ArtifactKind, actions.Scope, _cardBody, actions.Classification))"
+                           Disabled="_exporting">Экспорт .docx</MudButton>
+                <MudButton StartIcon="@Icons.Material.Filled.EditNote" OnClick="@(() => _cardEditing = true)"
+                           Disabled="_cardBusy">Править</MudButton>
+                <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="ToggleApproveAsync" Disabled="_cardBusy">
+                    @(actions.Status == MethodDocumentStatus.Approved ? "В черновики" : "Утвердить")
+                </MudButton>
+            }
         }
         <MudButton OnClick="@(() => _cardOpen = false)">Закрыть</MudButton>
     </DialogActions>
@@ -316,8 +340,9 @@
     private static readonly string[] InspectionTypes =
         ["Комплексная", "Целевая", "Контрольная", "Внеплановая"];
 
+    // Широкое окно под лист документа с прокруткой внутри — как просмотр НПА (методику читают долго).
     private static readonly DialogOptions CardDialogOptions =
-        new() { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true };
+        new() { MaxWidth = MaxWidth.Large, FullWidth = true, CloseOnEscapeKey = true, CloseButton = true };
 
     private readonly List<DivisionNode> _divisions = [];
     private int _activeTab;
@@ -347,6 +372,7 @@
     // --- Карточка ---
     private bool _cardOpen;
     private bool _cardBusy;
+    private bool _cardEditing;
     private string? _cardError;
     private MethodDocumentDetails? _card;
     private string _cardBody = string.Empty;
@@ -496,6 +522,7 @@
         _card = details;
         _cardBody = details.Body;
         _cardError = null;
+        _cardEditing = false;
         _cardOpen = true;
     }
 
