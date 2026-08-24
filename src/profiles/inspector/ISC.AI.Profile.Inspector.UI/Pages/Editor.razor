@@ -1,9 +1,232 @@
 @namespace ISC.AI.Profile.Inspector.UI
 @page "/editor"
 @rendermode InteractiveServer
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Abstractions.Grounding
+@using ISC.AI.Profile.Inspector.Application.Features.Editor
+@using ISC.AI.Profile.Inspector.Application.Features.Generation
+@using Microsoft.JSInterop
 
-<ModuleStub Title="Редактор"
-            Subtitle="ИИ-правка по команде с сохранением грунтовки"
-            Icon="@Icons.Material.Filled.EditNote"
-            Description="Редактирование документов внутри платформы. ИИ-правка по команде («добавь норму», «переформулируй строже», «приведи к стандарту») с сохранением грунтовки: новые ссылки обязаны пройти валидатор. Экспорт в .docx с маркировкой грифа."
-            Requirement="§5.2.10 · P1 · на движке грунтовки (готов)" />
+@* Модуль «Редактор» (§5.2.10, ТФ-РЕД-01..03) — ИИ-правка НАСТОЯЩАЯ, заглушка снята.
+   Слева — текст документа (вставленный или набранный), команда правки и подсказки; справа —
+   предложенная новая редакция с метками грунтовки (новая редакция проходит валидатор ссылок
+   ЦЕЛИКОМ — правка не протаскивает выдуманных норм, GATE-2). Принимает или отклоняет правку
+   ЧЕЛОВЕК (ТБ-042); экспорт в .docx — с грифом результата (ТБ-033, общий экспортёр). *@
+
+<PageHeader Title="Редактор"
+            Subtitle="ИИ-правка по команде — с сохранением грунтовки"
+            Icon="@Icons.Material.Filled.EditNote" />
+
+<MudGrid>
+    @* ================= Слева: документ и команда ================= *@
+    <MudItem xs="12" md="6">
+        <MudPaper Class="pa-4 mb-4" Outlined="true">
+            <SectionCaption Text="Документ" Class="mb-2" />
+            <MudTextField @bind-Value="_text" Variant="Variant.Outlined" Lines="18" Immediate="true"
+                          Disabled="_busy"
+                          Placeholder="Вставьте текст документа: справку из Генератора, методику из реестра или любой свой текст…" />
+        </MudPaper>
+
+        <MudPaper Class="pa-4" Outlined="true">
+            <SectionCaption Text="Команда правки" Class="mb-2" />
+            <div class="d-flex gap-2 flex-wrap mb-2">
+                @foreach (var hint in InstructionHints)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default"
+                             OnClick="@(() => _instruction = hint)">@hint</MudChip>
+                }
+            </div>
+            <MudTextField @bind-Value="_instruction" Variant="Variant.Outlined" Immediate="true"
+                          Disabled="_busy" MaxLength="500"
+                          Placeholder="напр. переформулируй раздел 2 строже; добавь норму про сроки хранения" />
+
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Class="mt-3"
+                       StartIcon="@Icons.Material.Filled.AutoFixHigh"
+                       OnClick="ReviseAsync" Disabled="@(_busy || !CanRevise)">
+                @(_busy ? "Готовлю правку…" : "Применить правку")
+            </MudButton>
+        </MudPaper>
+    </MudItem>
+
+    @* ================= Справа: предложенная редакция ================= *@
+    <MudItem xs="12" md="6">
+        <MudPaper Class="pa-4 h-100" Outlined="true">
+            @if (_busy)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-3" />
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    Извлекаю нормы по допуску, готовлю новую редакцию и проверяю ссылки грунтовкой…
+                </MudText>
+            }
+            else if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_error</MudAlert>
+            }
+            else if (Result is null)
+            {
+                <EmptyState Icon="@Icons.Material.Filled.EditNote" MinHeight="280">
+                    Вставьте текст, дайте команду —<br />и нажмите «Применить правку»
+                </EmptyState>
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3">
+                    ПРЕДЛОЖЕННАЯ РЕДАКЦИЯ — принимает человек (HITL, ТБ-042). Гриф: @Result.ResultClassification.
+                </MudAlert>
+
+                @if (!Result.AllCitationsConfirmed)
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                        Не все ссылки подтверждены извлечёнными нормами — правка НЕ считается готовой (GATE-2).
+                    </MudAlert>
+                }
+
+                <div class="d-flex gap-2 mb-3">
+                    <MudButton Color="Color.Primary" Variant="Variant.Filled" FullWidth="true"
+                               StartIcon="@Icons.Material.Filled.Check" OnClick="AcceptAsync">
+                        Принять — заменить текст
+                    </MudButton>
+                    <MudButton Color="Color.Default" Variant="Variant.Outlined" FullWidth="true"
+                               StartIcon="@Icons.Material.Filled.Close" OnClick="@(() => _response = null)">
+                        Отклонить
+                    </MudButton>
+                </div>
+                <MudButton Class="mb-3" Color="Color.Secondary" Variant="Variant.Filled" FullWidth="true"
+                           OnClick="ExportAsync" Disabled="_exporting" StartIcon="@Icons.Material.Filled.Download">
+                    @(_exporting ? "Экспорт…" : "Экспорт редакции в .docx")
+                </MudButton>
+
+                <SectionCaption Text="Новая редакция" Class="mb-1" />
+                @* Длинный текст не растягивает страницу — прокрутка внутри блока. *@
+                <MudPaper Class="pa-3 mb-3" Outlined="true" Style="max-height:50vh; overflow-y:auto;">
+                    <MudText Typo="Typo.body2" Style="white-space: pre-wrap;">@Result.DraftText</MudText>
+                </MudPaper>
+
+                @if (Result.Citations.Count > 0)
+                {
+                    <SectionCaption Text="Ссылки (грунтовка новой редакции)" Class="mb-1" />
+                    @foreach (var citation in Result.Citations)
+                    {
+                        <div class="d-flex align-center gap-2 mb-1">
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@StatusColor(citation.Status)">
+                                @StatusLabel(citation.Status)
+                            </MudChip>
+                            <MudText Typo="Typo.body2">@citation.Citation</MudText>
+                        </div>
+                    }
+                }
+            }
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    // Команды ТФ-РЕД-02 из ТЗ — как подсказки; своя команда — свободным текстом.
+    private static readonly string[] InstructionHints =
+    [
+        "Переформулируй строже",
+        "Приведи к деловому стандарту",
+        "Сократи, сохранив существо",
+        "Добавь норму про ",
+    ];
+
+    private string _text = string.Empty;
+    private string _instruction = string.Empty;
+
+    private bool _busy;
+    private bool _exporting;
+    private string? _error;
+    private ResponseDto<GenerateReferenceResult>? _response;
+
+    private GenerateReferenceResult? Result => _response?.Data;
+
+    private bool CanRevise => !string.IsNullOrWhiteSpace(_text) && !string.IsNullOrWhiteSpace(_instruction);
+
+    private async Task ReviseAsync()
+    {
+        _busy = true;
+        _error = null;
+        _response = null;
+        try
+        {
+            var response = await Dispatcher.Send(new ReviseDocumentCommand(_text, _instruction));
+            if (response.Status)
+            {
+                _response = response;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка правки: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    // Принять: новая редакция становится ТЕКУЩИМ текстом слева — можно давать следующую команду.
+    private Task AcceptAsync()
+    {
+        if (Result is { } result)
+        {
+            _text = result.DraftText;
+            _response = null;
+            _instruction = string.Empty;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task ExportAsync()
+    {
+        if (Result is not { } result)
+        {
+            return;
+        }
+
+        _exporting = true;
+        try
+        {
+            // Экспортёр общий с Генератором (ТФ-РЕД-03/ТБ-033).
+            var response = await Dispatcher.Send(new ExportReferenceCommand(
+                "Документ (правка в Редакторе)", result.DraftText, result.ResultClassification));
+
+            if (response is { Status: true, Data: { } file })
+            {
+                using var streamReference = new DotNetStreamReference(new MemoryStream(file.Content));
+                await JS.InvokeVoidAsync("downloadFileFromStream", file.FileName, streamReference);
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка экспорта: {ex.Message}";
+        }
+        finally
+        {
+            _exporting = false;
+        }
+    }
+
+    private static Color StatusColor(CitationStatus status) => status switch
+    {
+        CitationStatus.Confirmed => Color.Success,
+        CitationStatus.Superseded => Color.Warning,
+        _ => Color.Error,
+    };
+
+    private static string StatusLabel(CitationStatus status) => status switch
+    {
+        CitationStatus.Confirmed => "подтверждена",
+        CitationStatus.Superseded => "УТРАТИЛА СИЛУ",
+        _ => "не подтверждена",
+    };
+}
