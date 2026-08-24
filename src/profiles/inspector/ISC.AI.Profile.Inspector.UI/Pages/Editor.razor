@@ -212,9 +212,11 @@
     }
 
     // Принять: новая редакция становится ТЕКУЩИМ текстом слева — можно давать следующую команду.
+    // Пустую редакцию не принимаем НИКОГДА (страховка поверх серверной проверки): документ,
+    // затёртый пустотой, не восстановить — поле и есть его единственное хранилище.
     private Task AcceptAsync()
     {
-        if (Result is { } result)
+        if (Result is { } result && !string.IsNullOrWhiteSpace(result.DraftText))
         {
             _text = result.DraftText;
             _response = null;
