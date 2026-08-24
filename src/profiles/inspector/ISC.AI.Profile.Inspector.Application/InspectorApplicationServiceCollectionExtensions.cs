@@ -28,6 +28,10 @@ public static class InspectorApplicationServiceCollectionExtensions
         // свой задачный промпт (method.scriban), ядро и грунтовка не трогаются.
         services.AddSingleton<Features.Methods.IMethodPromptRenderer, Features.Methods.ScribanMethodPromptRenderer>();
 
+        // Редактор (ТФ-РЕД-02): ИИ-правка по команде — третий сценарий там же (editor.scriban);
+        // новая редакция проходит грунтовку целиком, правка не протаскивает выдуманных норм.
+        services.AddSingleton<Features.Editor.IEditorPromptRenderer, Features.Editor.ScribanEditorPromptRenderer>();
+
         // Детерминированный расчёт риска подразделения (Э5-01 шаг 2, Приложение §2) — код, не ИИ.
         services.AddSingleton<RiskScoreCalculator>();
 

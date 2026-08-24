@@ -61,14 +61,15 @@ public sealed class InspectorProfile : IProfile
         // подразделениям; метаданные справок — из документооборота через решётку доступа.
         new ModuleDescriptor("archive", "/archive", "Архив", Icons.Material.Filled.Inventory2,
             typeof(Archive), ReadPolicy, GroupMain),
+        // Редактор (§5.2.10, ТФ-РЕД-01..03): ИИ-правка по команде с сохранением грунтовки.
+        new ModuleDescriptor("editor", "/editor", "Редактор", Icons.Material.Filled.EditNote,
+            typeof(Editor), ReadPolicy, GroupMain),
 
         // --- Модули §5.2, ещё не реализованные (страницы-заглушки) ---
         new ModuleDescriptor("collegium", "/collegium", "Коллегия", Icons.Material.Filled.Groups,
             typeof(Collegium), ReadPolicy, GroupMain),
         new ModuleDescriptor("meetings", "/meetings", "Совещания", Icons.Material.Filled.EventNote,
             typeof(Meetings), ReadPolicy, GroupMain),
-        new ModuleDescriptor("editor", "/editor", "Редактор", Icons.Material.Filled.EditNote,
-            typeof(Editor), ReadPolicy, GroupMain),
         new ModuleDescriptor("analysis", "/analysis", "Анализ / Сравнение", Icons.Material.Filled.CompareArrows,
             typeof(Analysis), ReadPolicy, GroupMain),
         new ModuleDescriptor("risks", "/risks", "Риски и контроль", Icons.Material.Filled.Warning,
