@@ -32,8 +32,8 @@ public static class CoreAiModelsServiceCollectionExtensions
     // (2026-08-24, та же болезнь, что у эмбеддера 30 с → 120 с при импорте кодекса 2026-08-19).
     // Долгая неудачная попытка держит bulkhead-слот дольше — осознанная цена: мёртвый сервер падает
     // быстро (connection refused), по таймауту ждёт только ЖИВОЙ медленный, где ожидание оправдано.
-    private static readonly TimeSpan DefaultChatCallTimeout = TimeSpan.FromSeconds(360);
-    private static readonly TimeSpan DefaultEmbeddingCallTimeout = TimeSpan.FromSeconds(120);
+    private static readonly TimeSpan DefaultChatCallTimeout = TimeSpan.FromSeconds(3600);
+    private static readonly TimeSpan DefaultEmbeddingCallTimeout = TimeSpan.FromSeconds(1200);
 
     // Bulkhead по умолчанию: не больше N одновременных вызовов на роль к общему серверу инференса.
     private const int DefaultMaxConcurrencyPerRole = 4;
