@@ -140,10 +140,30 @@
                     </MudAlert>
                 }
 
-                <MudButton Class="mb-3" Color="Color.Secondary" Variant="Variant.Filled" FullWidth="true"
+                <MudButton Class="mb-2" Color="Color.Secondary" Variant="Variant.Filled" FullWidth="true"
                            OnClick="ExportAsync" Disabled="_exporting" StartIcon="@Icons.Material.Filled.Download">
                     @(_exporting ? "Экспорт…" : "Экспорт в .docx")
                 </MudButton>
+
+                @if (_registeredId is { } registeredId)
+                {
+                    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                        Зарегистрировано в документообороте (№ записи @registeredId) — модуль «Документы».
+                    </MudAlert>
+                }
+                else
+                {
+                    @* Регистрация — акт принятия человеком; при неподтверждённых ссылках запрещена (GATE-2):
+                       иначе выдуманная норма ушла бы в реестр документов и поисковый корпус. *@
+                    <MudTooltip Text="@(Result.AllCitationsConfirmed ? string.Empty : "Сначала уберите неподтверждённые ссылки (GATE-2) — доработайте текст в Редакторе.")">
+                        <MudButton Class="mb-3" Color="Color.Tertiary" Variant="Variant.Outlined" FullWidth="true"
+                                   OnClick="@(() => _registerOpen = true)"
+                                   Disabled="@(!Result.AllCitationsConfirmed)"
+                                   StartIcon="@Icons.Material.Filled.AppRegistration">
+                            Зарегистрировать в документообороте
+                        </MudButton>
+                    </MudTooltip>
+                }
 
                 <SectionCaption Text="Текст" Class="mb-1" />
                 <MudPaper Class="pa-3 mb-3" Outlined="true">
@@ -167,6 +187,14 @@
         </MudPaper>
     </MudItem>
 </MudGrid>
+
+@* --- Регистрация принятого черновика в документообороте (с пометкой ИИ-происхождения) --- *@
+<RegisterGeneratedDialog @bind-Visible="_registerOpen" Origin="Генератор"
+                         DefaultTitle="@($"{_docType} — {_division?.Name}, {_period}")"
+                         Body="@(Result?.DraftText ?? string.Empty)"
+                         Classification="@(Result?.ResultClassification ?? 0)"
+                         Citations="@(Result?.Citations ?? [])"
+                         OnRegistered="@(id => _registeredId = id)" />
 
 @code {
     // Типы документов §5.2.1.1. Реализована пока только справка; остальные — новый prompt-каркас без правок ядра.
@@ -193,6 +221,8 @@
 
     private bool _busy;
     private bool _exporting;
+    private bool _registerOpen;
+    private int? _registeredId;
     private string? _error;
     private ResponseDto<GenerateReferenceResult>? _response;
 
@@ -233,6 +263,7 @@
         _busy = true;
         _error = null;
         _response = null;
+        _registeredId = null;
         try
         {
             var response = await Dispatcher.Send(new GenerateReferenceCommand(BuildTopic()));

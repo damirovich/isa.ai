@@ -91,10 +91,29 @@
                         Отклонить
                     </MudButton>
                 </div>
-                <MudButton Class="mb-3" Color="Color.Secondary" Variant="Variant.Filled" FullWidth="true"
+                <MudButton Class="mb-2" Color="Color.Secondary" Variant="Variant.Filled" FullWidth="true"
                            OnClick="ExportAsync" Disabled="_exporting" StartIcon="@Icons.Material.Filled.Download">
                     @(_exporting ? "Экспорт…" : "Экспорт редакции в .docx")
                 </MudButton>
+
+                @if (_registeredId is { } registeredId)
+                {
+                    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                        Зарегистрировано в документообороте (№ записи @registeredId) — модуль «Документы».
+                    </MudAlert>
+                }
+                else
+                {
+                    @* Регистрация — акт принятия человеком; при неподтверждённых ссылках запрещена (GATE-2). *@
+                    <MudTooltip Text="@(Result.AllCitationsConfirmed ? string.Empty : "Сначала уберите неподтверждённые ссылки (GATE-2) — дайте команду на доработку.")">
+                        <MudButton Class="mb-3" Color="Color.Tertiary" Variant="Variant.Outlined" FullWidth="true"
+                                   OnClick="@(() => _registerOpen = true)"
+                                   Disabled="@(!Result.AllCitationsConfirmed)"
+                                   StartIcon="@Icons.Material.Filled.AppRegistration">
+                            Зарегистрировать в документообороте
+                        </MudButton>
+                    </MudTooltip>
+                }
 
                 <SectionCaption Text="Новая редакция" Class="mb-1" />
                 @* Длинный текст не растягивает страницу — прокрутка внутри блока. *@
@@ -120,6 +139,14 @@
     </MudItem>
 </MudGrid>
 
+@* --- Регистрация принятой редакции в документообороте (с пометкой ИИ-происхождения) --- *@
+<RegisterGeneratedDialog @bind-Visible="_registerOpen" Origin="Редактор"
+                         DefaultTitle="@($"Документ (правка в Редакторе): {_instruction}")"
+                         Body="@(Result?.DraftText ?? string.Empty)"
+                         Classification="@(Result?.ResultClassification ?? 0)"
+                         Citations="@(Result?.Citations ?? [])"
+                         OnRegistered="@(id => _registeredId = id)" />
+
 @code {
     // Команды ТФ-РЕД-02 из ТЗ — как подсказки; своя команда — свободным текстом.
     private static readonly string[] InstructionHints =
@@ -135,6 +162,8 @@
 
     private bool _busy;
     private bool _exporting;
+    private bool _registerOpen;
+    private int? _registeredId;
     private string? _error;
     private ResponseDto<GenerateReferenceResult>? _response;
 
@@ -147,6 +176,7 @@
         _busy = true;
         _error = null;
         _response = null;
+        _registeredId = null;
         try
         {
             var response = await Dispatcher.Send(new ReviseDocumentCommand(_text, _instruction));
