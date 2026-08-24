@@ -51,8 +51,12 @@ public static class CoreAiModelsServiceCollectionExtensions
         var chatTimeout = ReadTimeout(configuration, "Llm:ChatCallTimeoutSeconds", DefaultChatCallTimeout);
         var embeddingTimeout = ReadTimeout(configuration, "Llm:EmbeddingCallTimeoutSeconds", DefaultEmbeddingCallTimeout);
 
-        TryAddChatModel(services, configuration, ModelRole.Draft, maxConcurrency, chatTimeout);
-        TryAddChatModel(services, configuration, ModelRole.Analysis, maxConcurrency, chatTimeout);
+        // Размышления модели по умолчанию ОТКЛЮЧЕНЫ (Llm:DisableThinking=false — вернуть):
+        // на редакторской задаче раздумья съедали весь лимит вывода, ответ приходил пустым.
+        var disableThinking = !bool.TryParse(configuration["Llm:DisableThinking"], out var flag) || flag;
+
+        TryAddChatModel(services, configuration, ModelRole.Draft, maxConcurrency, chatTimeout, disableThinking);
+        TryAddChatModel(services, configuration, ModelRole.Analysis, maxConcurrency, chatTimeout, disableThinking);
         TryAddEmbeddingModel(services, configuration, ModelRole.Embeddings, maxConcurrency, embeddingTimeout);
         return services;
     }
@@ -63,7 +67,8 @@ public static class CoreAiModelsServiceCollectionExtensions
             : fallback;
 
     private static void TryAddChatModel(
-        IServiceCollection services, IConfiguration configuration, ModelRole role, int maxConcurrency, TimeSpan callTimeout)
+        IServiceCollection services, IConfiguration configuration, ModelRole role, int maxConcurrency,
+        TimeSpan callTimeout, bool disableThinking)
     {
         if (!TryReadModel(configuration, role, out var endpoint, out var configuredModel, out var apiKey))
         {
@@ -80,7 +85,7 @@ public static class CoreAiModelsServiceCollectionExtensions
             var model = ResolveModelName(endpoint, configuredModel, role);
             IChatClient client = new OpenAIClient(
                     new ApiKeyCredential(apiKey),
-                    BuildClientOptions(endpointUri))
+                    BuildClientOptions(endpointUri, disableThinking))
                 .GetChatClient(model)
                 .AsIChatClient();
             return new ResilientChatClient(client, role, callTimeout, maxConcurrency);
@@ -104,7 +109,7 @@ public static class CoreAiModelsServiceCollectionExtensions
             var model = ResolveModelName(endpoint, configuredModel, role);
             IEmbeddingGenerator<string, Embedding<float>> client = new OpenAIClient(
                     new ApiKeyCredential(apiKey),
-                    BuildClientOptions(endpointUri))
+                    BuildClientOptions(endpointUri, disableThinking: false)) // эмбеддер не «думает».
                 .GetEmbeddingClient(model)
                 .AsIEmbeddingGenerator();
             return new ResilientEmbeddingGenerator(client, role, callTimeout, maxConcurrency);
@@ -124,7 +129,7 @@ public static class CoreAiModelsServiceCollectionExtensions
     /// модель генерирует бесконечно.</item>
     /// </list>
     /// </summary>
-    private static OpenAIClientOptions BuildClientOptions(Uri endpointUri)
+    private static OpenAIClientOptions BuildClientOptions(Uri endpointUri, bool disableThinking)
     {
         var options = new OpenAIClientOptions
         {
@@ -132,7 +137,7 @@ public static class CoreAiModelsServiceCollectionExtensions
             NetworkTimeout = System.Threading.Timeout.InfiniteTimeSpan,
             RetryPolicy = new System.ClientModel.Primitives.ClientRetryPolicy(maxRetries: 0),
         };
-        options.AddPolicy(new LegacyMaxTokensPolicy(), System.ClientModel.Primitives.PipelinePosition.PerCall);
+        options.AddPolicy(new LegacyMaxTokensPolicy(disableThinking), System.ClientModel.Primitives.PipelinePosition.PerCall);
         return options;
     }
 
