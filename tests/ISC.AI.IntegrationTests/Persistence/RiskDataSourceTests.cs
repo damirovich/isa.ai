@@ -82,6 +82,83 @@ public sealed class RiskDataSourceTests : IAsyncLifetime
         summary.RecentViolations.Select(r => r.DetectedAt).ShouldBeInOrder(SortDirection.Descending);
     }
 
+    [Fact(DisplayName = "Разбор риска: сигналы, болевые сферы и последняя рекомендация сходятся с ручным расчётом")]
+    public async Task Division_risk_breakdown_matches_hand_computed_signals()
+    {
+        var (source, ids) = await BuildAsync();
+
+        await SeedViolationAsync(ids.DivisionA, ids.KindK1, ViolationSeverity.High,
+            new DateOnly(2026, 5, 10), RemediationStatus.Overdue, "Усилить контроль сроков");
+        await SeedViolationAsync(ids.DivisionA, ids.KindK1, ViolationSeverity.Medium,
+            new DateOnly(2026, 5, 20), RemediationStatus.Resolved, "Провести разбор с исполнителями");
+        await SeedViolationAsync(ids.DivisionA, ids.KindK1, ViolationSeverity.Critical,
+            new DateOnly(2026, 5, 25), RemediationStatus.UnderControl);
+        await SeedViolationAsync(ids.DivisionB, ids.KindK2, ViolationSeverity.Low,
+            new DateOnly(2026, 5, 5), RemediationStatus.Resolved);
+        await SeedViolationAsync(ids.DivisionA, ids.KindK2, ViolationSeverity.Low,
+            new DateOnly(2026, 4, 15), RemediationStatus.Resolved);
+
+        var risks = await source.GetDivisionRisksAsync(From, To);
+
+        risks.Count.ShouldBe(2);
+        var alpha = risks[0];
+        alpha.DivisionName.ShouldBe("Альфа");
+        alpha.ViolationCount.ShouldBe(3);
+        alpha.OpenCount.ShouldBe(2);          // High/просрочено + Critical/на контроле.
+        alpha.RepeatCount.ShouldBe(2);
+        alpha.OverdueCount.ShouldBe(1);
+        alpha.TrendDelta.ShouldBe(2);         // 3 в мае − 1 в апреле.
+        alpha.Assessment.Score.ShouldBe(19);  // Тот же ручной расчёт, что у дашборда.
+        // Болевая точка — сфера (родитель вида), с числом нарушений.
+        alpha.TopSpheres.ShouldBe(["Документооборот — 3"]);
+        // Последняя НЕПУСТАЯ рекомендация: у самого свежего (25.05) её нет — берётся от 20.05.
+        alpha.LastRecommendation.ShouldBe("Провести разбор с исполнителями");
+
+        var beta = risks[1];
+        beta.OpenCount.ShouldBe(0);
+        beta.TrendDelta.ShouldBe(1);
+        beta.LastRecommendation.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Мониторинг устранения: счётчики по подразделениям и порядок карточек (неустранённые первыми)")]
+    public async Task Remediation_summary_counts_and_orders_cards()
+    {
+        var (source, ids) = await BuildAsync();
+
+        await SeedViolationAsync(ids.DivisionA, ids.KindK1, ViolationSeverity.High,
+            new DateOnly(2026, 5, 10), RemediationStatus.Overdue, "Усилить контроль сроков");
+        await SeedViolationAsync(ids.DivisionA, ids.KindK1, ViolationSeverity.Medium,
+            new DateOnly(2026, 5, 20), RemediationStatus.Resolved);
+        await SeedViolationAsync(ids.DivisionA, ids.KindK1, ViolationSeverity.Critical,
+            new DateOnly(2026, 5, 25), RemediationStatus.UnderControl);
+        await SeedViolationAsync(ids.DivisionB, ids.KindK2, ViolationSeverity.Low,
+            new DateOnly(2026, 5, 5), RemediationStatus.Resolved);
+        await SeedViolationAsync(ids.DivisionA, ids.KindK2, ViolationSeverity.Low,
+            new DateOnly(2026, 4, 15), RemediationStatus.Resolved);
+
+        var summary = await source.GetRemediationAsync(From, To);
+
+        // Счётчики по подразделениям (по алфавиту); апрельская запись в окно не входит.
+        summary.Divisions.Count.ShouldBe(2);
+        var alpha = summary.Divisions[0];
+        alpha.DivisionName.ShouldBe("Альфа");
+        alpha.Total.ShouldBe(3);
+        alpha.Resolved.ShouldBe(1);
+        alpha.UnderControl.ShouldBe(1);
+        alpha.Overdue.ShouldBe(1);
+        alpha.Partial.ShouldBe(0);
+        summary.Divisions[1].DivisionName.ShouldBe("Бета");
+        summary.Divisions[1].Resolved.ShouldBe(1);
+
+        // Карточки: неустранённые первыми (свежие выше), устранённые следом.
+        summary.Rows.Count.ShouldBe(4);
+        summary.Rows[0].RemediationStatus.ShouldBe(RemediationStatus.UnderControl);
+        summary.Rows[1].RemediationStatus.ShouldBe(RemediationStatus.Overdue);
+        summary.Rows[1].Recommendation.ShouldBe("Усилить контроль сроков");
+        summary.Rows[2].RemediationStatus.ShouldBe(RemediationStatus.Resolved);
+        summary.Rows[3].RemediationStatus.ShouldBe(RemediationStatus.Resolved);
+    }
+
     [Fact(DisplayName = "Пустой период — нулевая сводка без строк светофора")]
     public async Task Empty_period_yields_zero_summary()
     {
@@ -125,7 +202,8 @@ public sealed class RiskDataSourceTests : IAsyncLifetime
     }
 
     private async Task SeedViolationAsync(
-        int divisionId, int categoryId, ViolationSeverity severity, DateOnly detectedAt, RemediationStatus status)
+        int divisionId, int categoryId, ViolationSeverity severity, DateOnly detectedAt, RemediationStatus status,
+        string? recommendation = null)
     {
         var factory = new InspectorContextFactory(_postgres.GetConnectionString());
         await using var db = factory.CreateDbContext();
@@ -136,6 +214,7 @@ public sealed class RiskDataSourceTests : IAsyncLifetime
             Severity = severity,
             DetectedAt = detectedAt,
             RemediationStatus = status,
+            Recommendation = recommendation,
         });
         await db.SaveChangesAsync();
     }

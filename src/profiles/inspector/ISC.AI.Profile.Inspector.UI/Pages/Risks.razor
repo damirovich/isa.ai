@@ -1,28 +1,36 @@
 @namespace ISC.AI.Profile.Inspector.UI
 @page "/risks"
 @rendermode InteractiveServer
+@using ISC.AI.Profile.Inspector.Application.Features.Risks
 @using ISC.AI.Profile.Inspector.Domain.Enums
-@using ISC.AI.Profile.Inspector.Domain.Risk
-@inject RiskScoreCalculator Calculator
+@using ISC.AI.Profile.Inspector.Domain.Services
 
-@* Модуль «Риски и внутренний контроль» (§5.2.5.1). ВАЖНО: уровень риска на экране НЕ нарисован — его
-   считает настоящий RiskScoreCalculator по формуле Приложения §2 (детерминированно, код, не ИИ).
-   ДЕМО — только исходные сигналы (нарушения/повторы/просрочки/тренд), пока inspector.violation пуст. *@
+@* Модуль «Риски и внутренний контроль» (§5.2.5.1) на ЖИВОМ учёте нарушений (Э5-01) — демо снято.
+   Балл каждого подразделения считает RiskScoreCalculator по формуле Приложения §2 (детерминированно,
+   код, не ИИ); здесь сигналы формулы показываются по отдельности — виден разбор, а не только итог. *@
 
 <PageHeader Title="Риски и внутренний контроль"
             Subtitle="Выявление рисков, правила и процедуры контроля"
-            Icon="@Icons.Material.Filled.Warning" />
+            Icon="@Icons.Material.Filled.Warning">
+    <MudSelect T="int" Value="_periodDays" ValueChanged="ChangePeriodAsync" Label="Период"
+               Variant="Variant.Outlined" Dense="true" Style="width:180px;">
+        <MudSelectItem T="int" Value="30">30 дней</MudSelectItem>
+        <MudSelectItem T="int" Value="90">90 дней</MudSelectItem>
+        <MudSelectItem T="int" Value="180">Полгода</MudSelectItem>
+        <MudSelectItem T="int" Value="365">Год</MudSelectItem>
+    </MudSelect>
+</PageHeader>
 
-<DemoAlert>
-    Исходные данные показательные (ДЕМО) — <c>inspector.violation</c> ещё не наполнен. Но сам <b>уровень риска
-    вычисляет настоящая детерминированная формула</b> (Приложение §2), а не константа: балл = w1·Σтяжесть +
-    w2·повторы + w3·просрочки + w4·тренд. ИИ здесь не участвует.
-</DemoAlert>
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
 
 @* --- Показатели --- *@
 <MudGrid Class="mb-2">
     <MudItem xs="12" sm="6" md="3">
-        <StatCard Value="@_assessed.Count" Label="Выявленных рисков" Accent="var(--mud-palette-info)" />
+        <StatCard Value="@_risks.Count" Label="Подразделений с нарушениями" Accent="var(--mud-palette-info)" />
     </MudItem>
     <MudItem xs="12" sm="6" md="3">
         <StatCard Value="@CountOf(RiskLevel.Critical, RiskLevel.High)" Label="Критичных / высоких"
@@ -45,10 +53,17 @@
             <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" Class="mt-1">
                 <MudTabPanel Text="Реестр рисков" Icon="@Icons.Material.Filled.Warning">
                     @* --- Фильтр по уровню --- *@
-                    <FilterChipRow TValue="RiskLevel" Label="Уровень:" AllCount="@_assessed.Count"
+                    <FilterChipRow TValue="RiskLevel" Label="Уровень:" AllCount="@_risks.Count"
                                    Items="@FilterItems" Selected="@_filter"
                                    SelectedChanged="@((RiskLevel? v) => _filter = v)" />
 
+                    @if (_risks.Count == 0 && !_busy)
+                    {
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                            За период нарушений не занесено — рисков нет. Реестр наполняется
+                            из модуля «Учёт нарушений».
+                        </MudText>
+                    }
                     @foreach (var item in Filtered)
                     {
                         <AccentRow Accent="@LevelColor(item.Assessment.Level)"
@@ -56,16 +71,22 @@
                                    OnClick="@(() => _selected = item)">
                             <div class="d-flex align-center gap-2">
                                 <MudText Typo="Typo.body1" Class="flex-grow-1">
-                                    <b>@item.Entry.Division — @item.Entry.Area</b>
+                                    <b>@item.DivisionName</b>
                                 </MudText>
                                 <TintedChip Color="@LevelColor(item.Assessment.Level)">
-                                    @LevelLabel(item.Assessment.Level)
+                                    @item.Assessment.Level.Label()
                                 </TintedChip>
                             </div>
-                            <MudText Typo="Typo.body2" Class="mud-text-secondary mt-1">@item.Entry.Description</MudText>
-                            <MudText Typo="Typo.caption" Style="@($"color:{LevelColor(RiskLevel.Low)};")" Class="mt-1 d-block">
-                                → @item.Entry.Recommendation
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary mt-1">
+                                Нарушений за период: @item.ViolationCount, из них открытых: @item.OpenCount ·
+                                @string.Join(" · ", item.TopSpheres)
                             </MudText>
+                            @if (item.LastRecommendation is { } recommendation)
+                            {
+                                <MudText Typo="Typo.caption" Style="@($"color:{LevelColor(RiskLevel.Low)};")" Class="mt-1 d-block">
+                                    → @recommendation
+                                </MudText>
+                            }
                         </AccentRow>
                     }
                 </MudTabPanel>
@@ -103,29 +124,34 @@
             @if (_selected is null)
             {
                 <EmptyState Icon="@Icons.Material.Filled.Warning">
-                    Выберите риск из реестра<br />для работы с ним и правилами контроля
+                    Выберите подразделение из реестра —<br />покажу, из чего сложился его балл
                 </EmptyState>
             }
             else
             {
                 <SectionCaption Text="Риск" />
-                <MudText Typo="Typo.h6">@_selected.Entry.Division</MudText>
-                <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">@_selected.Entry.Area</MudText>
+                <MudText Typo="Typo.h6">@_selected.DivisionName</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">
+                    Нарушений за период: @_selected.ViolationCount
+                </MudText>
 
                 <div class="d-flex align-center gap-2 mb-3">
                     <TintedChip Color="@LevelColor(_selected.Assessment.Level)">
-                        @LevelLabel(_selected.Assessment.Level)
+                        @_selected.Assessment.Level.Label()
                     </TintedChip>
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">
                         балл @_selected.Assessment.Score.ToString("0.#")
                     </MudChip>
                 </div>
 
-                <SectionCaption Text="Существо" Class="" />
-                <MudText Typo="Typo.body2" Class="mb-3">@_selected.Entry.Description</MudText>
+                <SectionCaption Text="Болевые точки (сферы)" Class="" />
+                <MudText Typo="Typo.body2" Class="mb-3">@string.Join(" · ", _selected.TopSpheres)</MudText>
 
-                <SectionCaption Text="Рекомендация" Class="" />
-                <MudText Typo="Typo.body2" Class="mb-3">@_selected.Entry.Recommendation</MudText>
+                @if (_selected.LastRecommendation is { } recommendation)
+                {
+                    <SectionCaption Text="Последняя рекомендация" Class="" />
+                    <MudText Typo="Typo.body2" Class="mb-3">@recommendation</MudText>
+                }
 
                 @* Разбор балла — показывает, что уровень получен формулой, а не назначен вручную. *@
                 <SectionCaption Text="Из чего сложился балл" Class="mb-1" />
@@ -142,34 +168,61 @@
     private static readonly RiskLevel[] AllLevels =
         [RiskLevel.Critical, RiskLevel.High, RiskLevel.Medium, RiskLevel.Low];
 
-    /// <summary>Запись реестра вместе с ВЫЧИСЛЕННОЙ оценкой (формула, не константа).</summary>
-    private sealed record AssessedRisk(InspectorDemoData.RiskEntry Entry, RiskAssessment Assessment);
-
-    private List<AssessedRisk> _assessed = [];
+    private readonly List<DivisionRiskDetail> _risks = [];
+    private int _periodDays = 90;
     private RiskLevel? _filter;
-    private AssessedRisk? _selected;
+    private DivisionRiskDetail? _selected;
+    private bool _busy;
+    private string? _error;
 
-    protected override void OnInitialized() =>
-        // Уровень каждого риска считает НАСТОЯЩИЙ калькулятор по демо-сигналам (Приложение §2).
-        _assessed = [.. InspectorDemoData.Risks.Select(r => new AssessedRisk(r, Calculator.Assess(r.Signals)))];
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
 
-    private IEnumerable<AssessedRisk> Filtered =>
-        _filter is null ? _assessed : _assessed.Where(r => r.Assessment.Level == _filter);
+    private async Task ChangePeriodAsync(int days)
+    {
+        _periodDays = days;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new GetDivisionRisksQuery(_periodDays));
+            _risks.Clear();
+            _selected = null;
+            if (response is { Status: true, Data: { } list })
+            {
+                _risks.AddRange(list);
+            }
+            else if (response is { Status: false })
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private IEnumerable<DivisionRiskDetail> Filtered =>
+        _filter is null ? _risks : _risks.Where(r => r.Assessment.Level == _filter);
 
     /// <summary>Чипы фильтра по уровню: подпись, цвет и количество записей на каждый уровень.</summary>
     private IReadOnlyList<FilterChipItem<RiskLevel>> FilterItems =>
-        [.. AllLevels.Select(l => new FilterChipItem<RiskLevel>(l, LevelLabel(l), LevelColor(l), CountOf(l)))];
+        [.. AllLevels.Select(l => new FilterChipItem<RiskLevel>(l, l.Label(), LevelColor(l), CountOf(l)))];
 
-    /// <summary>Строки «Из чего сложился балл» выбранного риска — сигналы формулы Приложения §2.</summary>
+    /// <summary>Строки «Из чего сложился балл» — сигналы формулы Приложения §2 из живого учёта.</summary>
     private IReadOnlyList<(string Label, string Value)> ScoreRows => _selected is null ? [] :
     [
-        ("Открытых нарушений (объём×тяжесть)", _selected.Entry.Signals.OpenSeverities.Count.ToString()),
-        ("Повторяемость", _selected.Entry.Signals.RepeatCount.ToString()),
-        ("Просроченных устранений", _selected.Entry.Signals.OverdueCount.ToString()),
-        ("Тренд к пред. периоду", _selected.Entry.Signals.TrendDelta.ToString()),
+        ("Открытых нарушений (объём×тяжесть)", _selected.OpenCount.ToString()),
+        ("Повторяемость", _selected.RepeatCount.ToString()),
+        ("Просроченных устранений", _selected.OverdueCount.ToString()),
+        ("Тренд к пред. периоду", _selected.TrendDelta.ToString()),
     ];
 
-    private int CountOf(params RiskLevel[] levels) => _assessed.Count(r => levels.Contains(r.Assessment.Level));
+    private int CountOf(params RiskLevel[] levels) => _risks.Count(r => levels.Contains(r.Assessment.Level));
 
     // 4 уровня — 4 оттенка (на дашборде они сворачиваются в 3 цвета светофора, Приложение §2).
     private static string LevelColor(RiskLevel level) => level switch
@@ -178,13 +231,5 @@
         RiskLevel.High => "#f97316",
         RiskLevel.Medium => "#eab308",
         _ => "#22c55e",
-    };
-
-    private static string LevelLabel(RiskLevel level) => level switch
-    {
-        RiskLevel.Critical => "Критичный",
-        RiskLevel.High => "Высокий",
-        RiskLevel.Medium => "Средний",
-        _ => "Низкий",
     };
 }
