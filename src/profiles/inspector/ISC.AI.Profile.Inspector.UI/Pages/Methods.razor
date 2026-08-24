@@ -1,145 +1,313 @@
 @namespace ISC.AI.Profile.Inspector.UI
 @page "/methods"
 @rendermode InteractiveServer
+@using System.Text.Json
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Abstractions.Grounding
 @using ISC.AI.Profile.Inspector.Application.Features.Divisions
 @using ISC.AI.Profile.Inspector.Application.Features.Generation
 @using ISC.AI.Profile.Inspector.Application.Features.Methods
+@using ISC.AI.Profile.Inspector.Domain.Enums
 @using ISC.AI.Profile.Inspector.Domain.Services
 @using Microsoft.JSInterop
 
-@* Модуль «Методики проверок» (§5.2.9, ТФ-МЕТ-01) — генерация НАСТОЯЩАЯ, демо-витрина снята.
-   Тот же grounded-конвейер, что у Генератора: извлечение норм по допуску → модель → грунтовка
-   (ТБ-040, GATE-2) → черновик для проверки человеком (HITL, ТБ-042) → экспорт .docx с грифом (ТБ-033).
-   Планы работы и дорожные карты (ТФ-МЕТ-02) — P2, не входят. *@
+@* Модуль «Методики проверок» (§5.2.9, ТФ-МЕТ-01) — генерация НАСТОЯЩАЯ + РЕЕСТР сохранённых методик
+   (Ц-03 «институциональная память»): сформированное сохраняется черновиком, дорабатывается человеком
+   и утверждается Руководителем/Администратором; правка утверждённой возвращает её в черновики.
+   Выдача реестра — по допуску (гриф методики наследован от генерации, ТБ-020-стиль).
+   Конвейер генерации: извлечение по допуску → модель → грунтовка (ТБ-040, GATE-2) → черновик
+   (HITL, ТБ-042) → экспорт .docx с грифом (ТБ-033). ТФ-МЕТ-02 (планы, дорожные карты) — P2. *@
 
 <PageHeader Title="Методики проверок"
-            Subtitle="Программы, чек-листы, инструкции и памятки — по типу и объекту проверки"
+            Subtitle="Программы, чек-листы, инструкции и памятки — формирование и реестр"
             Icon="@Icons.Material.Filled.MenuBook" />
 
-<MudGrid>
-    @* ================= Левая колонка: параметры ================= *@
-    <MudItem xs="12" md="7">
-        @* --- Вид документа --- *@
-        <MudPaper Class="pa-4 mb-4" Outlined="true">
-            <SectionCaption Text="Вид документа" Class="mb-2" />
-            <div class="d-flex gap-2 flex-wrap">
-                @foreach (var kind in ArtifactKinds)
-                {
-                    <MudChip T="string" Variant="@(_artifactKind == kind ? Variant.Filled : Variant.Outlined)"
-                             Color="Color.Primary" OnClick="@(() => _artifactKind = kind)">@kind</MudChip>
-                }
-            </div>
-        </MudPaper>
-
-        @* --- Тип и объект проверки --- *@
-        <MudPaper Class="pa-4 mb-4" Outlined="true">
-            <SectionCaption Text="Тип и объект проверки" Class="mb-2" />
-            <div class="d-flex gap-2 flex-wrap mb-3">
-                @foreach (var type in InspectionTypes)
-                {
-                    <MudChip T="string" Variant="@(_inspectionType == type ? Variant.Filled : Variant.Outlined)"
-                             Color="Color.Secondary" OnClick="@(() => _inspectionType = type)">@type</MudChip>
-                }
-            </div>
-
-            <MudGrid Spacing="2">
-                <MudItem xs="12" sm="6">
-                    @* Подразделение — из живого справочника (§4.2); необязательно, если объект задан текстом. *@
-                    <MudSelect T="int?" @bind-Value="_divisionId" Label="Подразделение (объект)"
-                               Variant="Variant.Outlined" Clearable="true" Dense="true">
-                        @foreach (var division in ActiveDivisions)
+<MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" @bind-ActivePanelIndex="_activeTab">
+    @* ================= Вкладка 1: формирование ================= *@
+    <MudTabPanel Text="Формирование" Icon="@Icons.Material.Filled.AutoAwesome">
+        <MudGrid Class="mt-2">
+            <MudItem xs="12" md="7">
+                @* --- Вид документа --- *@
+                <MudPaper Class="pa-4 mb-4" Outlined="true">
+                    <SectionCaption Text="Вид документа" Class="mb-2" />
+                    <div class="d-flex gap-2 flex-wrap">
+                        @foreach (var kind in ArtifactKinds)
                         {
-                            <MudSelectItem T="int?" Value="@division.Id">@division.Name</MudSelectItem>
+                            <MudChip T="string" Variant="@(_artifactKind == kind ? Variant.Filled : Variant.Outlined)"
+                                     Color="Color.Primary" OnClick="@(() => _artifactKind = kind)">@kind</MudChip>
                         }
-                    </MudSelect>
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <MudTextField @bind-Value="_direction" Label="Направление / предмет проверки"
-                                  Variant="Variant.Outlined" Immediate="true" MaxLength="200"
-                                  Placeholder="напр. режим секретного делопроизводства" />
-                </MudItem>
-            </MudGrid>
-        </MudPaper>
-
-        @* --- Дополнительные указания --- *@
-        <MudPaper Class="pa-4" Outlined="true">
-            <SectionCaption Text="Дополнительные указания (необязательно)" />
-            <MudTextField @bind-Value="_extra" Variant="Variant.Outlined" Lines="4" Immediate="true"
-                          Disabled="_busy" MaxLength="2000"
-                          Placeholder="Что учесть особо: период, известные слабые места, акцент проверки…" />
-
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Class="mt-3"
-                       StartIcon="@Icons.Material.Filled.AutoAwesome"
-                       OnClick="GenerateAsync" Disabled="@(_busy || !CanGenerate)">
-                @(_busy ? "Формирую…" : "Сформировать документ")
-            </MudButton>
-        </MudPaper>
-    </MudItem>
-
-    @* ================= Правая колонка: результат ================= *@
-    <MudItem xs="12" md="5">
-        <MudPaper Class="pa-4 h-100" Outlined="true">
-            @if (_busy)
-            {
-                <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-3" />
-                <MudText Typo="Typo.body2" Class="mud-text-secondary">
-                    Извлекаю нормы по допуску, формирую черновик и проверяю ссылки грунтовкой…
-                </MudText>
-            }
-            else if (_error is not null)
-            {
-                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_error</MudAlert>
-            }
-            else if (Result is null)
-            {
-                <EmptyState Icon="@Icons.Material.Filled.MenuBook" MinHeight="280">
-                    Выберите вид документа, тип и объект проверки —<br />и нажмите «Сформировать»
-                </EmptyState>
-            }
-            else
-            {
-                <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3">
-                    ЧЕРНОВИК — требует проверки человеком (HITL, ТБ-042). Гриф результата: @Result.ResultClassification.
-                </MudAlert>
-
-                @if (!Result.AllCitationsConfirmed)
-                {
-                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">
-                        Не все ссылки подтверждены извлечёнными нормами — вывод НЕ считается готовым (GATE-2).
-                    </MudAlert>
-                }
-
-                <MudButton Class="mb-3" Color="Color.Secondary" Variant="Variant.Filled" FullWidth="true"
-                           OnClick="ExportAsync" Disabled="_exporting" StartIcon="@Icons.Material.Filled.Download">
-                    @(_exporting ? "Экспорт…" : "Экспорт в .docx")
-                </MudButton>
-
-                <SectionCaption Text="Текст" Class="mb-1" />
-                <MudPaper Class="pa-3 mb-3" Outlined="true">
-                    <MudText Typo="Typo.body2" Style="white-space: pre-wrap;">@Result.DraftText</MudText>
+                    </div>
                 </MudPaper>
 
-                @if (Result.Citations.Count > 0)
-                {
-                    <SectionCaption Text="Ссылки (грунтовка)" Class="mb-1" />
-                    @foreach (var citation in Result.Citations)
+                @* --- Тип и объект проверки --- *@
+                <MudPaper Class="pa-4 mb-4" Outlined="true">
+                    <SectionCaption Text="Тип и объект проверки" Class="mb-2" />
+                    <div class="d-flex gap-2 flex-wrap mb-3">
+                        @foreach (var type in InspectionTypes)
+                        {
+                            <MudChip T="string" Variant="@(_inspectionType == type ? Variant.Filled : Variant.Outlined)"
+                                     Color="Color.Secondary" OnClick="@(() => _inspectionType = type)">@type</MudChip>
+                        }
+                    </div>
+
+                    <MudGrid Spacing="2">
+                        <MudItem xs="12" sm="6">
+                            @* Подразделение — из живого справочника (§4.2); необязательно, если объект задан текстом. *@
+                            <MudSelect T="int?" @bind-Value="_divisionId" Label="Подразделение (объект)"
+                                       Variant="Variant.Outlined" Clearable="true" Dense="true">
+                                @foreach (var division in ActiveDivisions)
+                                {
+                                    <MudSelectItem T="int?" Value="@division.Id">@division.Name</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudTextField @bind-Value="_direction" Label="Направление / предмет проверки"
+                                          Variant="Variant.Outlined" Immediate="true" MaxLength="200"
+                                          Placeholder="напр. режим секретного делопроизводства" />
+                        </MudItem>
+                    </MudGrid>
+                </MudPaper>
+
+                @* --- Дополнительные указания --- *@
+                <MudPaper Class="pa-4" Outlined="true">
+                    <SectionCaption Text="Дополнительные указания (необязательно)" />
+                    <MudTextField @bind-Value="_extra" Variant="Variant.Outlined" Lines="4" Immediate="true"
+                                  Disabled="_busy" MaxLength="2000"
+                                  Placeholder="Что учесть особо: период, известные слабые места, акцент проверки…" />
+
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Class="mt-3"
+                               StartIcon="@Icons.Material.Filled.AutoAwesome"
+                               OnClick="GenerateAsync" Disabled="@(_busy || !CanGenerate)">
+                        @(_busy ? "Формирую…" : "Сформировать документ")
+                    </MudButton>
+                </MudPaper>
+            </MudItem>
+
+            @* ================= Результат ================= *@
+            <MudItem xs="12" md="5">
+                <MudPaper Class="pa-4 h-100" Outlined="true">
+                    @if (_busy)
                     {
-                        <div class="d-flex align-center gap-2 mb-1">
-                            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@StatusColor(citation.Status)">
-                                @StatusLabel(citation.Status)
-                            </MudChip>
-                            <MudText Typo="Typo.body2">@citation.Citation</MudText>
-                        </div>
+                        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-3" />
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                            Извлекаю нормы по допуску, формирую черновик и проверяю ссылки грунтовкой…
+                        </MudText>
                     }
+                    else if (_error is not null)
+                    {
+                        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_error</MudAlert>
+                    }
+                    else if (Result is null)
+                    {
+                        <EmptyState Icon="@Icons.Material.Filled.MenuBook" MinHeight="280">
+                            Выберите вид документа, тип и объект проверки —<br />и нажмите «Сформировать»
+                        </EmptyState>
+                    }
+                    else
+                    {
+                        <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3">
+                            ЧЕРНОВИК — требует проверки человеком (HITL, ТБ-042). Гриф результата: @Result.ResultClassification.
+                        </MudAlert>
+
+                        @if (!Result.AllCitationsConfirmed)
+                        {
+                            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                                Не все ссылки подтверждены извлечёнными нормами — вывод НЕ считается готовым (GATE-2).
+                            </MudAlert>
+                        }
+
+                        @if (_savedId is { } savedId)
+                        {
+                            <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                                Сохранено в реестр (№ @savedId) — вкладка «Реестр методик».
+                            </MudAlert>
+                        }
+
+                        <div class="d-flex gap-2 mb-3">
+                            <MudButton Color="Color.Primary" Variant="Variant.Filled" FullWidth="true"
+                                       OnClick="SaveToRegistryAsync" Disabled="@(_saving || _savedId is not null)"
+                                       StartIcon="@Icons.Material.Filled.Save">
+                                @(_saving ? "Сохраняю…" : "Сохранить в реестр")
+                            </MudButton>
+                            <MudButton Color="Color.Secondary" Variant="Variant.Filled" FullWidth="true"
+                                       OnClick="@(() => ExportAsync(_artifactKind, BuildScope(), Result!.DraftText, Result!.ResultClassification))"
+                                       Disabled="_exporting" StartIcon="@Icons.Material.Filled.Download">
+                                @(_exporting ? "Экспорт…" : "Экспорт в .docx")
+                            </MudButton>
+                        </div>
+
+                        <SectionCaption Text="Текст" Class="mb-1" />
+                        <MudPaper Class="pa-3 mb-3" Outlined="true">
+                            <MudText Typo="Typo.body2" Style="white-space: pre-wrap;">@Result.DraftText</MudText>
+                        </MudPaper>
+
+                        @if (Result.Citations.Count > 0)
+                        {
+                            <SectionCaption Text="Ссылки (грунтовка)" Class="mb-1" />
+                            @foreach (var citation in Result.Citations)
+                            {
+                                <div class="d-flex align-center gap-2 mb-1">
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@StatusColor(citation.Status)">
+                                        @StatusLabel(citation.Status)
+                                    </MudChip>
+                                    <MudText Typo="Typo.body2">@citation.Citation</MudText>
+                                </div>
+                            }
+                        }
+                    }
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    </MudTabPanel>
+
+    @* ================= Вкладка 2: реестр методик ================= *@
+    <MudTabPanel Text="Реестр методик" Icon="@Icons.Material.Filled.LibraryBooks">
+        @if (_registryError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3"
+                      ShowCloseIcon="true" CloseIconClicked="@(() => _registryError = null)">@_registryError</MudAlert>
+        }
+
+        <MudPaper Outlined="true" Class="pa-3 my-3">
+            <div class="d-flex gap-3 align-end flex-wrap">
+                <MudSelect T="string" Value="_filterKind" ValueChanged="@(async (string? v) => { _filterKind = v; await ReloadRegistryAsync(true); })"
+                           Label="Вид документа" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:200px;">
+                    @foreach (var kind in ArtifactKinds)
+                    {
+                        <MudSelectItem T="string" Value="@kind">@kind</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudSelect T="MethodDocumentStatus?" Value="_filterStatus" ValueChanged="@(async (MethodDocumentStatus? v) => { _filterStatus = v; await ReloadRegistryAsync(true); })"
+                           Label="Статус" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:160px;">
+                    <MudSelectItem T="MethodDocumentStatus?" Value="@MethodDocumentStatus.Draft">Черновик</MudSelectItem>
+                    <MudSelectItem T="MethodDocumentStatus?" Value="@MethodDocumentStatus.Approved">Утверждена</MudSelectItem>
+                </MudSelect>
+                <MudTextField Value="_filterSearch" ValueChanged="@(async (string? v) => { _filterSearch = v; await ReloadRegistryAsync(true); })"
+                              Label="Объект / тип проверки" Variant="Variant.Outlined" Clearable="true"
+                              Immediate="false" Style="min-width:240px;" />
+            </div>
+        </MudPaper>
+
+        <MudTable T="MethodDocumentListItem" Items="_registryRows" Hover="true" Dense="true" Outlined="true"
+                  Loading="_registryBusy" OnRowClick="@(async (TableRowClickEventArgs<MethodDocumentListItem> e) => await OpenCardAsync(e.Item!.Id))">
+            <HeaderContent>
+                <MudTh>Дата</MudTh>
+                <MudTh>Вид</MudTh>
+                <MudTh>Тип проверки</MudTh>
+                <MudTh>Объект</MudTh>
+                <MudTh>Грунтовка</MudTh>
+                <MudTh>Статус</MudTh>
+                <MudTh>Сохранил</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Дата">@context.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudTd>
+                <MudTd DataLabel="Вид">@context.ArtifactKind</MudTd>
+                <MudTd DataLabel="Тип проверки">@context.InspectionType</MudTd>
+                <MudTd DataLabel="Объект">@context.Scope</MudTd>
+                <MudTd DataLabel="Грунтовка">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                             Color="@(context.AllCitationsConfirmed ? Color.Success : Color.Warning)">
+                        @(context.AllCitationsConfirmed ? "подтверждена" : "есть непроверенные")
+                    </MudChip>
+                </MudTd>
+                <MudTd DataLabel="Статус">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                             Color="@(context.Status == MethodDocumentStatus.Approved ? Color.Success : Color.Default)">
+                        @context.Status.Label()
+                    </MudChip>
+                </MudTd>
+                <MudTd DataLabel="Сохранил">@(context.CreatedByName ?? "—")</MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                    В реестре пока пусто. Сформируйте документ на первой вкладке и нажмите «Сохранить в реестр».
+                </MudText>
+            </NoRecordsContent>
+        </MudTable>
+
+        <div class="d-flex align-center justify-space-between mt-3 flex-wrap gap-2">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                Методик: @_registryTotal · страница @_registryPage из @RegistryPageCount
+            </MudText>
+            <MudPagination Count="@RegistryPageCount" Selected="_registryPage" SelectedChanged="GoToRegistryPageAsync"
+                           Size="Size.Small" ShowFirstButton="true" ShowLastButton="true" />
+        </div>
+    </MudTabPanel>
+</MudTabs>
+
+@* --- Карточка сохранённой методики --- *@
+<MudDialog @bind-Visible="_cardOpen" Options="CardDialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            @(_card is { } c ? $"{c.ArtifactKind} · {c.Scope}" : "Методика")
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_card is { } card)
+        {
+            @if (_cardError is not null)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_cardError</MudAlert>
+            }
+            <div class="d-flex align-center gap-2 mb-2 flex-wrap">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                         Color="@(card.Status == MethodDocumentStatus.Approved ? Color.Success : Color.Default)">
+                    @card.Status.Label()
+                </MudChip>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">гриф @card.Classification</MudChip>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    @card.InspectionType · сохранена @card.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                    @(card.CreatedByName is { } author ? $" · {author}" : string.Empty)
+                    @(card.ApprovedByName is { } approver ? $" · утвердил: {approver}" : string.Empty)
+                </MudText>
+            </div>
+
+            @* Правка — человеком; при правке утверждённая вернётся в черновики (об этом честно ниже). *@
+            <MudTextField @bind-Value="_cardBody" Variant="Variant.Outlined" Lines="16" Class="mb-1" />
+            @if (card.Status == MethodDocumentStatus.Approved)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary mb-2 d-block">
+                    Сохранение правок вернёт методику в черновики: утверждение относится к конкретной редакции текста.
+                </MudText>
+            }
+
+            @if (CardCitations.Count > 0)
+            {
+                <SectionCaption Text="Ссылки (грунтовка на момент сохранения)" Class="mb-1" />
+                @foreach (var citation in CardCitations)
+                {
+                    <div class="d-flex align-center gap-2 mb-1">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@StatusColor(citation.Status)">
+                            @StatusLabel(citation.Status)
+                        </MudChip>
+                        <MudText Typo="Typo.body2">@citation.Citation</MudText>
+                    </div>
                 }
             }
-        </MudPaper>
-    </MudItem>
-</MudGrid>
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (_card is { } actions)
+        {
+            @if (actions.Status == MethodDocumentStatus.Draft)
+            {
+                <MudButton Color="Color.Error" OnClick="DeleteCardAsync" Disabled="_cardBusy">Удалить</MudButton>
+            }
+            <MudButton OnClick="@(() => ExportAsync(actions.ArtifactKind, actions.Scope, _cardBody, actions.Classification))"
+                       Disabled="_exporting">Экспорт .docx</MudButton>
+            <MudButton OnClick="SaveCardBodyAsync" Disabled="_cardBusy">Сохранить правки</MudButton>
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="ToggleApproveAsync" Disabled="_cardBusy">
+                @(actions.Status == MethodDocumentStatus.Approved ? "В черновики" : "Утвердить")
+            </MudButton>
+        }
+        <MudButton OnClick="@(() => _cardOpen = false)">Закрыть</MudButton>
+    </DialogActions>
+</MudDialog>
 
 @code {
+    private const int RegistryPageSize = 20;
+
     // Пять видов методических артефактов ТФ-МЕТ-01 (P1-объём §5.2.9).
     private static readonly string[] ArtifactKinds =
         ["Программа проверки", "Чек-лист", "Инструкция", "Памятка", "Учебный материал"];
@@ -148,7 +316,11 @@
     private static readonly string[] InspectionTypes =
         ["Комплексная", "Целевая", "Контрольная", "Внеплановая"];
 
+    private static readonly DialogOptions CardDialogOptions =
+        new() { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true };
+
     private readonly List<DivisionNode> _divisions = [];
+    private int _activeTab;
     private string _artifactKind = "Программа проверки";
     private string _inspectionType = "Комплексная";
     private int? _divisionId;
@@ -157,8 +329,27 @@
 
     private bool _busy;
     private bool _exporting;
+    private bool _saving;
+    private int? _savedId;
     private string? _error;
     private ResponseDto<GenerateReferenceResult>? _response;
+
+    // --- Реестр ---
+    private readonly List<MethodDocumentListItem> _registryRows = [];
+    private int _registryTotal;
+    private int _registryPage = 1;
+    private bool _registryBusy;
+    private string? _registryError;
+    private string? _filterKind;
+    private MethodDocumentStatus? _filterStatus;
+    private string? _filterSearch;
+
+    // --- Карточка ---
+    private bool _cardOpen;
+    private bool _cardBusy;
+    private string? _cardError;
+    private MethodDocumentDetails? _card;
+    private string _cardBody = string.Empty;
 
     private GenerateReferenceResult? Result => _response?.Data;
 
@@ -167,6 +358,13 @@
     // Объект проверки: подразделение и/или направление — хотя бы что-то одно.
     private bool CanGenerate => _divisionId is not null || !string.IsNullOrWhiteSpace(_direction);
 
+    private int RegistryPageCount => Math.Max(1, (int)Math.Ceiling(_registryTotal / (double)RegistryPageSize));
+
+    private IReadOnlyList<CitationCheck> CardCitations =>
+        _card?.CitationsJson is { } json
+            ? JsonSerializer.Deserialize<List<CitationCheck>>(json) ?? []
+            : [];
+
     protected override async Task OnInitializedAsync()
     {
         var response = await Dispatcher.Send(new ListDivisionTreeQuery());
@@ -174,6 +372,8 @@
         {
             _divisions.AddRange(list);
         }
+
+        await ReloadRegistryAsync(true);
     }
 
     private string BuildScope()
@@ -193,6 +393,7 @@
         _busy = true;
         _error = null;
         _response = null;
+        _savedId = null;
         try
         {
             var response = await Dispatcher.Send(
@@ -216,25 +417,187 @@
         }
     }
 
-    private async Task ExportAsync()
+    private async Task SaveToRegistryAsync()
     {
-        if (Result is null)
+        if (Result is not { } result)
         {
             return;
         }
 
-        _exporting = true;
+        _saving = true;
         _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new SaveMethodDocumentCommand(
+                _artifactKind, _inspectionType, BuildScope(), result.DraftText,
+                result.Citations, result.AllCitationsConfirmed, result.ResultClassification));
+            if (response is { Status: true, Data: var id })
+            {
+                _savedId = id;
+                await ReloadRegistryAsync(true);
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task ReloadRegistryAsync(bool resetPage)
+    {
+        if (resetPage)
+        {
+            _registryPage = 1;
+        }
+
+        _registryBusy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ListMethodDocumentsQuery(
+                _filterKind, _filterStatus, _filterSearch, _registryPage, RegistryPageSize));
+            _registryRows.Clear();
+            if (response is { Status: true, Data: { } page })
+            {
+                _registryRows.AddRange(page.Rows);
+                _registryTotal = page.TotalCount;
+            }
+            else if (response is { Status: false })
+            {
+                _registryError = response.StatusMessage;
+                _registryTotal = 0;
+            }
+        }
+        finally
+        {
+            _registryBusy = false;
+        }
+    }
+
+    private async Task GoToRegistryPageAsync(int page)
+    {
+        _registryPage = page;
+        await ReloadRegistryAsync(false);
+    }
+
+    private async Task OpenCardAsync(int methodId)
+    {
+        _registryError = null;
+        var response = await Dispatcher.Send(new GetMethodDocumentQuery(methodId));
+        if (response is not { Status: true, Data: { } details })
+        {
+            _registryError = response.StatusMessage;
+            return;
+        }
+
+        _card = details;
+        _cardBody = details.Body;
+        _cardError = null;
+        _cardOpen = true;
+    }
+
+    private async Task SaveCardBodyAsync()
+    {
+        if (_card is not { } card)
+        {
+            return;
+        }
+
+        _cardBusy = true;
+        _cardError = null;
+        try
+        {
+            var response = await Dispatcher.Send(new UpdateMethodDocumentBodyCommand(card.Id, _cardBody));
+            if (!response.Status)
+            {
+                _cardError = response.StatusMessage;
+                return;
+            }
+
+            await OpenCardAsync(card.Id);
+            await ReloadRegistryAsync(false);
+        }
+        finally
+        {
+            _cardBusy = false;
+        }
+    }
+
+    private async Task ToggleApproveAsync()
+    {
+        if (_card is not { } card)
+        {
+            return;
+        }
+
+        _cardBusy = true;
+        _cardError = null;
+        try
+        {
+            var approve = card.Status != MethodDocumentStatus.Approved;
+            var response = await Dispatcher.Send(new SetMethodDocumentStatusCommand(card.Id, approve));
+            if (!response.Status)
+            {
+                _cardError = response.StatusMessage;
+                return;
+            }
+
+            await OpenCardAsync(card.Id);
+            await ReloadRegistryAsync(false);
+        }
+        finally
+        {
+            _cardBusy = false;
+        }
+    }
+
+    private async Task DeleteCardAsync()
+    {
+        if (_card is not { } card)
+        {
+            return;
+        }
+
+        _cardBusy = true;
+        _cardError = null;
+        try
+        {
+            var response = await Dispatcher.Send(new DeleteMethodDocumentCommand(card.Id));
+            if (!response.Status)
+            {
+                _cardError = response.StatusMessage;
+                return;
+            }
+
+            _cardOpen = false;
+            await ReloadRegistryAsync(false);
+        }
+        finally
+        {
+            _cardBusy = false;
+        }
+    }
+
+    private async Task ExportAsync(string title, string scope, string body, short classification)
+    {
+        _exporting = true;
         try
         {
             // Экспортёр общий с Генератором (ТФ-ГЕН-03/ТБ-033): заголовок — вид + объект.
             var response = await Dispatcher.Send(new ExportReferenceCommand(
-                $"{_artifactKind}: {BuildScope()}", Result.DraftText, Result.ResultClassification));
+                $"{title}: {scope}", body, classification));
 
             if (response is { Status: true, Data: { } file })
             {
                 using var streamReference = new DotNetStreamReference(new MemoryStream(file.Content));
                 await JS.InvokeVoidAsync("downloadFileFromStream", file.FileName, streamReference);
+            }
+            else if (_cardOpen)
+            {
+                _cardError = response.StatusMessage;
             }
             else
             {
