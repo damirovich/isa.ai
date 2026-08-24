@@ -54,9 +54,9 @@
             }
         </MudSelect>
         <MudDatePicker Date="_filterFrom" DateChanged="@(async (DateTime? v) => { _filterFrom = v; await ApplyFiltersAsync(); })"
-                       Label="Выявлено с" Variant="Variant.Outlined" Clearable="true" Style="width:160px;" />
+                       Label="Выявлено с" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" Clearable="true" Style="width:160px;" />
         <MudDatePicker Date="_filterTo" DateChanged="@(async (DateTime? v) => { _filterTo = v; await ApplyFiltersAsync(); })"
-                       Label="по" Variant="Variant.Outlined" Clearable="true" Style="width:160px;" />
+                       Label="по" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" Clearable="true" Style="width:160px;" />
     </div>
 </MudPaper>
 
@@ -132,6 +132,15 @@
         {
             <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_formError</MudAlert>
         }
+        @if (!LeafCategories.Any())
+        {
+            @* Классификатор засеян только сферами — без видов занести факт нельзя (нарушение
+               относится к ВИДУ). Без подсказки выпадающий список выглядел бы просто сломанным. *@
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                В классификаторе пока только сферы, без видов. Добавьте виды внутри сфер на странице
+                «Виды нарушений» (раздел «Администрирование», ведёт Администратор) — затем возвращайтесь.
+            </MudAlert>
+        }
         <MudGrid Spacing="2">
             <MudItem xs="12" sm="6">
                 <MudSelect T="int?" @bind-Value="_formDivisionId" Label="Подразделение" Variant="Variant.Outlined" Dense="true">
@@ -159,7 +168,8 @@
                 </MudSelect>
             </MudItem>
             <MudItem xs="12" sm="4">
-                <MudDatePicker @bind-Date="_formDetectedAt" Label="Дата выявления" Variant="Variant.Outlined" />
+                <MudDatePicker @bind-Date="_formDetectedAt" Label="Дата выявления" Variant="Variant.Outlined"
+                               DateFormat="dd.MM.yyyy" />
             </MudItem>
             <MudItem xs="12" sm="4">
                 <MudSelect T="RemediationStatus" @bind-Value="_formStatus" Label="Статус устранения" Variant="Variant.Outlined" Dense="true">
@@ -244,7 +254,11 @@
     // В карточку — только действующие подразделения; в отборе — все (по расформированным ищут историю).
     private IEnumerable<DivisionNode> ActiveDivisions => _divisions.Where(d => d.IsActive);
 
-    private IEnumerable<ViolationCategoryNode> LeafCategories => _categories.Where(c => c.ParentId is not null);
+    // Виды — сгруппированно по сферам (в подписи «Сфера → Вид»), чтобы длинный список читался.
+    private IEnumerable<ViolationCategoryNode> LeafCategories =>
+        _categories.Where(c => c.ParentId is not null)
+            .OrderBy(c => _categories.FirstOrDefault(s => s.Id == c.ParentId)?.Name)
+            .ThenBy(c => c.Name);
 
     private bool FormValid => _formDivisionId is > 0 && _formCategoryId is > 0 && _formDetectedAt is not null;
 
