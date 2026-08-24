@@ -27,6 +27,9 @@ public class InspectorDbContext(DbContextOptions<InspectorDbContext> options) : 
     public DbSet<ViolationCategory> ViolationCategories { get; set; } = null!;
     public DbSet<Violation> Violations { get; set; } = null!;
 
+    /// <summary>Реестр методик (§5.2.9, Ц-03): сохранённые методические документы.</summary>
+    public DbSet<MethodDocument> MethodDocuments { get; set; } = null!;
+
     // Роли пользователей (§2.1 ТЗ СКИД, этап 6 Э4-35) — построчный доступ к докфлоу-документам.
     public DbSet<UserRoleAssignment> UserRoleAssignments { get; set; } = null!;
 

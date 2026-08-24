@@ -24,6 +24,10 @@ public static class InspectorApplicationServiceCollectionExtensions
             new EmbeddedScribanPromptProvider(typeof(InspectorApplicationServiceCollectionExtensions).Assembly));
         services.AddSingleton<IReferencePromptRenderer, ScribanReferencePromptRenderer>();
 
+        // Методики проверок (ТФ-МЕТ-01): второй генерирующий сценарий на том же конвейере —
+        // свой задачный промпт (method.scriban), ядро и грунтовка не трогаются.
+        services.AddSingleton<Features.Methods.IMethodPromptRenderer, Features.Methods.ScribanMethodPromptRenderer>();
+
         // Детерминированный расчёт риска подразделения (Э5-01 шаг 2, Приложение §2) — код, не ИИ.
         services.AddSingleton<RiskScoreCalculator>();
 

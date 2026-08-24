@@ -53,6 +53,9 @@ public static class InspectorPersistenceServiceCollectionExtensions
         // Автопросрочка устранения (ТФ-МОН-01): истёкший контрольный срок помечает система.
         services.AddHostedService<RemediationDeadlineJob>();
 
+        // Реестр методик (§5.2.9, Ц-03): сохранённые методические документы; выдача — по допуску.
+        services.AddScoped<IMethodRegistryStore, MethodRegistryStore>();
+
         // Профиль отдаёт модулю документооборота свой справочник подразделений (вопрос 3 Э4-35):
         // словарь id един с решёткой доступа, справочник ведёт профиль.
         services.AddScoped<ISC.AI.Modules.DocFlow.Domain.Services.IDivisionDirectory, DocFlowDivisionDirectory>();

@@ -25,13 +25,15 @@ namespace ISC.AI.AI.Models;
 /// </remarks>
 public static class CoreAiModelsServiceCollectionExtensions
 {
-    // Таймаут одного вызова (ТН-003): генерация (черновик/анализ) может быть долгой. Эмбеддинг одного
-    // запроса быстрый (~100 мс), но при импорте пакета НПА в один вызов уходят СОТНИ фрагментов
-    // кодекса — 30 с не хватало, документ отклонялся как «сервер недоступен» при живом сервере
-    // (2026-08-19). 120 с — запас под массовый импорт; интерактивному поиску это не мешает
-    // (один фрагмент-запрос по-прежнему отвечает за миллисекунды).
-    private static readonly TimeSpan ChatCallTimeout = TimeSpan.FromSeconds(120);
-    private static readonly TimeSpan EmbeddingCallTimeout = TimeSpan.FromSeconds(120);
+    // Таймауты одного вызова (ТН-003) — ДЕФОЛТЫ, переопределяются конфигом Llm:ChatCallTimeoutSeconds /
+    // Llm:EmbeddingCallTimeoutSeconds (скорость локального сервера — свойство развёртывания, не кода).
+    // Чат: полный ответ в MaxOutputTokens=4096 на локальной модели ~15-20 ток/с занимает 3-5 минут —
+    // 120 с обрывали ДЛИННУЮ генерацию (методика/чек-лист) как «сервер недоступен» при живом сервере
+    // (2026-08-24, та же болезнь, что у эмбеддера 30 с → 120 с при импорте кодекса 2026-08-19).
+    // Долгая неудачная попытка держит bulkhead-слот дольше — осознанная цена: мёртвый сервер падает
+    // быстро (connection refused), по таймауту ждёт только ЖИВОЙ медленный, где ожидание оправдано.
+    private static readonly TimeSpan DefaultChatCallTimeout = TimeSpan.FromSeconds(3600);
+    private static readonly TimeSpan DefaultEmbeddingCallTimeout = TimeSpan.FromSeconds(1200);
 
     // Bulkhead по умолчанию: не больше N одновременных вызовов на роль к общему серверу инференса.
     private const int DefaultMaxConcurrencyPerRole = 4;
@@ -45,14 +47,23 @@ public static class CoreAiModelsServiceCollectionExtensions
             ? configured
             : DefaultMaxConcurrencyPerRole;
 
-        TryAddChatModel(services, configuration, ModelRole.Draft, maxConcurrency);
-        TryAddChatModel(services, configuration, ModelRole.Analysis, maxConcurrency);
-        TryAddEmbeddingModel(services, configuration, ModelRole.Embeddings, maxConcurrency);
+        // Таймауты вызовов — из конфига, тем же безопасным чтением: не задано/некорректно → дефолт.
+        var chatTimeout = ReadTimeout(configuration, "Llm:ChatCallTimeoutSeconds", DefaultChatCallTimeout);
+        var embeddingTimeout = ReadTimeout(configuration, "Llm:EmbeddingCallTimeoutSeconds", DefaultEmbeddingCallTimeout);
+
+        TryAddChatModel(services, configuration, ModelRole.Draft, maxConcurrency, chatTimeout);
+        TryAddChatModel(services, configuration, ModelRole.Analysis, maxConcurrency, chatTimeout);
+        TryAddEmbeddingModel(services, configuration, ModelRole.Embeddings, maxConcurrency, embeddingTimeout);
         return services;
     }
 
+    private static TimeSpan ReadTimeout(IConfiguration configuration, string key, TimeSpan fallback) =>
+        int.TryParse(configuration[key], out var seconds) && seconds > 0
+            ? TimeSpan.FromSeconds(seconds)
+            : fallback;
+
     private static void TryAddChatModel(
-        IServiceCollection services, IConfiguration configuration, ModelRole role, int maxConcurrency)
+        IServiceCollection services, IConfiguration configuration, ModelRole role, int maxConcurrency, TimeSpan callTimeout)
     {
         if (!TryReadModel(configuration, role, out var endpoint, out var configuredModel, out var apiKey))
         {
@@ -69,15 +80,15 @@ public static class CoreAiModelsServiceCollectionExtensions
             var model = ResolveModelName(endpoint, configuredModel, role);
             IChatClient client = new OpenAIClient(
                     new ApiKeyCredential(apiKey),
-                    new OpenAIClientOptions { Endpoint = endpointUri })
+                    BuildClientOptions(endpointUri))
                 .GetChatClient(model)
                 .AsIChatClient();
-            return new ResilientChatClient(client, role, ChatCallTimeout, maxConcurrency);
+            return new ResilientChatClient(client, role, callTimeout, maxConcurrency);
         });
     }
 
     private static void TryAddEmbeddingModel(
-        IServiceCollection services, IConfiguration configuration, ModelRole role, int maxConcurrency)
+        IServiceCollection services, IConfiguration configuration, ModelRole role, int maxConcurrency, TimeSpan callTimeout)
     {
         if (!TryReadModel(configuration, role, out var endpoint, out var configuredModel, out var apiKey))
         {
@@ -93,11 +104,36 @@ public static class CoreAiModelsServiceCollectionExtensions
             var model = ResolveModelName(endpoint, configuredModel, role);
             IEmbeddingGenerator<string, Embedding<float>> client = new OpenAIClient(
                     new ApiKeyCredential(apiKey),
-                    new OpenAIClientOptions { Endpoint = endpointUri })
+                    BuildClientOptions(endpointUri))
                 .GetEmbeddingClient(model)
                 .AsIEmbeddingGenerator();
-            return new ResilientEmbeddingGenerator(client, role, EmbeddingCallTimeout, maxConcurrency);
+            return new ResilientEmbeddingGenerator(client, role, callTimeout, maxConcurrency);
         });
+    }
+
+    /// <summary>
+    /// Общие настройки OpenAI-клиента (инцидент 2026-08-24, ТН-003):
+    /// <list type="bullet">
+    /// <item>СЕТЕВОЙ таймаут SDK отключён (дефолт 100 с рвал любой вызов длиннее — «даже 3600 не
+    /// хватило»): единственный владелец таймаута — наша обвязка (<see cref="ModelCallResilience"/>,
+    /// значение из конфига на попытку); двух конкурирующих таймаутов быть не должно.</item>
+    /// <item>ВНУТРЕННИЙ повтор SDK отключён (по умолчанию ×4): повторы уже делает та же обвязка —
+    /// иначе они перемножались (4×3 = 12 обречённых попыток ≈ 20 минут на один клик).</item>
+    /// <item>Политика <see cref="LegacyMaxTokensPolicy"/>: лимит длины ответа дублируется старым
+    /// полем <c>max_tokens</c> — llama-server игнорирует новое имя поля, и без потолка «думающая»
+    /// модель генерирует бесконечно.</item>
+    /// </list>
+    /// </summary>
+    private static OpenAIClientOptions BuildClientOptions(Uri endpointUri)
+    {
+        var options = new OpenAIClientOptions
+        {
+            Endpoint = endpointUri,
+            NetworkTimeout = System.Threading.Timeout.InfiniteTimeSpan,
+            RetryPolicy = new System.ClientModel.Primitives.ClientRetryPolicy(maxRetries: 0),
+        };
+        options.AddPolicy(new LegacyMaxTokensPolicy(), System.ClientModel.Primitives.PipelinePosition.PerCall);
+        return options;
     }
 
     // Адрес/модель/ключ роли — из секции Llm:Models:{role}. У локального сервера авторизации нет → ключ-заглушка.
