@@ -137,6 +137,9 @@ public sealed class InspectorProfile : IProfile
         // Сценарии профиля: промпт-рендереры, валидаторы, доменные швы грунтовки/чанкинга, расчёт риска.
         services.AddInspectorApplication();
 
+        // Передача черновика Генератор → Редактор без копирования руками (scoped = одна сессия).
+        services.AddScoped<EditorDraftHandoff>();
+
         // Прикладные сервисы подключённых пакетов модулей (ADR-0017).
         DocFlowModule.RegisterServices(services);
     }

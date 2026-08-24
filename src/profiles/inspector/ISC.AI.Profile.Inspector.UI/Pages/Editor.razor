@@ -6,6 +6,7 @@
 @using ISC.AI.Profile.Inspector.Application.Features.Editor
 @using ISC.AI.Profile.Inspector.Application.Features.Generation
 @using Microsoft.JSInterop
+@inject EditorDraftHandoff EditorHandoff
 
 @* Модуль «Редактор» (§5.2.10, ТФ-РЕД-01..03) — ИИ-правка НАСТОЯЩАЯ, заглушка снята.
    Слева — текст документа (вставленный или набранный), команда правки и подсказки; справа —
@@ -170,6 +171,17 @@
     private GenerateReferenceResult? Result => _response?.Data;
 
     private bool CanRevise => !string.IsNullOrWhiteSpace(_text) && !string.IsNullOrWhiteSpace(_instruction);
+
+    protected override void OnInitialized()
+    {
+        // Черновик, переданный из Генератора кнопкой «Доработать в Редакторе» (одноразово):
+        // текст встаёт в документ, а при непроверенных ссылках команда правки уже заполнена.
+        if (EditorHandoff.Take() is { } handoff)
+        {
+            _text = handoff.Text;
+            _instruction = handoff.Instruction ?? string.Empty;
+        }
+    }
 
     private async Task ReviseAsync()
     {

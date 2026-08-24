@@ -10,6 +10,8 @@
 @using ISC.AI.Profile.Inspector.Application.Features.Divisions
 @using ISC.AI.Profile.Inspector.Application.Features.Generation
 @using ISC.AI.Profile.Inspector.Domain.Services
+@inject EditorDraftHandoff EditorHandoff
+@inject NavigationManager Navigation
 
 <PageHeader Title="Генератор документов" Subtitle="Справки, акты, заключения"
             Icon="@Icons.Material.Filled.AutoAwesome" />
@@ -145,6 +147,13 @@
                     @(_exporting ? "Экспорт…" : "Экспорт в .docx")
                 </MudButton>
 
+                @* Перенос в Редактор одной кнопкой: при неподтверждённых ссылках команда правки
+                   заполнится автоматически их перечнем — исправил, принял, вернулся регистрировать. *@
+                <MudButton Class="mb-2" Color="Color.Default" Variant="Variant.Outlined" FullWidth="true"
+                           OnClick="OpenInEditor" StartIcon="@Icons.Material.Filled.EditNote">
+                    Доработать в Редакторе
+                </MudButton>
+
                 @if (_registeredId is { } registeredId)
                 {
                     <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mb-3">
@@ -155,7 +164,7 @@
                 {
                     @* Регистрация — акт принятия человеком; при неподтверждённых ссылках запрещена (GATE-2):
                        иначе выдуманная норма ушла бы в реестр документов и поисковый корпус. *@
-                    <MudTooltip Text="@(Result.AllCitationsConfirmed ? string.Empty : "Сначала уберите неподтверждённые ссылки (GATE-2) — доработайте текст в Редакторе.")">
+                    <MudTooltip Text="@(Result.AllCitationsConfirmed ? string.Empty : "Сначала уберите неподтверждённые ссылки (GATE-2) — кнопка «Доработать в Редакторе» выше.")">
                         <MudButton Class="mb-3" Color="Color.Tertiary" Variant="Variant.Outlined" FullWidth="true"
                                    OnClick="@(() => _registerOpen = true)"
                                    Disabled="@(!Result.AllCitationsConfirmed)"
@@ -318,6 +327,26 @@
         {
             _exporting = false;
         }
+    }
+
+    // Перенос черновика в Редактор: при непроверенных ссылках команда правки заполняется их
+    // перечнем автоматически — человеку остаётся нажать «Применить правку».
+    private void OpenInEditor()
+    {
+        if (Result is not { } result)
+        {
+            return;
+        }
+
+        var unverified = result.Citations
+            .Where(c => c.Status != CitationStatus.Confirmed)
+            .Select(c => c.Citation)
+            .ToList();
+        var instruction = unverified.Count > 0
+            ? $"Убери или замени ссылки, не подтверждённые фрагментами: {string.Join("; ", unverified)}"
+            : null;
+        EditorHandoff.Put(result.DraftText, instruction);
+        Navigation.NavigateTo("/editor");
     }
 
     private static Color StatusColor(CitationStatus status) => status switch
