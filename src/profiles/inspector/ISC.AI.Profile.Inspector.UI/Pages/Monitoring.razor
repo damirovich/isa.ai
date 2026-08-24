@@ -1,37 +1,45 @@
 @namespace ISC.AI.Profile.Inspector.UI
 @page "/monitoring"
 @rendermode InteractiveServer
+@using ISC.AI.Profile.Inspector.Application.Features.Monitoring
 @using ISC.AI.Profile.Inspector.Domain.Enums
+@using ISC.AI.Profile.Inspector.Domain.Services
 
-@* Модуль «Мониторинг» (§5.2.6): контроль устранения нарушений и эффективности подразделений.
-   ВНИМАНИЕ: данные ПОКАЗАТЕЛЬНЫЕ (демо) — inspector.violation ещё не наполнен. Статусы взяты из
-   доменного перечня RemediationStatus, сводки считаются из списка, а не вписаны. *@
+@* Модуль «Мониторинг» (§5.2.6) на ЖИВОМ учёте нарушений (Э5-01) — демо снято. Прогресс устранения —
+   детерминированная свёртка статусов (устранено=100, частично=50, на контроле=25, просрочено=0):
+   отдельного поля «процент» в учёте нет, статус ведёт человек. *@
 
 <PageHeader Title="Мониторинг нарушений"
             Subtitle="Система контроля устранения нарушений и эффективности подразделений"
-            Icon="@Icons.Material.Filled.MonitorHeart" />
+            Icon="@Icons.Material.Filled.MonitorHeart">
+    <MudSelect T="int" Value="_periodDays" ValueChanged="ChangePeriodAsync" Label="Период"
+               Variant="Variant.Outlined" Dense="true" Style="width:180px;">
+        <MudSelectItem T="int" Value="30">30 дней</MudSelectItem>
+        <MudSelectItem T="int" Value="90">90 дней</MudSelectItem>
+        <MudSelectItem T="int" Value="180">Полгода</MudSelectItem>
+        <MudSelectItem T="int" Value="365">Год</MudSelectItem>
+    </MudSelect>
+</PageHeader>
 
-<DemoAlert>
-    Показательные данные (ДЕМО). В рабочей версии карточки заполняются из <c>inspector.violation</c>, а сроки и
-    отметки об исполнении — из поручений СКИД (§5.2.6). Проценты и счётчики на экране считаются из списка.
-</DemoAlert>
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
 
-@* --- Показатели: все считаются из Monitoring, ни одна цифра не вписана --- *@
+@* --- Показатели: все считаются из живой сводки, ни одна цифра не вписана --- *@
 <MudGrid Class="mb-2">
     <MudItem xs="12" sm="6" md="3">
-        <StatCard Value="@InspectorDemoData.Monitoring.Count" Label="Нарушений на мониторинге"
-                  Accent="var(--mud-palette-info)" />
+        <StatCard Value="@Total" Label="Нарушений на мониторинге" Accent="var(--mud-palette-info)" />
     </MudItem>
     <MudItem xs="12" sm="6" md="3">
-        <StatCard Value="@CountOf(RemediationStatus.Resolved)" Label="Устранено"
-                  Accent="@StatusColor(RemediationStatus.Resolved)" />
+        <StatCard Value="@Resolved" Label="Устранено" Accent="@StatusColor(RemediationStatus.Resolved)" />
     </MudItem>
     <MudItem xs="12" sm="6" md="3">
-        <StatCard Value="@CountOf(RemediationStatus.Overdue)" Label="Просрочено / не устранено"
-                  Accent="@StatusColor(RemediationStatus.Overdue)" />
+        <StatCard Value="@Overdue" Label="Просрочено" Accent="@StatusColor(RemediationStatus.Overdue)" />
     </MudItem>
     <MudItem xs="12" sm="6" md="3">
-        <StatCard Value="@($"{AverageProgress}%")" Label="Средний прогресс"
+        <StatCard Value="@($"{AverageProgress}%")" Label="Средний прогресс устранения"
                   Accent="var(--mud-palette-warning)" />
     </MudItem>
 </MudGrid>
@@ -42,23 +50,38 @@
         <MudPaper Class="pa-4 h-100" Outlined="true">
             <SectionCaption Text="Мониторинг устранения нарушений" />
 
-            <FilterChipRow TValue="RemediationStatus" AllCount="@InspectorDemoData.Monitoring.Count"
+            <FilterChipRow TValue="RemediationStatus" AllCount="@Rows.Count"
                            Items="@FilterItems" Selected="@_filter"
                            SelectedChanged="@((RemediationStatus? v) => _filter = v)" />
 
+            @if (Rows.Count == 0 && !_busy)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                    За период нарушений не занесено — контролировать нечего. Карточки наполняются
+                    из модуля «Учёт нарушений».
+                </MudText>
+            }
             @foreach (var item in Filtered)
             {
-                <AccentRow Accent="@StatusColor(item.Status)">
+                <AccentRow Accent="@StatusColor(item.RemediationStatus)">
                     <div class="d-flex align-center gap-2">
-                        <MudText Typo="Typo.body1" Class="flex-grow-1"><b>@item.Division</b></MudText>
-                        <TintedChip Color="@StatusColor(item.Status)">@StatusLabel(item.Status)</TintedChip>
+                        <MudText Typo="Typo.body1" Class="flex-grow-1"><b>@item.DivisionName</b></MudText>
+                        <TintedChip Color="@SeverityHex(item.Severity)">@item.Severity.Label()</TintedChip>
+                        <TintedChip Color="@StatusColor(item.RemediationStatus)">
+                            @item.RemediationStatus.Label()
+                        </TintedChip>
                     </div>
-                    <MudText Typo="Typo.body2" Class="mud-text-secondary">@item.Issue</MudText>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">@item.CategoryName</MudText>
                     <div class="mt-1">
-                        <IconCaption Icon="@Icons.Material.Filled.Schedule">Срок: @item.Deadline</IconCaption>
+                        <IconCaption Icon="@Icons.Material.Filled.CalendarMonth">
+                            Выявлено: @item.DetectedAt.ToString("dd.MM.yyyy")
+                        </IconCaption>
                     </div>
-                    <ColorBar Percent="@item.Progress" Color="@StatusColor(item.Status)" />
-                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@item.Comment</MudText>
+                    <ColorBar Percent="@Progress(item.RemediationStatus)" Color="@StatusColor(item.RemediationStatus)" />
+                    @if (item.Recommendation is { } recommendation)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@recommendation</MudText>
+                    }
                 </AccentRow>
             }
         </MudPaper>
@@ -69,17 +92,23 @@
         <MudPaper Class="pa-4 h-100" Outlined="true">
             <SectionCaption Text="Аналитика эффективности" Class="mb-3" />
 
-            @foreach (var item in InspectorDemoData.Monitoring)
+            @if (Divisions.Count == 0 && !_busy)
             {
-                <ProgressStat Label="@item.Division" Percent="@item.Progress"
-                              Color="@ProgressColor(item.Progress)" />
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    Появится, когда по подразделениям будут занесены нарушения.
+                </MudText>
+            }
+            @foreach (var division in Divisions)
+            {
+                <ProgressStat Label="@division.DivisionName" Percent="@DivisionProgress(division)"
+                              Color="@ProgressColor(DivisionProgress(division))" />
             }
 
-            <ActionHintButton Text="Аналитический отчёт для руководства (ДЕМО)" Class="mt-4">
+            <ActionHintButton Text="Аналитический отчёт для руководства" Class="mt-4">
                 <Hint>
-                    В рабочей версии отчёт формируется Генератором через grounded-конвейер: цифры берутся из БД
-                    (детерминированно), ИИ пишет только текст, ссылки на НПА проходят грунтовку, результат —
-                    черновик для проверки человеком.
+                    Отчёт будет формироваться Генератором через grounded-конвейер: цифры берутся из БД
+                    (детерминированно), ИИ пишет только текст, ссылки на НПА проходят грунтовку,
+                    результат — черновик для проверки человеком.
                 </Hint>
             </ActionHintButton>
         </MudPaper>
@@ -87,25 +116,81 @@
 </MudGrid>
 
 @code {
-    // Порядок фильтров как в прототипе: Устранено / На контроле / Просрочено.
+    // Порядок фильтров — по остроте: просроченные важнее устранённых.
     private static readonly RemediationStatus[] FilterStatuses =
-        [RemediationStatus.Resolved, RemediationStatus.UnderControl, RemediationStatus.Overdue];
+        [RemediationStatus.Overdue, RemediationStatus.Partial, RemediationStatus.UnderControl, RemediationStatus.Resolved];
 
-    // Чипы фильтра статусов: подпись, цвет и количество считаются из списка при каждом рендере
-    // (свойство, а не static-поле, — иначе счётчики застынут, когда данные станут живыми).
-    private static IReadOnlyList<FilterChipItem<RemediationStatus>> FilterItems =>
-        [.. FilterStatuses.Select(s => new FilterChipItem<RemediationStatus>(s, StatusLabel(s), StatusColor(s), CountOf(s)))];
-
+    private RemediationSummary? _summary;
+    private int _periodDays = 90;
     private RemediationStatus? _filter;
+    private bool _busy;
+    private string? _error;
 
-    private static IEnumerable<InspectorDemoData.MonitoringItem> All => InspectorDemoData.Monitoring;
+    private IReadOnlyList<RemediationRow> Rows => _summary?.Rows ?? [];
 
-    private IEnumerable<InspectorDemoData.MonitoringItem> Filtered =>
-        _filter is null ? All : All.Where(i => i.Status == _filter);
+    private IReadOnlyList<DivisionRemediationRow> Divisions => _summary?.Divisions ?? [];
 
-    private static int CountOf(RemediationStatus status) => All.Count(i => i.Status == status);
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
 
-    private static int AverageProgress => (int)Math.Round(All.Average(i => i.Progress));
+    private async Task ChangePeriodAsync(int days)
+    {
+        _periodDays = days;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new GetRemediationQuery(_periodDays));
+            if (response is { Status: true, Data: { } summary })
+            {
+                _summary = summary;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private IEnumerable<RemediationRow> Filtered =>
+        _filter is null ? Rows : Rows.Where(r => r.RemediationStatus == _filter);
+
+    // Чипы фильтра статусов: подпись, цвет и количество считаются из живой сводки при каждом рендере.
+    private IReadOnlyList<FilterChipItem<RemediationStatus>> FilterItems =>
+        [.. FilterStatuses.Select(s => new FilterChipItem<RemediationStatus>(s, s.Label(), StatusColor(s), CountOf(s)))];
+
+    private int CountOf(RemediationStatus status) => Rows.Count(r => r.RemediationStatus == status);
+
+    // Счётчики шапки — по подразделениям (полные), а не по карточкам (срез до 100).
+    private int Total => Divisions.Sum(d => d.Total);
+
+    private int Resolved => Divisions.Sum(d => d.Resolved);
+
+    private int Overdue => Divisions.Sum(d => d.Overdue);
+
+    // Прогресс — детерминированная свёртка статусов: устранено=100, частично=50, на контроле=25, просрочено=0.
+    private static int Progress(RemediationStatus status) => status switch
+    {
+        RemediationStatus.Resolved => 100,
+        RemediationStatus.Partial => 50,
+        RemediationStatus.UnderControl => 25,
+        _ => 0,
+    };
+
+    private static int DivisionProgress(DivisionRemediationRow division) =>
+        division.Total == 0 ? 0 : (int)Math.Round(
+            (division.Resolved * 100.0 + division.Partial * 50.0 + division.UnderControl * 25.0) / division.Total);
+
+    private int AverageProgress =>
+        Total == 0 ? 0 : (int)Math.Round(
+            (Resolved * 100.0 + Divisions.Sum(d => d.Partial) * 50.0 + Divisions.Sum(d => d.UnderControl) * 25.0) / Total);
 
     private static string StatusColor(RemediationStatus status) => status switch
     {
@@ -115,15 +200,16 @@
         _ => "#ef4444",
     };
 
+    // Оттенки тяжести согласованы с реестром нарушений (низкая — нейтральный серый).
+    private static string SeverityHex(ViolationSeverity severity) => severity switch
+    {
+        ViolationSeverity.Low => "#6b7280",
+        ViolationSeverity.Medium => "#3b82f6",
+        ViolationSeverity.High => "#f97316",
+        _ => "#ef4444",
+    };
+
     // Цвет полосы прогресса — по величине, а не по статусу (видно «слабых» и «сильных» на глаз).
     private static string ProgressColor(int progress) =>
         progress >= 100 ? "#22c55e" : progress >= 60 ? "#3b82f6" : progress >= 30 ? "#eab308" : "#ef4444";
-
-    private static string StatusLabel(RemediationStatus status) => status switch
-    {
-        RemediationStatus.Resolved => "Устранено",
-        RemediationStatus.UnderControl => "На контроле",
-        RemediationStatus.Partial => "Частично",
-        _ => "Просрочено",
-    };
 }

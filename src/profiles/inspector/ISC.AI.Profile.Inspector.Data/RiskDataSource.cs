@@ -115,4 +115,120 @@ public sealed class RiskDataSource(
             [.. recentRows.Select(r => new RecentViolationRow(
                 r.Id, r.DivisionName, r.CategoryName, r.Severity, r.DetectedAt, r.RemediationStatus))]);
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<DivisionRiskDetail>> GetDivisionRisksAsync(
+        DateOnly from, DateOnly to, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Сигналы — те же определения, что у дашборда (иначе экраны разошлись бы в цифрах).
+        // «Сфера» болевой точки — родитель вида; нарушение, отнесённое к сфере напрямую, — она сама.
+        var rows = await db.Violations.AsNoTracking()
+            .Where(v => v.DetectedAt >= from && v.DetectedAt <= to)
+            .Select(v => new
+            {
+                v.DivisionId,
+                DivisionName = v.Division!.Name,
+                v.Severity,
+                v.RemediationStatus,
+                v.DetectedAt,
+                v.Id,
+                v.Recommendation,
+                SphereName = v.Category!.Parent != null ? v.Category.Parent.Name : v.Category.Name,
+                IsRepeat = db.Violations.Any(o => o.DivisionId == v.DivisionId
+                    && o.CategoryId == v.CategoryId
+                    && (o.DetectedAt < v.DetectedAt || (o.DetectedAt == v.DetectedAt && o.Id < v.Id))),
+            })
+            .ToListAsync(cancellationToken);
+
+        var days = to.DayNumber - from.DayNumber;
+        var previousCounts = await db.Violations.AsNoTracking()
+            .Where(v => v.DetectedAt >= from.AddDays(-(days + 1)) && v.DetectedAt <= from.AddDays(-1))
+            .GroupBy(v => v.DivisionId)
+            .Select(g => new { DivisionId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(g => g.DivisionId, g => g.Count, cancellationToken);
+
+        return [.. rows
+            .GroupBy(r => new { r.DivisionId, r.DivisionName })
+            .Select(g =>
+            {
+                var open = g.Where(r => r.RemediationStatus != RemediationStatus.Resolved).ToList();
+                var signals = new RiskSignals(
+                    OpenSeverities: [.. open.Select(r => r.Severity)],
+                    RepeatCount: g.Count(r => r.IsRepeat),
+                    OverdueCount: g.Count(r => r.RemediationStatus == RemediationStatus.Overdue),
+                    TrendDelta: g.Count() - previousCounts.GetValueOrDefault(g.Key.DivisionId));
+                return new DivisionRiskDetail(
+                    g.Key.DivisionId,
+                    g.Key.DivisionName,
+                    g.Count(),
+                    open.Count,
+                    signals.RepeatCount,
+                    signals.OverdueCount,
+                    signals.TrendDelta,
+                    TopSpheres: [.. g.GroupBy(r => r.SphereName)
+                        .OrderByDescending(s => s.Count()).ThenBy(s => s.Key)
+                        .Take(3)
+                        .Select(s => $"{s.Key} — {s.Count()}")],
+                    LastRecommendation: g.Where(r => !string.IsNullOrWhiteSpace(r.Recommendation))
+                        .OrderByDescending(r => r.DetectedAt).ThenByDescending(r => r.Id)
+                        .Select(r => r.Recommendation)
+                        .FirstOrDefault(),
+                    Assessment: calculator.Assess(signals));
+            })
+            .OrderByDescending(d => d.Assessment.Score).ThenBy(d => d.DivisionName)];
+    }
+
+    /// <inheritdoc />
+    public async Task<RemediationSummary> GetRemediationAsync(
+        DateOnly from, DateOnly to, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var period = db.Violations.AsNoTracking()
+            .Where(v => v.DetectedAt >= from && v.DetectedAt <= to);
+
+        // Карточки: неустранённые важнее устранённых, внутри группы — свежие первыми.
+        // Срез 100 — защита экрана от многотысячного периода (карточки листаются реестром, не здесь).
+        var rows = await period
+            .OrderBy(v => v.RemediationStatus == RemediationStatus.Resolved ? 1 : 0)
+            .ThenByDescending(v => v.DetectedAt).ThenByDescending(v => v.Id)
+            .Take(100)
+            .Select(v => new
+            {
+                v.Id,
+                DivisionName = v.Division!.Name,
+                CategoryName = v.Category!.Name,
+                v.Severity,
+                v.DetectedAt,
+                v.RemediationStatus,
+                v.Recommendation,
+            })
+            .ToListAsync(cancellationToken);
+
+        // Проекция в анонимный тип (record в EF-проекции переводится не всегда — общий обход проекта).
+        var divisions = await period
+            .GroupBy(v => new { v.DivisionId, Name = v.Division!.Name })
+            .Select(g => new
+            {
+                g.Key.DivisionId,
+                g.Key.Name,
+                Total = g.Count(),
+                Resolved = g.Sum(v => v.RemediationStatus == RemediationStatus.Resolved ? 1 : 0),
+                Partial = g.Sum(v => v.RemediationStatus == RemediationStatus.Partial ? 1 : 0),
+                UnderControl = g.Sum(v => v.RemediationStatus == RemediationStatus.UnderControl ? 1 : 0),
+                Overdue = g.Sum(v => v.RemediationStatus == RemediationStatus.Overdue ? 1 : 0),
+            })
+            .ToListAsync(cancellationToken);
+
+        return new RemediationSummary(
+            [.. rows.Select(r => new RemediationRow(
+                r.Id, r.DivisionName, r.CategoryName, r.Severity, r.DetectedAt,
+                r.RemediationStatus, r.Recommendation))],
+            [.. divisions
+                .OrderBy(d => d.Name)
+                .Select(d => new DivisionRemediationRow(
+                    d.DivisionId, d.Name, d.Total, d.Resolved, d.Partial, d.UnderControl, d.Overdue))]);
+    }
 }

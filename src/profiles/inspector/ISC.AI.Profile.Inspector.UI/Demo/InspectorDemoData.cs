@@ -1,69 +1,18 @@
-using ISC.AI.Profile.Inspector.Domain.Enums;
-using ISC.AI.Profile.Inspector.Domain.Risk;
 
 namespace ISC.AI.Profile.Inspector.UI.Demo;
 
 /// <summary>
-/// ПОКАЗАТЕЛЬНЫЕ (ДЕМО) данные дашборда — <b>НЕ реальные</b>. Существуют только чтобы экран соответствовал
-/// прототипу, пока в системе нет настоящих записей: домен «Нарушение» (<c>inspector.violation</c>,
-/// <c>inspector.division</c>) создан, но пуст.
+/// ПОКАЗАТЕЛЬНЫЕ (ДЕМО) данные страниц-заглушек, которые ещё не переведены на живые данные
+/// (Генератор — списки подразделений, Методики, Анализ, правила контроля). Существуют только чтобы
+/// экран соответствовал прототипу.
 /// </summary>
 /// <remarks>
-/// ЧЕСТНОСТЬ: везде, где эти данные выводятся, обязателен видимый маркер «ДЕМО» (чип в оболочке + плашка на
-/// дашборде). Как только появятся реальные нарушения и справочник подразделений — этот класс удаляется, а
-/// дашборд читает данные через сценарии профиля. Уровень риска считает детерминированная формула
-/// (<c>RiskScoreCalculator</c>), а не эти константы.
+/// ЧЕСТНОСТЬ: везде, где эти данные выводятся, обязателен видимый маркер «ДЕМО». Дашборд, Риски и
+/// Мониторинг уже читают живой учёт нарушений (Э5-01) — их демо-наборы отсюда удалены. По мере
+/// перевода остальных модулей класс усыхает до полного удаления.
 /// </remarks>
 public static class InspectorDemoData
 {
-    /// <summary>Текст обязательной плашки-предупреждения о демо-режиме.</summary>
-    public const string Notice =
-        "Показательные данные (ДЕМО). Реальных записей пока нет: домен «Нарушение» создан, но не наполнен — "
-        + "цифры ниже нужны только для демонстрации вида экрана.";
-
-    /// <summary>Всего проверок (демо).</summary>
-    public const int TotalChecks = 7;
-
-    /// <summary>Критических нарушений (демо).</summary>
-    public const int CriticalViolations = 2;
-
-    /// <summary>Не устранено (демо).</summary>
-    public const int NotRemediated = 1;
-
-    /// <summary>Устранено (демо).</summary>
-    public const int Remediated = 3;
-
-    /// <summary>Строка списка «Последние проверки» (демо).</summary>
-    /// <param name="Title">Подразделение/объект проверки.</param>
-    /// <param name="Date">Дата проверки.</param>
-    /// <param name="Location">Территория/расположение.</param>
-    /// <param name="Status">Статус устранения.</param>
-    public sealed record RecentCheck(string Title, string Date, string Location, string Status);
-
-    /// <summary>Последние проверки (демо).</summary>
-    public static IReadOnlyList<RecentCheck> RecentChecks { get; } =
-    [
-        new("УЗБ", "01.09.2024", "Центр. аппарат", "На контроле"),
-        new("УЗК", "15.07.2024", "Центр. аппарат", "Устранено"),
-        new("Карасуйский РО", "30.05.2024", "Ошская обл.", "Устранено"),
-        new("Токтогульский РО", "05.04.2024", "Джалал-Абадская обл.", "Не устранено"),
-    ];
-
-    /// <summary>Строка сводки «Статус устранения» (демо).</summary>
-    /// <param name="Label">Наименование статуса.</param>
-    /// <param name="Count">Количество.</param>
-    /// <param name="Percent">Доля для полосы прогресса, %.</param>
-    public sealed record RemediationStat(string Label, int Count, int Percent);
-
-    /// <summary>Статус устранения (демо).</summary>
-    public static IReadOnlyList<RemediationStat> Remediation { get; } =
-    [
-        new("Устранено", 3, 100),
-        new("Частично устранено", 1, 35),
-        new("На контроле", 2, 65),
-        new("Не устранено", 1, 35),
-    ];
-
     /// <summary>Строка таблицы подразделений (демо).</summary>
     /// <param name="Name">Наименование подразделения.</param>
     /// <param name="Note">Регион или расшифровка.</param>
@@ -153,65 +102,6 @@ public static class InspectorDemoData
         new("Планирование и отчётность", 9),
     ];
 
-    /// <summary>
-    /// Запись реестра рисков (демо). ВАЖНО: демо задаёт только исходные СИГНАЛЫ; сам уровень риска считает
-    /// НАСТОЯЩИЙ <see cref="RiskScoreCalculator"/> по формуле Приложения §2 — на экране не нарисованный,
-    /// а вычисленный результат.
-    /// </summary>
-    /// <param name="Division">Подразделение.</param>
-    /// <param name="Area">Направление/сфера.</param>
-    /// <param name="Description">Существо риска.</param>
-    /// <param name="Recommendation">Рекомендация (в рабочей версии — ИИ-черновик с участием человека).</param>
-    /// <param name="Signals">Исходные сигналы для формулы риска.</param>
-    public sealed record RiskEntry(
-        string Division, string Area, string Description, string Recommendation, RiskSignals Signals);
-
-    /// <summary>Реестр рисков (демо-сигналы; уровни вычисляются формулой).</summary>
-    public static IReadOnlyList<RiskEntry> Risks { get; } =
-    [
-        // Σ=16 + 3·1.5 + 2·2 + 1 = 25.5 → высокий
-        new("Чуйское управление", "Агентурная работа",
-            "Нарушение периодичности контакта с конфидентами — системный характер по 3 из 5 РО.",
-            "Вести еженедельный мониторинг контактов. Пересмотреть нагрузку на оперсостав.",
-            new RiskSignals(
-                [ViolationSeverity.High, ViolationSeverity.High, ViolationSeverity.High,
-                 ViolationSeverity.Medium, ViolationSeverity.Medium],
-                RepeatCount: 3, OverdueCount: 2, TrendDelta: 1)),
-
-        // Σ=6 + 2·1.5 + 1·2 + 1 = 12 → средний
-        new("ДЭБ", "Планирование",
-            "Низкое качество аналитических материалов — слабая методологическая основа.",
-            "Разработать единый стандарт подготовки аналитики. Ввести внутреннее рецензирование.",
-            new RiskSignals(
-                [ViolationSeverity.Medium, ViolationSeverity.Medium, ViolationSeverity.Low, ViolationSeverity.Low],
-                RepeatCount: 2, OverdueCount: 1, TrendDelta: 1)),
-
-        // Σ=40 + 4·1.5 + 4·2 + 2 = 56 → критический
-        new("Джалал-Абадское управление", "Исполнение поручений",
-            "Систематическое неисполнение поручений коллегий — 4 из 6 открытых поручений просрочены.",
-            "Ввести еженедельный контроль. Рассмотреть вопрос персональной ответственности.",
-            new RiskSignals(
-                [ViolationSeverity.Critical, ViolationSeverity.Critical, ViolationSeverity.Critical,
-                 ViolationSeverity.Critical, ViolationSeverity.High, ViolationSeverity.High],
-                RepeatCount: 4, OverdueCount: 4, TrendDelta: 2)),
-
-        // Σ=7 + 4·1.5 + 1·2 + 0 = 15 → средний
-        new("Все ТУ", "Документооборот",
-            "Разные стандарты оформления документов — затрудняет сравнительный анализ.",
-            "Утвердить единые шаблоны. Загрузить в систему как обязательные образцы.",
-            new RiskSignals(
-                [ViolationSeverity.Medium, ViolationSeverity.Medium, ViolationSeverity.Medium, ViolationSeverity.Low],
-                RepeatCount: 4, OverdueCount: 1, TrendDelta: 0)),
-
-        // Σ=2 + 1·1.5 + 0 + 0 = 3.5 → низкий
-        new("УЗК", "Взаимодействие",
-            "Слабое взаимодействие с территориальными управлениями по оперативным вопросам.",
-            "Регламентировать порядок информационного обмена между линейными и ТУ.",
-            new RiskSignals(
-                [ViolationSeverity.Low, ViolationSeverity.Low],
-                RepeatCount: 1, OverdueCount: 0, TrendDelta: 0)),
-    ];
-
     /// <summary>Правило внутреннего контроля (демо).</summary>
     /// <param name="Title">Наименование правила.</param>
     /// <param name="Note">Что проверяет и на каких данных.</param>
@@ -225,33 +115,6 @@ public static class InspectorDemoData
         new("Скорость устранения", "Средние дни от выявления нарушения до статуса «устранено»"),
         new("Повторяемость", "Доля повторных нарушений того же вида в том же подразделении"),
         new("Динамика нарушений", "Изменение числа нарушений к предыдущему периоду"),
-    ];
-
-    /// <summary>Нарушение на мониторинге устранения (демо, §5.2.6).</summary>
-    /// <param name="Division">Подразделение.</param>
-    /// <param name="Issue">Существо нарушения.</param>
-    /// <param name="Deadline">Контрольный срок устранения.</param>
-    /// <param name="Status">Статус устранения (доменный перечень профиля).</param>
-    /// <param name="Progress">Прогресс устранения, %.</param>
-    /// <param name="Comment">Комментарий о ходе устранения.</param>
-    public sealed record MonitoringItem(
-        string Division, string Issue, string Deadline, RemediationStatus Status, int Progress, string Comment);
-
-    /// <summary>Мониторинг устранения нарушений (демо). Сводки на экране считаются ИЗ этого списка.</summary>
-    public static IReadOnlyList<MonitoringItem> Monitoring { get; } =
-    [
-        new("Иссык-Атинский РО", "Отсутствие контакта с конфидентами", "01.11.2023",
-            RemediationStatus.Overdue, 20, "Частично устранено. Контакт восстановлен по 3 из 7 позиций."),
-        new("Сокулукский РО", "Формальные отчёты по АОД", "15.12.2023",
-            RemediationStatus.Resolved, 100, "Устранено. Новые планы приведены в соответствие с обстановкой."),
-        new("Кантский РО", "Слабая работа по лидерам нацменьшинств", "01.04.2024",
-            RemediationStatus.UnderControl, 55, "На контроле. Восстановлен контакт с 4 из 7 лидеров."),
-        new("Токтогульский РО", "Повторные нарушения по АОД", "01.06.2024",
-            RemediationStatus.Overdue, 5, "Не устранено. Руководство РО не приняло мер."),
-        new("ДЭБ", "Низкое качество аналитики", "01.06.2024",
-            RemediationStatus.UnderControl, 70, "На контроле. Разработаны новые стандарты подготовки материалов."),
-        new("УЗК", "Задержка исполнения поручений", "01.10.2024",
-            RemediationStatus.Resolved, 100, "Устранено. Введён еженедельный контроль поручений."),
     ];
 
     /// <summary>Вид находки анализа НПА (демо, §5.2.3.2).</summary>
