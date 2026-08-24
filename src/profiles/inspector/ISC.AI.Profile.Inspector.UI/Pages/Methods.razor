@@ -1,115 +1,267 @@
 @namespace ISC.AI.Profile.Inspector.UI
 @page "/methods"
 @rendermode InteractiveServer
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Abstractions.Grounding
+@using ISC.AI.Profile.Inspector.Application.Features.Divisions
+@using ISC.AI.Profile.Inspector.Application.Features.Generation
+@using ISC.AI.Profile.Inspector.Application.Features.Methods
+@using ISC.AI.Profile.Inspector.Domain.Services
+@using Microsoft.JSInterop
 
-@* Модуль «Методики проверок» (§5.2.9, P1). ВНИМАНИЕ: содержимое ПОКАЗАТЕЛЬНОЕ (демо) — реальные методики
-   генерируются grounded-конвейером Генератора (промпт-каркас: цель, объект, вопросы, чек-лист, критерии) и
-   опционально хранятся как объект «методика». Сейчас экран показывает вид и состав, генерация не подключена. *@
+@* Модуль «Методики проверок» (§5.2.9, ТФ-МЕТ-01) — генерация НАСТОЯЩАЯ, демо-витрина снята.
+   Тот же grounded-конвейер, что у Генератора: извлечение норм по допуску → модель → грунтовка
+   (ТБ-040, GATE-2) → черновик для проверки человеком (HITL, ТБ-042) → экспорт .docx с грифом (ТБ-033).
+   Планы работы и дорожные карты (ТФ-МЕТ-02) — P2, не входят. *@
 
 <PageHeader Title="Методики проверок"
-            Subtitle="Программы, методики, учебные и методические материалы"
-            Icon="@Icons.Material.Filled.MenuBook">
-    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">в разработке</MudChip>
-</PageHeader>
-
-<DemoAlert>
-    Показательные данные (ДЕМО). Реальные программы и чек-листы будут формироваться grounded-конвейером
-    Генератора (§5.2.9): ссылки на НПА проходят грунтовку, результат — черновик для проверки человеком.
-</DemoAlert>
+            Subtitle="Программы, чек-листы, инструкции и памятки — по типу и объекту проверки"
+            Icon="@Icons.Material.Filled.MenuBook" />
 
 <MudGrid>
-    @* --- Список программ / материалов / чек-листов --- *@
+    @* ================= Левая колонка: параметры ================= *@
     <MudItem xs="12" md="7">
-        <MudPaper Class="pa-4 h-100" Outlined="true">
-            <SectionCaption Text="Программы и методики проверок" />
+        @* --- Вид документа --- *@
+        <MudPaper Class="pa-4 mb-4" Outlined="true">
+            <SectionCaption Text="Вид документа" Class="mb-2" />
+            <div class="d-flex gap-2 flex-wrap">
+                @foreach (var kind in ArtifactKinds)
+                {
+                    <MudChip T="string" Variant="@(_artifactKind == kind ? Variant.Filled : Variant.Outlined)"
+                             Color="Color.Primary" OnClick="@(() => _artifactKind = kind)">@kind</MudChip>
+                }
+            </div>
+        </MudPaper>
 
-            <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" Class="mt-1">
-                <MudTabPanel Text="Программы проверок" Icon="@Icons.Material.Filled.Article">
-                    @foreach (var program in InspectorDemoData.Programs)
-                    {
-                        <AccentRow Selected="@ReferenceEquals(_selected, program)" OnClick="@(() => Select(program))">
-                            <MudText Typo="Typo.body1"><b>@program.Title</b></MudText>
-                            <div class="d-flex align-center gap-4 mt-1">
-                                <IconCaption Icon="@Icons.Material.Filled.Place">@program.Scope</IconCaption>
-                                <IconCaption Icon="@Icons.Material.Filled.Schedule">@program.Duration</IconCaption>
-                            </div>
-                        </AccentRow>
-                    }
+        @* --- Тип и объект проверки --- *@
+        <MudPaper Class="pa-4 mb-4" Outlined="true">
+            <SectionCaption Text="Тип и объект проверки" Class="mb-2" />
+            <div class="d-flex gap-2 flex-wrap mb-3">
+                @foreach (var type in InspectionTypes)
+                {
+                    <MudChip T="string" Variant="@(_inspectionType == type ? Variant.Filled : Variant.Outlined)"
+                             Color="Color.Secondary" OnClick="@(() => _inspectionType = type)">@type</MudChip>
+                }
+            </div>
 
-                    <ActionHintButton Text="Создать новую программу (ДЕМО)"
-                                      Icon="@Icons.Material.Filled.Add" Class="mt-2">
-                        <Hint>
-                            В рабочей версии программа формируется Генератором через grounded-конвейер
-                            (промпт-каркас: цель, объект, вопросы, чек-лист, критерии) и сохраняется как черновик.
-                        </Hint>
-                    </ActionHintButton>
-                </MudTabPanel>
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="6">
+                    @* Подразделение — из живого справочника (§4.2); необязательно, если объект задан текстом. *@
+                    <MudSelect T="int?" @bind-Value="_divisionId" Label="Подразделение (объект)"
+                               Variant="Variant.Outlined" Clearable="true" Dense="true">
+                        @foreach (var division in ActiveDivisions)
+                        {
+                            <MudSelectItem T="int?" Value="@division.Id">@division.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudTextField @bind-Value="_direction" Label="Направление / предмет проверки"
+                                  Variant="Variant.Outlined" Immediate="true" MaxLength="200"
+                                  Placeholder="напр. режим секретного делопроизводства" />
+                </MudItem>
+            </MudGrid>
+        </MudPaper>
 
-                <MudTabPanel Text="Методические материалы" Icon="@Icons.Material.Filled.School">
-                    @foreach (var material in InspectorDemoData.Materials)
-                    {
-                        <AccentRow>
-                            <MudText Typo="Typo.body1"><b>@material.Title</b></MudText>
-                            <MudText Typo="Typo.caption" Class="mud-text-secondary">@material.Note</MudText>
-                        </AccentRow>
-                    }
-                </MudTabPanel>
+        @* --- Дополнительные указания --- *@
+        <MudPaper Class="pa-4" Outlined="true">
+            <SectionCaption Text="Дополнительные указания (необязательно)" />
+            <MudTextField @bind-Value="_extra" Variant="Variant.Outlined" Lines="4" Immediate="true"
+                          Disabled="_busy" MaxLength="2000"
+                          Placeholder="Что учесть особо: период, известные слабые места, акцент проверки…" />
 
-                <MudTabPanel Text="Чек-листы" Icon="@Icons.Material.Filled.Checklist">
-                    @foreach (var checklist in InspectorDemoData.Checklists)
-                    {
-                        <AccentRow Class="pa-3 mb-2 d-flex align-center">
-                            <MudText Typo="Typo.body1" Class="flex-grow-1"><b>@checklist.Title</b></MudText>
-                            <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Filled">
-                                @checklist.Points пунктов
-                            </MudChip>
-                        </AccentRow>
-                    }
-                </MudTabPanel>
-            </MudTabs>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Class="mt-3"
+                       StartIcon="@Icons.Material.Filled.AutoAwesome"
+                       OnClick="GenerateAsync" Disabled="@(_busy || !CanGenerate)">
+                @(_busy ? "Формирую…" : "Сформировать документ")
+            </MudButton>
         </MudPaper>
     </MudItem>
 
-    @* --- Панель деталей: пусто, пока программа не выбрана --- *@
+    @* ================= Правая колонка: результат ================= *@
     <MudItem xs="12" md="5">
         <MudPaper Class="pa-4 h-100" Outlined="true">
-            @if (_selected is null)
+            @if (_busy)
             {
-                <EmptyState Icon="@Icons.Material.Filled.MenuBook">
-                    Выберите программу из списка<br />или создайте новую
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-3" />
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    Извлекаю нормы по допуску, формирую черновик и проверяю ссылки грунтовкой…
+                </MudText>
+            }
+            else if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_error</MudAlert>
+            }
+            else if (Result is null)
+            {
+                <EmptyState Icon="@Icons.Material.Filled.MenuBook" MinHeight="280">
+                    Выберите вид документа, тип и объект проверки —<br />и нажмите «Сформировать»
                 </EmptyState>
             }
             else
             {
-                <SectionCaption Text="Программа проверки" />
-                <MudText Typo="Typo.h6" GutterBottom="true">@_selected.Title</MudText>
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3">
+                    ЧЕРНОВИК — требует проверки человеком (HITL, ТБ-042). Гриф результата: @Result.ResultClassification.
+                </MudAlert>
 
-                <div class="d-flex align-center gap-4 mb-3">
-                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
-                             Icon="@Icons.Material.Filled.Place">@_selected.Scope</MudChip>
-                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default"
-                             Icon="@Icons.Material.Filled.Schedule">@_selected.Duration</MudChip>
-                </div>
+                @if (!Result.AllCitationsConfirmed)
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                        Не все ссылки подтверждены извлечёнными нормами — вывод НЕ считается готовым (GATE-2).
+                    </MudAlert>
+                }
 
-                <SectionCaption Text="Цель" Class="" />
-                <MudText Typo="Typo.body2" Class="mb-3">@_selected.Purpose</MudText>
+                <MudButton Class="mb-3" Color="Color.Secondary" Variant="Variant.Filled" FullWidth="true"
+                           OnClick="ExportAsync" Disabled="_exporting" StartIcon="@Icons.Material.Filled.Download">
+                    @(_exporting ? "Экспорт…" : "Экспорт в .docx")
+                </MudButton>
 
-                <SectionCaption Text="Перечень вопросов" Class="mb-1" />
-                <MudList T="string" Dense="true">
-                    @foreach (var question in _selected.Questions)
+                <SectionCaption Text="Текст" Class="mb-1" />
+                <MudPaper Class="pa-3 mb-3" Outlined="true">
+                    <MudText Typo="Typo.body2" Style="white-space: pre-wrap;">@Result.DraftText</MudText>
+                </MudPaper>
+
+                @if (Result.Citations.Count > 0)
+                {
+                    <SectionCaption Text="Ссылки (грунтовка)" Class="mb-1" />
+                    @foreach (var citation in Result.Citations)
                     {
-                        <MudListItem T="string" Icon="@Icons.Material.Filled.Check" IconColor="Color.Success">
-                            <MudText Typo="Typo.body2">@question</MudText>
-                        </MudListItem>
+                        <div class="d-flex align-center gap-2 mb-1">
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@StatusColor(citation.Status)">
+                                @StatusLabel(citation.Status)
+                            </MudChip>
+                            <MudText Typo="Typo.body2">@citation.Citation</MudText>
+                        </div>
                     }
-                </MudList>
+                }
             }
         </MudPaper>
     </MudItem>
 </MudGrid>
 
 @code {
-    private InspectorDemoData.InspectionProgram? _selected;
+    // Пять видов методических артефактов ТФ-МЕТ-01 (P1-объём §5.2.9).
+    private static readonly string[] ArtifactKinds =
+        ["Программа проверки", "Чек-лист", "Инструкция", "Памятка", "Учебный материал"];
 
-    private void Select(InspectorDemoData.InspectionProgram program) => _selected = program;
+    // Типы проверок — из прототипа; свободный тип можно дописать в «направлении/указаниях».
+    private static readonly string[] InspectionTypes =
+        ["Комплексная", "Целевая", "Контрольная", "Внеплановая"];
+
+    private readonly List<DivisionNode> _divisions = [];
+    private string _artifactKind = "Программа проверки";
+    private string _inspectionType = "Комплексная";
+    private int? _divisionId;
+    private string _direction = string.Empty;
+    private string? _extra;
+
+    private bool _busy;
+    private bool _exporting;
+    private string? _error;
+    private ResponseDto<GenerateReferenceResult>? _response;
+
+    private GenerateReferenceResult? Result => _response?.Data;
+
+    private IEnumerable<DivisionNode> ActiveDivisions => _divisions.Where(d => d.IsActive);
+
+    // Объект проверки: подразделение и/или направление — хотя бы что-то одно.
+    private bool CanGenerate => _divisionId is not null || !string.IsNullOrWhiteSpace(_direction);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var response = await Dispatcher.Send(new ListDivisionTreeQuery());
+        if (response is { Status: true, Data: { } list })
+        {
+            _divisions.AddRange(list);
+        }
+    }
+
+    private string BuildScope()
+    {
+        var divisionName = _divisions.FirstOrDefault(d => d.Id == _divisionId)?.Name;
+        return (divisionName, Direction: _direction?.Trim()) switch
+        {
+            ({ } division, { Length: > 0 } direction) => $"{division} — {direction}",
+            ({ } division, _) => division,
+            (_, { Length: > 0 } direction) => direction,
+            _ => string.Empty,
+        };
+    }
+
+    private async Task GenerateAsync()
+    {
+        _busy = true;
+        _error = null;
+        _response = null;
+        try
+        {
+            var response = await Dispatcher.Send(
+                new GenerateMethodDocumentCommand(_artifactKind, _inspectionType, BuildScope(), _extra));
+            if (response.Status)
+            {
+                _response = response;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка генерации: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ExportAsync()
+    {
+        if (Result is null)
+        {
+            return;
+        }
+
+        _exporting = true;
+        _error = null;
+        try
+        {
+            // Экспортёр общий с Генератором (ТФ-ГЕН-03/ТБ-033): заголовок — вид + объект.
+            var response = await Dispatcher.Send(new ExportReferenceCommand(
+                $"{_artifactKind}: {BuildScope()}", Result.DraftText, Result.ResultClassification));
+
+            if (response is { Status: true, Data: { } file })
+            {
+                using var streamReference = new DotNetStreamReference(new MemoryStream(file.Content));
+                await JS.InvokeVoidAsync("downloadFileFromStream", file.FileName, streamReference);
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка экспорта: {ex.Message}";
+        }
+        finally
+        {
+            _exporting = false;
+        }
+    }
+
+    private static Color StatusColor(CitationStatus status) => status switch
+    {
+        CitationStatus.Confirmed => Color.Success,
+        CitationStatus.Superseded => Color.Warning,
+        _ => Color.Error,
+    };
+
+    private static string StatusLabel(CitationStatus status) => status switch
+    {
+        CitationStatus.Confirmed => "подтверждена",
+        CitationStatus.Superseded => "УТРАТИЛА СИЛУ",
+        _ => "не подтверждена",
+    };
 }
