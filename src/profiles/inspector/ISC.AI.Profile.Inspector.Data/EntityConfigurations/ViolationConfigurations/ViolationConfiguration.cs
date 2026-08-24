@@ -30,5 +30,8 @@ public class ViolationConfiguration : IEntityTypeConfiguration<Violation>
         builder.HasIndex(e => new { e.DivisionId, e.DetectedAt });
         builder.HasIndex(e => e.CategoryId);
         builder.HasIndex(e => e.RemediationStatus);
+
+        // Под фоновую пометку просрочки (ТФ-МОН-01): кандидаты ищутся по статусу и истёкшему сроку.
+        builder.HasIndex(e => new { e.RemediationStatus, e.RemediationDeadline });
     }
 }

@@ -2,12 +2,14 @@
 @* Модуль «Генератор» (Э4-03, ТФ-ГЕН-01): формирует черновик справки через RAG-оркестратор ядра.
    Форма (тип → подразделение → нарушения) собирает структурированный запрос; генерация НАСТОЯЩАЯ:
    извлечение с фильтром доступа → модель → грунтовка (ТБ-040) → черновик (HITL, ТБ-042) → экспорт .docx.
-   ДЕМО здесь только справочник подразделений — реальных записей ещё нет. *@
+   Подразделения — из ЖИВОГО справочника (§4.2), демо-список снят. *@
 @page "/generator"
 @rendermode InteractiveServer
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Abstractions.Grounding
+@using ISC.AI.Profile.Inspector.Application.Features.Divisions
 @using ISC.AI.Profile.Inspector.Application.Features.Generation
+@using ISC.AI.Profile.Inspector.Domain.Services
 
 <PageHeader Title="Генератор документов" Subtitle="Справки, акты, заключения"
             Icon="@Icons.Material.Filled.AutoAwesome" />
@@ -48,33 +50,33 @@
         <MudPaper Class="pa-4 mb-4" Outlined="true">
             <SectionCaption Text="Подразделение" />
 
-            <MudToggleGroup T="bool" @bind-Value="_territorial" Color="Color.Primary" Class="mb-3" CheckMark="false">
-                <MudToggleItem T="bool" Value="true" Text="Территориальное" />
-                <MudToggleItem T="bool" Value="false" Text="Линейное" />
-            </MudToggleGroup>
-
+            @* Живой справочник (§4.2): карточками — действующие корневые подразделения (ТУ и линейные),
+               подчинённые РО показываются числом. Пустой справочник — подсказка вместо тупика. *@
+            @if (RootDivisions.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    Справочник подразделений пуст — заполните его на странице «Подразделения».
+                </MudText>
+            }
             <MudGrid Spacing="2">
-                @foreach (var division in (_territorial ? InspectorDemoData.Territorial : InspectorDemoData.Linear))
+                @foreach (var division in RootDivisions)
                 {
                     <MudItem xs="12" sm="6">
                         <MudPaper Class="pa-3 cursor-pointer" Outlined="true" Style="@DivisionStyle(division)"
                                   @onclick="@(() => _division = division)">
                             <MudText Typo="Typo.body2"><b>@division.Name</b></MudText>
                             <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                                @division.Note@(division.SubUnits > 0 ? $" · {division.SubUnits} РО" : string.Empty)
+                                @(division.Code ?? "без кода")@(division.Children > 0 ? $" · {division.Children} РО" : string.Empty)
                             </MudText>
                         </MudPaper>
                     </MudItem>
                 }
             </MudGrid>
 
-            <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2 d-block">
-                Справочник показательный (ДЕМО): реальный появится вместе с наполнением <c>inspector.division</c>.
-            </MudText>
-
             <MudGrid Class="mt-1">
                 <MudItem xs="12" sm="6">
-                    <MudDatePicker @bind-Date="_date" Label="Дата" Variant="Variant.Outlined" Editable="true" />
+                    <MudDatePicker @bind-Date="_date" Label="Дата" Variant="Variant.Outlined" Editable="true"
+                                   DateFormat="dd.MM.yyyy" />
                 </MudItem>
                 <MudItem xs="12" sm="6">
                     <MudTextField @bind-Value="_period" Label="Период" Variant="Variant.Outlined" Placeholder="2024 г." />
@@ -183,8 +185,8 @@
     private static readonly string[] ViolationHints = ["Агентурная", "АОД", "Нацменьшинства", "Соц. напряжённость"];
 
     private string _docType = "Справка об итогах проверки";
-    private bool _territorial = true;
-    private InspectorDemoData.DivisionStat? _division;
+    private readonly List<DivisionNode> _divisions = [];
+    private DivisionNode? _division;
     private DateTime? _date = DateTime.Today;
     private string _period = "2024 г.";
     private string _violations = string.Empty;
@@ -198,9 +200,21 @@
 
     private bool CanGenerate => _division is not null && !string.IsNullOrWhiteSpace(_violations);
 
+    private IReadOnlyList<DivisionNode> RootDivisions =>
+        [.. _divisions.Where(d => d.ParentId is null && d.IsActive)];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var response = await Dispatcher.Send(new ListDivisionTreeQuery());
+        if (response is { Status: true, Data: { } list })
+        {
+            _divisions.AddRange(list);
+        }
+    }
+
     private static Variant StepVariant(bool filled) => filled ? Variant.Filled : Variant.Outlined;
 
-    private string DivisionStyle(InspectorDemoData.DivisionStat division) =>
+    private string DivisionStyle(DivisionNode division) =>
         ReferenceEquals(_division, division)
             ? "border-color: var(--mud-palette-primary); border-left: 3px solid var(--mud-palette-primary);"
             : string.Empty;
@@ -210,7 +224,8 @@
 
     // Параметры формы собираются в структурированный запрос для RAG-оркестратора (задачный промпт — в профиле).
     private string BuildTopic() =>
-        $"{_docType}. Подразделение: {_division?.Name} ({_division?.Note}). "
+        $"{_docType}. Подразделение: {_division?.Name}"
+        + $"{(_division?.Code is { } code ? $" (код {code})" : string.Empty)}. "
         + $"Период: {_period}. Дата: {_date:dd.MM.yyyy}. Выявленные нарушения: {_violations}";
 
     private async Task GenerateAsync()

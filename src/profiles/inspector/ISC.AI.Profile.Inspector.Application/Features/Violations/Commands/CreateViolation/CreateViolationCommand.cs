@@ -18,7 +18,8 @@ public sealed record CreateViolationCommand(
     string? SourceAssignmentRef = null,
     string? ReferenceDocRef = null,
     string? Cause = null,
-    string? Recommendation = null) : IRequest<ResponseDto<int>>, IAuditableRequest
+    string? Recommendation = null,
+    DateOnly? RemediationDeadline = null) : IRequest<ResponseDto<int>>, IAuditableRequest
 {
     /// <inheritdoc />
     public AuditAction AuditAction => AuditAction.Modify;
@@ -53,5 +54,6 @@ public sealed record CreateViolationCommand(
 
     internal static ViolationDraft Draft(CreateViolationCommand c) => new(
         c.DivisionId, c.CategoryId, c.Severity, c.DetectedAt, c.RemediationStatus,
-        c.SourceDocRef, c.SourceAssignmentRef, c.ReferenceDocRef, c.Cause, c.Recommendation);
+        c.SourceDocRef, c.SourceAssignmentRef, c.ReferenceDocRef, c.Cause, c.Recommendation,
+        c.RemediationDeadline);
 }

@@ -19,7 +19,8 @@ public sealed record UpdateViolationCommand(
     string? SourceAssignmentRef = null,
     string? ReferenceDocRef = null,
     string? Cause = null,
-    string? Recommendation = null) : IRequest<ResponseDto<bool>>, IAuditableRequest
+    string? Recommendation = null,
+    DateOnly? RemediationDeadline = null) : IRequest<ResponseDto<bool>>, IAuditableRequest
 {
     /// <inheritdoc />
     public AuditAction AuditAction => AuditAction.Modify;
@@ -46,7 +47,8 @@ public sealed record UpdateViolationCommand(
             var draft = new ViolationDraft(
                 command.DivisionId, command.CategoryId, command.Severity, command.DetectedAt,
                 command.RemediationStatus, command.SourceDocRef, command.SourceAssignmentRef,
-                command.ReferenceDocRef, command.Cause, command.Recommendation);
+                command.ReferenceDocRef, command.Cause, command.Recommendation,
+                command.RemediationDeadline);
             var result = await store.UpdateAsync(command.ViolationId, draft, cancellationToken);
             return result switch
             {

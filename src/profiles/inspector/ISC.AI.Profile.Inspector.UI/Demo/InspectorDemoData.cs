@@ -13,36 +13,6 @@ namespace ISC.AI.Profile.Inspector.UI.Demo;
 /// </remarks>
 public static class InspectorDemoData
 {
-    /// <summary>Строка таблицы подразделений (демо).</summary>
-    /// <param name="Name">Наименование подразделения.</param>
-    /// <param name="Note">Регион или расшифровка.</param>
-    /// <param name="Checks">Число проверок.</param>
-    /// <param name="SubUnits">Число подчинённых районных отделов (для ТУ); 0 — нет/неприменимо.</param>
-    public sealed record DivisionStat(string Name, string Note, int Checks, int SubUnits = 0);
-
-    /// <summary>Территориальные управления (демо).</summary>
-    public static IReadOnlyList<DivisionStat> Territorial { get; } =
-    [
-        new("Чуйское управление", "Чуйская обл.", 3, SubUnits: 5),
-        new("Ошское управление", "Ошская обл.", 1, SubUnits: 4),
-        new("Джалал-Абадское управление", "Джалал-Абадская обл.", 1, SubUnits: 3),
-        new("Иссык-Кульское управление", "Иссык-Кульская обл.", 0, SubUnits: 3),
-        new("Нарынское управление", "Нарынская обл.", 0, SubUnits: 2),
-        new("Таласское управление", "Таласская обл.", 0, SubUnits: 2),
-        new("Баткенское управление", "Баткенская обл.", 0, SubUnits: 2),
-    ];
-
-    /// <summary>Линейные подразделения (демо).</summary>
-    public static IReadOnlyList<DivisionStat> Linear { get; } =
-    [
-        new("УВКР", "Управление военной контрразведки", 0),
-        new("УЗК", "Управление защиты конституционного строя", 1),
-        new("УЭБ", "Управление экономической безопасности", 1),
-        new("УКР", "Управление контрразведки", 0),
-        new("УПТ", "Управление по противодействию терроризму", 0),
-        new("УДО", "Управление документального обеспечения", 0),
-    ];
-
     /// <summary>Программа проверки (демо) — модуль «Методики проверок» (§5.2.9).</summary>
     /// <param name="Title">Наименование программы.</param>
     /// <param name="Scope">Объект проверки.</param>

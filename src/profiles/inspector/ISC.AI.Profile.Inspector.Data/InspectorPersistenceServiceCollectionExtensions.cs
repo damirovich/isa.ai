@@ -50,6 +50,9 @@ public static class InspectorPersistenceServiceCollectionExtensions
         services.AddScoped<IInspectionArchiveStore, InspectionArchiveStore>();
         services.AddScoped<IInspectionDocumentResolver, InspectionDocumentResolver>();
 
+        // Автопросрочка устранения (ТФ-МОН-01): истёкший контрольный срок помечает система.
+        services.AddHostedService<RemediationDeadlineJob>();
+
         // Профиль отдаёт модулю документооборота свой справочник подразделений (вопрос 3 Э4-35):
         // словарь id един с решёткой доступа, справочник ведёт профиль.
         services.AddScoped<ISC.AI.Modules.DocFlow.Domain.Services.IDivisionDirectory, DocFlowDivisionDirectory>();

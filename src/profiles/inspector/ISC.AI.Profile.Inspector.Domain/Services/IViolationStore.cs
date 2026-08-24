@@ -23,4 +23,12 @@ public interface IViolationStore
     /// <summary>Правит нарушение целиком (та же проверка категории).</summary>
     Task<ViolationWriteResult> UpdateAsync(
         int violationId, ViolationDraft draft, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Переводит в «Просрочено» неустранённые нарушения с истёкшим контрольным сроком
+    /// (ТФ-МОН-01; системное действие — зовёт фоновая проверка, аудит пишет вызывающий).
+    /// «Устранено» и уже «Просрочено» не трогаются; без срока — автопросрочки нет.
+    /// </summary>
+    Task<IReadOnlyList<ViolationOverdueMark>> MarkOverdueAsync(
+        DateOnly today, CancellationToken cancellationToken = default);
 }

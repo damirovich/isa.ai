@@ -72,10 +72,16 @@
                         </TintedChip>
                     </div>
                     <MudText Typo="Typo.body2" Class="mud-text-secondary">@item.CategoryName</MudText>
-                    <div class="mt-1">
+                    <div class="mt-1 d-flex align-center gap-3 flex-wrap">
                         <IconCaption Icon="@Icons.Material.Filled.CalendarMonth">
                             Выявлено: @item.DetectedAt.ToString("dd.MM.yyyy")
                         </IconCaption>
+                        @if (item.RemediationDeadline is { } deadline)
+                        {
+                            <IconCaption Icon="@Icons.Material.Filled.Schedule">
+                                Срок: @deadline.ToString("dd.MM.yyyy")
+                            </IconCaption>
+                        }
                     </div>
                     <ColorBar Percent="@Progress(item.RemediationStatus)" Color="@StatusColor(item.RemediationStatus)" />
                     @if (item.Recommendation is { } recommendation)
