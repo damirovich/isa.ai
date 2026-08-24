@@ -1,0 +1,458 @@
+@namespace ISC.AI.Profile.Inspector.UI
+@* Учёт нарушений (Э5-01, Приложение §4): реестр с отбором + карточка занесения/правки. Данные заносит
+   ЧЕЛОВЕК (Инспектор/Руководитель), ИИ здесь ничего не считает — этими записями живут светофор риска
+   и дашборд (§5.2.5). «Повтор» — производный признак (тот же вид в том же подразделении ранее). *@
+@page "/violations"
+@rendermode InteractiveServer
+@using ISC.AI.Profile.Inspector.Application.Features.Divisions
+@using ISC.AI.Profile.Inspector.Application.Features.ViolationCategories
+@using ISC.AI.Profile.Inspector.Application.Features.Violations
+@using ISC.AI.Profile.Inspector.Domain.Enums
+@using ISC.AI.Profile.Inspector.Domain.Services
+
+<PageHeader Title="Учёт нарушений" Subtitle="Реестр выявленных нарушений — источник светофора риска"
+            Icon="@Icons.Material.Filled.ReportProblem">
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="OpenCreateAsync">Занести нарушение</MudButton>
+</PageHeader>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@* --- Отбор --- *@
+<MudPaper Outlined="true" Class="pa-3 mb-4">
+    <div class="d-flex gap-3 align-end flex-wrap">
+        <MudSelect T="int?" Value="_filterDivisionId" ValueChanged="@(async (int? v) => { _filterDivisionId = v; await ApplyFiltersAsync(); })"
+                   Label="Подразделение" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:220px;">
+            @foreach (var division in _divisions)
+            {
+                <MudSelectItem T="int?" Value="@division.Id">@division.Name</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="int?" Value="_filterCategoryId" ValueChanged="@(async (int? v) => { _filterCategoryId = v; await ApplyFiltersAsync(); })"
+                   Label="Сфера / вид" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:260px;">
+            @foreach (var node in OrderedCategories)
+            {
+                <MudSelectItem T="int?" Value="@node.Id">@(node.ParentId is null ? node.Name : "— " + node.Name)</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="ViolationSeverity?" Value="_filterSeverity" ValueChanged="@(async (ViolationSeverity? v) => { _filterSeverity = v; await ApplyFiltersAsync(); })"
+                   Label="Тяжесть" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:160px;">
+            @foreach (var severity in Severities)
+            {
+                <MudSelectItem T="ViolationSeverity?" Value="@severity">@severity.Label()</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="RemediationStatus?" Value="_filterStatus" ValueChanged="@(async (RemediationStatus? v) => { _filterStatus = v; await ApplyFiltersAsync(); })"
+                   Label="Статус устранения" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:190px;">
+            @foreach (var status in Statuses)
+            {
+                <MudSelectItem T="RemediationStatus?" Value="@status">@status.Label()</MudSelectItem>
+            }
+        </MudSelect>
+        @* Ширина — ОБЁРТКОЙ, не Style: MudBlazor копирует Style пикера на раскрытый календарь,
+           и попап сжимался до ширины поля (дата в шапке обрезалась до года). *@
+        <div style="width:160px;">
+            <MudDatePicker Date="_filterFrom" DateChanged="@(async (DateTime? v) => { _filterFrom = v; await ApplyFiltersAsync(); })"
+                           Label="Выявлено с" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" Clearable="true" />
+        </div>
+        <div style="width:160px;">
+            <MudDatePicker Date="_filterTo" DateChanged="@(async (DateTime? v) => { _filterTo = v; await ApplyFiltersAsync(); })"
+                           Label="по" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" Clearable="true" />
+        </div>
+    </div>
+</MudPaper>
+
+@* --- Реестр --- *@
+<MudTable T="ViolationListItem" Items="_rows" Hover="true" Dense="true" Outlined="true" Loading="_busy">
+    <HeaderContent>
+        <MudTh>Дата</MudTh>
+        <MudTh>Подразделение</MudTh>
+        <MudTh>Сфера · вид</MudTh>
+        <MudTh>Тяжесть</MudTh>
+        <MudTh>Статус</MudTh>
+        <MudTh>Источник</MudTh>
+        <MudTh Style="width:1%;"></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Дата">@context.DetectedAt.ToString("dd.MM.yyyy")</MudTd>
+        <MudTd DataLabel="Подразделение">@context.DivisionName</MudTd>
+        <MudTd DataLabel="Сфера · вид">
+            <div class="d-flex align-center gap-1">
+                <div>
+                    @if (context.CategoryParentName is { } sphere)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">@sphere</MudText>
+                    }
+                    <span>@context.CategoryName</span>
+                </div>
+                @if (context.IsRecurring)
+                {
+                    <MudTooltip Text="Повторное: тот же вид уже выявлялся в этом подразделении">
+                        <MudIcon Icon="@Icons.Material.Filled.Repeat" Size="Size.Small" Color="Color.Warning" />
+                    </MudTooltip>
+                }
+            </div>
+        </MudTd>
+        <MudTd DataLabel="Тяжесть">
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@SeverityColor(context.Severity)">
+                @context.Severity.Label()
+            </MudChip>
+        </MudTd>
+        <MudTd DataLabel="Статус">
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@StatusColor(context.RemediationStatus)">
+                @context.RemediationStatus.Label()
+            </MudChip>
+        </MudTd>
+        <MudTd DataLabel="Источник">@(context.SourceDocRef ?? "—")</MudTd>
+        <MudTd>
+            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" title="Изменить"
+                           OnClick="@(() => OpenEditAsync(context.Id))" />
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+            Нарушений по выбранному отбору нет. Занесите первое — кнопкой «Занести нарушение» выше.
+        </MudText>
+    </NoRecordsContent>
+</MudTable>
+
+<div class="d-flex align-center justify-space-between mt-3 flex-wrap gap-2">
+    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+        Нарушений: @_total · страница @_page из @PageCount
+    </MudText>
+    <MudPagination Count="@PageCount" Selected="_page" SelectedChanged="GoToPageAsync"
+                   Size="Size.Small" ShowFirstButton="true" ShowLastButton="true" />
+</div>
+
+@* --- Карточка нарушения (создание и правка одной формой) --- *@
+<MudDialog @bind-Visible="_formOpen" Options="FormDialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(_formId is null ? "Занести нарушение" : "Изменить нарушение")</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_formError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_formError</MudAlert>
+        }
+        @if (_categories.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                Классификатор пуст — добавьте сферы и виды на странице «Виды нарушений»
+                (раздел «Администрирование», ведёт Администратор).
+            </MudAlert>
+        }
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="6">
+                <MudSelect T="int?" @bind-Value="_formDivisionId" Label="Подразделение" Variant="Variant.Outlined" Dense="true">
+                    @foreach (var division in ActiveDivisions)
+                    {
+                        <MudSelectItem T="int?" Value="@division.Id">@division.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                @* Категория — любого уровня: сфера целиком, а вид внутри — необязательное уточнение
+                   (классификатор наполняется постепенно, строгое «только вид» оставляло бы список пустым). *@
+                <MudSelect T="int?" @bind-Value="_formCategoryId" Label="Сфера / вид нарушения" Variant="Variant.Outlined" Dense="true">
+                    @foreach (var node in OrderedCategories)
+                    {
+                        <MudSelectItem T="int?" Value="@node.Id">@(node.ParentId is null ? node.Name : "— " + node.Name)</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudSelect T="ViolationSeverity" @bind-Value="_formSeverity" Label="Тяжесть" Variant="Variant.Outlined" Dense="true">
+                    @foreach (var severity in Severities)
+                    {
+                        <MudSelectItem T="ViolationSeverity" Value="@severity">@severity.Label()</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudDatePicker @bind-Date="_formDetectedAt" Label="Дата выявления" Variant="Variant.Outlined"
+                               DateFormat="dd.MM.yyyy" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudSelect T="RemediationStatus" @bind-Value="_formStatus" Label="Статус устранения" Variant="Variant.Outlined" Dense="true">
+                    @foreach (var status in Statuses)
+                    {
+                        <MudSelectItem T="RemediationStatus" Value="@status">@status.Label()</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudTextField @bind-Value="_formSourceDocRef" Label="Документ-источник (акт, справка)"
+                              Variant="Variant.Outlined" MaxLength="200" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudTextField @bind-Value="_formSourceAssignmentRef" Label="Поручение (номер)"
+                              Variant="Variant.Outlined" MaxLength="200" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudTextField @bind-Value="_formReferenceDocRef" Label="Нарушенная норма (НПА)"
+                              Variant="Variant.Outlined" MaxLength="200" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_formCause" Label="Причина / обстоятельства" Variant="Variant.Outlined"
+                              Lines="3" MaxLength="4000" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_formRecommendation" Label="Рекомендация по устранению" Variant="Variant.Outlined"
+                              Lines="3" MaxLength="4000" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _formOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!FormValid || _busy)"
+                   OnClick="SaveAsync">Сохранить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private const int PageSize = 25;
+
+    private static readonly DialogOptions FormDialogOptions =
+        new() { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true };
+
+    private static readonly ViolationSeverity[] Severities =
+        [ViolationSeverity.Low, ViolationSeverity.Medium, ViolationSeverity.High, ViolationSeverity.Critical];
+
+    private static readonly RemediationStatus[] Statuses =
+        [RemediationStatus.UnderControl, RemediationStatus.Partial, RemediationStatus.Overdue, RemediationStatus.Resolved];
+
+    private readonly List<DivisionNode> _divisions = [];
+    private readonly List<ViolationCategoryNode> _categories = [];
+    private readonly List<ViolationListItem> _rows = [];
+    private int _total;
+    private int _page = 1;
+    private bool _busy;
+    private string? _error;
+
+    private int? _filterDivisionId;
+    private int? _filterCategoryId;
+    private ViolationSeverity? _filterSeverity;
+    private RemediationStatus? _filterStatus;
+    private DateTime? _filterFrom;
+    private DateTime? _filterTo;
+
+    private bool _formOpen;
+    private string? _formError;
+    private int? _formId;
+    private int? _formDivisionId;
+    private int? _formCategoryId;
+    private ViolationSeverity _formSeverity = ViolationSeverity.Medium;
+    private DateTime? _formDetectedAt;
+    private RemediationStatus _formStatus = RemediationStatus.UnderControl;
+    private string? _formSourceDocRef;
+    private string? _formSourceAssignmentRef;
+    private string? _formReferenceDocRef;
+    private string? _formCause;
+    private string? _formRecommendation;
+
+    private int PageCount => Math.Max(1, (int)Math.Ceiling(_total / (double)PageSize));
+
+    // В карточку — только действующие подразделения; в отборе — все (по расформированным ищут историю).
+    private IEnumerable<DivisionNode> ActiveDivisions => _divisions.Where(d => d.IsActive);
+
+    // Классификатор в порядке «сфера, под ней её виды» — иначе алфавитный список из хранилища
+    // перемешивает уровни и виды отрываются от своих сфер.
+    private IEnumerable<ViolationCategoryNode> OrderedCategories
+    {
+        get
+        {
+            foreach (var sphere in _categories.Where(c => c.ParentId is null))
+            {
+                yield return sphere;
+                foreach (var kind in _categories.Where(c => c.ParentId == sphere.Id))
+                {
+                    yield return kind;
+                }
+            }
+        }
+    }
+
+    private bool FormValid => _formDivisionId is > 0 && _formCategoryId is > 0 && _formDetectedAt is not null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDictionariesAsync();
+        await ReloadAsync();
+    }
+
+    private async Task LoadDictionariesAsync()
+    {
+        var divisions = await Dispatcher.Send(new ListDivisionTreeQuery());
+        if (divisions is { Status: true, Data: { } divisionList })
+        {
+            _divisions.Clear();
+            _divisions.AddRange(divisionList);
+        }
+
+        var categories = await Dispatcher.Send(new ListViolationCategoriesQuery());
+        if (categories is { Status: true, Data: { } categoryList })
+        {
+            _categories.Clear();
+            _categories.AddRange(categoryList);
+        }
+    }
+
+    private string LeafDisplay(ViolationCategoryNode leaf)
+    {
+        var sphere = _categories.FirstOrDefault(c => c.Id == leaf.ParentId);
+        return sphere is null ? leaf.Name : $"{sphere.Name} → {leaf.Name}";
+    }
+
+    private async Task ApplyFiltersAsync()
+    {
+        _page = 1;
+        await ReloadAsync();
+    }
+
+    private async Task GoToPageAsync(int page)
+    {
+        _page = page;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ListViolationsQuery(
+                _filterDivisionId, _filterCategoryId, _filterSeverity, _filterStatus,
+                ToDateOnly(_filterFrom), ToDateOnly(_filterTo), _page, PageSize));
+            _rows.Clear();
+            if (response is { Status: true, Data: { } pageData })
+            {
+                _rows.AddRange(pageData.Rows);
+                _total = pageData.TotalCount;
+            }
+            else if (response is { Status: false })
+            {
+                _error = response.StatusMessage;
+                _total = 0;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task OpenCreateAsync()
+    {
+        // Словари — заново: администратор мог дополнить классификатор, пока страница открыта.
+        await LoadDictionariesAsync();
+        _formId = null;
+        _formDivisionId = null;
+        _formCategoryId = null;
+        _formSeverity = ViolationSeverity.Medium;
+        _formDetectedAt = DateTime.Today;
+        _formStatus = RemediationStatus.UnderControl;
+        _formSourceDocRef = null;
+        _formSourceAssignmentRef = null;
+        _formReferenceDocRef = null;
+        _formCause = null;
+        _formRecommendation = null;
+        _formError = null;
+        _formOpen = true;
+    }
+
+    private async Task OpenEditAsync(int violationId)
+    {
+        _error = null;
+        await LoadDictionariesAsync();
+        var response = await Dispatcher.Send(new GetViolationQuery(violationId));
+        if (response is not { Status: true, Data: { } details })
+        {
+            _error = response.StatusMessage;
+            return;
+        }
+
+        _formId = details.Id;
+        _formDivisionId = details.DivisionId;
+        _formCategoryId = details.CategoryId;
+        _formSeverity = details.Severity;
+        _formDetectedAt = details.DetectedAt.ToDateTime(TimeOnly.MinValue);
+        _formStatus = details.RemediationStatus;
+        _formSourceDocRef = details.SourceDocRef;
+        _formSourceAssignmentRef = details.SourceAssignmentRef;
+        _formReferenceDocRef = details.ReferenceDocRef;
+        _formCause = details.Cause;
+        _formRecommendation = details.Recommendation;
+        _formError = null;
+        _formOpen = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_formDivisionId is not { } divisionId || _formCategoryId is not { } categoryId
+            || _formDetectedAt is not { } detectedAt)
+        {
+            return;
+        }
+
+        _busy = true;
+        _formError = null;
+        try
+        {
+            var detected = DateOnly.FromDateTime(detectedAt);
+            if (_formId is { } violationId)
+            {
+                var response = await Dispatcher.Send(new UpdateViolationCommand(
+                    violationId, divisionId, categoryId, _formSeverity, detected, _formStatus,
+                    _formSourceDocRef, _formSourceAssignmentRef, _formReferenceDocRef, _formCause, _formRecommendation));
+                if (!response.Status)
+                {
+                    _formError = response.StatusMessage;
+                    return;
+                }
+            }
+            else
+            {
+                var response = await Dispatcher.Send(new CreateViolationCommand(
+                    divisionId, categoryId, _formSeverity, detected, _formStatus,
+                    _formSourceDocRef, _formSourceAssignmentRef, _formReferenceDocRef, _formCause, _formRecommendation));
+                if (!response.Status)
+                {
+                    _formError = response.StatusMessage;
+                    return;
+                }
+            }
+
+            _formOpen = false;
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    private static DateOnly? ToDateOnly(DateTime? value) =>
+        value is { } date ? DateOnly.FromDateTime(date) : null;
+
+    // Цвета согласованы с дашбордом (свёртка Приложения §2): тяжесть заливкой, статус контуром.
+    private static Color SeverityColor(ViolationSeverity severity) => severity switch
+    {
+        ViolationSeverity.Low => Color.Default,
+        ViolationSeverity.Medium => Color.Info,
+        ViolationSeverity.High => Color.Warning,
+        _ => Color.Error,
+    };
+
+    private static Color StatusColor(RemediationStatus status) => status switch
+    {
+        RemediationStatus.Resolved => Color.Success,
+        RemediationStatus.UnderControl => Color.Info,
+        RemediationStatus.Partial => Color.Warning,
+        _ => Color.Error,
+    };
+}

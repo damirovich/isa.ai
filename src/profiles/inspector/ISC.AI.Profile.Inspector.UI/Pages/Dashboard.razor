@@ -1,124 +1,194 @@
 @namespace ISC.AI.Profile.Inspector.UI
 @page "/dashboard"
 @rendermode InteractiveServer
+@using ISC.AI.Profile.Inspector.Application.Features.Dashboard
+@using ISC.AI.Profile.Inspector.Domain.Enums
+@using ISC.AI.Profile.Inspector.Domain.Services
 
-@* Модуль «Дашборд» (ТФ-ДШ-01/02). ВНИМАНИЕ: данные ПОКАЗАТЕЛЬНЫЕ (демо) — реальных записей ещё нет,
-   домен «Нарушение» создан, но пуст. Демо-маркер обязан быть виден (плашка ниже + чип в оболочке).
-   Цвет светофора — свёртка 4 уровней риска в 3 цвета (Приложение §2), считает код, не ИИ. *@
+@* Модуль «Дашборд» (§5.2.5, Э5-01): ЖИВЫЕ данные из учёта нарушений — демо-набор снят. Светофор —
+   детерминированный балл RiskScore (Приложение §2), считает код (RiskScoreCalculator), не ИИ. *@
 
-<PageHeader Title="Дашборд" Subtitle="Сводная картина по подразделениям — обзор"
-            Icon="@Icons.Material.Filled.Dashboard" />
+<PageHeader Title="Дашборд" Subtitle="Сводная картина по подразделениям — светофор риска"
+            Icon="@Icons.Material.Filled.Dashboard">
+    <MudSelect T="int" Value="_periodDays" ValueChanged="ChangePeriodAsync" Label="Период"
+               Variant="Variant.Outlined" Dense="true" Style="width:180px;">
+        <MudSelectItem T="int" Value="30">30 дней</MudSelectItem>
+        <MudSelectItem T="int" Value="90">90 дней</MudSelectItem>
+        <MudSelectItem T="int" Value="180">Полгода</MudSelectItem>
+        <MudSelectItem T="int" Value="365">Год</MudSelectItem>
+    </MudSelect>
+</PageHeader>
 
-<DemoAlert>@InspectorDemoData.Notice</DemoAlert>
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
 
-@* --- Показатели --- *@
-<MudGrid Class="mb-2">
-    <MudItem xs="12" sm="6" md="3">
-        <StatCard Value="@InspectorDemoData.TotalChecks" Label="Всего проверок" Accent="var(--mud-palette-info)" />
-    </MudItem>
-    <MudItem xs="12" sm="6" md="3">
-        <StatCard Value="@InspectorDemoData.CriticalViolations" Label="Критических нарушений" Accent="var(--mud-palette-error)" />
-    </MudItem>
-    <MudItem xs="12" sm="6" md="3">
-        <StatCard Value="@InspectorDemoData.NotRemediated" Label="Не устранено" Accent="var(--mud-palette-warning)" />
-    </MudItem>
-    <MudItem xs="12" sm="6" md="3">
-        <StatCard Value="@InspectorDemoData.Remediated" Label="Устранено" Accent="var(--mud-palette-success)" />
-    </MudItem>
-</MudGrid>
+@if (_summary is { } summary)
+{
+    @* --- Показатели за период --- *@
+    <MudGrid Class="mb-2">
+        <MudItem xs="12" sm="6" md="3">
+            <StatCard Value="@summary.TotalViolations" Label="Нарушений за период" Accent="var(--mud-palette-info)" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <StatCard Value="@summary.CriticalViolations" Label="Критических" Accent="var(--mud-palette-error)" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <StatCard Value="@summary.NotRemediated" Label="Не устранено" Accent="var(--mud-palette-warning)" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <StatCard Value="@summary.Remediated" Label="Устранено" Accent="var(--mud-palette-success)" />
+        </MudItem>
+    </MudGrid>
 
-<MudGrid Class="mb-2">
-    @* --- Последние проверки --- *@
-    <MudItem xs="12" md="6">
-        <MudPaper Class="pa-4 h-100" Outlined="true">
-            <SectionCaption Text="Последние проверки" Class="mb-3" />
-            @foreach (var check in InspectorDemoData.RecentChecks)
-            {
-                <AccentRow Class="pa-3 mb-2 d-flex align-center gap-3">
-                    <div class="flex-grow-1">
-                        <MudText Typo="Typo.body1"><b>@check.Title</b></MudText>
-                        <div class="d-flex align-center gap-3 mt-1">
-                            <IconCaption Icon="@Icons.Material.Filled.CalendarMonth">@check.Date</IconCaption>
-                            <IconCaption Icon="@Icons.Material.Filled.Place">@check.Location</IconCaption>
+    <MudGrid>
+        @* --- Светофор риска --- *@
+        <MudItem xs="12" md="7">
+            <MudPaper Class="pa-4 h-100" Outlined="true">
+                <SectionCaption Text="Риск по подразделениям" Class="mb-3" />
+                <MudTable T="DivisionRiskRow" Items="summary.DivisionRisks" Hover="true" Dense="true"
+                          Loading="_busy" Elevation="0">
+                    <HeaderContent>
+                        <MudTh>Подразделение</MudTh>
+                        <MudTh>Нарушений</MudTh>
+                        <MudTh>Балл</MudTh>
+                        <MudTh>Уровень</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Подразделение">@context.DivisionName</MudTd>
+                        <MudTd DataLabel="Нарушений">@context.ViolationCount</MudTd>
+                        <MudTd DataLabel="Балл">@context.Assessment.Score.ToString("0.#")</MudTd>
+                        <MudTd DataLabel="Уровень">
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                                     Color="@RiskChipColor(context.Assessment.Color)">
+                                @context.Assessment.Level.Label()
+                            </MudChip>
+                        </MudTd>
+                    </RowTemplate>
+                    <NoRecordsContent>
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                            За период нарушений не занесено — светофор пуст.
+                        </MudText>
+                    </NoRecordsContent>
+                </MudTable>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="5">
+            @* --- Последние нарушения --- *@
+            <MudPaper Class="pa-4 mb-4" Outlined="true">
+                <SectionCaption Text="Последние нарушения" Class="mb-3" />
+                @if (summary.RecentViolations.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                        Записей пока нет — начните с модуля «Учёт нарушений».
+                    </MudText>
+                }
+                @foreach (var row in summary.RecentViolations)
+                {
+                    <AccentRow Class="pa-3 mb-2 d-flex align-center gap-3">
+                        <div class="flex-grow-1">
+                            <MudText Typo="Typo.body2"><b>@row.CategoryName</b></MudText>
+                            <div class="d-flex align-center gap-3 mt-1">
+                                <IconCaption Icon="@Icons.Material.Filled.CalendarMonth">
+                                    @row.DetectedAt.ToString("dd.MM.yyyy")
+                                </IconCaption>
+                                <IconCaption Icon="@Icons.Material.Filled.Business">@row.DivisionName</IconCaption>
+                            </div>
                         </div>
-                    </div>
-                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@StatusColor(check.Status)">
-                        @check.Status
-                    </MudChip>
-                </AccentRow>
-            }
-        </MudPaper>
-    </MudItem>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                                 Color="@SeverityColor(row.Severity)">@row.Severity.Label()</MudChip>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                 Color="@StatusColor(row.RemediationStatus)">@row.RemediationStatus.Label()</MudChip>
+                    </AccentRow>
+                }
+            </MudPaper>
 
-    <MudItem xs="12" md="6">
-        @* --- Статус устранения --- *@
-        <MudPaper Class="pa-4 mb-4" Outlined="true">
-            <SectionCaption Text="Статус устранения" Class="mb-3" />
-            @foreach (var stat in InspectorDemoData.Remediation)
-            {
-                <ProgressStat Label="@stat.Label" Percent="@stat.Percent"
-                              Value="@stat.Count.ToString()" Color="@StatusCss(stat.Label)" />
-            }
-        </MudPaper>
-
-        @* --- Быстрый старт --- *@
-        <MudPaper Class="pa-4" Outlined="true">
-            <SectionCaption Text="Быстрый старт" Class="mb-3" />
-            <MudStack Spacing="2">
-                <MudButton Href="/generator" Variant="Variant.Outlined" FullWidth="true"
-                           StartIcon="@Icons.Material.Filled.AutoAwesome" Class="justify-start">
-                    Генератор документов
-                </MudButton>
-                <MudButton Href="/npa" Variant="Variant.Outlined" FullWidth="true"
-                           StartIcon="@Icons.Material.Filled.Gavel" Class="justify-start">
-                    Поиск по НПА
-                </MudButton>
-                <MudButton Href="/archive" Variant="Variant.Outlined" FullWidth="true"
-                           StartIcon="@Icons.Material.Filled.Inventory2" Class="justify-start">
-                    Архив проверок
-                </MudButton>
-                <MudButton Href="/collegium" Variant="Variant.Outlined" FullWidth="true"
-                           StartIcon="@Icons.Material.Filled.Groups" Class="justify-start">
-                    Подготовка к коллегии
-                </MudButton>
-            </MudStack>
-        </MudPaper>
-    </MudItem>
-</MudGrid>
-
-@* --- Подразделения --- *@
-<MudGrid>
-    <MudItem xs="12" md="6">
-        <MudPaper Class="pa-4 h-100" Outlined="true">
-            <SectionCaption Text="Территориальные управления" />
-            <DivisionsTable Rows="@InspectorDemoData.Territorial" NoteAsColumn="true" />
-        </MudPaper>
-    </MudItem>
-
-    <MudItem xs="12" md="6">
-        <MudPaper Class="pa-4 h-100" Outlined="true">
-            <SectionCaption Text="Линейные подразделения" />
-            <DivisionsTable Rows="@InspectorDemoData.Linear" />
-        </MudPaper>
-    </MudItem>
-</MudGrid>
+            @* --- Быстрый старт --- *@
+            <MudPaper Class="pa-4" Outlined="true">
+                <SectionCaption Text="Быстрый старт" Class="mb-3" />
+                <MudStack Spacing="2">
+                    <MudButton Href="/violations" Variant="Variant.Outlined" FullWidth="true"
+                               StartIcon="@Icons.Material.Filled.ReportProblem" Class="justify-start">
+                        Учёт нарушений
+                    </MudButton>
+                    <MudButton Href="/generator" Variant="Variant.Outlined" FullWidth="true"
+                               StartIcon="@Icons.Material.Filled.AutoAwesome" Class="justify-start">
+                        Генератор документов
+                    </MudButton>
+                    <MudButton Href="/npa" Variant="Variant.Outlined" FullWidth="true"
+                               StartIcon="@Icons.Material.Filled.Gavel" Class="justify-start">
+                        Поиск по НПА
+                    </MudButton>
+                </MudStack>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+else if (_busy)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-4" />
+}
 
 @code {
-    // Цвет статуса устранения: согласован со свёрткой уровней риска в 3 цвета (Приложение §2).
-    private static Color StatusColor(string status) => status switch
+    private DashboardSummary? _summary;
+    private int _periodDays = 90;
+    private bool _busy;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ChangePeriodAsync(int days)
     {
-        "Устранено" => Color.Success,
-        "Частично устранено" => Color.Warning,
-        "На контроле" => Color.Info,
+        _periodDays = days;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new GetDashboardQuery(_periodDays));
+            if (response is { Status: true, Data: { } summary })
+            {
+                _summary = summary;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    // Свёртка светофора (Приложение §2): зелёный/жёлтый/красный → цвета палитры MudBlazor.
+    private static Color RiskChipColor(RiskColor color) => color switch
+    {
+        RiskColor.Green => Color.Success,
+        RiskColor.Yellow => Color.Warning,
         _ => Color.Error,
     };
 
-    // Тот же маппинг статусов, но в CSS-цвета палитры — для полос ProgressStat (ColorBar красится CSS-цветом).
-    private static string StatusCss(string status) => status switch
+    // Цвета согласованы со страницей «Учёт нарушений»: тяжесть заливкой, статус контуром.
+    private static Color SeverityColor(ViolationSeverity severity) => severity switch
     {
-        "Устранено" => "var(--mud-palette-success)",
-        "Частично устранено" => "var(--mud-palette-warning)",
-        "На контроле" => "var(--mud-palette-info)",
-        _ => "var(--mud-palette-error)",
+        ViolationSeverity.Low => Color.Default,
+        ViolationSeverity.Medium => Color.Info,
+        ViolationSeverity.High => Color.Warning,
+        _ => Color.Error,
+    };
+
+    private static Color StatusColor(RemediationStatus status) => status switch
+    {
+        RemediationStatus.Resolved => Color.Success,
+        RemediationStatus.UnderControl => Color.Info,
+        RemediationStatus.Partial => Color.Warning,
+        _ => Color.Error,
     };
 }

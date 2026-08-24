@@ -19,3 +19,17 @@ public enum ViolationSeverity
     /// <summary>Критическая.</summary>
     Critical = 4,
 }
+
+/// <summary>Подписи по-русски — в домене, чтобы страницы не держали копий (как UserRoleLabels).</summary>
+public static class ViolationSeverityLabels
+{
+    /// <summary>Подпись значения.</summary>
+    public static string Label(this ViolationSeverity value) => value switch
+    {
+        ViolationSeverity.Low => "Низкая",
+        ViolationSeverity.Medium => "Средняя",
+        ViolationSeverity.High => "Высокая",
+        ViolationSeverity.Critical => "Критическая",
+        _ => value.ToString(),
+    };
+}

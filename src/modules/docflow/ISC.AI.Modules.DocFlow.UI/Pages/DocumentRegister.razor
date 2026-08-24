@@ -35,7 +35,11 @@
         </MudSelect>
         <MudTextField @bind-Value="_regNumber" Label="Рег. номер (уникален)" Variant="Variant.Outlined" MaxLength="200"
                       Style="width:200px;" />
-        <MudDatePicker @bind-Date="_regDate" Label="Дата регистрации *" Variant="Variant.Outlined" Style="width:190px;" />
+        @* Ширина календарей — ОБЁРТКОЙ, не Style: MudBlazor копирует Style пикера на раскрытый
+           календарь, и попап сжимался до ширины поля (дата в шапке обрезалась до года). *@
+        <div style="width:190px;">
+            <MudDatePicker @bind-Date="_regDate" Label="Дата регистрации *" Variant="Variant.Outlined" />
+        </div>
         <MudSelect T="DocumentDirection" @bind-Value="_direction" Label="Направленность" Variant="Variant.Outlined"
                    Style="width:190px;">
             @foreach (var direction in Enum.GetValues<DocumentDirection>())
@@ -123,8 +127,9 @@
         <MudCheckBox T="bool" @bind-Value="_useCommonDeadline" Label="Единый срок для всех подразделений (§4.1)" />
         @if (_useCommonDeadline)
         {
-            <MudDatePicker @bind-Date="_commonDeadline" Label="Единый срок исполнения *" Variant="Variant.Outlined"
-                           Style="width:220px;" Class="mb-2" />
+            <div style="width:220px;" class="mb-2">
+                <MudDatePicker @bind-Date="_commonDeadline" Label="Единый срок исполнения *" Variant="Variant.Outlined" />
+            </div>
         }
 
         @* Здесь список подразделений ПОЛНЫЙ, в отличие от подразделения-владельца. Назначение —
@@ -153,7 +158,9 @@
                 </MudSelect>
                 @if (!_useCommonDeadline)
                 {
-                    <MudDatePicker @bind-Date="row.Deadline" Label="Срок" Variant="Variant.Outlined" Style="width:180px;" />
+                    <div style="width:180px;">
+                        <MudDatePicker @bind-Date="row.Deadline" Label="Срок" Variant="Variant.Outlined" />
+                    </div>
                 }
                 <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
                                OnClick="@(() => _assignments.Remove(row))" />

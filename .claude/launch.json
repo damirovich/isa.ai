@@ -12,6 +12,12 @@
       "runtimeExecutable": "dotnet",
       "runtimeArgs": ["run", "--project", "src/core/ISC.AI.Web/ISC.AI.Web.csproj", "--urls", "http://localhost:5134"],
       "port": 5134
+    },
+    {
+      "name": "isc-ai-web-dev",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "src/core/ISC.AI.Web/ISC.AI.Web.csproj", "--urls", "http://localhost:5135", "--Auth:Mode=Dev"],
+      "port": 5135
     }
   ]
 }

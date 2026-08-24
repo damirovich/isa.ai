@@ -54,6 +54,9 @@ public sealed class InspectorProfile : IProfile
         // пункты по префиксу, и вложенный маршрут подсвечивал бы «Базу НПА» вместе с картотекой.
         new ModuleDescriptor("npa-registry", "/norms", "Картотека НПА", Icons.Material.Filled.LibraryBooks,
             typeof(NpaRegistry), ReadPolicy, GroupMain),
+        // Учёт нарушений (Э5-01, Приложение §4): реестр фактов, которыми живут светофор риска и дашборд.
+        new ModuleDescriptor("violations", "/violations", "Учёт нарушений", Icons.Material.Filled.ReportProblem,
+            typeof(Violations), ReadPolicy, GroupMain),
 
         // --- Модули §5.2, ещё не реализованные (страницы-заглушки) ---
         new ModuleDescriptor("archive", "/archive", "Архив", Icons.Material.Filled.Inventory2,
@@ -104,6 +107,10 @@ public sealed class InspectorProfile : IProfile
         // нельзя — только запросом к БД.
         new ModuleDescriptor("admin-audit", "/admin/audit", "Журнал аудита",
             Icons.Material.Filled.History, typeof(AuditJournal), ReadPolicy, GroupAdmin),
+
+        // Классификатор видов нарушений (Э5-01): справочник «сфера → вид», ведёт Администратор.
+        new ModuleDescriptor("admin-violation-categories", "/admin/violation-categories", "Виды нарушений",
+            Icons.Material.Filled.Category, typeof(ViolationCategories), ReadPolicy, GroupAdmin),
 
         // Смена СВОЕГО пароля — не администрирование, доступна любому вошедшему.
         new ModuleDescriptor("account-password", "/account/password", "Смена пароля",

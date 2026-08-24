@@ -83,10 +83,16 @@
                 <MudSelectItem T="int?" Value="@user.Id">@user.Name</MudSelectItem>
             }
         </MudSelect>
-        <MudDatePicker @bind-Date="_filterFrom" Label="Зарегистрирован с" Variant="Variant.Outlined"
-                       DateFormat="dd.MM.yyyy" Clearable="true" Style="width:180px;" />
-        <MudDatePicker @bind-Date="_filterTo" Label="по" Variant="Variant.Outlined"
-                       DateFormat="dd.MM.yyyy" Clearable="true" Style="width:180px;" />
+        @* Ширина календарей — ОБЁРТКОЙ, не Style: MudBlazor копирует Style пикера на раскрытый
+           календарь, и попап сжимался до ширины поля (дата в шапке обрезалась до года). *@
+        <div style="width:180px;">
+            <MudDatePicker @bind-Date="_filterFrom" Label="Зарегистрирован с" Variant="Variant.Outlined"
+                           DateFormat="dd.MM.yyyy" Clearable="true" />
+        </div>
+        <div style="width:180px;">
+            <MudDatePicker @bind-Date="_filterTo" Label="по" Variant="Variant.Outlined"
+                           DateFormat="dd.MM.yyyy" Clearable="true" />
+        </div>
 
         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Search"
                    OnClick="SearchAsync" Disabled="_busy">Найти</MudButton>

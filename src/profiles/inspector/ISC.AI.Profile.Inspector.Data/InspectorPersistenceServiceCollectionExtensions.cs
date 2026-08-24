@@ -39,6 +39,12 @@ public static class InspectorPersistenceServiceCollectionExtensions
         // Автонаполнение картотеки из корпуса (метаданные ЦБД): нормы/редакции/связки без ручного ввода.
         services.AddScoped<INpaRegistrySynchronizer, NpaRegistrySynchronizer>();
 
+        // Учёт нарушений (Э5-01): реестр/карточка, классификатор видов, сигналы риска и сводка
+        // дашборда. Балл риска — детерминированный код (Приложение §2), не ИИ.
+        services.AddScoped<IViolationStore, ViolationStore>();
+        services.AddScoped<IViolationCategoryStore, ViolationCategoryStore>();
+        services.AddScoped<IRiskDataSource, RiskDataSource>();
+
         // Профиль отдаёт модулю документооборота свой справочник подразделений (вопрос 3 Э4-35):
         // словарь id един с решёткой доступа, справочник ведёт профиль.
         services.AddScoped<ISC.AI.Modules.DocFlow.Domain.Services.IDivisionDirectory, DocFlowDivisionDirectory>();
