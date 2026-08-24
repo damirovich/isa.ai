@@ -53,6 +53,16 @@ public sealed record ReviseDocumentCommand(string Text, string Instruction)
                 access,
                 cancellationToken);
 
+            // «Думающая» модель может потратить весь лимит вывода на размышления и вернуть ПУСТОЙ
+            // текст (инцидент 2026-08-24: кнопка «Принять» затёрла документ пустотой). Пустая
+            // редакция — не результат, а сбой: честный отказ вместо тихой потери текста.
+            if (string.IsNullOrWhiteSpace(response.Answer))
+            {
+                return ResponseDto<GenerateReferenceResult>.BadRequest(
+                    "Модель вернула пустой ответ (весь лимит вывода ушёл на размышления). "
+                    + "Повторите попытку; если повторяется — сократите документ или увеличьте Llm:Generation:MaxOutputTokens.");
+            }
+
             var result = new GenerateReferenceResult(
                 DraftText: response.Answer,
                 RequiresHumanReview: true, // HITL всегда (ТБ-042): правку принимает человек.

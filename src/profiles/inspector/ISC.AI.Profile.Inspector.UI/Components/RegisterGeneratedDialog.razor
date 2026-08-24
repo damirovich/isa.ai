@@ -1,0 +1,181 @@
+@namespace ISC.AI.Profile.Inspector.UI
+@* Регистрация ИИ-сформированного документа в документообороте. ЧЕСТНОСТЬ (ТБ-042): источник и
+   примечание несут пометку «сформировано ИИ»; регистрация — акт принятия ЧЕЛОВЕКОМ, поэтому
+   вызывающая страница допускает её только при полностью подтверждённой грунтовке (GATE-2) —
+   иначе непроверенные ссылки ушли бы в реестр документов и, через индексацию, в поисковый корпус. *@
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Abstractions.Grounding
+@using ISC.AI.Modules.DocFlow.Application.Features.Documents
+@using ISC.AI.Modules.DocFlow.Application.Features.DocumentTypes
+@using ISC.AI.Modules.DocFlow.Domain.Enums
+@using ISC.AI.Modules.DocFlow.Domain.Services
+@using ISC.AI.Profile.Inspector.Application.Features.Divisions
+@using ISC.AI.Profile.Inspector.Application.Features.Generation
+@using InspectorDivisionNode = ISC.AI.Profile.Inspector.Domain.Services.DivisionNode
+
+<MudDialog Visible="Visible" VisibleChanged="VisibleChanged" Options="Options">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Зарегистрировать в документообороте</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_error</MudAlert>
+        }
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+            Документ будет зарегистрирован с пометкой «сформировано ИИ» в источнике и примечании.
+            Гриф — унаследован от генерации: @Classification.
+        </MudAlert>
+
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="6">
+                <MudSelect T="int?" @bind-Value="_typeId" Label="Тип документа" Variant="Variant.Outlined" Dense="true">
+                    @foreach (var type in _types)
+                    {
+                        <MudSelectItem T="int?" Value="@type.Id">@type.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="int?" @bind-Value="_divisionId" Label="Подразделение-владелец" Variant="Variant.Outlined" Dense="true">
+                    @foreach (var division in _divisions.Where(d => d.IsActive))
+                    {
+                        <MudSelectItem T="int?" Value="@division.Id">@division.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_regNumber" Label="Рег. номер (пусто — до присвоения)"
+                              Variant="Variant.Outlined" MaxLength="200" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudDatePicker @bind-Date="_regDate" Label="Дата регистрации" Variant="Variant.Outlined"
+                               DateFormat="dd.MM.yyyy" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_shortContent" Label="Краткое содержание" Variant="Variant.Outlined"
+                              Lines="2" MaxLength="2000" Immediate="true" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => VisibleChanged.InvokeAsync(false))">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="RegisterAsync"
+                   Disabled="@(_busy || _typeId is null || _divisionId is null || string.IsNullOrWhiteSpace(_shortContent))">
+            @(_busy ? "Регистрирую…" : "Зарегистрировать")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly DialogOptions Options =
+        new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true };
+
+    private readonly List<DocumentTypeItem> _types = [];
+    private readonly List<InspectorDivisionNode> _divisions = [];
+    private int? _typeId;
+    private int? _divisionId;
+    private string? _regNumber;
+    private DateTime? _regDate = DateTime.Today;
+    private string _shortContent = string.Empty;
+    private bool _busy;
+    private string? _error;
+    private bool _prefilled;
+
+    /// <summary>Открыт ли диалог (двустороннее связывание).</summary>
+    [Parameter] public bool Visible { get; set; }
+
+    /// <summary>Смена видимости.</summary>
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+
+    /// <summary>Откуда документ («Генератор» / «Редактор») — уходит в пометку источника.</summary>
+    [Parameter, EditorRequired] public string Origin { get; set; } = string.Empty;
+
+    /// <summary>Заготовка краткого содержания (тема генерации).</summary>
+    [Parameter] public string? DefaultTitle { get; set; }
+
+    /// <summary>Текст документа (полный, идёт в карточку и индексацию).</summary>
+    [Parameter, EditorRequired] public string Body { get; set; } = string.Empty;
+
+    /// <summary>Гриф результата генерации (наследуется документом, не редактируется здесь).</summary>
+    [Parameter] public short Classification { get; set; }
+
+    /// <summary>Метки грунтовки результата — фиксируются в примечании документа.</summary>
+    [Parameter] public IReadOnlyList<CitationCheck> Citations { get; set; } = [];
+
+    /// <summary>Успешная регистрация: id созданного документа документооборота.</summary>
+    [Parameter] public EventCallback<int> OnRegistered { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Visible && !_prefilled)
+        {
+            _prefilled = true;
+            _shortContent = DefaultTitle ?? string.Empty;
+            _error = null;
+
+            var types = await Dispatcher.Send(new ListDocumentTypesQuery(IsActive: true));
+            if (types is { Status: true, Data: { } typeList })
+            {
+                _types.Clear();
+                _types.AddRange(typeList);
+            }
+
+            var divisions = await Dispatcher.Send(new ListDivisionTreeQuery());
+            if (divisions is { Status: true, Data: { } divisionList })
+            {
+                _divisions.Clear();
+                _divisions.AddRange(divisionList);
+            }
+        }
+        else if (!Visible)
+        {
+            _prefilled = false;
+        }
+    }
+
+    private async Task RegisterAsync()
+    {
+        if (_typeId is not { } typeId || _divisionId is not { } divisionId || _regDate is not { } regDate)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            var today = DateOnly.FromDateTime(regDate);
+            var response = await Dispatcher.Send(new RegisterDocumentCommand(
+                RegNumber: string.IsNullOrWhiteSpace(_regNumber) ? null : _regNumber.Trim(),
+                RegDate: today,
+                TypeId: typeId,
+                Direction: DocumentDirection.Internal,
+                Source: GeneratedDocumentStamp.Source(Origin),
+                ShortContent: _shortContent,
+                FullText: Body,
+                Notes: GeneratedDocumentStamp.Notes(Origin, today, Citations),
+                Priority: null,
+                InspectorUserId: null,
+                Classification: Classification,
+                DivisionId: divisionId,
+                Assignments: [],
+                UseCommonDeadline: false,
+                CommonDeadline: null));
+
+            if (response is { Status: true, Data: var documentId })
+            {
+                await VisibleChanged.InvokeAsync(false);
+                await OnRegistered.InvokeAsync(documentId);
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

@@ -6,6 +6,7 @@
 @using ISC.AI.Profile.Inspector.Application.Features.Editor
 @using ISC.AI.Profile.Inspector.Application.Features.Generation
 @using Microsoft.JSInterop
+@inject EditorDraftHandoff EditorHandoff
 
 @* Модуль «Редактор» (§5.2.10, ТФ-РЕД-01..03) — ИИ-правка НАСТОЯЩАЯ, заглушка снята.
    Слева — текст документа (вставленный или набранный), команда правки и подсказки; справа —
@@ -91,10 +92,29 @@
                         Отклонить
                     </MudButton>
                 </div>
-                <MudButton Class="mb-3" Color="Color.Secondary" Variant="Variant.Filled" FullWidth="true"
+                <MudButton Class="mb-2" Color="Color.Secondary" Variant="Variant.Filled" FullWidth="true"
                            OnClick="ExportAsync" Disabled="_exporting" StartIcon="@Icons.Material.Filled.Download">
                     @(_exporting ? "Экспорт…" : "Экспорт редакции в .docx")
                 </MudButton>
+
+                @if (_registeredId is { } registeredId)
+                {
+                    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                        Зарегистрировано в документообороте (№ записи @registeredId) — модуль «Документы».
+                    </MudAlert>
+                }
+                else
+                {
+                    @* Регистрация — акт принятия человеком; при неподтверждённых ссылках запрещена (GATE-2). *@
+                    <MudTooltip Text="@(Result.AllCitationsConfirmed ? string.Empty : "Сначала уберите неподтверждённые ссылки (GATE-2) — дайте команду на доработку.")">
+                        <MudButton Class="mb-3" Color="Color.Tertiary" Variant="Variant.Outlined" FullWidth="true"
+                                   OnClick="@(() => _registerOpen = true)"
+                                   Disabled="@(!Result.AllCitationsConfirmed)"
+                                   StartIcon="@Icons.Material.Filled.AppRegistration">
+                            Зарегистрировать в документообороте
+                        </MudButton>
+                    </MudTooltip>
+                }
 
                 <SectionCaption Text="Новая редакция" Class="mb-1" />
                 @* Длинный текст не растягивает страницу — прокрутка внутри блока. *@
@@ -120,6 +140,14 @@
     </MudItem>
 </MudGrid>
 
+@* --- Регистрация принятой редакции в документообороте (с пометкой ИИ-происхождения) --- *@
+<RegisterGeneratedDialog @bind-Visible="_registerOpen" Origin="Редактор"
+                         DefaultTitle="@($"Документ (правка в Редакторе): {_instruction}")"
+                         Body="@(Result?.DraftText ?? string.Empty)"
+                         Classification="@(Result?.ResultClassification ?? 0)"
+                         Citations="@(Result?.Citations ?? [])"
+                         OnRegistered="@(id => _registeredId = id)" />
+
 @code {
     // Команды ТФ-РЕД-02 из ТЗ — как подсказки; своя команда — свободным текстом.
     private static readonly string[] InstructionHints =
@@ -135,6 +163,8 @@
 
     private bool _busy;
     private bool _exporting;
+    private bool _registerOpen;
+    private int? _registeredId;
     private string? _error;
     private ResponseDto<GenerateReferenceResult>? _response;
 
@@ -142,11 +172,23 @@
 
     private bool CanRevise => !string.IsNullOrWhiteSpace(_text) && !string.IsNullOrWhiteSpace(_instruction);
 
+    protected override void OnInitialized()
+    {
+        // Черновик, переданный из Генератора кнопкой «Доработать в Редакторе» (одноразово):
+        // текст встаёт в документ, а при непроверенных ссылках команда правки уже заполнена.
+        if (EditorHandoff.Take() is { } handoff)
+        {
+            _text = handoff.Text;
+            _instruction = handoff.Instruction ?? string.Empty;
+        }
+    }
+
     private async Task ReviseAsync()
     {
         _busy = true;
         _error = null;
         _response = null;
+        _registeredId = null;
         try
         {
             var response = await Dispatcher.Send(new ReviseDocumentCommand(_text, _instruction));
@@ -170,9 +212,11 @@
     }
 
     // Принять: новая редакция становится ТЕКУЩИМ текстом слева — можно давать следующую команду.
+    // Пустую редакцию не принимаем НИКОГДА (страховка поверх серверной проверки): документ,
+    // затёртый пустотой, не восстановить — поле и есть его единственное хранилище.
     private Task AcceptAsync()
     {
-        if (Result is { } result)
+        if (Result is { } result && !string.IsNullOrWhiteSpace(result.DraftText))
         {
             _text = result.DraftText;
             _response = null;

@@ -40,6 +40,15 @@ public sealed record GenerateReferenceCommand(string Topic) : IRequest<ResModel>
                 access,
                 cancellationToken);
 
+            // «Думающая» модель может потратить весь лимит вывода на размышления и вернуть ПУСТОЙ текст —
+            // это сбой, а не черновик: честный отказ (инцидент 2026-08-24, как в Редакторе).
+            if (string.IsNullOrWhiteSpace(response.Answer))
+            {
+                return ResponseDto<GenerateReferenceResult>.BadRequest(
+                    "Модель вернула пустой ответ (весь лимит вывода ушёл на размышления). "
+                    + "Повторите попытку; если повторяется — увеличьте Llm:Generation:MaxOutputTokens.");
+            }
+
             var result = new GenerateReferenceResult(
                 DraftText: response.Answer,
                 RequiresHumanReview: true, // HITL: результат всегда проект, требующий проверки (ТБ-042/ТЭ-002).

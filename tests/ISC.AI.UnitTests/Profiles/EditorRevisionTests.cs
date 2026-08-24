@@ -71,6 +71,29 @@ public sealed class EditorRevisionTests
         response.Data.AllCitationsConfirmed.ShouldBeTrue();
     }
 
+    [Fact(DisplayName = "Пустой ответ модели — честный отказ, а не пустая редакция (текст не затирается)")]
+    public async Task Empty_model_answer_is_rejected()
+    {
+        var access = new AccessContext("u1", MaxClassification: 0, AllowedDivisions: [7]);
+        var accessProvider = Substitute.For<IAccessContextProvider>();
+        accessProvider.GetCurrentAsync(Arg.Any<CancellationToken>()).Returns(access);
+
+        var renderer = Substitute.For<IEditorPromptRenderer>();
+        renderer.Render(Arg.Any<ReviseDocumentCommand>()).Returns("ПРОМПТ");
+
+        // «Думающая» модель потратила весь лимит на размышления: ответ пуст.
+        var generator = Substitute.For<IGroundedGenerator>();
+        generator.GenerateAsync(Arg.Any<GroundedRequest>(), access, Arg.Any<CancellationToken>())
+            .Returns(new GroundedResponse("", new GroundingResult([], AllConfirmed: true), [], 0));
+
+        var response = await new ReviseDocumentCommand.Handler(generator, accessProvider, renderer)
+            .Handle(new ReviseDocumentCommand("исходный текст", "строже"), CancellationToken.None);
+
+        response.Status.ShouldBeFalse();
+        response.StatusMessage.ShouldNotBeNull();
+        response.StatusMessage.ShouldContain("пустой ответ");
+    }
+
     [Fact(DisplayName = "Валидатор: пустой текст или пустая команда — отказ")]
     public void Validator_requires_text_and_instruction()
     {
