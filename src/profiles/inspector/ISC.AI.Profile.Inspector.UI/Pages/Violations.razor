@@ -193,7 +193,8 @@
                               Variant="Variant.Outlined" MaxLength="200" />
             </MudItem>
             <MudItem xs="12" sm="4">
-                <MudTextField @bind-Value="_formReferenceDocRef" Label="Нарушенная норма (НПА)"
+                @* Номер справки-проверки — по нему нарушение встаёт в историю «Архива проверок». *@
+                <MudTextField @bind-Value="_formReferenceDocRef" Label="Справка-проверка (№)"
                               Variant="Variant.Outlined" MaxLength="200" />
             </MudItem>
             <MudItem xs="12">

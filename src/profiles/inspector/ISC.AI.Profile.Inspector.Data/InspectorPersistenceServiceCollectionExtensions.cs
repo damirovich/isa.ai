@@ -45,6 +45,11 @@ public static class InspectorPersistenceServiceCollectionExtensions
         services.AddScoped<IViolationCategoryStore, ViolationCategoryStore>();
         services.AddScoped<IRiskDataSource, RiskDataSource>();
 
+        // Архив проверок (§5.2.4): группы «справка × подразделение» из учёта нарушений; ссылки
+        // на справки разрешаются через порт документооборота ОТ ИМЕНИ субъекта (решётка — там).
+        services.AddScoped<IInspectionArchiveStore, InspectionArchiveStore>();
+        services.AddScoped<IInspectionDocumentResolver, InspectionDocumentResolver>();
+
         // Профиль отдаёт модулю документооборота свой справочник подразделений (вопрос 3 Э4-35):
         // словарь id един с решёткой доступа, справочник ведёт профиль.
         services.AddScoped<ISC.AI.Modules.DocFlow.Domain.Services.IDivisionDirectory, DocFlowDivisionDirectory>();
