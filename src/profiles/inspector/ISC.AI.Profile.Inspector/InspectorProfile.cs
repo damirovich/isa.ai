@@ -64,12 +64,8 @@ public sealed class InspectorProfile : IProfile
         // Редактор (§5.2.10, ТФ-РЕД-01..03): ИИ-правка по команде с сохранением грунтовки.
         new ModuleDescriptor("editor", "/editor", "Редактор", Icons.Material.Filled.EditNote,
             typeof(Editor), ReadPolicy, GroupMain),
-
-        // --- Модули §5.2, ещё не реализованные (страницы-заглушки) ---
-        new ModuleDescriptor("collegium", "/collegium", "Коллегия", Icons.Material.Filled.Groups,
-            typeof(Collegium), ReadPolicy, GroupMain),
-        new ModuleDescriptor("meetings", "/meetings", "Совещания", Icons.Material.Filled.EventNote,
-            typeof(Meetings), ReadPolicy, GroupMain),
+        // Анализ / Сравнение (§5.2.3, ТФ-НПА-03/04): противоречия и пробелы между НПА, анализ
+        // документа — вдумчивая роль Analysis (размышления по-ролево, ADR-0011). Последний P1.
         new ModuleDescriptor("analysis", "/analysis", "Анализ / Сравнение", Icons.Material.Filled.CompareArrows,
             typeof(Analysis), ReadPolicy, GroupMain),
         new ModuleDescriptor("risks", "/risks", "Риски и контроль", Icons.Material.Filled.Warning,
@@ -78,6 +74,12 @@ public sealed class InspectorProfile : IProfile
             typeof(Methods), ReadPolicy, GroupMain),
         new ModuleDescriptor("monitoring", "/monitoring", "Мониторинг", Icons.Material.Filled.MonitorHeart,
             typeof(Monitoring), ReadPolicy, GroupMain),
+
+        // --- Модули §5.2, ещё не реализованные (страницы-заглушки, волна P2) ---
+        new ModuleDescriptor("collegium", "/collegium", "Коллегия", Icons.Material.Filled.Groups,
+            typeof(Collegium), ReadPolicy, GroupMain),
+        new ModuleDescriptor("meetings", "/meetings", "Совещания", Icons.Material.Filled.EventNote,
+            typeof(Meetings), ReadPolicy, GroupMain),
 
         // --- Операционный модуль (вне §5.2): наполнение корпуса ---
         new ModuleDescriptor("load", "/load", "Загрузка корпуса", Icons.Material.Filled.CloudUpload,

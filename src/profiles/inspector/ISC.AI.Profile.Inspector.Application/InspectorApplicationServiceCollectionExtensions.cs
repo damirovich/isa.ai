@@ -32,6 +32,10 @@ public static class InspectorApplicationServiceCollectionExtensions
         // новая редакция проходит грунтовку целиком, правка не протаскивает выдуманных норм.
         services.AddSingleton<Features.Editor.IEditorPromptRenderer, Features.Editor.ScribanEditorPromptRenderer>();
 
+        // Анализ / Сравнение (ТФ-НПА-03/04): вдумчивая роль Analysis (размышления по-ролево, ADR-0011).
+        services.AddSingleton<Features.Analysis.ICompareNpaPromptRenderer, Features.Analysis.ScribanCompareNpaPromptRenderer>();
+        services.AddSingleton<Features.Analysis.IAnalyzeDocumentPromptRenderer, Features.Analysis.ScribanAnalyzeDocumentPromptRenderer>();
+
         // Детерминированный расчёт риска подразделения (Э5-01 шаг 2, Приложение §2) — код, не ИИ.
         services.AddSingleton<RiskScoreCalculator>();
 

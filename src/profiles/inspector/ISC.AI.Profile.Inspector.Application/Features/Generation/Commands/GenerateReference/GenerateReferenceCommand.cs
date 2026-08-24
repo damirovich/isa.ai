@@ -1,4 +1,5 @@
 using ISC.AI.Abstractions.Application;
+using ISC.AI.Abstractions.Enums;
 using ISC.AI.Abstractions.Grounding;
 using ISC.AI.Abstractions.Rag;
 using ISC.AI.Abstractions.Security;
@@ -36,7 +37,8 @@ public sealed record GenerateReferenceCommand(string Topic) : IRequest<ResModel>
             var access = await accessContextProvider.GetCurrentAsync(cancellationToken);
 
             var response = await generator.GenerateAsync(
-                new GroundedRequest(command.Topic, TaskPrompt: promptRenderer.Render(command)),
+                // Роль Draft — быстрая (без размышлений, ADR-0011): черновик по шаблону, думать не над чем.
+                new GroundedRequest(command.Topic, ModelRole.Draft, TaskPrompt: promptRenderer.Render(command)),
                 access,
                 cancellationToken);
 
