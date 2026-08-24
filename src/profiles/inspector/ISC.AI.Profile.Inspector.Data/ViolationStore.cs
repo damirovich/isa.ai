@@ -188,7 +188,9 @@ public sealed class ViolationStore(IDbContextFactory<InspectorDbContext> context
         return ViolationWriteResult.Ok;
     }
 
-    // Подразделение существует; вид существует и НИЖНЕГО уровня (сфера — группировка, не категория факта).
+    // Подразделение и категория существуют. Категория — ЛЮБОГО уровня: нарушение относят к сфере
+    // целиком, а вид внутри сферы — необязательное уточнение (классификатор наполняется постепенно,
+    // и строгое «только вид» оставляло бы учёт пустым, пока администратор не заведёт виды).
     private static async Task<ViolationWriteResult> CheckReferencesAsync(
         InspectorDbContext db, ViolationDraft draft, CancellationToken cancellationToken)
     {
@@ -197,16 +199,9 @@ public sealed class ViolationStore(IDbContextFactory<InspectorDbContext> context
             return ViolationWriteResult.NotFound;
         }
 
-        var category = await db.ViolationCategories.AsNoTracking()
-            .Where(c => c.Id == draft.CategoryId)
-            .Select(c => new { c.ParentId })
-            .FirstOrDefaultAsync(cancellationToken);
-        if (category is null)
-        {
-            return ViolationWriteResult.NotFound;
-        }
-
-        return category.ParentId is null ? ViolationWriteResult.CategoryNotLeaf : ViolationWriteResult.Ok;
+        return await db.ViolationCategories.AnyAsync(c => c.Id == draft.CategoryId, cancellationToken)
+            ? ViolationWriteResult.Ok
+            : ViolationWriteResult.NotFound;
     }
 
     private static string? Normalize(string? value) =>

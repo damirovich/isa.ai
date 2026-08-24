@@ -14,13 +14,13 @@ public interface IViolationStore
     Task<ViolationDetails?> GetAsync(int violationId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Заносит нарушение. Вид обязан быть НИЖНЕГО уровня (видом внутри сферы, не сферой):
-    /// сфера — группировка для аналитики, а не категория конкретного факта.
+    /// Заносит нарушение. Категория — ЛЮБОГО уровня классификатора: сфера целиком или
+    /// уточняющий вид внутри неё (виды наполняются постепенно, уточнение необязательно).
     /// </summary>
     Task<(ViolationWriteResult Result, int ViolationId)> CreateAsync(
         ViolationDraft draft, CancellationToken cancellationToken = default);
 
-    /// <summary>Правит нарушение целиком (та же проверка вида).</summary>
+    /// <summary>Правит нарушение целиком (та же проверка категории).</summary>
     Task<ViolationWriteResult> UpdateAsync(
         int violationId, ViolationDraft draft, CancellationToken cancellationToken = default);
 }

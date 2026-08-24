@@ -13,7 +13,7 @@
 <PageHeader Title="Учёт нарушений" Subtitle="Реестр выявленных нарушений — источник светофора риска"
             Icon="@Icons.Material.Filled.ReportProblem">
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-               OnClick="OpenCreate">Занести нарушение</MudButton>
+               OnClick="OpenCreateAsync">Занести нарушение</MudButton>
 </PageHeader>
 
 @if (_error is not null)
@@ -34,7 +34,7 @@
         </MudSelect>
         <MudSelect T="int?" Value="_filterCategoryId" ValueChanged="@(async (int? v) => { _filterCategoryId = v; await ApplyFiltersAsync(); })"
                    Label="Сфера / вид" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:260px;">
-            @foreach (var node in _categories)
+            @foreach (var node in OrderedCategories)
             {
                 <MudSelectItem T="int?" Value="@node.Id">@(node.ParentId is null ? node.Name : "— " + node.Name)</MudSelectItem>
             }
@@ -138,13 +138,11 @@
         {
             <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_formError</MudAlert>
         }
-        @if (!LeafCategories.Any())
+        @if (_categories.Count == 0)
         {
-            @* Классификатор засеян только сферами — без видов занести факт нельзя (нарушение
-               относится к ВИДУ). Без подсказки выпадающий список выглядел бы просто сломанным. *@
             <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
-                В классификаторе пока только сферы, без видов. Добавьте виды внутри сфер на странице
-                «Виды нарушений» (раздел «Администрирование», ведёт Администратор) — затем возвращайтесь.
+                Классификатор пуст — добавьте сферы и виды на странице «Виды нарушений»
+                (раздел «Администрирование», ведёт Администратор).
             </MudAlert>
         }
         <MudGrid Spacing="2">
@@ -157,11 +155,12 @@
                 </MudSelect>
             </MudItem>
             <MudItem xs="12" sm="6">
-                @* В карточке выбирается только ВИД (нижний уровень) — сфера целиком не категория факта. *@
-                <MudSelect T="int?" @bind-Value="_formCategoryId" Label="Вид нарушения" Variant="Variant.Outlined" Dense="true">
-                    @foreach (var leaf in LeafCategories)
+                @* Категория — любого уровня: сфера целиком, а вид внутри — необязательное уточнение
+                   (классификатор наполняется постепенно, строгое «только вид» оставляло бы список пустым). *@
+                <MudSelect T="int?" @bind-Value="_formCategoryId" Label="Сфера / вид нарушения" Variant="Variant.Outlined" Dense="true">
+                    @foreach (var node in OrderedCategories)
                     {
-                        <MudSelectItem T="int?" Value="@leaf.Id">@LeafDisplay(leaf)</MudSelectItem>
+                        <MudSelectItem T="int?" Value="@node.Id">@(node.ParentId is null ? node.Name : "— " + node.Name)</MudSelectItem>
                     }
                 </MudSelect>
             </MudItem>
@@ -260,11 +259,22 @@
     // В карточку — только действующие подразделения; в отборе — все (по расформированным ищут историю).
     private IEnumerable<DivisionNode> ActiveDivisions => _divisions.Where(d => d.IsActive);
 
-    // Виды — сгруппированно по сферам (в подписи «Сфера → Вид»), чтобы длинный список читался.
-    private IEnumerable<ViolationCategoryNode> LeafCategories =>
-        _categories.Where(c => c.ParentId is not null)
-            .OrderBy(c => _categories.FirstOrDefault(s => s.Id == c.ParentId)?.Name)
-            .ThenBy(c => c.Name);
+    // Классификатор в порядке «сфера, под ней её виды» — иначе алфавитный список из хранилища
+    // перемешивает уровни и виды отрываются от своих сфер.
+    private IEnumerable<ViolationCategoryNode> OrderedCategories
+    {
+        get
+        {
+            foreach (var sphere in _categories.Where(c => c.ParentId is null))
+            {
+                yield return sphere;
+                foreach (var kind in _categories.Where(c => c.ParentId == sphere.Id))
+                {
+                    yield return kind;
+                }
+            }
+        }
+    }
 
     private bool FormValid => _formDivisionId is > 0 && _formCategoryId is > 0 && _formDetectedAt is not null;
 
@@ -335,8 +345,10 @@
         }
     }
 
-    private void OpenCreate()
+    private async Task OpenCreateAsync()
     {
+        // Словари — заново: администратор мог дополнить классификатор, пока страница открыта.
+        await LoadDictionariesAsync();
         _formId = null;
         _formDivisionId = null;
         _formCategoryId = null;
@@ -355,6 +367,7 @@
     private async Task OpenEditAsync(int violationId)
     {
         _error = null;
+        await LoadDictionariesAsync();
         var response = await Dispatcher.Send(new GetViolationQuery(violationId));
         if (response is not { Status: true, Data: { } details })
         {

@@ -51,9 +51,7 @@ public sealed record UpdateViolationCommand(
             return result switch
             {
                 ViolationWriteResult.Ok => ResponseDto<bool>.Ok(true),
-                ViolationWriteResult.CategoryNotLeaf =>
-                    ResponseDto<bool>.BadRequest("Выберите ВИД нарушения внутри сферы — сфера целиком не категория факта."),
-                _ => ResponseDto<bool>.NotFound("Нарушение, подразделение или вид не найдены."),
+                _ => ResponseDto<bool>.NotFound("Нарушение, подразделение или категория не найдены."),
             };
         }
     }

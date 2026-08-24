@@ -61,21 +61,6 @@ public sealed class ViolationHandlersTests
         await store.DidNotReceiveWithAnyArgs().CreateAsync(default!, default);
     }
 
-    [Fact(DisplayName = "Занесение нарушения: сфера вместо вида — понятный отказ")]
-    public async Task Sphere_instead_of_kind_is_explained()
-    {
-        var store = Substitute.For<IViolationStore>();
-        store.CreateAsync(Arg.Any<ViolationDraft>(), Arg.Any<CancellationToken>())
-            .Returns((ViolationWriteResult.CategoryNotLeaf, 0));
-
-        var response = await new CreateViolationCommand.Handler(store, Roles(UserRole.Inspector), Caller(7))
-            .Handle(Command(), CancellationToken.None);
-
-        response.Status.ShouldBeFalse();
-        response.StatusMessage.ShouldNotBeNull();
-        response.StatusMessage.ShouldContain("ВИД");
-    }
-
     [Fact(DisplayName = "Классификатор: Инспектор при живом Администраторе — отказ, хранилище не тронуто")]
     public async Task Classifier_requires_administrator()
     {

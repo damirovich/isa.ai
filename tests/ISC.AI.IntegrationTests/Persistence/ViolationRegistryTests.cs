@@ -16,9 +16,9 @@ namespace ISC.AI.IntegrationTests.Persistence;
 /// Учёт нарушений и классификатор видов (Э5-01) на настоящем PostgreSQL. Требуется Docker.
 /// </summary>
 /// <remarks>
-/// Ключевые инварианты: нарушение относится только к ВИДУ (нижний уровень классификатора) — сфера
-/// целиком не категория факта; повторность — ПРОИЗВОДНЫЙ признак (не хранится и не разъезжается
-/// с данными); отбор по сфере включает её виды; сид классификатора — только на пустом.
+/// Ключевые инварианты: категория нарушения — любого уровня (сфера целиком или уточняющий вид);
+/// повторность — ПРОИЗВОДНЫЙ признак (не хранится и не разъезжается с данными); отбор по сфере
+/// включает её виды; классификатор двухуровневый; сид — только на пустом.
 /// </remarks>
 public sealed class ViolationRegistryTests : IAsyncLifetime
 {
@@ -28,16 +28,16 @@ public sealed class ViolationRegistryTests : IAsyncLifetime
 
     public Task DisposeAsync() => _postgres.DisposeAsync().AsTask();
 
-    [Fact(DisplayName = "Нарушение принимает только вид нижнего уровня; сфера и битые ссылки — отказ")]
-    public async Task Violation_requires_leaf_category_and_valid_references()
+    [Fact(DisplayName = "Нарушение принимает и сферу, и вид; битые ссылки — отказ")]
+    public async Task Violation_accepts_any_category_level_but_not_broken_references()
     {
         var (store, _, ids) = await BuildAsync();
 
-        // Сфера целиком — не категория факта.
+        // Сфера целиком — допустимая категория: виды наполняются постепенно, уточнение необязательно.
         var draft = Draft(ids.DivisionA, ids.Sphere);
-        (await store.CreateAsync(draft)).Result.ShouldBe(ViolationWriteResult.CategoryNotLeaf);
+        (await store.CreateAsync(draft)).Result.ShouldBe(ViolationWriteResult.Ok);
 
-        // Несуществующее подразделение / вид.
+        // Несуществующее подразделение / категория.
         (await store.CreateAsync(draft with { DivisionId = 999_999, CategoryId = ids.KindK1 }))
             .Result.ShouldBe(ViolationWriteResult.NotFound);
         (await store.CreateAsync(draft with { CategoryId = 999_999 }))
