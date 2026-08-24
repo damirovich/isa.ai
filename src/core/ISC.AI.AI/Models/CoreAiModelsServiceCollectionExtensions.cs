@@ -80,7 +80,7 @@ public static class CoreAiModelsServiceCollectionExtensions
             var model = ResolveModelName(endpoint, configuredModel, role);
             IChatClient client = new OpenAIClient(
                     new ApiKeyCredential(apiKey),
-                    new OpenAIClientOptions { Endpoint = endpointUri })
+                    BuildClientOptions(endpointUri))
                 .GetChatClient(model)
                 .AsIChatClient();
             return new ResilientChatClient(client, role, callTimeout, maxConcurrency);
@@ -104,11 +104,36 @@ public static class CoreAiModelsServiceCollectionExtensions
             var model = ResolveModelName(endpoint, configuredModel, role);
             IEmbeddingGenerator<string, Embedding<float>> client = new OpenAIClient(
                     new ApiKeyCredential(apiKey),
-                    new OpenAIClientOptions { Endpoint = endpointUri })
+                    BuildClientOptions(endpointUri))
                 .GetEmbeddingClient(model)
                 .AsIEmbeddingGenerator();
             return new ResilientEmbeddingGenerator(client, role, callTimeout, maxConcurrency);
         });
+    }
+
+    /// <summary>
+    /// Общие настройки OpenAI-клиента (инцидент 2026-08-24, ТН-003):
+    /// <list type="bullet">
+    /// <item>СЕТЕВОЙ таймаут SDK отключён (дефолт 100 с рвал любой вызов длиннее — «даже 3600 не
+    /// хватило»): единственный владелец таймаута — наша обвязка (<see cref="ModelCallResilience"/>,
+    /// значение из конфига на попытку); двух конкурирующих таймаутов быть не должно.</item>
+    /// <item>ВНУТРЕННИЙ повтор SDK отключён (по умолчанию ×4): повторы уже делает та же обвязка —
+    /// иначе они перемножались (4×3 = 12 обречённых попыток ≈ 20 минут на один клик).</item>
+    /// <item>Политика <see cref="LegacyMaxTokensPolicy"/>: лимит длины ответа дублируется старым
+    /// полем <c>max_tokens</c> — llama-server игнорирует новое имя поля, и без потолка «думающая»
+    /// модель генерирует бесконечно.</item>
+    /// </list>
+    /// </summary>
+    private static OpenAIClientOptions BuildClientOptions(Uri endpointUri)
+    {
+        var options = new OpenAIClientOptions
+        {
+            Endpoint = endpointUri,
+            NetworkTimeout = System.Threading.Timeout.InfiniteTimeSpan,
+            RetryPolicy = new System.ClientModel.Primitives.ClientRetryPolicy(maxRetries: 0),
+        };
+        options.AddPolicy(new LegacyMaxTokensPolicy(), System.ClientModel.Primitives.PipelinePosition.PerCall);
+        return options;
     }
 
     // Адрес/модель/ключ роли — из секции Llm:Models:{role}. У локального сервера авторизации нет → ключ-заглушка.
