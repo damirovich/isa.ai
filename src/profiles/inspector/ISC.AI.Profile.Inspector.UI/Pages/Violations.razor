@@ -53,10 +53,16 @@
                 <MudSelectItem T="RemediationStatus?" Value="@status">@status.Label()</MudSelectItem>
             }
         </MudSelect>
-        <MudDatePicker Date="_filterFrom" DateChanged="@(async (DateTime? v) => { _filterFrom = v; await ApplyFiltersAsync(); })"
-                       Label="Выявлено с" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" Clearable="true" Style="width:160px;" />
-        <MudDatePicker Date="_filterTo" DateChanged="@(async (DateTime? v) => { _filterTo = v; await ApplyFiltersAsync(); })"
-                       Label="по" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" Clearable="true" Style="width:160px;" />
+        @* Ширина — ОБЁРТКОЙ, не Style: MudBlazor копирует Style пикера на раскрытый календарь,
+           и попап сжимался до ширины поля (дата в шапке обрезалась до года). *@
+        <div style="width:160px;">
+            <MudDatePicker Date="_filterFrom" DateChanged="@(async (DateTime? v) => { _filterFrom = v; await ApplyFiltersAsync(); })"
+                           Label="Выявлено с" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" Clearable="true" />
+        </div>
+        <div style="width:160px;">
+            <MudDatePicker Date="_filterTo" DateChanged="@(async (DateTime? v) => { _filterTo = v; await ApplyFiltersAsync(); })"
+                           Label="по" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" Clearable="true" />
+        </div>
     </div>
 </MudPaper>
 
