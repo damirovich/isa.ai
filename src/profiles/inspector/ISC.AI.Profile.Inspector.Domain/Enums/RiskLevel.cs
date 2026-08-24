@@ -18,3 +18,17 @@ public enum RiskLevel
     /// <summary>Критический.</summary>
     Critical = 3,
 }
+
+/// <summary>Подписи по-русски — в домене, чтобы страницы не держали копий (как UserRoleLabels).</summary>
+public static class RiskLevelLabels
+{
+    /// <summary>Подпись значения.</summary>
+    public static string Label(this RiskLevel value) => value switch
+    {
+        RiskLevel.Low => "Низкий",
+        RiskLevel.Medium => "Средний",
+        RiskLevel.High => "Высокий",
+        RiskLevel.Critical => "Критический",
+        _ => value.ToString(),
+    };
+}

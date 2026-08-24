@@ -17,3 +17,17 @@ public enum RemediationStatus
     /// <summary>Просрочено.</summary>
     Overdue = 3,
 }
+
+/// <summary>Подписи по-русски — в домене, чтобы страницы не держали копий (как UserRoleLabels).</summary>
+public static class RemediationStatusLabels
+{
+    /// <summary>Подпись значения.</summary>
+    public static string Label(this RemediationStatus value) => value switch
+    {
+        RemediationStatus.Resolved => "Устранено",
+        RemediationStatus.UnderControl => "На контроле",
+        RemediationStatus.Partial => "Частично устранено",
+        RemediationStatus.Overdue => "Просрочено",
+        _ => value.ToString(),
+    };
+}
