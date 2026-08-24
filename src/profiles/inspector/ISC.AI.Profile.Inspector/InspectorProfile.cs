@@ -57,10 +57,12 @@ public sealed class InspectorProfile : IProfile
         // Учёт нарушений (Э5-01, Приложение §4): реестр фактов, которыми живут светофор риска и дашборд.
         new ModuleDescriptor("violations", "/violations", "Учёт нарушений", Icons.Material.Filled.ReportProblem,
             typeof(Violations), ReadPolicy, GroupMain),
-
-        // --- Модули §5.2, ещё не реализованные (страницы-заглушки) ---
+        // Архив проверок (§5.2.4, ТФ-АРХ-01/02): история нарушений по справкам-проверкам и
+        // подразделениям; метаданные справок — из документооборота через решётку доступа.
         new ModuleDescriptor("archive", "/archive", "Архив", Icons.Material.Filled.Inventory2,
             typeof(Archive), ReadPolicy, GroupMain),
+
+        // --- Модули §5.2, ещё не реализованные (страницы-заглушки) ---
         new ModuleDescriptor("collegium", "/collegium", "Коллегия", Icons.Material.Filled.Groups,
             typeof(Collegium), ReadPolicy, GroupMain),
         new ModuleDescriptor("meetings", "/meetings", "Совещания", Icons.Material.Filled.EventNote,

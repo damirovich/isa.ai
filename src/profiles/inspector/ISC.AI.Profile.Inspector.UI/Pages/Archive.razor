@@ -1,9 +1,283 @@
 @namespace ISC.AI.Profile.Inspector.UI
+@* Архив проверок (§5.2.4, ТФ-АРХ-01/02): история нарушений по подразделениям вплоть до райотдела,
+   сгруппированная по справкам-проверкам (слабая ссылка по номеру, ТО-инф-06). Метаданные справки
+   приходят из документооборота ЧЕРЕЗ решётку доступа: недоступная справка остаётся голым номером.
+   ИИ-аналитика архива (ТФ-АРХ-03) — P2, здесь только детерминированная история. *@
 @page "/archive"
 @rendermode InteractiveServer
+@using ISC.AI.Profile.Inspector.Application.Features.Archive
+@using ISC.AI.Profile.Inspector.Application.Features.Divisions
+@using ISC.AI.Profile.Inspector.Application.Features.ViolationCategories
+@using ISC.AI.Profile.Inspector.Domain.Enums
+@using ISC.AI.Profile.Inspector.Domain.Services
 
-<ModuleStub Title="Архив проверок"
-            Subtitle="История проверок и нарушений по подразделениям"
-            Icon="@Icons.Material.Filled.Inventory2"
-            Description="Модель чтения над справками-проверками (метаданные из СКИД) и нарушениями профиля: история по подразделениям вплоть до районного отдела. Фильтры с указанием источника — из СКИД (номер, дата, инспектор, тип, статус, подразделение) и свои (вид и тяжесть нарушения, статус устранения)."
-            Requirement="§5.2.4 · P1 · нужны домен «Нарушение» и данные СКИД" />
+<PageHeader Title="Архив проверок" Subtitle="История проверок и нарушений по подразделениям"
+            Icon="@Icons.Material.Filled.Inventory2" />
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@* --- Отбор (ТФ-АРХ-02) --- *@
+<MudPaper Outlined="true" Class="pa-3 mb-4">
+    <div class="d-flex gap-3 align-end flex-wrap">
+        <MudTextField Value="_refSearch" ValueChanged="@(async (string? v) => { _refSearch = v; await ApplyFiltersAsync(); })"
+                      Label="№ справки-проверки" Variant="Variant.Outlined" Clearable="true"
+                      Immediate="false" Style="width:200px;" />
+        <MudSelect T="int?" Value="_divisionId" ValueChanged="@(async (int? v) => { _divisionId = v; await ApplyFiltersAsync(); })"
+                   Label="Подразделение" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:220px;">
+            @foreach (var division in _divisions)
+            {
+                <MudSelectItem T="int?" Value="@division.Id">@division.Name</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="int?" Value="_categoryId" ValueChanged="@(async (int? v) => { _categoryId = v; await ApplyFiltersAsync(); })"
+                   Label="Сфера / вид" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:240px;">
+            @foreach (var node in OrderedCategories)
+            {
+                <MudSelectItem T="int?" Value="@node.Id">@(node.ParentId is null ? node.Name : "— " + node.Name)</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="ViolationSeverity?" Value="_severity" ValueChanged="@(async (ViolationSeverity? v) => { _severity = v; await ApplyFiltersAsync(); })"
+                   Label="Тяжесть" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:150px;">
+            @foreach (var severity in Severities)
+            {
+                <MudSelectItem T="ViolationSeverity?" Value="@severity">@severity.Label()</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="RemediationStatus?" Value="_status" ValueChanged="@(async (RemediationStatus? v) => { _status = v; await ApplyFiltersAsync(); })"
+                   Label="Статус устранения" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:180px;">
+            @foreach (var status in Statuses)
+            {
+                <MudSelectItem T="RemediationStatus?" Value="@status">@status.Label()</MudSelectItem>
+            }
+        </MudSelect>
+        @* Ширина — обёрткой, не Style пикера: иначе сжимается раскрытый календарь. *@
+        <div style="width:160px;">
+            <MudDatePicker Date="_from" DateChanged="@(async (DateTime? v) => { _from = v; await ApplyFiltersAsync(); })"
+                           Label="Выявлено с" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" Clearable="true" />
+        </div>
+        <div style="width:160px;">
+            <MudDatePicker Date="_to" DateChanged="@(async (DateTime? v) => { _to = v; await ApplyFiltersAsync(); })"
+                           Label="по" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" Clearable="true" />
+        </div>
+    </div>
+</MudPaper>
+
+@if (_busy)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-2" />
+}
+
+@if (_groups.Count == 0 && !_busy)
+{
+    <MudPaper Outlined="true" Class="pa-4">
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            По выбранному отбору истории нет. Архив наполняется из модуля «Учёт нарушений»:
+            у нарушения заполняется поле «Справка-проверка (№)» — и запись встаёт в историю проверки.
+        </MudText>
+    </MudPaper>
+}
+
+@* --- История: карточка = справка-проверка × подразделение --- *@
+@foreach (var view in _groups)
+{
+    <MudPaper Outlined="true" Class="pa-4 mb-3">
+        <div class="d-flex align-center gap-2 flex-wrap">
+            <MudIcon Icon="@(view.Group.ReferenceDocRef is null ? Icons.Material.Filled.ReportProblem : Icons.Material.Filled.FactCheck)"
+                     Size="Size.Small" Class="mud-text-secondary" />
+            <MudText Typo="Typo.body1" Class="flex-grow-1">
+                <b>@(view.Group.ReferenceDocRef is { } reference ? $"Справка-проверка № {reference}" : "Вне проверок")</b>
+                <span class="mud-text-secondary"> · @view.Group.DivisionName</span>
+            </MudText>
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@SeverityColor(view.Group.MaxSeverity)">
+                до: @view.Group.MaxSeverity.Label()
+            </MudChip>
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                     Color="@(view.Group.OpenCount > 0 ? Color.Warning : Color.Success)">
+                @(view.Group.OpenCount > 0 ? $"открыто {view.Group.OpenCount} из {view.Group.ViolationCount}" : $"устранено все {view.Group.ViolationCount}")
+            </MudChip>
+        </div>
+
+        <div class="d-flex align-center gap-3 mt-1 flex-wrap">
+            <IconCaption Icon="@Icons.Material.Filled.CalendarMonth">
+                @(view.Group.FirstDetectedAt == view.Group.LastDetectedAt
+                    ? view.Group.LastDetectedAt.ToString("dd.MM.yyyy")
+                    : $"{view.Group.FirstDetectedAt:dd.MM.yyyy} — {view.Group.LastDetectedAt:dd.MM.yyyy}")
+            </IconCaption>
+            @if (view.Document is { } document)
+            {
+                <IconCaption Icon="@Icons.Material.Filled.Description">
+                    @document.TypeName от @document.RegDate.ToString("dd.MM.yyyy")
+                </IconCaption>
+                @if (document.InspectorName is { } inspector)
+                {
+                    <IconCaption Icon="@Icons.Material.Filled.Person">@inspector</IconCaption>
+                }
+                @if (document.StatusLabel is { } statusLabel)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Class="ma-0">@statusLabel</MudChip>
+                }
+            }
+            else if (view.Group.ReferenceDocRef is not null)
+            {
+                @* Документ не найден либо недоступен по решётке — честно показываем только номер. *@
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    документ в документообороте не найден или недоступен
+                </MudText>
+            }
+        </div>
+
+        <MudDivider Class="my-2" />
+        @foreach (var violation in view.Group.Violations)
+        {
+            <div class="d-flex align-center gap-2 py-1 flex-wrap">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary" Style="width:80px;">
+                    @violation.DetectedAt.ToString("dd.MM.yyyy")
+                </MudText>
+                <div class="flex-grow-1">
+                    @if (violation.CategoryParentName is { } sphere)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">@sphere</MudText>
+                    }
+                    <MudText Typo="Typo.body2">@violation.CategoryName</MudText>
+                </div>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@SeverityColor(violation.Severity)">
+                    @violation.Severity.Label()
+                </MudChip>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@StatusColor(violation.RemediationStatus)">
+                    @violation.RemediationStatus.Label()
+                </MudChip>
+            </div>
+        }
+    </MudPaper>
+}
+
+<div class="d-flex align-center justify-space-between mt-3 flex-wrap gap-2">
+    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+        Проверок в истории: @_total · страница @_page из @PageCount
+    </MudText>
+    <MudPagination Count="@PageCount" Selected="_page" SelectedChanged="GoToPageAsync"
+                   Size="Size.Small" ShowFirstButton="true" ShowLastButton="true" />
+</div>
+
+@code {
+    private const int PageSize = 20;
+
+    private static readonly ViolationSeverity[] Severities =
+        [ViolationSeverity.Low, ViolationSeverity.Medium, ViolationSeverity.High, ViolationSeverity.Critical];
+
+    private static readonly RemediationStatus[] Statuses =
+        [RemediationStatus.Overdue, RemediationStatus.Partial, RemediationStatus.UnderControl, RemediationStatus.Resolved];
+
+    private readonly List<DivisionNode> _divisions = [];
+    private readonly List<ViolationCategoryNode> _categories = [];
+    private readonly List<ArchiveGroupView> _groups = [];
+    private int _total;
+    private int _page = 1;
+    private bool _busy;
+    private string? _error;
+
+    private string? _refSearch;
+    private int? _divisionId;
+    private int? _categoryId;
+    private ViolationSeverity? _severity;
+    private RemediationStatus? _status;
+    private DateTime? _from;
+    private DateTime? _to;
+
+    private int PageCount => Math.Max(1, (int)Math.Ceiling(_total / (double)PageSize));
+
+    // Классификатор в порядке «сфера, под ней её виды» — как в реестре нарушений.
+    private IEnumerable<ViolationCategoryNode> OrderedCategories
+    {
+        get
+        {
+            foreach (var sphere in _categories.Where(c => c.ParentId is null))
+            {
+                yield return sphere;
+                foreach (var kind in _categories.Where(c => c.ParentId == sphere.Id))
+                {
+                    yield return kind;
+                }
+            }
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var divisions = await Dispatcher.Send(new ListDivisionTreeQuery());
+        if (divisions is { Status: true, Data: { } divisionList })
+        {
+            _divisions.AddRange(divisionList);
+        }
+
+        var categories = await Dispatcher.Send(new ListViolationCategoriesQuery());
+        if (categories is { Status: true, Data: { } categoryList })
+        {
+            _categories.AddRange(categoryList);
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task ApplyFiltersAsync()
+    {
+        _page = 1;
+        await ReloadAsync();
+    }
+
+    private async Task GoToPageAsync(int page)
+    {
+        _page = page;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ListInspectionArchiveQuery(
+                _divisionId, _categoryId, _severity, _status,
+                ToDateOnly(_from), ToDateOnly(_to), _refSearch, _page, PageSize));
+            _groups.Clear();
+            if (response is { Status: true, Data: { } result })
+            {
+                _groups.AddRange(result.Groups);
+                _total = result.TotalGroups;
+            }
+            else if (response is { Status: false })
+            {
+                _error = response.StatusMessage;
+                _total = 0;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static DateOnly? ToDateOnly(DateTime? value) =>
+        value is { } date ? DateOnly.FromDateTime(date) : null;
+
+    // Цвета согласованы с реестром нарушений и мониторингом.
+    private static Color SeverityColor(ViolationSeverity severity) => severity switch
+    {
+        ViolationSeverity.Low => Color.Default,
+        ViolationSeverity.Medium => Color.Info,
+        ViolationSeverity.High => Color.Warning,
+        _ => Color.Error,
+    };
+
+    private static Color StatusColor(RemediationStatus status) => status switch
+    {
+        RemediationStatus.Resolved => Color.Success,
+        RemediationStatus.UnderControl => Color.Info,
+        RemediationStatus.Partial => Color.Warning,
+        _ => Color.Error,
+    };
+}

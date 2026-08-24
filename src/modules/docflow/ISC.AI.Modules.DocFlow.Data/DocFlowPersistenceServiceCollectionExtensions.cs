@@ -71,6 +71,10 @@ public static class DocFlowPersistenceServiceCollectionExtensions
         // справочник ведёт профиль, поручения живут здесь, соединить схемы одним запросом нельзя.
         services.AddScoped<Domain.Services.IDivisionUsage, DivisionUsageQuery>();
 
+        // Разрешение слабых ссылок по RegNumber (ТО-инф-06) для чужих модулей — напр. архив
+        // проверок профиля обогащает «справку-проверку» нарушения; решётка доступа — в запросе.
+        services.AddScoped<Domain.Services.IDocumentLookup, DocumentLookup>();
+
         // Рендереры отчётов — все три сразу; сценарий выбирает нужный по ReportFormat.
         // Шрифт для PDF берётся из системы по настраиваемому пути: вшить его в сборку нельзя
         // из-за лицензий, скачать — из-за изолированного контура (см. PdfReportFontOptions).
