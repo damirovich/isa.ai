@@ -18,5 +18,9 @@ public sealed class CreateViolationValidator : AbstractValidator<CreateViolation
         RuleFor(c => c.ReferenceDocRef).MaximumLength(200);
         RuleFor(c => c.Cause).MaximumLength(4000);
         RuleFor(c => c.Recommendation).MaximumLength(4000);
+        // Срок раньше даты выявления — опечатка ввода: автопросрочка сработала бы немедленно.
+        RuleFor(c => c.RemediationDeadline)
+            .Must((c, deadline) => deadline is null || deadline >= c.DetectedAt)
+            .WithMessage("Срок устранения не может быть раньше даты выявления.");
     }
 }

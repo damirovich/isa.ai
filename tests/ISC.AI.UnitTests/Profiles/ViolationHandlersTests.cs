@@ -74,6 +74,18 @@ public sealed class ViolationHandlersTests
         await store.DidNotReceiveWithAnyArgs().CreateAsync(default!, default, default);
     }
 
+    [Fact(DisplayName = "Валидатор: срок устранения раньше даты выявления — отказ; позже или пустой — принят")]
+    public void Deadline_must_not_precede_detection_date()
+    {
+        var validator = new CreateViolationValidator();
+
+        validator.Validate(Command() with { RemediationDeadline = new DateOnly(2026, 7, 31) })
+            .IsValid.ShouldBeFalse();
+        validator.Validate(Command() with { RemediationDeadline = new DateOnly(2026, 8, 1) })
+            .IsValid.ShouldBeTrue();
+        validator.Validate(Command()).IsValid.ShouldBeTrue();
+    }
+
     private static CreateViolationCommand Command() => new(
         DivisionId: 1, CategoryId: 2, Severity: ViolationSeverity.High,
         DetectedAt: new DateOnly(2026, 8, 1), RemediationStatus: RemediationStatus.UnderControl);

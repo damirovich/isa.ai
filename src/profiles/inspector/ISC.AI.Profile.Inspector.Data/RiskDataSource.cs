@@ -204,6 +204,7 @@ public sealed class RiskDataSource(
                 v.DetectedAt,
                 v.RemediationStatus,
                 v.Recommendation,
+                v.RemediationDeadline,
             })
             .ToListAsync(cancellationToken);
 
@@ -225,7 +226,7 @@ public sealed class RiskDataSource(
         return new RemediationSummary(
             [.. rows.Select(r => new RemediationRow(
                 r.Id, r.DivisionName, r.CategoryName, r.Severity, r.DetectedAt,
-                r.RemediationStatus, r.Recommendation))],
+                r.RemediationStatus, r.Recommendation, r.RemediationDeadline))],
             [.. divisions
                 .OrderBy(d => d.Name)
                 .Select(d => new DivisionRemediationRow(

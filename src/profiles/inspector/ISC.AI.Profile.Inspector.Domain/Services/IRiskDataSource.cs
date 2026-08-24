@@ -44,7 +44,7 @@ public sealed record DivisionRiskDetail(
     string? LastRecommendation,
     RiskAssessment Assessment);
 
-/// <summary>Карточка мониторинга устранения (§5.2.6) — нарушение с рекомендацией.</summary>
+/// <summary>Карточка мониторинга устранения (§5.2.6) — нарушение с рекомендацией и сроком.</summary>
 public sealed record RemediationRow(
     int Id,
     string DivisionName,
@@ -52,7 +52,8 @@ public sealed record RemediationRow(
     Enums.ViolationSeverity Severity,
     DateOnly DetectedAt,
     Enums.RemediationStatus RemediationStatus,
-    string? Recommendation);
+    string? Recommendation,
+    DateOnly? RemediationDeadline);
 
 /// <summary>Счётчики устранения по подразделению (§5.2.6).</summary>
 public sealed record DivisionRemediationRow(

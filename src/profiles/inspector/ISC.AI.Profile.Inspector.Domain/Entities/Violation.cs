@@ -30,6 +30,13 @@ public class Violation : AuditableEntity
     /// <summary>Статус устранения.</summary>
     public RemediationStatus RemediationStatus { get; set; }
 
+    /// <summary>
+    /// Контрольный срок устранения (ТФ-МОН-01, опц.). По его истечении СИСТЕМА переводит
+    /// неустранённое нарушение в «Просрочено» (фоновая проверка, как у поручений документооборота);
+    /// без срока автопросрочка не действует — статус ведёт человек.
+    /// </summary>
+    public DateOnly? RemediationDeadline { get; set; }
+
     /// <summary>Первоисточник — RegNumber документа СКИД (по значению, опц.).</summary>
     public string? SourceDocRef { get; set; }
 

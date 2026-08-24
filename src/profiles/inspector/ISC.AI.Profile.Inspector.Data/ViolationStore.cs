@@ -84,6 +84,7 @@ public sealed class ViolationStore(IDbContextFactory<InspectorDbContext> context
                 v.DetectedAt,
                 v.RemediationStatus,
                 v.SourceDocRef,
+                v.RemediationDeadline,
                 // Повторность — производная (Приложение §4): есть ли ДРУГОЕ нарушение того же вида
                 // в том же подразделении (в любое время).
                 IsRecurring = db.Violations.Any(o => o.Id != v.Id
@@ -94,7 +95,8 @@ public sealed class ViolationStore(IDbContextFactory<InspectorDbContext> context
         var items = rows
             .Select(r => new ViolationListItem(
                 r.Id, r.DivisionId, r.DivisionName, r.CategoryId, r.CategoryName, r.CategoryParentName,
-                r.Severity, r.DetectedAt, r.RemediationStatus, r.SourceDocRef, r.IsRecurring))
+                r.Severity, r.DetectedAt, r.RemediationStatus, r.SourceDocRef, r.IsRecurring,
+                r.RemediationDeadline))
             .ToList();
 
         return new ViolationPage(items, total);
@@ -110,6 +112,7 @@ public sealed class ViolationStore(IDbContextFactory<InspectorDbContext> context
             {
                 v.Id, v.DivisionId, v.CategoryId, v.Severity, v.DetectedAt, v.RemediationStatus,
                 v.SourceDocRef, v.SourceAssignmentRef, v.ReferenceDocRef, v.Cause, v.Recommendation,
+                v.RemediationDeadline,
             })
             .FirstOrDefaultAsync(cancellationToken);
         return rows is null
@@ -117,7 +120,7 @@ public sealed class ViolationStore(IDbContextFactory<InspectorDbContext> context
             : new ViolationDetails(
                 rows.Id, rows.DivisionId, rows.CategoryId, rows.Severity, rows.DetectedAt,
                 rows.RemediationStatus, rows.SourceDocRef, rows.SourceAssignmentRef,
-                rows.ReferenceDocRef, rows.Cause, rows.Recommendation);
+                rows.ReferenceDocRef, rows.Cause, rows.Recommendation, rows.RemediationDeadline);
     }
 
     /// <inheritdoc />
@@ -146,6 +149,7 @@ public sealed class ViolationStore(IDbContextFactory<InspectorDbContext> context
             ReferenceDocRef = Normalize(draft.ReferenceDocRef),
             Cause = Normalize(draft.Cause),
             Recommendation = Normalize(draft.Recommendation),
+            RemediationDeadline = draft.RemediationDeadline,
         };
         db.Violations.Add(violation);
         await db.SaveChangesAsync(cancellationToken);
@@ -183,9 +187,44 @@ public sealed class ViolationStore(IDbContextFactory<InspectorDbContext> context
         violation.ReferenceDocRef = Normalize(draft.ReferenceDocRef);
         violation.Cause = Normalize(draft.Cause);
         violation.Recommendation = Normalize(draft.Recommendation);
+        violation.RemediationDeadline = draft.RemediationDeadline;
         await db.SaveChangesAsync(cancellationToken);
 
         return ViolationWriteResult.Ok;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ViolationOverdueMark>> MarkOverdueAsync(
+        DateOnly today, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Кандидаты read-only списком id; перевод — поштучно с перепроверкой (перенос подхода
+        // docflow): пока ждали, нарушение могли устранить или продлить срок — не отравлять остальных.
+        var candidateIds = await db.Violations.AsNoTracking()
+            .Where(v => v.RemediationDeadline != null && v.RemediationDeadline < today
+                && v.RemediationStatus != RemediationStatus.Resolved
+                && v.RemediationStatus != RemediationStatus.Overdue)
+            .Select(v => v.Id)
+            .ToListAsync(cancellationToken);
+
+        var marked = new List<ViolationOverdueMark>();
+        foreach (var id in candidateIds)
+        {
+            var violation = await db.Violations.FirstOrDefaultAsync(v => v.Id == id, cancellationToken);
+            if (violation is null
+                || violation.RemediationStatus is RemediationStatus.Resolved or RemediationStatus.Overdue
+                || violation.RemediationDeadline is null || violation.RemediationDeadline >= today)
+            {
+                continue;
+            }
+
+            violation.RemediationStatus = RemediationStatus.Overdue;
+            await db.SaveChangesAsync(cancellationToken);
+            marked.Add(new ViolationOverdueMark(violation.Id, violation.DivisionId, violation.RemediationDeadline.Value));
+        }
+
+        return marked;
     }
 
     // Подразделение и категория существуют. Категория — ЛЮБОГО уровня: нарушение относят к сфере

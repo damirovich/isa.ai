@@ -74,6 +74,7 @@
         <MudTh>Сфера · вид</MudTh>
         <MudTh>Тяжесть</MudTh>
         <MudTh>Статус</MudTh>
+        <MudTh>Срок</MudTh>
         <MudTh>Источник</MudTh>
         <MudTh Style="width:1%;"></MudTh>
     </HeaderContent>
@@ -106,6 +107,20 @@
             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@StatusColor(context.RemediationStatus)">
                 @context.RemediationStatus.Label()
             </MudChip>
+        </MudTd>
+        <MudTd DataLabel="Срок">
+            @if (context.RemediationDeadline is { } deadline)
+            {
+                @* Истёкший срок неустранённого — красным (система вот-вот пометит «Просрочено»). *@
+                <MudText Typo="Typo.body2"
+                         Color="@(context.RemediationStatus != RemediationStatus.Resolved && deadline < DateOnly.FromDateTime(DateTime.Today) ? Color.Error : Color.Default)">
+                    @deadline.ToString("dd.MM.yyyy")
+                </MudText>
+            }
+            else
+            {
+                <span class="mud-text-secondary">—</span>
+            }
         </MudTd>
         <MudTd DataLabel="Источник">@(context.SourceDocRef ?? "—")</MudTd>
         <MudTd>
@@ -164,7 +179,7 @@
                     }
                 </MudSelect>
             </MudItem>
-            <MudItem xs="12" sm="4">
+            <MudItem xs="12" sm="3">
                 <MudSelect T="ViolationSeverity" @bind-Value="_formSeverity" Label="Тяжесть" Variant="Variant.Outlined" Dense="true">
                     @foreach (var severity in Severities)
                     {
@@ -172,17 +187,22 @@
                     }
                 </MudSelect>
             </MudItem>
-            <MudItem xs="12" sm="4">
+            <MudItem xs="12" sm="3">
                 <MudDatePicker @bind-Date="_formDetectedAt" Label="Дата выявления" Variant="Variant.Outlined"
                                DateFormat="dd.MM.yyyy" />
             </MudItem>
-            <MudItem xs="12" sm="4">
+            <MudItem xs="12" sm="3">
                 <MudSelect T="RemediationStatus" @bind-Value="_formStatus" Label="Статус устранения" Variant="Variant.Outlined" Dense="true">
                     @foreach (var status in Statuses)
                     {
                         <MudSelectItem T="RemediationStatus" Value="@status">@status.Label()</MudSelectItem>
                     }
                 </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                @* Контрольный срок (ТФ-МОН-01): по его истечении система сама ставит «Просрочено». *@
+                <MudDatePicker @bind-Date="_formDeadline" Label="Срок устранения" Variant="Variant.Outlined"
+                               DateFormat="dd.MM.yyyy" Clearable="true" />
             </MudItem>
             <MudItem xs="12" sm="4">
                 <MudTextField @bind-Value="_formSourceDocRef" Label="Документ-источник (акт, справка)"
@@ -248,6 +268,7 @@
     private int? _formCategoryId;
     private ViolationSeverity _formSeverity = ViolationSeverity.Medium;
     private DateTime? _formDetectedAt;
+    private DateTime? _formDeadline;
     private RemediationStatus _formStatus = RemediationStatus.UnderControl;
     private string? _formSourceDocRef;
     private string? _formSourceAssignmentRef;
@@ -355,6 +376,7 @@
         _formCategoryId = null;
         _formSeverity = ViolationSeverity.Medium;
         _formDetectedAt = DateTime.Today;
+        _formDeadline = null;
         _formStatus = RemediationStatus.UnderControl;
         _formSourceDocRef = null;
         _formSourceAssignmentRef = null;
@@ -381,6 +403,7 @@
         _formCategoryId = details.CategoryId;
         _formSeverity = details.Severity;
         _formDetectedAt = details.DetectedAt.ToDateTime(TimeOnly.MinValue);
+        _formDeadline = details.RemediationDeadline?.ToDateTime(TimeOnly.MinValue);
         _formStatus = details.RemediationStatus;
         _formSourceDocRef = details.SourceDocRef;
         _formSourceAssignmentRef = details.SourceAssignmentRef;
@@ -404,11 +427,13 @@
         try
         {
             var detected = DateOnly.FromDateTime(detectedAt);
+            var deadline = ToDateOnly(_formDeadline);
             if (_formId is { } violationId)
             {
                 var response = await Dispatcher.Send(new UpdateViolationCommand(
                     violationId, divisionId, categoryId, _formSeverity, detected, _formStatus,
-                    _formSourceDocRef, _formSourceAssignmentRef, _formReferenceDocRef, _formCause, _formRecommendation));
+                    _formSourceDocRef, _formSourceAssignmentRef, _formReferenceDocRef, _formCause, _formRecommendation,
+                    deadline));
                 if (!response.Status)
                 {
                     _formError = response.StatusMessage;
@@ -419,7 +444,8 @@
             {
                 var response = await Dispatcher.Send(new CreateViolationCommand(
                     divisionId, categoryId, _formSeverity, detected, _formStatus,
-                    _formSourceDocRef, _formSourceAssignmentRef, _formReferenceDocRef, _formCause, _formRecommendation));
+                    _formSourceDocRef, _formSourceAssignmentRef, _formReferenceDocRef, _formCause, _formRecommendation,
+                    deadline));
                 if (!response.Status)
                 {
                     _formError = response.StatusMessage;

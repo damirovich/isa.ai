@@ -16,7 +16,8 @@ public sealed record ViolationDraft(
     string? SourceAssignmentRef,
     string? ReferenceDocRef,
     string? Cause,
-    string? Recommendation);
+    string? Recommendation,
+    DateOnly? RemediationDeadline = null);
 
 /// <summary>Отбор реестра нарушений.</summary>
 public sealed record ViolationListFilter(
@@ -41,7 +42,8 @@ public sealed record ViolationListItem(
     DateOnly DetectedAt,
     RemediationStatus RemediationStatus,
     string? SourceDocRef,
-    bool IsRecurring);
+    bool IsRecurring,
+    DateOnly? RemediationDeadline);
 
 /// <summary>Страница реестра: строки + общее число до среза.</summary>
 public sealed record ViolationPage(IReadOnlyList<ViolationListItem> Rows, int TotalCount);
@@ -58,7 +60,11 @@ public sealed record ViolationDetails(
     string? SourceAssignmentRef,
     string? ReferenceDocRef,
     string? Cause,
-    string? Recommendation);
+    string? Recommendation,
+    DateOnly? RemediationDeadline);
+
+/// <summary>Пометка автопросрочки (ТФ-МОН-01) — для аудита системного перевода.</summary>
+public sealed record ViolationOverdueMark(int ViolationId, int DivisionId, DateOnly Deadline);
 
 /// <summary>Узел классификатора видов (2 уровня: сфера → вид).</summary>
 public sealed record ViolationCategoryNode(
