@@ -16,7 +16,8 @@ public sealed record ChatMessageRequest(
     int? ConversationId,
     string Text,
     ChatMode Mode = ChatMode.Grounded,
-    ModelRole Role = ModelRole.Analysis,
+    // Диалог — быстрая роль Draft (ADR-0011): собеседник ждёт ответ, а не наблюдает раздумья.
+    ModelRole Role = ModelRole.Draft,
     int TopK = 10,
     string? TaskPrompt = null);
 

@@ -51,12 +51,14 @@ public static class CoreAiModelsServiceCollectionExtensions
         var chatTimeout = ReadTimeout(configuration, "Llm:ChatCallTimeoutSeconds", DefaultChatCallTimeout);
         var embeddingTimeout = ReadTimeout(configuration, "Llm:EmbeddingCallTimeoutSeconds", DefaultEmbeddingCallTimeout);
 
-        // Размышления модели по умолчанию ОТКЛЮЧЕНЫ (Llm:DisableThinking=false — вернуть):
-        // на редакторской задаче раздумья съедали весь лимит вывода, ответ приходил пустым.
-        var disableThinking = !bool.TryParse(configuration["Llm:DisableThinking"], out var flag) || flag;
+        // Размышления модели по умолчанию ОТКЛЮЧЕНЫ (глобально Llm:DisableThinking; ПО-РОЛЕВО —
+        // Llm:Models:{role}:DisableThinking поверх глобального): на задачах генерации/правки раздумья
+        // съедали весь лимит вывода (пустой ответ). Роли — и есть пресеты (ADR-0011): Draft — быстрые
+        // сценарии без размышлений; Analysis — вдумчивый анализ (противоречия НПА) с размышлениями.
+        var disableThinkingDefault = !bool.TryParse(configuration["Llm:DisableThinking"], out var flag) || flag;
 
-        TryAddChatModel(services, configuration, ModelRole.Draft, maxConcurrency, chatTimeout, disableThinking);
-        TryAddChatModel(services, configuration, ModelRole.Analysis, maxConcurrency, chatTimeout, disableThinking);
+        TryAddChatModel(services, configuration, ModelRole.Draft, maxConcurrency, chatTimeout, disableThinkingDefault);
+        TryAddChatModel(services, configuration, ModelRole.Analysis, maxConcurrency, chatTimeout, disableThinkingDefault);
         TryAddEmbeddingModel(services, configuration, ModelRole.Embeddings, maxConcurrency, embeddingTimeout);
         return services;
     }
@@ -68,12 +70,17 @@ public static class CoreAiModelsServiceCollectionExtensions
 
     private static void TryAddChatModel(
         IServiceCollection services, IConfiguration configuration, ModelRole role, int maxConcurrency,
-        TimeSpan callTimeout, bool disableThinking)
+        TimeSpan callTimeout, bool disableThinkingDefault)
     {
         if (!TryReadModel(configuration, role, out var endpoint, out var configuredModel, out var apiKey))
         {
             return; // роль не сконфигурирована (нет адреса) — пропускаем
         }
+
+        // По-ролевое переопределение размышлений: Llm:Models:{role}:DisableThinking → иначе глобальное.
+        var disableThinking = bool.TryParse(configuration[$"Llm:Models:{role}:DisableThinking"], out var roleFlag)
+            ? roleFlag
+            : disableThinkingDefault;
 
         // Air-gap (инвариант №2, ТБ-044): адрес модели обязан быть внутри контура — проверяем при старте.
         var endpointUri = new Uri(endpoint);

@@ -1,125 +1,313 @@
 @namespace ISC.AI.Profile.Inspector.UI
 @page "/analysis"
 @rendermode InteractiveServer
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Abstractions.Grounding
+@using ISC.AI.Profile.Inspector.Application.Features.Analysis
+@using ISC.AI.Profile.Inspector.Application.Features.Generation
+@using Microsoft.JSInterop
+@inject EditorDraftHandoff EditorHandoff
+@inject NavigationManager Navigation
 
-@* Модуль «Анализ и сравнение» (§5.2.3): подсветка противоречий и пробелов между НПА.
-   ЖЁСТКИЙ ИНВАРИАНТ: система лишь ПОМЕЧАЕТ возможные коллизии для проверки человеком и НЕ выдаёт
-   автоматического правового заключения. Данные ПОКАЗАТЕЛЬНЫЕ (демо); сводки считаются из списка. *@
+@* Модуль «Анализ / Сравнение» (§5.2.3, ТФ-НПА-03/04) — анализ НАСТОЯЩИЙ, демо снято.
+   Две задачи: СРАВНЕНИЕ НПА по теме (противоречия и пробелы между актами корпуса) и АНАЛИЗ
+   ДОКУМЕНТА (правовой/организационный/управленческий — на соответствие нормам корпуса).
+   Роль модели — Analysis, ВДУМЧИВАЯ (размышления включены по-ролево, ADR-0011): поиск действительных
+   расхождений — многошаговая задача; поэтому ответа ждут ДОЛЬШЕ, чем в Генераторе (минуты).
+   Выводы ИИ — проект для проверки человеком (ТБ-042); каждая ссылка проходит грунтовку (GATE-2). *@
 
-<PageHeader Title="Анализ и сравнение"
-            Subtitle="Сравнение документов и НПА, выявление противоречий"
+<PageHeader Title="Анализ / Сравнение"
+            Subtitle="Противоречия и пробелы между НПА · анализ документа на соответствие нормам"
             Icon="@Icons.Material.Filled.CompareArrows" />
 
-<DemoAlert Icon="@Icons.Material.Filled.Gavel">
-    Показательные данные (ДЕМО). Система <b>помечает возможные противоречия и пробелы для проверки человеком</b>
-    и не выдаёт автоматического правового заключения (§5.2.3). Ссылки на НПА проходят грунтовку — формируются
-    только из извлечённых фрагментов.
-</DemoAlert>
+<MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true">
+    @* ================= Вкладка 1: сравнение НПА по теме ================= *@
+    <MudTabPanel Text="Сравнение по теме" Icon="@Icons.Material.Filled.CompareArrows">
+        <MudGrid Class="mt-2">
+            <MudItem xs="12" md="5">
+                <MudPaper Class="pa-4" Outlined="true">
+                    <SectionCaption Text="Тема сравнения" Class="mb-2" />
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">
+                        Система извлечёт нормы РАЗНЫХ актов по теме и сверит их между собой:
+                        разные сроки, разные требования к одному предмету, незакрытые вопросы.
+                    </MudText>
+                    <MudTextField @bind-Value="_topic" Variant="Variant.Outlined" Immediate="true"
+                                  Disabled="_busy" MaxLength="500"
+                                  Placeholder="напр. сроки регистрации входящих документов" />
+                    <div class="d-flex gap-2 flex-wrap my-2">
+                        @foreach (var hint in TopicHints)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default"
+                                     OnClick="@(() => _topic = hint)">@hint</MudChip>
+                        }
+                    </div>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Class="mt-2"
+                               StartIcon="@Icons.Material.Filled.CompareArrows"
+                               OnClick="CompareAsync" Disabled="@(_busy || string.IsNullOrWhiteSpace(_topic))">
+                        @(_busy ? "Сравниваю…" : "Сравнить нормы")
+                    </MudButton>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2 d-block">
+                        Вдумчивый режим: анализ занимает несколько минут.
+                    </MudText>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" md="7">
+                @ResultPanel(("Задайте тему —", "и нажмите «Сравнить нормы»"))
+            </MudItem>
+        </MudGrid>
+    </MudTabPanel>
 
-<MudGrid>
-    @* ================= Находки ================= *@
-    <MudItem xs="12">
-        <MudPaper Class="pa-4" Outlined="true">
-            <SectionCaption Text="Анализ и сравнение документов" />
+    @* ================= Вкладка 2: анализ документа ================= *@
+    <MudTabPanel Text="Анализ документа" Icon="@Icons.Material.Filled.Plagiarism">
+        <MudGrid Class="mt-2">
+            <MudItem xs="12" md="5">
+                <MudPaper Class="pa-4" Outlined="true">
+                    <SectionCaption Text="Документ" Class="mb-2" />
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">
+                        Правовой (соответствие нормам корпуса), организационный (исполнимость)
+                        и управленческий (достигает ли цели) анализ вставленного текста.
+                    </MudText>
+                    <MudTextField @bind-Value="_documentText" Variant="Variant.Outlined" Lines="14"
+                                  Immediate="true" Disabled="_busy"
+                                  Placeholder="Вставьте текст: проект приказа, положение, справку…" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Class="mt-3"
+                               StartIcon="@Icons.Material.Filled.Plagiarism"
+                               OnClick="AnalyzeAsync" Disabled="@(_busy || string.IsNullOrWhiteSpace(_documentText))">
+                        @(_busy ? "Анализирую…" : "Проанализировать")
+                    </MudButton>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2 d-block">
+                        Вдумчивый режим: анализ занимает несколько минут.
+                    </MudText>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" md="7">
+                @ResultPanel(("Вставьте документ —", "и нажмите «Проанализировать»"))
+            </MudItem>
+        </MudGrid>
+    </MudTabPanel>
+</MudTabs>
 
-            <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" Class="mt-1">
-                <MudTabPanel Text="НПА — противоречия и пробелы" Icon="@Icons.Material.Filled.Balance">
-                    @* --- Фильтр по виду находки --- *@
-                    <FilterChipRow TValue="InspectorDemoData.FindingKind" Label="Фильтр:"
-                                   AllCount="@InspectorDemoData.Findings.Count" Items="@FilterItems"
-                                   Selected="@_filter"
-                                   SelectedChanged="@((InspectorDemoData.FindingKind? v) => _filter = v)" />
-
-                    @foreach (var finding in Filtered)
-                    {
-                        <AccentRow Accent="@KindColor(finding.Kind)">
-                            <div class="d-flex align-start gap-2">
-                                <MudText Typo="Typo.body1" Class="flex-grow-1"><b>@finding.Title</b></MudText>
-                                <TintedChip Color="@KindColor(finding.Kind)"
-                                            Icon="@KindIcon(finding.Kind)">@KindLabel(finding.Kind)</TintedChip>
-                            </div>
-                            <MudText Typo="Typo.body2" Class="mud-text-secondary my-1">@finding.Description</MudText>
-                            <div class="d-flex align-center gap-1 flex-wrap mb-1">
-                                @foreach (var source in finding.Sources)
-                                {
-                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
-                                             Color="Color.Default" Icon="@Icons.Material.Filled.Description">
-                                        @source
-                                    </MudChip>
-                                }
-                            </div>
-                            <MudText Typo="Typo.caption" Style="@($"color:{KindColor(finding.Kind)};")"
-                                     Class="d-flex align-center gap-1">
-                                <MudIcon Icon="@Icons.Material.Filled.ArrowRight" Size="Size.Small" /> @finding.Action
-                            </MudText>
-                        </AccentRow>
-                    }
-                </MudTabPanel>
-
-                <MudTabPanel Text="Документы архива" Icon="@Icons.Material.Filled.FolderOpen">
-                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="my-3">
-                        Здесь будет сопоставление внутриведомственного документа из архива с действующими
-                        редакциями НПА. Источник документов — модуль «Архив» (§5.2.2), пока не подключён.
-                    </MudAlert>
-                </MudTabPanel>
-            </MudTabs>
-
-            <ActionHintButton Text="ИИ-анализ НПА: подготовить заключение (ДЕМО)" Class="mt-3"
-                              HintSeverity="Severity.Warning">
-                <Hint>
-                    Важно: ИИ готовит <b>черновик-подсветку</b> возможных коллизий со ссылками из грунтовки —
-                    не правовое заключение. Итоговую оценку и решение принимает человек (§5.2.3).
-                </Hint>
-            </ActionHintButton>
-        </MudPaper>
-    </MudItem>
-</MudGrid>
+@* --- Регистрация заключения в документообороте (с пометкой ИИ-происхождения) --- *@
+<RegisterGeneratedDialog @bind-Visible="_registerOpen" Origin="Анализ"
+                         DefaultTitle="@_resultTitle"
+                         Body="@(Result?.DraftText ?? string.Empty)"
+                         Classification="@(Result?.ResultClassification ?? 0)"
+                         Citations="@(Result?.Citations ?? [])"
+                         OnRegistered="@(id => _registeredId = id)" />
 
 @code {
-    private static readonly InspectorDemoData.FindingKind[] AllKinds =
-        [InspectorDemoData.FindingKind.Contradiction, InspectorDemoData.FindingKind.Gap,
-         InspectorDemoData.FindingKind.Recommendation];
+    // Темы-подсказки — обезличенные примеры типовых предметов сравнения (ТД-007).
+    private static readonly string[] TopicHints =
+    [
+        "сроки регистрации документов",
+        "порядок хранения носителей",
+        "контроль исполнения поручений",
+    ];
 
-    private InspectorDemoData.FindingKind? _filter;
+    private string _topic = string.Empty;
+    private string _documentText = string.Empty;
 
-    private static IEnumerable<InspectorDemoData.AnalysisFinding> All => InspectorDemoData.Findings;
+    private bool _busy;
+    private bool _exporting;
+    private bool _registerOpen;
+    private int? _registeredId;
+    private string? _error;
+    private string _resultTitle = string.Empty;
+    private ResponseDto<GenerateReferenceResult>? _response;
 
-    private IEnumerable<InspectorDemoData.AnalysisFinding> Filtered =>
-        _filter is null ? All : All.Where(f => f.Kind == _filter);
+    private GenerateReferenceResult? Result => _response?.Data;
 
-    private static int CountOf(InspectorDemoData.FindingKind kind) => All.Count(f => f.Kind == kind);
-
-    // Категории фильтра по виду находки (подпись, цвет, количество): свойство, а не static-поле, —
-    // иначе счётчики застынут, когда находки станут приходить из анализа, а не из демо-списка.
-    private static IReadOnlyList<FilterChipItem<InspectorDemoData.FindingKind>> FilterItems =>
-        [.. AllKinds.Select(k => new FilterChipItem<InspectorDemoData.FindingKind>(
-            k, KindPlural(k), KindColor(k), CountOf(k)))];
-
-    private static string KindColor(InspectorDemoData.FindingKind kind) => kind switch
+    // Панель результата — общая для обеих вкладок (результат один: последний запуск).
+    private RenderFragment ResultPanel((string Line1, string Line2) empty) => __builder =>
     {
-        InspectorDemoData.FindingKind.Contradiction => "#ef4444",
-        InspectorDemoData.FindingKind.Gap => "#eab308",
-        _ => "#3b82f6",
+        <MudPaper Class="pa-4 h-100" Outlined="true">
+            @if (_busy)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-3" />
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    Извлекаю нормы по допуску, анализирую (вдумчивый режим) и проверяю ссылки грунтовкой…
+                </MudText>
+            }
+            else if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_error</MudAlert>
+            }
+            else if (Result is null)
+            {
+                <EmptyState Icon="@Icons.Material.Filled.CompareArrows" MinHeight="280">
+                    @empty.Line1<br />@empty.Line2
+                </EmptyState>
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3">
+                    ВЫВОДЫ ИИ — проект для проверки человеком (ТБ-042). Гриф: @Result.ResultClassification.
+                </MudAlert>
+
+                @if (!Result.AllCitationsConfirmed)
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                        Не все ссылки подтверждены извлечёнными нормами — выводы НЕ считаются готовыми (GATE-2).
+                    </MudAlert>
+                }
+
+                <div class="d-flex gap-2 mb-2">
+                    <MudButton Color="Color.Secondary" Variant="Variant.Filled" FullWidth="true"
+                               OnClick="ExportAsync" Disabled="_exporting" StartIcon="@Icons.Material.Filled.Download">
+                        @(_exporting ? "Экспорт…" : "Экспорт в .docx")
+                    </MudButton>
+                    <MudButton Color="Color.Default" Variant="Variant.Outlined" FullWidth="true"
+                               OnClick="OpenInEditor" StartIcon="@Icons.Material.Filled.EditNote">
+                        Доработать в Редакторе
+                    </MudButton>
+                </div>
+
+                @if (_registeredId is { } registeredId)
+                {
+                    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                        Зарегистрировано в документообороте (№ записи @registeredId) — модуль «Документы».
+                    </MudAlert>
+                }
+                else
+                {
+                    @* Регистрация — акт принятия человеком; при неподтверждённых ссылках запрещена (GATE-2). *@
+                    <MudTooltip Text="@(Result.AllCitationsConfirmed ? string.Empty : "Сначала уберите неподтверждённые ссылки (GATE-2) — кнопка «Доработать в Редакторе».")">
+                        <MudButton Class="mb-3" Color="Color.Tertiary" Variant="Variant.Outlined" FullWidth="true"
+                                   OnClick="@(() => _registerOpen = true)"
+                                   Disabled="@(!Result.AllCitationsConfirmed)"
+                                   StartIcon="@Icons.Material.Filled.AppRegistration">
+                            Зарегистрировать в документообороте
+                        </MudButton>
+                    </MudTooltip>
+                }
+
+                <SectionCaption Text="Выводы" Class="mb-1" />
+                <MudPaper Class="pa-3 mb-3" Outlined="true" Style="max-height:55vh; overflow-y:auto;">
+                    <MudText Typo="Typo.body2" Style="white-space: pre-wrap;">@Result.DraftText</MudText>
+                </MudPaper>
+
+                @if (Result.Citations.Count > 0)
+                {
+                    <SectionCaption Text="Ссылки (грунтовка)" Class="mb-1" />
+                    @foreach (var citation in Result.Citations)
+                    {
+                        <div class="d-flex align-center gap-2 mb-1">
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@StatusColor(citation.Status)">
+                                @StatusLabel(citation.Status)
+                            </MudChip>
+                            <MudText Typo="Typo.body2">@citation.Citation</MudText>
+                        </div>
+                    }
+                }
+            }
+        </MudPaper>
     };
 
-    private static string KindIcon(InspectorDemoData.FindingKind kind) => kind switch
+    private async Task CompareAsync()
     {
-        InspectorDemoData.FindingKind.Contradiction => Icons.Material.Filled.Bolt,
-        InspectorDemoData.FindingKind.Gap => Icons.Material.Filled.CropFree,
-        _ => Icons.Material.Filled.Lightbulb,
+        _resultTitle = $"Сравнение норм: {_topic}";
+        await RunAsync(() => Dispatcher.Send(new CompareNpaCommand(_topic)).AsTask());
+    }
+
+    private async Task AnalyzeAsync()
+    {
+        _resultTitle = "Заключение по результатам анализа документа";
+        await RunAsync(() => Dispatcher.Send(new AnalyzeDocumentCommand(_documentText)).AsTask());
+    }
+
+    private async Task RunAsync(Func<Task<ResponseDto<GenerateReferenceResult>>> action)
+    {
+        _busy = true;
+        _error = null;
+        _response = null;
+        _registeredId = null;
+        try
+        {
+            var response = await action();
+            if (response.Status)
+            {
+                _response = response;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка анализа: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ExportAsync()
+    {
+        if (Result is not { } result)
+        {
+            return;
+        }
+
+        _exporting = true;
+        try
+        {
+            // Экспортёр общий с Генератором (ТБ-033): гриф результата — в маркировке.
+            var response = await Dispatcher.Send(new ExportReferenceCommand(
+                _resultTitle, result.DraftText, result.ResultClassification));
+
+            if (response is { Status: true, Data: { } file })
+            {
+                using var streamReference = new DotNetStreamReference(new MemoryStream(file.Content));
+                await JS.InvokeVoidAsync("downloadFileFromStream", file.FileName, streamReference);
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка экспорта: {ex.Message}";
+        }
+        finally
+        {
+            _exporting = false;
+        }
+    }
+
+    // Заключение → Редактор: доработать выводы в справку/докладную; при непроверенных ссылках
+    // команда правки заполняется их перечнем автоматически (как из Генератора).
+    private void OpenInEditor()
+    {
+        if (Result is not { } result)
+        {
+            return;
+        }
+
+        var unverified = result.Citations
+            .Where(c => c.Status != CitationStatus.Confirmed)
+            .Select(c => c.Citation)
+            .ToList();
+        var instruction = unverified.Count > 0
+            ? $"Убери или замени ссылки, не подтверждённые фрагментами: {string.Join("; ", unverified)}"
+            : null;
+        EditorHandoff.Put(result.DraftText, instruction);
+        Navigation.NavigateTo("/editor");
+    }
+
+    private static Color StatusColor(CitationStatus status) => status switch
+    {
+        CitationStatus.Confirmed => Color.Success,
+        CitationStatus.Superseded => Color.Warning,
+        _ => Color.Error,
     };
 
-    private static string KindLabel(InspectorDemoData.FindingKind kind) => kind switch
+    private static string StatusLabel(CitationStatus status) => status switch
     {
-        InspectorDemoData.FindingKind.Contradiction => "Противоречие",
-        InspectorDemoData.FindingKind.Gap => "Пробел",
-        _ => "Рекомендация",
-    };
-
-    private static string KindPlural(InspectorDemoData.FindingKind kind) => kind switch
-    {
-        InspectorDemoData.FindingKind.Contradiction => "Противоречия",
-        InspectorDemoData.FindingKind.Gap => "Пробелы",
-        _ => "Рекомендации",
+        CitationStatus.Confirmed => "подтверждена",
+        CitationStatus.Superseded => "УТРАТИЛА СИЛУ",
+        _ => "не подтверждена",
     };
 }

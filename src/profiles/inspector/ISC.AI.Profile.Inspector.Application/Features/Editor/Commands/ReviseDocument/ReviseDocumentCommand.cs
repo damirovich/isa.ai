@@ -1,4 +1,5 @@
 using ISC.AI.Abstractions.Application;
+using ISC.AI.Abstractions.Enums;
 using ISC.AI.Abstractions.Grounding;
 using ISC.AI.Abstractions.Rag;
 using ISC.AI.Abstractions.Security;
@@ -47,8 +48,10 @@ public sealed record ReviseDocumentCommand(string Text, string Instruction)
                 ? command.Text
                 : command.Text[..RetrievalContextLength];
             var response = await generator.GenerateAsync(
+                // Роль Draft — быстрая (без размышлений, ADR-0011): на правках раздумья съедали лимит.
                 new GroundedRequest(
                     $"{command.Instruction}. Контекст документа: {context}",
+                    ModelRole.Draft,
                     TaskPrompt: promptRenderer.Render(command)),
                 access,
                 cancellationToken);

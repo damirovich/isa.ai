@@ -1,4 +1,5 @@
 using ISC.AI.Abstractions.Application;
+using ISC.AI.Abstractions.Enums;
 using ISC.AI.Abstractions.Grounding;
 using ISC.AI.Abstractions.Rag;
 using ISC.AI.Abstractions.Security;
@@ -47,7 +48,8 @@ public sealed record GenerateMethodDocumentCommand(
             var query = $"{command.InspectionType} проверка: {command.Scope}."
                 + (string.IsNullOrWhiteSpace(command.Extra) ? string.Empty : $" {command.Extra}");
             var response = await generator.GenerateAsync(
-                new GroundedRequest(query, TaskPrompt: promptRenderer.Render(command)),
+                // Роль Draft — быстрая (без размышлений, ADR-0011): структуру диктует промпт.
+                new GroundedRequest(query, ModelRole.Draft, TaskPrompt: promptRenderer.Render(command)),
                 access,
                 cancellationToken);
 
