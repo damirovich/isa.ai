@@ -56,6 +56,10 @@ public static class InspectorPersistenceServiceCollectionExtensions
         // Реестр методик (§5.2.9, Ц-03): сохранённые методические документы; выдача — по допуску.
         services.AddScoped<IMethodRegistryStore, MethodRegistryStore>();
 
+        // Совещания (§5.2.7): протокол читается из документооборота от имени субъекта — для справки
+        // об исполнении; имена подразделений — из справочника профиля.
+        services.AddScoped<IMeetingProtocolReader, MeetingProtocolReader>();
+
         // Профиль отдаёт модулю документооборота свой справочник подразделений (вопрос 3 Э4-35):
         // словарь id един с решёткой доступа, справочник ведёт профиль.
         services.AddScoped<ISC.AI.Modules.DocFlow.Domain.Services.IDivisionDirectory, DocFlowDivisionDirectory>();

@@ -1,9 +1,411 @@
 @namespace ISC.AI.Profile.Inspector.UI
 @page "/meetings"
 @rendermode InteractiveServer
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Abstractions.Grounding
+@using ISC.AI.Modules.DocFlow.Application.Features.Directory
+@using ISC.AI.Modules.DocFlow.Application.Features.Documents
+@using ISC.AI.Modules.DocFlow.Application.Features.DocumentTypes
+@using ISC.AI.Modules.DocFlow.Domain.Enums
+@using ISC.AI.Modules.DocFlow.Domain.Services
+@using ISC.AI.Profile.Inspector.Application.Features.Generation
+@using ISC.AI.Profile.Inspector.Application.Features.Meetings
+@using Microsoft.JSInterop
+@inject EditorDraftHandoff EditorHandoff
+@inject NavigationManager Navigation
 
-<ModuleStub Title="Совещания"
-            Subtitle="Протоколы, поручения, контрольные сроки"
-            Icon="@Icons.Material.Filled.EventNote"
-            Description="Протоколы, поручения, контрольные сроки и статус исполнения (на данных СКИД). Справка об исполнении поручений и эскалация при просрочке — проект, с участием человека."
-            Requirement="§5.2.7 · P2 · нужны поручения из СКИД" />
+@* Модуль «Совещания» (§5.2.7, ТФ-СОВ-01/02) — заглушка снята. Протокол совещания — ДОКУМЕНТ группы
+   «Исполнение» документооборота: пункты протокола — его назначения со сроками, статусами, продлениями
+   и автопросрочкой (вся механика контроля уже там, модуль её не дублирует — только показывает).
+   Справка об исполнении (ТФ-СОВ-02): состояние пунктов считает КОД, ИИ пишет текст с эскалацией
+   по просроченным; судьба справки — экспорт/Редактор/регистрация, как у всех ИИ-документов. *@
+
+<PageHeader Title="Совещания"
+            Subtitle="Протоколы, поручения, контрольные сроки — на механике документооборота"
+            Icon="@Icons.Material.Filled.EventNote">
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               Href="/docflow/documents/new">Зарегистрировать протокол</MudButton>
+</PageHeader>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@* --- Отбор: тип протокола (справочник типов группы «Исполнение») --- *@
+<MudPaper Outlined="true" Class="pa-3 mb-4">
+    <div class="d-flex gap-3 align-end flex-wrap">
+        <MudSelect T="int?" Value="_typeId" ValueChanged="@(async (int? v) => { _typeId = v; await ReloadAsync(true); })"
+                   Label="Тип протокола" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:260px;">
+            @foreach (var type in _types)
+            {
+                <MudSelectItem T="int?" Value="@type.Id">@type.Name</MudSelectItem>
+            }
+        </MudSelect>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary" Style="max-width:520px;">
+            Показаны документы группы «Исполнение». Заведите тип «Протокол совещания» в справочнике
+            типов и выбирайте его здесь — тогда список будет только про совещания.
+        </MudText>
+    </div>
+</MudPaper>
+
+@* --- Протоколы --- *@
+<MudTable T="DocumentListItem" Items="_rows" Hover="true" Dense="true" Outlined="true" Loading="_busy"
+          OnRowClick="@(async (TableRowClickEventArgs<DocumentListItem> e) => await OpenProtocolAsync(e.Item!.Id))">
+    <HeaderContent>
+        <MudTh>№ / дата</MudTh>
+        <MudTh>Содержание</MudTh>
+        <MudTh>Тип</MudTh>
+        <MudTh>Пунктов</MudTh>
+        <MudTh>Статус исполнения</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="№ / дата">
+            <b>@(context.RegNumber ?? "без номера")</b>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">@context.RegDate.ToString("dd.MM.yyyy")</MudText>
+        </MudTd>
+        <MudTd DataLabel="Содержание">@context.ShortContent</MudTd>
+        <MudTd DataLabel="Тип">@context.TypeName</MudTd>
+        <MudTd DataLabel="Пунктов">@context.AssignmentsCount</MudTd>
+        <MudTd DataLabel="Статус исполнения">
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@AggregatedColor(context.AggregatedStatus)">
+                @AggregatedLabel(context.AggregatedStatus)
+            </MudChip>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+            Протоколов пока нет. Зарегистрируйте протокол кнопкой выше: группа «Исполнение»,
+            пункты — назначениями на подразделения со сроками.
+        </MudText>
+    </NoRecordsContent>
+</MudTable>
+
+<div class="d-flex align-center justify-space-between mt-3 flex-wrap gap-2">
+    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+        Протоколов: @_total · страница @_page из @PageCount
+    </MudText>
+    <MudPagination Count="@PageCount" Selected="_page" SelectedChanged="GoToPageAsync"
+                   Size="Size.Small" ShowFirstButton="true" ShowLastButton="true" />
+</div>
+
+@* --- Карточка протокола: пункты + справка об исполнении --- *@
+<MudDialog @bind-Visible="_protocolOpen" Options="ProtocolDialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            @(_protocol is { } p ? $"Протокол {(p.RegNumber ?? "без номера")} от {p.RegDate:dd.MM.yyyy}" : "Протокол")
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_protocol is { } protocol)
+        {
+            @if (_reportError is not null)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_reportError</MudAlert>
+            }
+            <MudText Typo="Typo.body2" Class="mb-3">@protocol.ShortContent</MudText>
+
+            @if (Report is null)
+            {
+                <SectionCaption Text="Пункты (поручения)" Class="mb-1" />
+                <MudTable T="AssignmentDetails" Items="protocol.Assignments" Dense="true" Elevation="0">
+                    <HeaderContent>
+                        <MudTh>Подразделение</MudTh>
+                        <MudTh>Срок</MudTh>
+                        <MudTh>Статус</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Подразделение">@DivisionName(context.DivisionId)</MudTd>
+                        <MudTd DataLabel="Срок">@(context.Deadline?.ToString("dd.MM.yyyy") ?? "—")</MudTd>
+                        <MudTd DataLabel="Статус">
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                     Color="@AssignmentColor(context.Status)">
+                                @AssignmentLabel(context.Status)
+                            </MudChip>
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+                @if (protocol.Assignments.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary pa-2">
+                        Поручений по протоколу не назначено (добавляются при регистрации документа).
+                    </MudText>
+                }
+            }
+            else if (Report is { } report)
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3">
+                    ПРОЕКТ — подписывает человек (ТБ-042). Гриф: @report.ResultClassification.
+                    Факты справки — из документооборота, ИИ писал только текст.
+                </MudAlert>
+                @if (_registeredId is { } registeredId)
+                {
+                    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                        Зарегистрировано в документообороте (№ записи @registeredId) — модуль «Документы».
+                    </MudAlert>
+                }
+                <DocumentSheet Title="Справка об исполнении поручений"
+                               Subtitle="@($"протокол {(protocol.RegNumber ?? "без номера")} от {protocol.RegDate:dd.MM.yyyy}")"
+                               Body="@report.DraftText" EmblemUrl="@NpaDocument.EmblemUrl" />
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (_protocol is not null && Report is null)
+        {
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.OpenInNew"
+                       Href="@($"/docflow/documents/{_protocol.Id}")">Открыть документ</MudButton>
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="GenerateReportAsync"
+                       Disabled="_reportBusy" StartIcon="@Icons.Material.Filled.Summarize">
+                @(_reportBusy ? "Формирую…" : "Справка об исполнении")
+            </MudButton>
+        }
+        @if (Report is { } actions)
+        {
+            <MudButton OnClick="@(() => _reportResponse = null)">К пунктам</MudButton>
+            <MudButton OnClick="ExportReportAsync" Disabled="_exporting">Экспорт .docx</MudButton>
+            <MudButton StartIcon="@Icons.Material.Filled.EditNote" OnClick="OpenReportInEditor">
+                Доработать в Редакторе
+            </MudButton>
+            @if (_registeredId is null)
+            {
+                <MudTooltip Text="@(actions.AllCitationsConfirmed ? string.Empty : "Есть неподтверждённые ссылки (GATE-2) — доработайте в Редакторе.")">
+                    <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                               OnClick="@(() => _registerOpen = true)"
+                               Disabled="@(!actions.AllCitationsConfirmed)">
+                        Зарегистрировать
+                    </MudButton>
+                </MudTooltip>
+            }
+        }
+        <MudButton OnClick="@(() => _protocolOpen = false)">Закрыть</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<RegisterGeneratedDialog @bind-Visible="_registerOpen" Origin="Совещания"
+                         DefaultTitle="@($"Справка об исполнении поручений протокола {_protocol?.RegNumber ?? "без номера"}")"
+                         Body="@(Report?.DraftText ?? string.Empty)"
+                         Classification="@(Report?.ResultClassification ?? 0)"
+                         Citations="@(Report?.Citations ?? [])"
+                         OnRegistered="@(id => _registeredId = id)" />
+
+@code {
+    private const int PageSize = 25;
+
+    private static readonly DialogOptions ProtocolDialogOptions =
+        new() { MaxWidth = MaxWidth.Large, FullWidth = true, CloseOnEscapeKey = true, CloseButton = true };
+
+    private readonly List<DocumentTypeItem> _types = [];
+    private readonly Dictionary<int, string> _divisionNames = [];
+    private readonly List<DocumentListItem> _rows = [];
+    private int? _typeId;
+    private int _total;
+    private int _page = 1;
+    private bool _busy;
+    private string? _error;
+
+    private bool _protocolOpen;
+    private DocumentDetails? _protocol;
+
+    private bool _reportBusy;
+    private bool _exporting;
+    private bool _registerOpen;
+    private int? _registeredId;
+    private string? _reportError;
+    private ResponseDto<GenerateReferenceResult>? _reportResponse;
+
+    private GenerateReferenceResult? Report => _reportResponse?.Data;
+
+    private int PageCount => Math.Max(1, (int)Math.Ceiling(_total / (double)PageSize));
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Типы — только группа «Исполнение»: у протокола есть пункты-поручения по определению.
+        var types = await Dispatcher.Send(new ListDocumentTypesQuery(DocumentGroup.Execution, IsActive: true));
+        if (types is { Status: true, Data: { } typeList })
+        {
+            _types.AddRange(typeList);
+        }
+
+        // Имена подразделений — тем же справочником, что карточка документа docflow (порт профиля).
+        var divisions = await Dispatcher.Send(new ListDivisionsQuery());
+        if (divisions is { Status: true, Data: { } divisionList })
+        {
+            foreach (var division in divisionList)
+            {
+                _divisionNames[division.Id] = division.Name;
+            }
+        }
+
+        await ReloadAsync(true);
+    }
+
+    private async Task ReloadAsync(bool resetPage)
+    {
+        if (resetPage)
+        {
+            _page = 1;
+        }
+
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ListDocumentsQuery(
+                Group: DocumentGroup.Execution, TypeId: _typeId, Page: _page, PageSize: PageSize));
+            _rows.Clear();
+            if (response is { Status: true, Data: { } page })
+            {
+                _rows.AddRange(page.Rows);
+                _total = page.TotalCount;
+            }
+            else if (response is { Status: false })
+            {
+                _error = response.StatusMessage;
+                _total = 0;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task GoToPageAsync(int page)
+    {
+        _page = page;
+        await ReloadAsync(false);
+    }
+
+    private async Task OpenProtocolAsync(int documentId)
+    {
+        _error = null;
+        var response = await Dispatcher.Send(new GetDocumentQuery(documentId));
+        if (response is not { Status: true, Data: { } details })
+        {
+            _error = response.StatusMessage;
+            return;
+        }
+
+        _protocol = details;
+        _reportResponse = null;
+        _reportError = null;
+        _registeredId = null;
+        _protocolOpen = true;
+    }
+
+    private async Task GenerateReportAsync()
+    {
+        if (_protocol is not { } protocol)
+        {
+            return;
+        }
+
+        _reportBusy = true;
+        _reportError = null;
+        try
+        {
+            var response = await Dispatcher.Send(new GenerateMeetingReportCommand(protocol.Id));
+            if (response.Status)
+            {
+                _reportResponse = response;
+            }
+            else
+            {
+                _reportError = response.StatusMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _reportError = $"Ошибка формирования: {ex.Message}";
+        }
+        finally
+        {
+            _reportBusy = false;
+        }
+    }
+
+    private async Task ExportReportAsync()
+    {
+        if (Report is not { } report || _protocol is not { } protocol)
+        {
+            return;
+        }
+
+        _exporting = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ExportReferenceCommand(
+                $"Справка об исполнении поручений протокола {protocol.RegNumber ?? "без номера"}",
+                report.DraftText, report.ResultClassification));
+            if (response is { Status: true, Data: { } file })
+            {
+                using var streamReference = new DotNetStreamReference(new MemoryStream(file.Content));
+                await JS.InvokeVoidAsync("downloadFileFromStream", file.FileName, streamReference);
+            }
+            else
+            {
+                _reportError = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _exporting = false;
+        }
+    }
+
+    private void OpenReportInEditor()
+    {
+        if (Report is { } report)
+        {
+            EditorHandoff.Put(report.DraftText, null);
+            Navigation.NavigateTo("/editor");
+        }
+    }
+
+    private string DivisionName(int divisionId) =>
+        _divisionNames.TryGetValue(divisionId, out var name) ? name : $"подразделение №{divisionId}";
+
+    // Подписи/цвета статусов — согласованы с модулем документооборота (его UI-сборка тут не подключена).
+    private static string AggregatedLabel(DocumentAggregatedStatus status) => status switch
+    {
+        DocumentAggregatedStatus.NotApplicable => "—",
+        DocumentAggregatedStatus.Registered => "Зарегистрирован",
+        DocumentAggregatedStatus.InProgress => "В работе",
+        DocumentAggregatedStatus.PartiallyDone => "Частично исполнено",
+        DocumentAggregatedStatus.Done => "Исполнено",
+        DocumentAggregatedStatus.Overdue => "Просрочено",
+        DocumentAggregatedStatus.Closed => "Снят с контроля",
+        _ => status.ToString(),
+    };
+
+    private static Color AggregatedColor(DocumentAggregatedStatus status) => status switch
+    {
+        DocumentAggregatedStatus.Done or DocumentAggregatedStatus.Closed => Color.Success,
+        DocumentAggregatedStatus.Overdue => Color.Error,
+        DocumentAggregatedStatus.PartiallyDone => Color.Warning,
+        DocumentAggregatedStatus.InProgress => Color.Info,
+        _ => Color.Default,
+    };
+
+    private static string AssignmentLabel(AssignmentStatus status) => status switch
+    {
+        AssignmentStatus.Registered => "Зарегистрировано",
+        AssignmentStatus.InControl => "Контроль",
+        AssignmentStatus.InProgress => "В работе",
+        AssignmentStatus.PartiallyDone => "Частично исполнено",
+        AssignmentStatus.Done => "Исполнено",
+        AssignmentStatus.Overdue => "Просрочено",
+        AssignmentStatus.Closed => "Снято с контроля",
+        _ => status.ToString(),
+    };
+
+    private static Color AssignmentColor(AssignmentStatus status) => status switch
+    {
+        AssignmentStatus.Done or AssignmentStatus.Closed => Color.Success,
+        AssignmentStatus.Overdue => Color.Error,
+        AssignmentStatus.PartiallyDone => Color.Warning,
+        AssignmentStatus.InProgress or AssignmentStatus.InControl => Color.Info,
+        _ => Color.Default,
+    };
+}

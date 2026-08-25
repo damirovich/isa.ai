@@ -74,12 +74,15 @@ public sealed class InspectorProfile : IProfile
             typeof(Methods), ReadPolicy, GroupMain),
         new ModuleDescriptor("monitoring", "/monitoring", "Мониторинг", Icons.Material.Filled.MonitorHeart,
             typeof(Monitoring), ReadPolicy, GroupMain),
+        // Совещания (§5.2.7, ТФ-СОВ-01/02): протоколы — документы группы «Исполнение» документооборота
+        // (пункты = назначения, контроль сроков — там); модуль добавляет реестр протоколов и справку
+        // об исполнении (факты считает код, ИИ ролью Draft пишет только текст).
+        new ModuleDescriptor("meetings", "/meetings", "Совещания", Icons.Material.Filled.EventNote,
+            typeof(Meetings), ReadPolicy, GroupMain),
 
         // --- Модули §5.2, ещё не реализованные (страницы-заглушки, волна P2) ---
         new ModuleDescriptor("collegium", "/collegium", "Коллегия", Icons.Material.Filled.Groups,
             typeof(Collegium), ReadPolicy, GroupMain),
-        new ModuleDescriptor("meetings", "/meetings", "Совещания", Icons.Material.Filled.EventNote,
-            typeof(Meetings), ReadPolicy, GroupMain),
 
         // --- Операционный модуль (вне §5.2): наполнение корпуса ---
         new ModuleDescriptor("load", "/load", "Загрузка корпуса", Icons.Material.Filled.CloudUpload,
