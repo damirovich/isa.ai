@@ -18,8 +18,8 @@ namespace ISC.AI.Profile.Inspector;
 /// </summary>
 /// <remarks>
 /// Реестр модулей соответствует набору из §5.2 ТЗ (11 модулей) плюс операционная «Загрузка корпуса».
-/// Реализованы: Дашборд, Генератор, База НПА, Загрузка; остальные — страницы-заглушки «в разработке»
-/// (очередь Ф1/Ф2 по §6.2). Секции меню объявляет профиль (<c>MenuGroup</c>) — хост лишь группирует.
+/// Все модули §5.2 реализованы (заглушек не осталось; Коллегия — последняя, Э5-09).
+/// Секции меню объявляет профиль (<c>MenuGroup</c>) — хост лишь группирует.
 /// </remarks>
 public sealed class InspectorProfile : IProfile
 {
@@ -79,8 +79,9 @@ public sealed class InspectorProfile : IProfile
         // об исполнении (факты считает код, ИИ ролью Draft пишет только текст).
         new ModuleDescriptor("meetings", "/meetings", "Совещания", Icons.Material.Filled.EventNote,
             typeof(Meetings), ReadPolicy, GroupMain),
-
-        // --- Модули §5.2, ещё не реализованные (страницы-заглушки, волна P2) ---
+        // Коллегия (§5.2.8, ТФ-КОЛ-01/02): доклад, проект решения и материалы к совещанию руководства
+        // на одном факт-блоке с отчётом руководству (числа — код, ИИ ролью Draft — только текст).
+        // Последний модуль §5.2 — заглушек больше нет.
         new ModuleDescriptor("collegium", "/collegium", "Коллегия", Icons.Material.Filled.Groups,
             typeof(Collegium), ReadPolicy, GroupMain),
 
