@@ -7,6 +7,7 @@
 @rendermode InteractiveServer
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Profile.Inspector.Application.Features.Divisions
+@using ISC.AI.Profile.Inspector.Domain.Enums
 @using ISC.AI.Profile.Inspector.Domain.Services
 
 <PageHeader Title="Подразделения" Subtitle="Справочник с иерархией ТУ → РО · код — сопоставление со СКИД"
@@ -32,6 +33,12 @@
                 <MudSelectItem T="int?" Value="@node.Id">@node.Name</MudSelectItem>
             }
         </MudSelect>
+        @* Тип (§4.2) — разрез «территориальные/линейные» аналитики архива (ТФ-АРХ-03). *@
+        <MudSelect T="DivisionKind" @bind-Value="_newKind" Label="Тип"
+                   Variant="Variant.Outlined" Dense="true" Style="width:170px;">
+            <MudSelectItem T="DivisionKind" Value="DivisionKind.Territorial">Территориальное</MudSelectItem>
+            <MudSelectItem T="DivisionKind" Value="DivisionKind.Linear">Линейное</MudSelectItem>
+        </MudSelect>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
                    Disabled="@(_busy || string.IsNullOrWhiteSpace(_newName))" OnClick="CreateAsync">
             Добавить
@@ -43,6 +50,7 @@
 <MudTable T="TreeRow" Items="_tree" Hover="true" Dense="true" Outlined="true" Loading="_busy">
     <HeaderContent>
         <MudTh>Подразделение</MudTh>
+        <MudTh>Тип</MudTh>
         <MudTh>Код</MudTh>
         <MudTh>Используется</MudTh>
         <MudTh>Действует</MudTh>
@@ -58,6 +66,12 @@
                 }
                 <span class="@(context.Node.IsActive ? null : "mud-text-secondary")">@context.Node.Name</span>
             </div>
+        </MudTd>
+        <MudTd DataLabel="Тип">
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Class="ma-0"
+                     Color="@(context.Node.Kind == DivisionKind.Linear ? Color.Info : Color.Default)">
+                @context.Node.Kind.Label()
+            </MudChip>
         </MudTd>
         <MudTd DataLabel="Код">@(context.Node.Code ?? "—")</MudTd>
         <MudTd DataLabel="Используется">
@@ -132,7 +146,12 @@
     <DialogContent>
         <MudTextField @bind-Value="_renameName" Label="Наименование" Variant="Variant.Outlined" MaxLength="500"
                       Immediate="true" AutoFocus="true" Class="mb-2" />
-        <MudTextField @bind-Value="_renameCode" Label="Код (для СКИД)" Variant="Variant.Outlined" MaxLength="100" />
+        <MudTextField @bind-Value="_renameCode" Label="Код (для СКИД)" Variant="Variant.Outlined" MaxLength="100"
+                      Class="mb-2" />
+        <MudSelect T="DivisionKind" @bind-Value="_renameKind" Label="Тип" Variant="Variant.Outlined" Dense="true">
+            <MudSelectItem T="DivisionKind" Value="DivisionKind.Territorial">Территориальное</MudSelectItem>
+            <MudSelectItem T="DivisionKind" Value="DivisionKind.Linear">Линейное</MudSelectItem>
+        </MudSelect>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _renameOpen = false)">Отмена</MudButton>
@@ -154,6 +173,7 @@
     private string _newName = string.Empty;
     private string? _newCode;
     private int? _newParentId;
+    private DivisionKind _newKind = DivisionKind.Territorial;
     private bool _busy;
     private string? _error;
 
@@ -161,6 +181,7 @@
     private DivisionNode? _renameTarget;
     private string _renameName = string.Empty;
     private string? _renameCode;
+    private DivisionKind _renameKind = DivisionKind.Territorial;
 
     protected override async Task OnInitializedAsync() => await ReloadAsync();
 
@@ -211,11 +232,12 @@
         _error = null;
         try
         {
-            var response = await Dispatcher.Send(new CreateDivisionCommand(_newName, _newCode, _newParentId));
+            var response = await Dispatcher.Send(new CreateDivisionCommand(_newName, _newCode, _newParentId, _newKind));
             if (response.Status)
             {
                 _newName = string.Empty;
                 _newCode = null;
+                _newKind = DivisionKind.Territorial;
             }
             else
             {
@@ -261,6 +283,7 @@
         _renameTarget = node;
         _renameName = node.Name;
         _renameCode = node.Code;
+        _renameKind = node.Kind;
         _renameOpen = true;
     }
 
@@ -273,7 +296,7 @@
 
         _renameOpen = false;
         _error = null;
-        var response = await Dispatcher.Send(new RenameDivisionCommand(target.Id, _renameName, _renameCode));
+        var response = await Dispatcher.Send(new RenameDivisionCommand(target.Id, _renameName, _renameCode, _renameKind));
         if (!response.Status)
         {
             _error = response.StatusMessage;

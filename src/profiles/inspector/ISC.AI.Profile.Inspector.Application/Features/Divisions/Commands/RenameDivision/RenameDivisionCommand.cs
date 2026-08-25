@@ -6,8 +6,10 @@ using Mediator;
 
 namespace ISC.AI.Profile.Inspector.Application.Features.Divisions;
 
-/// <summary>Переименовать подразделение / изменить код сопоставления со СКИД.</summary>
-public sealed record RenameDivisionCommand(int Id, string Name, string? Code)
+/// <summary>Переименовать подразделение / изменить код сопоставления со СКИД и тип (§4.2).</summary>
+public sealed record RenameDivisionCommand(
+    int Id, string Name, string? Code,
+    Domain.Enums.DivisionKind Kind = Domain.Enums.DivisionKind.Territorial)
     : IRequest<ResponseDto<bool>>, IAuditableRequest
 {
     /// <inheritdoc />
@@ -24,7 +26,8 @@ public sealed record RenameDivisionCommand(int Id, string Name, string? Code)
             RenameDivisionCommand command, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(command);
-            var found = await store.RenameAsync(command.Id, command.Name, command.Code, cancellationToken);
+            var found = await store.RenameAsync(
+                command.Id, command.Name, command.Code, command.Kind, cancellationToken);
             return found ? ResponseDto<bool>.Ok(true) : ResponseDto<bool>.NotFound("Подразделение не найдено.");
         }
     }

@@ -1,3 +1,5 @@
+using ISC.AI.Profile.Inspector.Domain.Enums;
+
 namespace ISC.AI.Profile.Inspector.Domain.Entities;
 
 /// <summary>
@@ -12,6 +14,13 @@ public class Division : AuditableEntity
 
     /// <summary>Код подразделения — ключ сопоставления с записью СКИД по значению (§4.2).</summary>
     public string? Code { get; set; }
+
+    /// <summary>
+    /// Тип подразделения (§4.2): территориальное либо линейное. Существующие записи миграцией
+    /// помечены территориальными (историческое умолчание справочника); тип правится в справочнике.
+    /// Нужен аналитике архива (ТФ-АРХ-03 — сравнение территориальных и линейных).
+    /// </summary>
+    public DivisionKind Kind { get; set; } = DivisionKind.Territorial;
 
     /// <summary>Родительское подразделение (null — верхний уровень, напр. ТУ). FK внутри схемы inspector.</summary>
     public int? ParentId { get; set; }

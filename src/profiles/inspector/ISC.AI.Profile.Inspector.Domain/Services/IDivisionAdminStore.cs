@@ -25,10 +25,16 @@ public interface IDivisionAdminStore
     Task<bool> ExistsActiveAsync(int id, CancellationToken cancellationToken = default);
 
     /// <summary>Создаёт подразделение (при <paramref name="parentId"/> — дочернее). Возвращает идентификатор.</summary>
-    Task<int> CreateAsync(string name, string? code, int? parentId, CancellationToken cancellationToken = default);
+    Task<int> CreateAsync(
+        string name, string? code, int? parentId,
+        Enums.DivisionKind kind = Enums.DivisionKind.Territorial,
+        CancellationToken cancellationToken = default);
 
-    /// <summary>Меняет наименование и код. <see langword="false"/> — подразделение не найдено.</summary>
-    Task<bool> RenameAsync(int id, string name, string? code, CancellationToken cancellationToken = default);
+    /// <summary>Меняет наименование, код и тип. <see langword="false"/> — подразделение не найдено.</summary>
+    Task<bool> RenameAsync(
+        int id, string name, string? code,
+        Enums.DivisionKind kind = Enums.DivisionKind.Territorial,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Выводит подразделение из обращения или возвращает в него.</summary>
     Task<bool> SetActiveAsync(int id, bool isActive, CancellationToken cancellationToken = default);

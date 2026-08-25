@@ -2,17 +2,37 @@
 @* Архив проверок (§5.2.4, ТФ-АРХ-01/02): история нарушений по подразделениям вплоть до райотдела,
    сгруппированная по справкам-проверкам (слабая ссылка по номеру, ТО-инф-06). Метаданные справки
    приходят из документооборота ЧЕРЕЗ решётку доступа: недоступная справка остаётся голым номером.
-   ИИ-аналитика архива (ТФ-АРХ-03) — P2, здесь только детерминированная история. *@
+   ИИ-аналитика (ТФ-АРХ-03): тренды/повторяемость/разрез терр-лин считает КОД за два смежных
+   периода, ИИ вдумчивой ролью интерпретирует закономерности; судьба записки — как у всех
+   ИИ-документов (экспорт/Редактор/регистрация). *@
 @page "/archive"
 @rendermode InteractiveServer
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Abstractions.Grounding
 @using ISC.AI.Profile.Inspector.Application.Features.Archive
 @using ISC.AI.Profile.Inspector.Application.Features.Divisions
+@using ISC.AI.Profile.Inspector.Application.Features.Generation
 @using ISC.AI.Profile.Inspector.Application.Features.ViolationCategories
 @using ISC.AI.Profile.Inspector.Domain.Enums
 @using ISC.AI.Profile.Inspector.Domain.Services
+@using Microsoft.JSInterop
+@inject EditorDraftHandoff EditorHandoff
+@inject NavigationManager Navigation
 
 <PageHeader Title="Архив проверок" Subtitle="История проверок и нарушений по подразделениям"
-            Icon="@Icons.Material.Filled.Inventory2" />
+            Icon="@Icons.Material.Filled.Inventory2">
+    <MudSelect T="int" @bind-Value="_analyticsPeriodDays" Label="Период аналитики"
+               Variant="Variant.Outlined" Dense="true" Style="width:170px;">
+        <MudSelectItem T="int" Value="30">30 дней</MudSelectItem>
+        <MudSelectItem T="int" Value="90">90 дней</MudSelectItem>
+        <MudSelectItem T="int" Value="180">Полгода</MudSelectItem>
+        <MudSelectItem T="int" Value="365">Год</MudSelectItem>
+    </MudSelect>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="GenerateAnalyticsAsync"
+               Disabled="_analyticsBusy" StartIcon="@Icons.Material.Filled.Insights">
+        @(_analyticsBusy ? "Анализирую…" : "ИИ-аналитика")
+    </MudButton>
+</PageHeader>
 
 @if (_error is not null)
 {
@@ -65,6 +85,48 @@
         </div>
     </div>
 </MudPaper>
+
+@* --- ИИ-аналитика (ТФ-АРХ-03): результат над историей, судьба — как у всех ИИ-документов --- *@
+@if (Analytics is { } analytics)
+{
+    <MudPaper Outlined="true" Class="pa-4 mb-4">
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3">
+            ПРОЕКТ — подписывает человек (ТБ-042). Гриф: @analytics.ResultClassification.
+            Числа записки — детерминированный расчёт системы за два смежных периода, ИИ писал только текст.
+        </MudAlert>
+        @if (_registeredId is { } registeredId)
+        {
+            <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                Зарегистрировано в документообороте (№ записи @registeredId) — модуль «Документы».
+            </MudAlert>
+        }
+        <div style="max-height:55vh; overflow-y:auto;" class="mb-3">
+            <DocumentSheet Title="Аналитическая записка по архиву проверок"
+                           Subtitle="@($"за последние {_analyticsGeneratedDays} дней")"
+                           Body="@analytics.DraftText" EmblemUrl="@NpaDocument.EmblemUrl" />
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+            <MudButton OnClick="ExportAnalyticsAsync" Disabled="_exporting" Variant="Variant.Outlined">
+                Экспорт .docx
+            </MudButton>
+            <MudButton StartIcon="@Icons.Material.Filled.EditNote" Variant="Variant.Outlined"
+                       OnClick="OpenAnalyticsInEditor">
+                Доработать в Редакторе
+            </MudButton>
+            @if (_registeredId is null)
+            {
+                <MudTooltip Text="@(analytics.AllCitationsConfirmed ? string.Empty : "Есть неподтверждённые ссылки (GATE-2) — доработайте в Редакторе.")">
+                    <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                               OnClick="@(() => _registerOpen = true)"
+                               Disabled="@(!analytics.AllCitationsConfirmed)">
+                        Зарегистрировать
+                    </MudButton>
+                </MudTooltip>
+            }
+            <MudButton OnClick="@(() => _analyticsResponse = null)">Скрыть</MudButton>
+        </div>
+    </MudPaper>
+}
 
 @if (_busy)
 {
@@ -162,6 +224,13 @@
     <MudPagination Count="@PageCount" Selected="_page" SelectedChanged="GoToPageAsync"
                    Size="Size.Small" ShowFirstButton="true" ShowLastButton="true" />
 </div>
+
+<RegisterGeneratedDialog @bind-Visible="_registerOpen" Origin="Архив"
+                         DefaultTitle="@($"Аналитическая записка по архиву проверок за {_analyticsGeneratedDays} дней")"
+                         Body="@(Analytics?.DraftText ?? string.Empty)"
+                         Classification="@(Analytics?.ResultClassification ?? 0)"
+                         Citations="@(Analytics?.Citations ?? [])"
+                         OnRegistered="@(id => _registeredId = id)" />
 
 @code {
     private const int PageSize = 20;
@@ -263,6 +332,84 @@
 
     private static DateOnly? ToDateOnly(DateTime? value) =>
         value is { } date ? DateOnly.FromDateTime(date) : null;
+
+    // --- ИИ-аналитика архива (ТФ-АРХ-03) ---
+    private int _analyticsPeriodDays = 90;
+    private int _analyticsGeneratedDays = 90; // период на момент генерации: селект после — не меняет лист
+    private bool _analyticsBusy;
+    private bool _exporting;
+    private bool _registerOpen;
+    private int? _registeredId;
+    private ResponseDto<GenerateReferenceResult>? _analyticsResponse;
+
+    private GenerateReferenceResult? Analytics => _analyticsResponse?.Data;
+
+    private async Task GenerateAnalyticsAsync()
+    {
+        _analyticsBusy = true;
+        _error = null;
+        _analyticsResponse = null;
+        _registeredId = null;
+        try
+        {
+            var response = await Dispatcher.Send(new GenerateArchiveAnalyticsCommand(_analyticsPeriodDays));
+            if (response.Status)
+            {
+                _analyticsResponse = response;
+                _analyticsGeneratedDays = _analyticsPeriodDays;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка анализа: {ex.Message}";
+        }
+        finally
+        {
+            _analyticsBusy = false;
+        }
+    }
+
+    private async Task ExportAnalyticsAsync()
+    {
+        if (Analytics is not { } analytics)
+        {
+            return;
+        }
+
+        _exporting = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ExportReferenceCommand(
+                $"Аналитическая записка по архиву проверок за {_analyticsGeneratedDays} дней",
+                analytics.DraftText, analytics.ResultClassification));
+            if (response is { Status: true, Data: { } file })
+            {
+                using var streamReference = new DotNetStreamReference(new MemoryStream(file.Content));
+                await JS.InvokeVoidAsync("downloadFileFromStream", file.FileName, streamReference);
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _exporting = false;
+        }
+    }
+
+    private void OpenAnalyticsInEditor()
+    {
+        if (Analytics is { } analytics)
+        {
+            EditorHandoff.Put(analytics.DraftText, null);
+            Navigation.NavigateTo("/editor");
+        }
+    }
 
     // Цвета согласованы с реестром нарушений и мониторингом.
     private static Color SeverityColor(ViolationSeverity severity) => severity switch
