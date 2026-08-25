@@ -19,7 +19,7 @@
 ## Результат
 - Контракты [`IIngestionPort`](../../src/core/ISC.AI.Abstractions/Ingestion/IIngestionPort.cs), `IngestionRequest` (гриф/подразделение `null`-овые — детектор «не задано» для fail-closed), `IngestionResult`, `ITextChunker`.
 - [`IngestionPort`](../../src/core/ISC.AI.Ingestion/IngestionPort.cs): fail-closed (нет грифа/подразделения → `Reject` без записи); дедуп по `ContentHash`; чанкинг ([`SimpleTextChunker`](../../src/core/ISC.AI.Ingestion/SimpleTextChunker.cs)) → эмбеддинги (роль Embeddings) → запись `Document`/`Chunk`/`Embedding` в ОДНОЙ транзакции с денормализацией режима + `IsCurrent=true`. `AddCoreIngestion` в хосте.
-- Тесты: unit [`IngestionTests`](../../tests/ISC.AI.UnitTests/Ingestion/IngestionTests.cs) (fail-closed + чанкер); интеграционный [`IngestionPipelineTests`](../../tests/ISC.AI.IntegrationTests/Persistence/IngestionPipelineTests.cs) (индексация с грифом, дедуп, отказ без грифа). Сборка 0/0; unit 22/22.
+- Тесты: unit [`IngestionFailClosedTests`](../../tests/ISC.AI.UnitTests/Ingestion/IngestionFailClosedTests.cs) (fail-closed + чанкер); интеграционный [`IngestionPipelineTests`](../../tests/ISC.AI.IntegrationTests/Persistence/IngestionPipelineTests.cs) (индексация с грифом, дедуп, отказ без грифа). Сборка 0/0; unit 22/22.
 
 ## Осталось
 - Парсинг ФОРМАТОВ источников (OCR Tesseract для сканов, разбор `.docx`) и фоновая загрузка корпуса — [Э4-01](Э4-01-ingestion-корпус.md); порт принимает уже извлечённый текст.
