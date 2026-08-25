@@ -76,11 +76,27 @@ public sealed record RemediationSummary(
 /// просроченные устранения, тренд к предыдущему периоду равной длины. Балл считает
 /// <see cref="RiskScoreCalculator"/> — код, не ИИ (воспроизводимость приёмки, §5.2.5.1).
 /// </summary>
+/// <summary>
+/// Отбор дашборда (ТФ-ДШ-02): подразделение, вид нарушения (сфера включает её виды — как в архиве),
+/// тяжесть, статус устранения. <c>null</c>-поля — без ограничения.
+/// </summary>
+public sealed record DashboardFilter(
+    int? DivisionId = null,
+    int? CategoryId = null,
+    Enums.ViolationSeverity? Severity = null,
+    Enums.RemediationStatus? RemediationStatus = null);
+
 public interface IRiskDataSource
 {
-    /// <summary>Сводка дашборда за период [<paramref name="from"/>, <paramref name="to"/>].</summary>
+    /// <summary>
+    /// Сводка дашборда за период [<paramref name="from"/>, <paramref name="to"/>] с необязательным
+    /// отбором (ТФ-ДШ-02). Тренд к прошлому периоду считается В ТЕХ ЖЕ рамках отбора по
+    /// подразделению/виду/тяжести; статус устранения к прошлому периоду не применяется —
+    /// это текущее состояние, а не свойство периода.
+    /// </summary>
     Task<DashboardSummary> GetDashboardAsync(
-        DateOnly from, DateOnly to, CancellationToken cancellationToken = default);
+        DateOnly from, DateOnly to, DashboardFilter? filter = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Разбор риска по подразделениям за период — по убыванию балла.</summary>
     Task<IReadOnlyList<DivisionRiskDetail>> GetDivisionRisksAsync(

@@ -95,7 +95,7 @@ public sealed class ArchiveAnalyticsTests
         var riskDataSource = Substitute.For<IRiskDataSource>();
         riskDataSource.GetDashboardAsync(
                 Arg.Do<DateOnly>(f => dashboardCalls.Add((f, default))),
-                Arg.Any<DateOnly>(), Arg.Any<CancellationToken>())
+                Arg.Any<DateOnly>(), Arg.Any<DashboardFilter?>(), Arg.Any<CancellationToken>())
             .Returns(Current, Previous);
         riskDataSource.GetDivisionRisksAsync(Arg.Any<DateOnly>(), Arg.Any<DateOnly>(), Arg.Any<CancellationToken>())
             .Returns((IReadOnlyList<DivisionRiskDetail>)[NarynRisk, LineRisk]);

@@ -5,6 +5,7 @@ using ISC.AI.Profile.Inspector.Data;
 using ISC.AI.Profile.Inspector.Domain.Entities;
 using ISC.AI.Profile.Inspector.Domain.Enums;
 using ISC.AI.Profile.Inspector.Domain.Risk;
+using ISC.AI.Profile.Inspector.Domain.Services;
 using Microsoft.EntityFrameworkCore;
 using Shouldly;
 using Testcontainers.PostgreSql;
@@ -159,6 +160,47 @@ public sealed class RiskDataSourceTests : IAsyncLifetime
         summary.Rows[3].RemediationStatus.ShouldBe(RemediationStatus.Resolved);
     }
 
+    [Fact(DisplayName = "Отбор дашборда (ТФ-ДШ-02): подразделение, тяжесть, статус и сфера с её видами")]
+    public async Task Dashboard_filter_narrows_summary()
+    {
+        var (source, ids) = await BuildAsync();
+
+        // Набор — как в основном тесте: 4 нарушения в периоде + 1 в предыдущем.
+        await SeedViolationAsync(ids.DivisionA, ids.KindK1, ViolationSeverity.High,
+            new DateOnly(2026, 5, 10), RemediationStatus.Overdue);
+        await SeedViolationAsync(ids.DivisionA, ids.KindK1, ViolationSeverity.Medium,
+            new DateOnly(2026, 5, 20), RemediationStatus.Resolved);
+        await SeedViolationAsync(ids.DivisionA, ids.KindK1, ViolationSeverity.Critical,
+            new DateOnly(2026, 5, 25), RemediationStatus.UnderControl);
+        await SeedViolationAsync(ids.DivisionB, ids.KindK2, ViolationSeverity.Low,
+            new DateOnly(2026, 5, 5), RemediationStatus.Resolved);
+        await SeedViolationAsync(ids.DivisionA, ids.KindK2, ViolationSeverity.Low,
+            new DateOnly(2026, 4, 15), RemediationStatus.Resolved);
+
+        // Подразделение: только «Альфа» — 3 нарушения, светофор из одной строки, лента только её.
+        var byDivision = await source.GetDashboardAsync(From, To, new DashboardFilter(DivisionId: ids.DivisionA));
+        byDivision.TotalViolations.ShouldBe(3);
+        byDivision.DivisionRisks.Count.ShouldBe(1);
+        byDivision.DivisionRisks[0].DivisionName.ShouldBe("Альфа");
+        byDivision.RecentViolations.ShouldAllBe(r => r.DivisionName == "Альфа");
+
+        // Тяжесть: критическое за период — одно.
+        var bySeverity = await source.GetDashboardAsync(
+            From, To, new DashboardFilter(Severity: ViolationSeverity.Critical));
+        bySeverity.TotalViolations.ShouldBe(1);
+
+        // Статус устранения: устранённых — два.
+        var byStatus = await source.GetDashboardAsync(
+            From, To, new DashboardFilter(RemediationStatus: RemediationStatus.Resolved));
+        byStatus.TotalViolations.ShouldBe(2);
+
+        // Вид: K2 в периоде — одно (у «Беты»); СФЕРА-родитель включает все её виды — все 4 (как в архиве).
+        var byKind = await source.GetDashboardAsync(From, To, new DashboardFilter(CategoryId: ids.KindK2));
+        byKind.TotalViolations.ShouldBe(1);
+        var bySphere = await source.GetDashboardAsync(From, To, new DashboardFilter(CategoryId: ids.Sphere));
+        bySphere.TotalViolations.ShouldBe(4);
+    }
+
     [Fact(DisplayName = "Пустой период — нулевая сводка без строк светофора")]
     public async Task Empty_period_yields_zero_summary()
     {
@@ -197,7 +239,7 @@ public sealed class RiskDataSourceTests : IAsyncLifetime
             await db.SaveChangesAsync();
 
             return (new RiskDataSource(inspector, new RiskScoreCalculator()),
-                new TestIds(divisionA.Id, divisionB.Id, kind1.Id, kind2.Id));
+                new TestIds(divisionA.Id, divisionB.Id, kind1.Id, kind2.Id, sphere.Id));
         }
     }
 
@@ -219,5 +261,5 @@ public sealed class RiskDataSourceTests : IAsyncLifetime
         await db.SaveChangesAsync();
     }
 
-    private sealed record TestIds(int DivisionA, int DivisionB, int KindK1, int KindK2);
+    private sealed record TestIds(int DivisionA, int DivisionB, int KindK1, int KindK2, int Sphere);
 }

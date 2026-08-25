@@ -2,11 +2,15 @@
 @page "/dashboard"
 @rendermode InteractiveServer
 @using ISC.AI.Profile.Inspector.Application.Features.Dashboard
+@using ISC.AI.Profile.Inspector.Application.Features.Divisions
+@using ISC.AI.Profile.Inspector.Application.Features.ViolationCategories
 @using ISC.AI.Profile.Inspector.Domain.Enums
 @using ISC.AI.Profile.Inspector.Domain.Services
 
 @* Модуль «Дашборд» (§5.2.5, Э5-01): ЖИВЫЕ данные из учёта нарушений — демо-набор снят. Светофор —
-   детерминированный балл RiskScore (Приложение §2), считает код (RiskScoreCalculator), не ИИ. *@
+   детерминированный балл RiskScore (Приложение §2), считает код (RiskScoreCalculator), не ИИ.
+   Отбор ТФ-ДШ-02 (подразделение/вид/тяжесть/статус) применяется в самом источнике данных —
+   счётчики, светофор и лента пересчитываются в рамках отбора, тренд — в тех же рамках. *@
 
 <PageHeader Title="Дашборд" Subtitle="Сводная картина по подразделениям — светофор риска"
             Icon="@Icons.Material.Filled.Dashboard">
@@ -24,6 +28,40 @@
     <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
               ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
 }
+
+@* --- Отбор (ТФ-ДШ-02): подразделение, вид (сфера включает её виды), тяжесть, статус --- *@
+<MudPaper Outlined="true" Class="pa-3 mb-4">
+    <div class="d-flex gap-3 align-end flex-wrap">
+        <MudSelect T="int?" Value="_divisionId" ValueChanged="@(async (int? v) => { _divisionId = v; await ReloadAsync(); })"
+                   Label="Подразделение" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:220px;">
+            @foreach (var division in _divisions)
+            {
+                <MudSelectItem T="int?" Value="@division.Id">@division.Name</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="int?" Value="_categoryId" ValueChanged="@(async (int? v) => { _categoryId = v; await ReloadAsync(); })"
+                   Label="Сфера / вид" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:240px;">
+            @foreach (var node in OrderedCategories)
+            {
+                <MudSelectItem T="int?" Value="@node.Id">@(node.ParentId is null ? node.Name : "— " + node.Name)</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="ViolationSeverity?" Value="_severity" ValueChanged="@(async (ViolationSeverity? v) => { _severity = v; await ReloadAsync(); })"
+                   Label="Тяжесть" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:150px;">
+            @foreach (var severity in Severities)
+            {
+                <MudSelectItem T="ViolationSeverity?" Value="@severity">@severity.Label()</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="RemediationStatus?" Value="_status" ValueChanged="@(async (RemediationStatus? v) => { _status = v; await ReloadAsync(); })"
+                   Label="Статус устранения" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:180px;">
+            @foreach (var status in Statuses)
+            {
+                <MudSelectItem T="RemediationStatus?" Value="@status">@status.Label()</MudSelectItem>
+            }
+        </MudSelect>
+    </div>
+</MudPaper>
 
 @if (_summary is { } summary)
 {
@@ -133,12 +171,57 @@ else if (_busy)
 }
 
 @code {
+    private static readonly ViolationSeverity[] Severities =
+        [ViolationSeverity.Low, ViolationSeverity.Medium, ViolationSeverity.High, ViolationSeverity.Critical];
+
+    private static readonly RemediationStatus[] Statuses =
+        [RemediationStatus.Overdue, RemediationStatus.Partial, RemediationStatus.UnderControl, RemediationStatus.Resolved];
+
     private DashboardSummary? _summary;
     private int _periodDays = 90;
     private bool _busy;
     private string? _error;
 
-    protected override async Task OnInitializedAsync() => await ReloadAsync();
+    // --- Отбор ТФ-ДШ-02 ---
+    private readonly List<DivisionNode> _divisions = [];
+    private readonly List<ViolationCategoryNode> _categories = [];
+    private int? _divisionId;
+    private int? _categoryId;
+    private ViolationSeverity? _severity;
+    private RemediationStatus? _status;
+
+    // Классификатор в порядке «сфера, под ней её виды» — как в реестре нарушений и архиве.
+    private IEnumerable<ViolationCategoryNode> OrderedCategories
+    {
+        get
+        {
+            foreach (var sphere in _categories.Where(c => c.ParentId is null))
+            {
+                yield return sphere;
+                foreach (var kind in _categories.Where(c => c.ParentId == sphere.Id))
+                {
+                    yield return kind;
+                }
+            }
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var divisions = await Dispatcher.Send(new ListDivisionTreeQuery());
+        if (divisions is { Status: true, Data: { } divisionList })
+        {
+            _divisions.AddRange(divisionList);
+        }
+
+        var categories = await Dispatcher.Send(new ListViolationCategoriesQuery());
+        if (categories is { Status: true, Data: { } categoryList })
+        {
+            _categories.AddRange(categoryList);
+        }
+
+        await ReloadAsync();
+    }
 
     private async Task ChangePeriodAsync(int days)
     {
@@ -151,7 +234,8 @@ else if (_busy)
         _busy = true;
         try
         {
-            var response = await Dispatcher.Send(new GetDashboardQuery(_periodDays));
+            var response = await Dispatcher.Send(new GetDashboardQuery(
+                _periodDays, _divisionId, _categoryId, _severity, _status));
             if (response is { Status: true, Data: { } summary })
             {
                 _summary = summary;

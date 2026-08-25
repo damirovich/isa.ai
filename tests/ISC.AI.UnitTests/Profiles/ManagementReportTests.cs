@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
 using ISC.AI.Abstractions.Enums;
@@ -65,7 +65,7 @@ public sealed class ManagementReportTests
         accessProvider.GetCurrentAsync(Arg.Any<CancellationToken>()).Returns(access);
 
         var riskDataSource = Substitute.For<IRiskDataSource>();
-        riskDataSource.GetDashboardAsync(Arg.Any<DateOnly>(), Arg.Any<DateOnly>(), Arg.Any<CancellationToken>())
+        riskDataSource.GetDashboardAsync(Arg.Any<DateOnly>(), Arg.Any<DateOnly>(), Arg.Any<DashboardFilter?>(), Arg.Any<CancellationToken>())
             .Returns(Dashboard);
         riskDataSource.GetDivisionRisksAsync(Arg.Any<DateOnly>(), Arg.Any<DateOnly>(), Arg.Any<CancellationToken>())
             .Returns((IReadOnlyList<DivisionRiskDetail>)[NarynRisk]);

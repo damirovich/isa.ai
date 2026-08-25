@@ -1,4 +1,4 @@
-using ISC.AI.Abstractions.Application;
+﻿using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Enums;
 using ISC.AI.Abstractions.Grounding;
 using ISC.AI.Abstractions.Rag;
@@ -77,7 +77,7 @@ public sealed record GenerateCollegiumMaterialCommand(
             var days = Math.Clamp(command.PeriodDays, 7, 366);
             var to = DateOnly.FromDateTime(DateTime.UtcNow);
             var from = to.AddDays(-(days - 1));
-            var dashboard = await riskDataSource.GetDashboardAsync(from, to, cancellationToken);
+            var dashboard = await riskDataSource.GetDashboardAsync(from, to, filter: null, cancellationToken);
             var risks = await riskDataSource.GetDivisionRisksAsync(from, to, cancellationToken);
             var remediation = await riskDataSource.GetRemediationAsync(from, to, cancellationToken);
 
