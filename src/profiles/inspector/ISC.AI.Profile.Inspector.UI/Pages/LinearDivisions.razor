@@ -1,9 +1,12 @@
 @namespace ISC.AI.Profile.Inspector.UI
+@* Линейные подразделения (§4.2) — заглушка снята (Э5-11): после появления DivisionKind это второй
+   вид общего справочника DivisionDirectory. Разрез «территориальные/линейные» кормит аналитику
+   архива (ТФ-АРХ-03). *@
 @page "/divisions/linear"
 @rendermode InteractiveServer
+@using ISC.AI.Profile.Inspector.Domain.Enums
 
-<ModuleStub Title="Линейные подразделения"
-            Subtitle="Объекты контроля: линейные подразделения"
-            Icon="@Icons.Material.Filled.Business"
-            Description="Справочник линейных подразделений — объектов внутреннего контроля. Точный перечень и иерархия уточняются при обследовании (этап Э1). Модель данных (inspector.division) уже создана; экран наполнится вместе с реальным справочником."
-            Requirement="§4.2 · модель данных готова, нужен справочник" />
+<DivisionDirectory Kind="DivisionKind.Linear"
+                   Title="Линейные подразделения"
+                   Subtitle="Объекты контроля по направлениям деятельности · код — сопоставление со СКИД"
+                   Icon="@Icons.Material.Filled.Business" />
