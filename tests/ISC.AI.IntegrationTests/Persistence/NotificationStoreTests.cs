@@ -1,4 +1,4 @@
-using ISC.AI.Abstractions.Security;
+﻿using ISC.AI.Abstractions.Security;
 using ISC.AI.AI.Security;
 using ISC.AI.Modules.DocFlow.Data;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
@@ -40,7 +40,7 @@ public sealed class NotificationStoreTests : IAsyncLifetime
 
         var typeStore = new DocumentTypeStore(factory);
         var documents = new DocumentStore(factory, new NoFileStorage(), new AllowAllAccessPolicy(), TestUserDirectory.AllowAll);
-        var notifications = new NotificationStore(factory, new AllowAllAccessPolicy());
+        var notifications = new NotificationStore(factory, new AllowAllAccessPolicy(), new NotificationSignal());
 
         var typeId = await typeStore.CreateAsync("Поручение", DocumentGroup.Execution, isActive: true);
         var deadline = new DateOnly(2026, 8, 20);
@@ -118,7 +118,7 @@ public sealed class NotificationStoreTests : IAsyncLifetime
 
         var typeStore = new DocumentTypeStore(factory);
         var documents = new DocumentStore(factory, new NoFileStorage(), new AllowAllAccessPolicy(), TestUserDirectory.AllowAll);
-        var notifications = new NotificationStore(factory, new AllowAllAccessPolicy());
+        var notifications = new NotificationStore(factory, new AllowAllAccessPolicy(), new NotificationSignal());
 
         var typeId = await typeStore.CreateAsync("Справка", DocumentGroup.Storage, isActive: true);
 

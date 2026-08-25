@@ -8,7 +8,9 @@ namespace ISC.AI.Modules.DocFlow.Data;
 
 /// <summary>Уведомления (разд. 5 ТЗ СКИД) поверх <see cref="DocFlowDbContext"/>.</summary>
 public sealed class NotificationStore(
-    IDbContextFactory<DocFlowDbContext> contextFactory, IAccessPolicy accessPolicy) : INotificationStore
+    IDbContextFactory<DocFlowDbContext> contextFactory,
+    IAccessPolicy accessPolicy,
+    INotificationSignal signal) : INotificationStore
 {
     /// <summary>
     /// Непрочитанные уведомления субъекта, уже суженные допуском: свои по адресату И относящиеся либо
@@ -66,6 +68,10 @@ public sealed class NotificationStore(
         }
 
         await db.SaveChangesAsync(cancellationToken);
+
+        // Живое обновление (INotificationSignal): будим открытые страницы получателей ПОСЛЕ записи.
+        // Через шину идёт только «перечитай» — содержимое подписчики берут запросом через решётку.
+        signal.Publish(recipients);
         return recipients.Count;
     }
 
