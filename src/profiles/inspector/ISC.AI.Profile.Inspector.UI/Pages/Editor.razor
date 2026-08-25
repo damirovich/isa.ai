@@ -117,10 +117,11 @@
                 }
 
                 <SectionCaption Text="Новая редакция" Class="mb-1" />
-                @* Длинный текст не растягивает страницу — прокрутка внутри блока. *@
-                <MudPaper Class="pa-3 mb-3" Outlined="true" Style="max-height:50vh; overflow-y:auto;">
-                    <MudText Typo="Typo.body2" Style="white-space: pre-wrap;">@Result.DraftText</MudText>
-                </MudPaper>
+                @* Документный вид — как лист НПА; принятие берёт исходный текст, лист — только показ. *@
+                <div class="mb-3" style="max-height:50vh; overflow-y:auto;">
+                    <DocumentSheet Title="Проект новой редакции"
+                                   Body="@Result.DraftText" EmblemUrl="@NpaDocument.EmblemUrl" />
+                </div>
 
                 @if (Result.Citations.Count > 0)
                 {

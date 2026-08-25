@@ -149,9 +149,10 @@
                     Зарегистрировано в документообороте (№ записи @registeredId) — модуль «Документы».
                 </MudAlert>
             }
-            <MudPaper Class="pa-3 mb-2" Outlined="true" Style="max-height:60vh; overflow-y:auto;">
-                <MudText Typo="Typo.body2" Style="white-space: pre-wrap;">@report.DraftText</MudText>
-            </MudPaper>
+            @* Документный вид — как лист НПА/методики: бумага, засечки, герб. *@
+            <DocumentSheet Title="Отчёт о состоянии внутреннего контроля"
+                           Subtitle="@($"за последние {_periodDays} дней")"
+                           Body="@report.DraftText" EmblemUrl="@NpaDocument.EmblemUrl" />
         }
     </DialogContent>
     <DialogActions>
