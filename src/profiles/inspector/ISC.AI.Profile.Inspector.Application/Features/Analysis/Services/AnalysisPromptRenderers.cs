@@ -41,3 +41,22 @@ public sealed class ScribanAnalyzeDocumentPromptRenderer(IPromptProvider promptP
     public string Render(AnalyzeDocumentCommand command) =>
         _template.Render(new { document = command.Text });
 }
+
+/// <summary>
+/// Рендерер ЗАДАЧНОГО промпта сверки проекта до подписания (ТФ-АНПА-02) — те же правила.
+/// </summary>
+public interface ICheckDraftPromptRenderer
+{
+    /// <summary>Рендерит задачный промпт по команде.</summary>
+    string Render(CheckDraftCommand command);
+}
+
+/// <summary>Реализация на Scriban: ключ «draft-check» через нейтральный <see cref="IPromptProvider"/>.</summary>
+public sealed class ScribanCheckDraftPromptRenderer(IPromptProvider promptProvider) : ICheckDraftPromptRenderer
+{
+    private readonly Template _template = Template.Parse(promptProvider.GetTaskPrompt("draft-check").Text);
+
+    /// <inheritdoc />
+    public string Render(CheckDraftCommand command) =>
+        _template.Render(new { draft = command.Text });
+}

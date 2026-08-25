@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using ISC.AI.Profile.Inspector.Domain.Entities;
 using ISC.AI.Profile.Inspector.Domain.Enums;
 using ISC.AI.Profile.Inspector.Domain.Risk;
 using ISC.AI.Profile.Inspector.Domain.Services;
@@ -34,12 +35,14 @@ public sealed class RiskDataSource(
 
     /// <inheritdoc />
     public async Task<DashboardSummary> GetDashboardAsync(
-        DateOnly from, DateOnly to, CancellationToken cancellationToken = default)
+        DateOnly from, DateOnly to, DashboardFilter? filter = null,
+        CancellationToken cancellationToken = default)
     {
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
 
-        var period = db.Violations.AsNoTracking()
-            .Where(v => v.DetectedAt >= from && v.DetectedAt <= to);
+        var period = ApplyFilter(
+            db.Violations.AsNoTracking().Where(v => v.DetectedAt >= from && v.DetectedAt <= to),
+            filter, includeRemediationStatus: true);
 
         // Счётчики периода — одной поездкой (условный Count не переводится — Sum(cond ? 1 : 0)).
         var totals = await period
@@ -67,12 +70,16 @@ public sealed class RiskDataSource(
             })
             .ToListAsync(cancellationToken);
 
-        // Предыдущий период равной длины — для тренда, по подразделениям.
+        // Предыдущий период равной длины — для тренда, по подразделениям. Отбор применяется
+        // В ТЕХ ЖЕ рамках (кроме статуса устранения — он про текущее состояние, не про период):
+        // иначе тренд сравнивал бы отфильтрованное с полным и всегда «падал бы».
         var days = to.DayNumber - from.DayNumber;
         var previousFrom = from.AddDays(-(days + 1));
         var previousTo = from.AddDays(-1);
-        var previousCounts = await db.Violations.AsNoTracking()
-            .Where(v => v.DetectedAt >= previousFrom && v.DetectedAt <= previousTo)
+        var previousCounts = await ApplyFilter(
+                db.Violations.AsNoTracking()
+                    .Where(v => v.DetectedAt >= previousFrom && v.DetectedAt <= previousTo),
+                filter, includeRemediationStatus: false)
             .GroupBy(v => v.DivisionId)
             .Select(g => new { DivisionId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(g => g.DivisionId, g => g.Count, cancellationToken);
@@ -114,6 +121,41 @@ public sealed class RiskDataSource(
             divisionRisks,
             [.. recentRows.Select(r => new RecentViolationRow(
                 r.Id, r.DivisionName, r.CategoryName, r.Severity, r.DetectedAt, r.RemediationStatus))]);
+    }
+
+    /// <summary>
+    /// Отбор дашборда (ТФ-ДШ-02) поверх выборки нарушений. Сфера классификатора включает
+    /// её виды — тот же приём, что в архиве проверок (ArchiveFilter.CategoryId).
+    /// </summary>
+    private static IQueryable<Violation> ApplyFilter(
+        IQueryable<Violation> query, DashboardFilter? filter, bool includeRemediationStatus)
+    {
+        if (filter is null)
+        {
+            return query;
+        }
+
+        if (filter.DivisionId is { } divisionId)
+        {
+            query = query.Where(v => v.DivisionId == divisionId);
+        }
+
+        if (filter.CategoryId is { } categoryId)
+        {
+            query = query.Where(v => v.CategoryId == categoryId || v.Category!.ParentId == categoryId);
+        }
+
+        if (filter.Severity is { } severity)
+        {
+            query = query.Where(v => v.Severity == severity);
+        }
+
+        if (includeRemediationStatus && filter.RemediationStatus is { } status)
+        {
+            query = query.Where(v => v.RemediationStatus == status);
+        }
+
+        return query;
     }
 
     /// <inheritdoc />

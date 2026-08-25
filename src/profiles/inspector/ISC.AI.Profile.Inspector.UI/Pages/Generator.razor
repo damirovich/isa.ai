@@ -36,15 +36,13 @@
         <MudPaper Class="pa-4 mb-4" Outlined="true">
             <SectionCaption Text="Тип документа" />
             <MudSelect T="string" @bind-Value="_docType" Variant="Variant.Outlined" Dense="true">
-                @foreach (var type in DocumentTypes)
+                @foreach (var type in ReferenceDocumentTypes.All)
                 {
-                    <MudSelectItem T="string" Value="@type.Title" Disabled="@(!type.Implemented)">
-                        @(type.Implemented ? type.Title : $"{type.Title} — скоро")
-                    </MudSelectItem>
+                    <MudSelectItem T="string" Value="@type">@type</MudSelectItem>
                 }
             </MudSelect>
             <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1">
-                Первый реализуемый тип — справка (§5.2.1.1); остальные подключаются prompt-каркасом, без правок ядра.
+                Все типы §5.2.1.1: жанр и структуру задаёт промпт-шаблон типа, конвейер ядра один.
             </MudText>
         </MudPaper>
 
@@ -209,22 +207,11 @@
                          OnRegistered="@(id => _registeredId = id)" />
 
 @code {
-    // Типы документов §5.2.1.1. Реализована пока только справка; остальные — новый prompt-каркас без правок ядра.
-    private sealed record DocType(string Title, bool Implemented);
-
-    private static readonly DocType[] DocumentTypes =
-    [
-        new("Справка об итогах проверки", true),
-        new("Акт проверки", false),
-        new("Рапорт", false),
-        new("Докладная записка", false),
-        new("Заключение", false),
-        new("Проект приказа", false),
-    ];
-
+    // Типы документов §5.2.1.1 (ТФ-ГЕН-01): перечень — ЕДИНЫЙ источник ReferenceDocumentTypes
+    // (там же ключи промпт-шаблонов; «в селекте есть, шаблона нет» невозможно по построению).
     private static readonly string[] ViolationHints = ["Агентурная", "АОД", "Нацменьшинства", "Соц. напряжённость"];
 
-    private string _docType = "Справка об итогах проверки";
+    private string _docType = ReferenceDocumentTypes.Reference;
     private readonly List<DivisionNode> _divisions = [];
     private DivisionNode? _division;
     private DateTime? _date = DateTime.Today;
@@ -265,8 +252,9 @@
         _violations = string.IsNullOrWhiteSpace(_violations) ? $"— {hint}: " : $"{_violations}\n— {hint}: ";
 
     // Параметры формы собираются в структурированный запрос для RAG-оркестратора (задачный промпт — в профиле).
+    // Тип документа в тему НЕ входит: он идёт отдельным параметром команды и выбирает жанровый шаблон.
     private string BuildTopic() =>
-        $"{_docType}. Подразделение: {_division?.Name}"
+        $"Подразделение: {_division?.Name}"
         + $"{(_division?.Code is { } code ? $" (код {code})" : string.Empty)}. "
         + $"Период: {_period}. Дата: {_date:dd.MM.yyyy}. Выявленные нарушения: {_violations}";
 
@@ -278,7 +266,7 @@
         _registeredId = null;
         try
         {
-            var response = await Dispatcher.Send(new GenerateReferenceCommand(BuildTopic()));
+            var response = await Dispatcher.Send(new GenerateReferenceCommand(BuildTopic(), _docType));
             if (response.Status)
             {
                 _response = response;

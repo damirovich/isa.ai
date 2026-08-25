@@ -36,6 +36,9 @@ public static class InspectorApplicationServiceCollectionExtensions
         services.AddSingleton<Features.Analysis.ICompareNpaPromptRenderer, Features.Analysis.ScribanCompareNpaPromptRenderer>();
         services.AddSingleton<Features.Analysis.IAnalyzeDocumentPromptRenderer, Features.Analysis.ScribanAnalyzeDocumentPromptRenderer>();
 
+        // Сверка проекта до подписания (ТФ-АНПА-02): коллизии с базой — тот же конвейер (draft-check.scriban).
+        services.AddSingleton<Features.Analysis.ICheckDraftPromptRenderer, Features.Analysis.ScribanCheckDraftPromptRenderer>();
+
         // Детерминированный расчёт риска подразделения (Э5-01 шаг 2, Приложение §2) — код, не ИИ.
         services.AddSingleton<RiskScoreCalculator>();
 

@@ -9,11 +9,19 @@ namespace ISC.AI.Profile.Inspector.Application.Features.Generation;
 
 using ResModel  = ResponseDto<GenerateReferenceResult>;
 /// <summary>
-/// Команда генерации информационной справки по теме на основе извлечённых НПА (ТФ-ГЕН-01).
+/// Команда генерации документа по типу на основе извлечённых НПА (ТФ-ГЕН-01, §5.2.1.1;
+/// «Проект приказа» закрывает и ТФ-АНПА-01). Жанр и структуру задаёт промпт-шаблон типа
+/// (<see cref="IReferencePromptRenderer"/>) — ядро не правится, конвейер один на все типы.
 /// Результат — ЧЕРНОВИК, требующий проверки человеком (HITL, ТБ-042), в конверте <see cref="ResponseDto{T}"/>.
 /// </summary>
 /// <param name="Topic">Тема/запрос инспектора (используется для семантического извлечения норм).</param>
-public sealed record GenerateReferenceCommand(string Topic) : IRequest<ResModel>, IGroundedScenario
+/// <param name="DocumentType">
+/// Тип документа — русское наименование из <see cref="ReferenceDocumentTypes.All"/>.
+/// По умолчанию — справка (обратная совместимость с вызовами до ТФ-ГЕН-01-P1).
+/// </param>
+public sealed record GenerateReferenceCommand(
+    string Topic, string DocumentType = ReferenceDocumentTypes.Reference)
+    : IRequest<ResModel>, IGroundedScenario
 {
     // Аудит генерации (AuditAction.Generate) пишет RAG-оркестратор ядра (GroundedGenerator) с ТОЧНЫМ грифом
     // (=max грифов фрагментов), id фрагментов и payload запрос/ответ — поэтому команда НЕ помечается

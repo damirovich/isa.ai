@@ -6,17 +6,24 @@ using Mediator;
 namespace ISC.AI.Profile.Inspector.Application.Features.Dashboard;
 
 /// <summary>
-/// Сводка дашборда (§5.2.5) за последние <paramref name="PeriodDays"/> дней: счётчики нарушений
+/// Сводка дашборда (§5.2.5) за последние <paramref name="PeriodDays"/> дней с отбором ТФ-ДШ-02
+/// (подразделение, вид — сфера включает её виды, тяжесть, статус): счётчики нарушений
 /// и светофор риска по подразделениям. Балл — детерминированный код (Приложение §2), не ИИ.
 /// </summary>
-public sealed record GetDashboardQuery(int PeriodDays = 90)
+public sealed record GetDashboardQuery(
+    int PeriodDays = 90,
+    int? DivisionId = null,
+    int? CategoryId = null,
+    Domain.Enums.ViolationSeverity? Severity = null,
+    Domain.Enums.RemediationStatus? RemediationStatus = null)
     : IRequest<ResponseDto<DashboardSummary>>, IAuditableRequest
 {
     /// <inheritdoc />
     public AuditAction AuditAction => AuditAction.View;
 
     /// <inheritdoc />
-    public string? AuditSummary => $"inspector:dashboard:view:days={PeriodDays}";
+    public string? AuditSummary => $"inspector:dashboard:view:days={PeriodDays}"
+        + (DivisionId is { } d ? $":division={d}" : string.Empty);
 
     /// <inheritdoc cref="GetDashboardQuery" />
     public sealed class Handler(IRiskDataSource riskDataSource)
@@ -30,7 +37,10 @@ public sealed record GetDashboardQuery(int PeriodDays = 90)
 
             var days = Math.Clamp(query.PeriodDays, 7, 366);
             var to = DateOnly.FromDateTime(DateTime.UtcNow);
-            var summary = await riskDataSource.GetDashboardAsync(to.AddDays(-(days - 1)), to, cancellationToken);
+            var filter = new DashboardFilter(
+                query.DivisionId, query.CategoryId, query.Severity, query.RemediationStatus);
+            var summary = await riskDataSource.GetDashboardAsync(
+                to.AddDays(-(days - 1)), to, filter, cancellationToken);
             return ResponseDto<DashboardSummary>.Ok(summary);
         }
     }

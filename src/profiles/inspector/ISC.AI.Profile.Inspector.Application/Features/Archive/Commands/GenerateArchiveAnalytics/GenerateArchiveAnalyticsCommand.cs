@@ -1,4 +1,4 @@
-using ISC.AI.Abstractions.Application;
+﻿using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Enums;
 using ISC.AI.Abstractions.Grounding;
 using ISC.AI.Abstractions.Rag;
@@ -50,8 +50,8 @@ public sealed record GenerateArchiveAnalyticsCommand(int PeriodDays = 90)
             var previousTo = from.AddDays(-1);
             var previousFrom = previousTo.AddDays(-(days - 1));
 
-            var current = await riskDataSource.GetDashboardAsync(from, to, cancellationToken);
-            var previous = await riskDataSource.GetDashboardAsync(previousFrom, previousTo, cancellationToken);
+            var current = await riskDataSource.GetDashboardAsync(from, to, filter: null, cancellationToken);
+            var previous = await riskDataSource.GetDashboardAsync(previousFrom, previousTo, filter: null, cancellationToken);
             var risks = await riskDataSource.GetDivisionRisksAsync(from, to, cancellationToken);
             var remediation = await riskDataSource.GetRemediationAsync(from, to, cancellationToken);
 
