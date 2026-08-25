@@ -1,30 +1,63 @@
 @namespace ISC.AI.Profile.Inspector.UI
-@* Загрузка корпуса (Э4-01): файлы (.txt/.docx) → IFileIngestor; импорт пакета Harvester → IBundleImporter.
-   Гриф/подразделение ДЕКЛАРИРУЕТ оператор; fail-closed и дедуп — в порту. *@
+@* Загрузка корпуса (Э4-01): файлы → IFileIngestor; импорт пакета Harvester → IBundleImporter.
+   Гриф/подразделение ДЕКЛАРИРУЕТ оператор ЯВНО, без умолчаний (fail-closed, ТБ-024); дедуп — в порту.
+   Гриф — выпадающим списком В ПРЕДЕЛАХ ДОПУСКА оператора (как в регистрации документа): грузить
+   выше своего допуска нельзя — материал сразу пропал бы из виду самого оператора.
+   Замена версии (Э4-14) — ПОИСКОМ по каталогу корпуса, а не голым ID (решение заказчика 2026-08-25). *@
 @page "/load"
 @rendermode InteractiveServer
 @using Microsoft.AspNetCore.Components.Forms
 @using ISC.AI.Abstractions.Ingestion
+@using ISC.AI.Abstractions.Security
+@using ISC.AI.Profile.Inspector.Application.Features.Catalog
 @using ISC.AI.Profile.Inspector.Application.Features.Divisions
 @using ISC.AI.Profile.Inspector.Application.Features.Loading
 @using ISC.AI.Profile.Inspector.Domain.Services
+@inject IAccessContextProvider AccessProvider
 
-<PageTitle>Загрузка корпуса — ИнспекторAI</PageTitle>
+<PageHeader Title="Загрузка корпуса"
+            Subtitle="Наполнение базы знаний: НПА, положения, инструкции, приказы, акты, справки"
+            Icon="@Icons.Material.Filled.CloudUpload" />
 
-<MudText Typo="Typo.h4" GutterBottom="true">Загрузка корпуса</MudText>
 <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-4">
-    Гриф и подразделение задаёт оператор. Без них загрузка отклоняется (fail-closed, ТБ-024); повтор того же
-    содержимого не создаёт дублей. На обезличенных/тестовых данных — гриф 0 (открыто).
+    Гриф и подразделение задаёт оператор — явно, умолчания нет (fail-closed, ТБ-024): забытый гриф
+    не должен превращаться в «открыто». Повтор того же содержимого не создаёт дублей.
 </MudAlert>
 
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@* ================= Загрузка файлов ================= *@
 <MudPaper Class="pa-4 mb-4" Outlined="true">
-    <MudGrid>
-        <MudItem xs="12" sm="4"><MudTextField @bind-Value="_docType" Label="Тип документа" Variant="Variant.Outlined" /></MudItem>
-        <MudItem xs="6" sm="4"><MudNumericField @bind-Value="_classification" Label="Гриф (Classification)" Variant="Variant.Outlined" Min="0" /></MudItem>
+    <SectionCaption Text="Загрузка файлов" Class="mb-2" />
+    <MudGrid Spacing="2">
+        <MudItem xs="12" sm="4">
+            @* Тип — С ПОДСКАЗКАМИ из уже существующих в корпусе (единообразие: не «Приказ»/«приказ»/
+               «прик.»), но НЕ закрытым списком: корпус типонезависим, новый тип вводится свободно. *@
+            <MudAutocomplete T="string" @bind-Value="_docType" Label="Тип документа" Variant="Variant.Outlined"
+                             SearchFunc="SearchDocTypesAsync" CoerceValue="true" Clearable="true"
+                             MinCharacters="0" HelperText="выберите из списка или введите свой" />
+        </MudItem>
+        <MudItem xs="6" sm="4">
+            @* Гриф БЕЗ умолчания и В ПРЕДЕЛАХ допуска — тот же приём, что в регистрации документа
+               (вопрос 2, 2026-08-06): предзаполненный 0 предлагал бы «открыто» по забывчивости. *@
+            <MudSelect T="short?" @bind-Value="_classification" Label="Гриф *" Variant="Variant.Outlined"
+                       Placeholder="Выберите гриф" Disabled="_maxClassification is null">
+                @for (short level = 0; level <= SelectableClassificationLimit; level++)
+                {
+                    var value = level;
+                    <MudSelectItem T="short?" Value="@value">@(value == 0 ? "0 — открытый" : value.ToString())</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
         <MudItem xs="6" sm="4">
             @* Подразделение — ТОЛЬКО из справочника. Раньше вводилось числом, и пакет ЦБД лёг под
                несуществующее «10»: 100 НПА не видел никто (решётка отсекала у каждого). *@
-            <MudSelect T="int?" @bind-Value="_divisionId" Label="Подразделение *" Variant="Variant.Outlined">
+            <MudSelect T="int?" @bind-Value="_divisionId" Label="Подразделение *" Variant="Variant.Outlined"
+                       Placeholder="Выберите подразделение">
                 @foreach (var division in _divisions)
                 {
                     <MudSelectItem T="int?" Value="@division.Id">@division.Name</MudSelectItem>
@@ -33,64 +66,175 @@
         </MudItem>
     </MudGrid>
 
-    <div class="mt-2">
-        <MudNumericField T="int?" @bind-Value="_supersedesId" Label="Заменяет документ # (новая версия — необязательно)"
-                         Variant="Variant.Outlined" Min="1" Clearable="true" />
+    <div class="mt-3 d-flex align-center gap-3 flex-wrap">
+        @* MudBlazor 9.5: своя кнопка — через CustomContent + OpenFilePickerAsync (ActivatorContent
+           из старых версий удалён; без CustomContent рисуется английская «Browse files»). *@
+        <MudFileUpload T="IReadOnlyList<IBrowserFile>" FilesChanged="UploadFilesAsync"
+                       Accept=".txt,.docx,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp" MaximumFileCount="50"
+                       Disabled="@(_busy || _divisionId is null || _classification is null)">
+            <CustomContent Context="upload">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           Disabled="@(_busy || _divisionId is null || _classification is null)"
+                           StartIcon="@Icons.Material.Filled.UploadFile"
+                           OnClick="@(() => upload.OpenFilePickerAsync())">
+                    @(_busy ? "Загружаю…" : "Выбрать файлы и загрузить")
+                </MudButton>
+            </CustomContent>
+        </MudFileUpload>
         <MudText Typo="Typo.caption" Class="mud-text-secondary">
-            Укажите ID прежней версии — её фрагменты будут погашены, в поиск/ИИ пойдёт только новая (Э4-14).
+            .txt, .docx, .pdf; сканы .png/.jpg/.tiff распознаются OCR.
+            Старый .doc не поддерживается — сохраните как .docx.
         </MudText>
     </div>
+    @if (_divisionId is null || _classification is null)
+    {
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
+            Кнопка станет доступна после выбора грифа и подразделения.
+        </MudText>
+    }
 
-    <div class="mt-3">
-        <MudText Typo="Typo.body2" Class="mb-1">Файлы (.txt, .docx) — выбор сразу запускает загрузку:</MudText>
-        <InputFile OnChange="UploadFilesAsync" accept=".txt,.docx,.pdf" multiple disabled="@(_busy || _divisionId is null)" />
+    @* --- Замена версии (Э4-14): блок ВИДЕН всегда (свёрнутую панель пользователь не замечал —
+       замечание заказчика 2026-08-25); выбор — из списка корпуса диалогом. --- *@
+    <MudDivider Class="my-3" />
+    <SectionCaption Text="Загружаю новую версию существующего документа (необязательно)" Class="mb-2" />
+    <div class="d-flex align-center gap-2 flex-wrap">
+        @if (_supersedesDocument is { } selected)
+        {
+            <MudChip T="string" Color="Color.Info" Variant="Variant.Outlined"
+                     OnClose="@(() => _supersedesDocument = null)">
+                @DocumentLabel(selected)
+            </MudChip>
+            <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="OpenPickerAsync">Выбрать другой</MudButton>
+        }
+        else
+        {
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="OpenPickerAsync"
+                       StartIcon="@Icons.Material.Filled.LibraryBooks">
+                Выбрать документ из корпуса…
+            </MudButton>
+        }
     </div>
+    <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1 d-block">
+        Прежняя версия будет погашена: в поиск и к ИИ пойдёт только новая (Э4-14).
+        Ничего не выбрано — файлы лягут как новые документы.
+    </MudText>
 </MudPaper>
+
+@* --- Диалог выбора документа корпуса: список с поиском, выбор кликом по строке --- *@
+<MudDialog @bind-Visible="_pickerOpen" Options="PickerDialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Какой документ заменяет новая версия</MudText>
+    </TitleContent>
+    <DialogContent>
+        @* Immediate + debounce: список сужается ПО МЕРЕ ввода, без Enter/потери фокуса. *@
+        <MudTextField Value="_pickerSearch" ValueChanged="@(async (string? v) => { _pickerSearch = v; await LoadPickerAsync(true); })"
+                      Label="Поиск по названию или номеру" Variant="Variant.Outlined" Clearable="true"
+                      Immediate="true" DebounceInterval="400" Class="mb-3" Placeholder="пусто — свежие первыми" />
+        <MudTable T="CorpusCatalogItem" Items="_pickerRows" Hover="true" Dense="true" Elevation="0"
+                  Loading="_pickerBusy" RowClass="cursor-pointer"
+                  OnRowClick="@((TableRowClickEventArgs<CorpusCatalogItem> e) => SelectPicked(e.Item!))">
+            <HeaderContent>
+                <MudTh>№ / дата</MudTh>
+                <MudTh>Название</MudTh>
+                <MudTh>Тип</MudTh>
+                <MudTh>Статус</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="№ / дата">
+                    <b>@(context.Number ?? $"#{context.DocumentId}")</b>
+                    @if (context.DocDate is { } date)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">@date.ToString("dd.MM.yyyy")</MudText>
+                    }
+                </MudTd>
+                <MudTd DataLabel="Название">@context.Title</MudTd>
+                <MudTd DataLabel="Тип">@context.DocType</MudTd>
+                <MudTd DataLabel="Статус">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@CurrencyColor(context.Currency)">
+                        @CurrencyLabel(context.Currency)
+                    </MudChip>
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary pa-3">
+                    Ничего не найдено — уточните запрос. Показываются только документы в пределах вашего допуска.
+                </MudText>
+            </NoRecordsContent>
+        </MudTable>
+        <div class="d-flex align-center justify-space-between mt-2 flex-wrap gap-2">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                Документов: @_pickerTotal · страница @_pickerPage из @PickerPageCount
+            </MudText>
+            <MudPagination Count="@PickerPageCount" Selected="_pickerPage" SelectedChanged="GoToPickerPageAsync"
+                           Size="Size.Small" ShowFirstButton="true" ShowLastButton="true" />
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _pickerOpen = false)">Отмена</MudButton>
+    </DialogActions>
+</MudDialog>
 
 @if (_busy)
 {
     <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-2" />
 }
-@if (_error is not null)
-{
-    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-2">@_error</MudAlert>
-}
 
 @if (_fileResults.Count > 0)
 {
-    <MudText Typo="Typo.h6" GutterBottom="true">Результаты загрузки</MudText>
-    @foreach (var result in _fileResults)
-    {
-        <div class="d-flex align-center gap-2 mb-1">
-            <MudChip T="string" Size="Size.Small" Color="@ResultColor(result)">@ResultLabel(result)</MudChip>
-            <MudText Typo="Typo.body2">@result.FileName</MudText>
-            <MudText Typo="Typo.caption">
-                @(result.Accepted ? (result.IsDuplicate ? "уже в корпусе" : $"чанков: {result.ChunkCount}") : result.Reason)
-            </MudText>
-            @if (result.SupersededDocumentId is { } supersededId)
-            {
-                <MudText Typo="Typo.caption" Color="Color.Info">· заменил документ #@supersededId</MudText>
-            }
-        </div>
-    }
+    <MudPaper Class="pa-4 mb-4" Outlined="true">
+        <SectionCaption Text="Результаты загрузки" Class="mb-2" />
+        @foreach (var result in _fileResults)
+        {
+            <div class="d-flex align-center gap-2 mb-1">
+                <MudChip T="string" Size="Size.Small" Color="@ResultColor(result)">@ResultLabel(result)</MudChip>
+                <MudText Typo="Typo.body2">@result.FileName</MudText>
+                <MudText Typo="Typo.caption">
+                    @(result.Accepted ? (result.IsDuplicate ? "уже в корпусе" : $"фрагментов: {result.ChunkCount}") : result.Reason)
+                </MudText>
+                @if (result.SupersededDocumentId is { } supersededId)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Info">· заменил документ #@supersededId</MudText>
+                }
+            </div>
+        }
+    </MudPaper>
 }
 
+@* ================= Импорт пакета сборщика ================= *@
 <MudPaper Class="pa-4 mt-4" Outlined="true">
-    <MudText Typo="Typo.h6" GutterBottom="true">Импорт пакета сборщика (Harvester)</MudText>
+    <SectionCaption Text="Импорт пакета сборщика (Harvester)" Class="mb-2" />
     <MudTextField @bind-Value="_manifestPath" Label="Путь к manifest.json пакета" Variant="Variant.Outlined" />
-    <MudSelect T="int?" @bind-Value="_bundleDivisionId" Label="Подразделение для всего пакета *"
-               Variant="Variant.Outlined" Class="mt-2">
-        @foreach (var division in _divisions)
-        {
-            <MudSelectItem T="int?" Value="@division.Id">@division.Name</MudSelectItem>
-        }
-    </MudSelect>
+    <MudGrid Spacing="2" Class="mt-1">
+        <MudItem xs="12" sm="6">
+            <MudSelect T="int?" @bind-Value="_bundleDivisionId" Label="Подразделение для всего пакета *"
+                       Variant="Variant.Outlined" Placeholder="Выберите подразделение">
+                @foreach (var division in _divisions)
+                {
+                    <MudSelectItem T="int?" Value="@division.Id">@division.Name</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="6">
+            @* Гриф пакета подтверждает ОПЕРАТОР (ТБ-024): записанный в пакете — лишь намерение
+               сборщика, работавшего вне контура. *@
+            <MudSelect T="short?" @bind-Value="_bundleClassification" Label="Гриф для всего пакета *"
+                       Variant="Variant.Outlined" Placeholder="Выберите гриф" Disabled="_maxClassification is null">
+                @for (short level = 0; level <= SelectableClassificationLimit; level++)
+                {
+                    var value = level;
+                    <MudSelectItem T="short?" Value="@value">@(value == 0 ? "0 — открытый" : value.ToString())</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+    </MudGrid>
     <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
-        Перекрывает подразделение, записанное в пакете: сборщик работает вне контура и справочника
-        не видит. Для общих НПА (законы, кодексы) — обычно «Главная инспекция».
+        Подразделение и гриф перекрывают записанные в пакете: сборщик работает вне контура,
+        справочника и режима не видит. Для общих НПА (законы, кодексы) — обычно «Главная инспекция»,
+        гриф «0 — открытый».
     </MudText>
     <MudButton Class="mt-2" Variant="Variant.Filled" Color="Color.Secondary"
-               OnClick="ImportBundleAsync" Disabled="@(_busy || string.IsNullOrWhiteSpace(_manifestPath) || _bundleDivisionId is null)">
+               StartIcon="@Icons.Material.Filled.Archive" OnClick="ImportBundleAsync"
+               Disabled="@(_busy || string.IsNullOrWhiteSpace(_manifestPath) || _bundleDivisionId is null || _bundleClassification is null)">
         Импортировать пакет
     </MudButton>
     @if (_bundleStatus is not null)
@@ -100,17 +244,48 @@
 </MudPaper>
 
 @code {
+    // Потолок шкалы в интерфейсе — как в регистрации документа (0..9): ошибочный допуск в БД
+    // (скажем, 1000) не должен превращать список в тысячу строк.
+    private const short MaxSelectableClassification = 9;
+
     private string _docType = "положение";
-    private int _classification;
+    private short? _classification;        // гриф файлов — БЕЗ умолчания (ТБ-024)
     private int? _divisionId;
     private int? _bundleDivisionId;
-    private int? _supersedesId;
+    private short? _bundleClassification;  // гриф пакета — тоже явный, перекрывает записанный в пакете
+    private CorpusCatalogItem? _supersedesDocument; // замена версии — выбором из каталога, не голым ID
+
+    // null = допуск не получен; грифы в этом состоянии не предлагаются (fail-closed).
+    private short? _maxClassification;
 
     /// <summary>Действующие подразделения из справочника — единственный допустимый выбор.</summary>
     private IReadOnlyList<DivisionNode> _divisions = [];
 
+    private int SelectableClassificationLimit =>
+        _maxClassification is { } max ? Math.Min((int)max, MaxSelectableClassification) : -1;
+
+    // Типовые виды — стартовые подсказки для пустого корпуса; к ним добавляются реально
+    // существующие в корпусе типы (единообразие написания без закрытого списка).
+    private static readonly string[] DefaultDocTypes =
+        ["закон", "положение", "инструкция", "приказ", "акт", "справка", "регламент", "методика"];
+
+    private IReadOnlyList<string> _docTypes = DefaultDocTypes;
+
     protected override async Task OnInitializedAsync()
     {
+        // Пределы грифа — из допуска оператора: грузить выше своего допуска нельзя
+        // (материал сразу пропал бы из виду самого оператора).
+        var access = await AccessProvider.GetCurrentAsync();
+        _maxClassification = access.MaxClassification;
+
+        // Существующие типы корпуса — для подсказок (каталог отдаёт их с любой страницей).
+        var types = await Dispatcher.Send(new ListCorpusDocumentsQuery(PageSize: 1));
+        if (types is { Status: true, Data.DocTypes: { Count: > 0 } corpusTypes })
+        {
+            _docTypes = [.. corpusTypes.Union(DefaultDocTypes, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)];
+        }
+
         var response = await Dispatcher.Send(new ListDivisionTreeQuery());
         if (response is { Status: true, Data: { } list })
         {
@@ -134,11 +309,92 @@
     private string _manifestPath = string.Empty;
     private string? _bundleStatus;
 
-    private async Task UploadFilesAsync(InputFileChangeEventArgs args)
+    // --- Диалог выбора документа корпуса (замена версии, Э4-14) ---
+    private const int PickerPageSize = 10;
+
+    private static readonly DialogOptions PickerDialogOptions =
+        new() { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true, CloseButton = true };
+
+    private bool _pickerOpen;
+    private bool _pickerBusy;
+    private string? _pickerSearch;
+    private int _pickerPage = 1;
+    private int _pickerTotal;
+    private readonly List<CorpusCatalogItem> _pickerRows = [];
+
+    private int PickerPageCount => Math.Max(1, (int)Math.Ceiling(_pickerTotal / (double)PickerPageSize));
+
+    /// <summary>Подсказки типа: фильтр по подстроке; пустой ввод — весь список (MinCharacters=0).</summary>
+    private Task<IEnumerable<string>> SearchDocTypesAsync(string? value, CancellationToken cancellationToken) =>
+        Task.FromResult<IEnumerable<string>>(string.IsNullOrWhiteSpace(value)
+            ? _docTypes
+            : _docTypes.Where(t => t.Contains(value, StringComparison.OrdinalIgnoreCase)));
+
+    private async Task OpenPickerAsync()
     {
-        if (_divisionId is null)
+        _pickerOpen = true;
+        // Список показывается СРАЗУ (свежие первыми), поиск лишь сужает его — видно, из чего выбираешь.
+        await LoadPickerAsync(resetPage: true);
+    }
+
+    /// <summary>Страница каталога корпуса для выбора — через решётку доступа (чужое не покажется).</summary>
+    private async Task LoadPickerAsync(bool resetPage)
+    {
+        if (resetPage)
         {
-            _error = "Выберите подразделение из справочника.";
+            _pickerPage = 1;
+        }
+
+        _pickerBusy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ListCorpusDocumentsQuery(
+                Text: string.IsNullOrWhiteSpace(_pickerSearch) ? null : _pickerSearch,
+                Page: _pickerPage, PageSize: PickerPageSize));
+            _pickerRows.Clear();
+            if (response is { Status: true, Data: { } page })
+            {
+                _pickerRows.AddRange(page.Rows);
+                _pickerTotal = page.TotalCount;
+            }
+            else if (response is { Status: false })
+            {
+                _error = response.StatusMessage;
+                _pickerTotal = 0;
+            }
+        }
+        finally
+        {
+            _pickerBusy = false;
+        }
+    }
+
+    private async Task GoToPickerPageAsync(int page)
+    {
+        _pickerPage = page;
+        await LoadPickerAsync(resetPage: false);
+    }
+
+    private void SelectPicked(CorpusCatalogItem item)
+    {
+        _supersedesDocument = item;
+        _pickerOpen = false;
+    }
+
+    private static string DocumentLabel(CorpusCatalogItem item) =>
+        $"#{item.DocumentId} · {item.Title}{(item.DocDate is { } date ? $" ({date:dd.MM.yyyy})" : string.Empty)}";
+
+    private async Task UploadFilesAsync(IReadOnlyList<IBrowserFile>? files)
+    {
+        // Дубль к disabled на кнопке — защита от гонки состояния формы (ТБ-024).
+        if (_divisionId is null || _classification is null)
+        {
+            _error = "Выберите гриф и подразделение из справочника.";
+            return;
+        }
+
+        if (files is null || files.Count == 0)
+        {
             return;
         }
 
@@ -146,7 +402,7 @@
         _error = null;
         try
         {
-            foreach (var file in args.GetMultipleFiles(maximumFileCount: 50))
+            foreach (var file in files)
             {
                 using var buffer = new MemoryStream();
                 await using (var stream = file.OpenReadStream(maxAllowedSize: 25 * 1024 * 1024))
@@ -154,8 +410,9 @@
                     await stream.CopyToAsync(buffer);
                 }
 
-                var response = await Dispatcher.Send(
-                    new IngestFileCommand(buffer.ToArray(), file.Name, _docType, (short)_classification, _divisionId!.Value, _supersedesId));
+                var response = await Dispatcher.Send(new IngestFileCommand(
+                    buffer.ToArray(), file.Name, _docType, _classification!.Value, _divisionId!.Value,
+                    _supersedesDocument?.DocumentId));
 
                 if (response is { Status: true, Data: { } result })
                 {
@@ -168,6 +425,10 @@
 
                 StateHasChanged();
             }
+
+            // Замена версии — одноразовое намерение: после загрузки сбрасывается, чтобы следующий
+            // файл случайно не «заменил» тот же документ ещё раз.
+            _supersedesDocument = null;
         }
         catch (Exception ex)
         {
@@ -181,9 +442,9 @@
 
     private async Task ImportBundleAsync()
     {
-        if (_bundleDivisionId is not { } bundleDivisionId)
+        if (_bundleDivisionId is not { } bundleDivisionId || _bundleClassification is not { } bundleClassification)
         {
-            _error = "Выберите подразделение для пакета.";
+            _error = "Выберите подразделение и гриф для пакета.";
             return;
         }
 
@@ -192,7 +453,8 @@
         _bundleStatus = null;
         try
         {
-            var response = await Dispatcher.Send(new ImportBundleCommand(_manifestPath, bundleDivisionId));
+            var response = await Dispatcher.Send(
+                new ImportBundleCommand(_manifestPath, bundleDivisionId, bundleClassification));
             if (response.Status)
             {
                 _bundleStatus = response.StatusMessage;
@@ -211,6 +473,23 @@
             _busy = false;
         }
     }
+
+    // Подписи статуса — те же, что в «Базе НПА»: заменять обычно есть смысл действующий документ.
+    private static string CurrencyLabel(CorpusDocumentCurrency currency) => currency switch
+    {
+        CorpusDocumentCurrency.Current => "действует",
+        CorpusDocumentCurrency.Superseded => "утратил силу",
+        CorpusDocumentCurrency.Mixed => "частично",
+        _ => "без текста",
+    };
+
+    private static Color CurrencyColor(CorpusDocumentCurrency currency) => currency switch
+    {
+        CorpusDocumentCurrency.Current => Color.Success,
+        CorpusDocumentCurrency.Superseded => Color.Error,
+        CorpusDocumentCurrency.Mixed => Color.Warning,
+        _ => Color.Default,
+    };
 
     private static Color ResultColor(IngestFileResult result) =>
         !result.Accepted ? Color.Error : result.IsDuplicate ? Color.Default : Color.Success;

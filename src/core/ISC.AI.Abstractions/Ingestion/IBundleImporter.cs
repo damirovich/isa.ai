@@ -14,9 +14,13 @@ public interface IBundleImporter
     /// ПЕРЕКРЫВАЮЩЕЕ записанное в пакете: пакет собран вне контура, где справочника подразделений нет,
     /// и записанный там номер — лишь намерение сборщика; решение о том, чьим числится материал, принимает
     /// оператор внутри контура, видя справочник. <see langword="null"/> — довериться пакету (как было).
+    /// <paramref name="classification"/> — гриф, ПОДТВЕРЖДЁННЫЙ оператором (ТБ-024), перекрывает
+    /// записанный в пакете по той же причине: пакет — от недоверенного производителя вне контура.
+    /// <see langword="null"/> — довериться пакету (fail-closed по отсутствию грифа остаётся в порту).
     /// </summary>
     Task<BundleImportResult> ImportAsync(
-        string manifestPath, int? divisionId = null, CancellationToken cancellationToken = default);
+        string manifestPath, int? divisionId = null, short? classification = null,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>Итог импорта пакета.</summary>

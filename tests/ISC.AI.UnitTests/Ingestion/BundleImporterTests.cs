@@ -55,6 +55,38 @@ public sealed class BundleImporterTests
         }
     }
 
+    [Fact(DisplayName = "ТБ-024: гриф и подразделение оператора перекрывают записанные в пакете")]
+    public async Task Operator_classification_and_division_override_bundle_values()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "harvester-import-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            // Пакет декларирует гриф 0 и подразделение 7 — но пакет собран вне контура,
+            // и решает оператор: его значения обязаны победить.
+            HarvestedDocument[] docs =
+                [new("http://e/1", "Док", "текст", "закон", "H1", Classification: 0, DivisionId: 7)];
+            var manifestPath = await new JsonBundleWriter().WriteAsync(directory, docs);
+
+            IngestionRequest? captured = null;
+            var port = Substitute.For<IIngestionPort>();
+            port.IngestAsync(Arg.Do<IngestionRequest>(r => captured = r), Arg.Any<CancellationToken>())
+                .Returns(IngestionResult.Ok(documentId: 1, chunkCount: 1));
+
+            await new BundleImporter(port).ImportAsync(manifestPath, divisionId: 3, classification: 2);
+
+            captured.ShouldNotBeNull();
+            captured!.Classification.ShouldBe((short?)2);
+            captured.DivisionId.ShouldBe(3);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
     [Fact(DisplayName = "ТБ-024: документ без поля грифа в пакете уходит в порт как null (→ отказ), а не как открытый 0")]
     public async Task Missing_classification_field_maps_to_null_not_open_zero()
     {

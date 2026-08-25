@@ -21,13 +21,19 @@ using ResModel = ResponseDto<BundleImportResult>;
 /// </remarks>
 /// <param name="ManifestPath">Путь к манифесту пакета.</param>
 /// <param name="DivisionId">Подразделение из справочника, под которым ложится весь пакет.</param>
-public sealed record ImportBundleCommand(string ManifestPath, int DivisionId) : IRequest<ResModel>, IAuditableRequest
+/// <param name="Classification">
+/// Гриф, подтверждённый оператором для всего пакета (ТБ-024): перекрывает записанный в пакете —
+/// пакет собран вне контура недоверенным производителем, гриф там лишь намерение.
+/// </param>
+public sealed record ImportBundleCommand(string ManifestPath, int DivisionId, short Classification)
+    : IRequest<ResModel>, IAuditableRequest
 {
     /// <inheritdoc />
     public AuditAction AuditAction => AuditAction.Ingest;
 
     /// <inheritdoc />
-    public string? AuditSummary => $"Импорт пакета в корпус: {ManifestPath}; подразделение={DivisionId}";
+    public string? AuditSummary =>
+        $"Импорт пакета в корпус: {ManifestPath}; подразделение={DivisionId}; гриф={Classification}";
 
     /// <summary>Обработчик: проверяет подразделение и манифест, запускает импорт.</summary>
     public sealed class Handler(IBundleImporter importer, IDivisionAdminStore divisions, IBackgroundTaskQueue taskQueue)
@@ -48,7 +54,8 @@ public sealed record ImportBundleCommand(string ManifestPath, int DivisionId) : 
                 return ResModel.NotFound($"Манифест не найден: {command.ManifestPath}");
             }
 
-            var result = await importer.ImportAsync(command.ManifestPath, command.DivisionId, cancellationToken);
+            var result = await importer.ImportAsync(
+                command.ManifestPath, command.DivisionId, command.Classification, cancellationToken);
 
             // Картотека достраивается ФОНОМ после импорта (нормы/редакции/связки из метаданных ЦБД):
             // оператор не ждёт обход корпуса; синхронизация идемпотентна, повтор безопасен.

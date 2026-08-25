@@ -20,7 +20,8 @@ public sealed class BundleImporter(IIngestionPort port) : IBundleImporter
 
     /// <inheritdoc />
     public async Task<BundleImportResult> ImportAsync(
-        string manifestPath, int? divisionId = null, CancellationToken cancellationToken = default)
+        string manifestPath, int? divisionId = null, short? classification = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);
 
@@ -37,8 +38,8 @@ public sealed class BundleImporter(IIngestionPort port) : IBundleImporter
                     DocType: document.DocType,
                     Title: document.Title,
                     Text: document.Text,
-                    Classification: document.Classification,
-                    // Перекрытие оператора важнее номера из пакета (см. IBundleImporter).
+                    // Перекрытие оператора важнее записанного в пакете (см. IBundleImporter, ТБ-024).
+                    Classification: classification ?? document.Classification,
                     DivisionId: divisionId ?? document.DivisionId,
                     Source: document.SourceUrl,
                     // Пакет даты не несёт (ЦБД отдаёт только заголовок) — берём из заголовка, где она

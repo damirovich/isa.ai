@@ -1,4 +1,4 @@
-using ISC.AI.Abstractions.Application;
+﻿using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.BackgroundTasks;
 using ISC.AI.Abstractions.Ingestion;
 using ISC.AI.Profile.Inspector.Application.Features.Loading;
@@ -79,11 +79,11 @@ public sealed class LoadingHandlersTests
         var importer = Substitute.For<IBundleImporter>();
         var taskQueue = Substitute.For<IBackgroundTaskQueue>();
         var response = await new ImportBundleCommand.Handler(importer, Divisions(1), taskQueue)
-            .Handle(new ImportBundleCommand(@"C:\nope\does-not-exist\manifest.json", DivisionId: 1), CancellationToken.None);
+            .Handle(new ImportBundleCommand(@"C:\nope\does-not-exist\manifest.json", DivisionId: 1, Classification: 0), CancellationToken.None);
 
         response.Status.ShouldBeFalse();
         response.StatusCode.ShouldBe(ResponseStatusCode.NotFound);
-        await importer.DidNotReceiveWithAnyArgs().ImportAsync(default!, default, default);
+        await importer.DidNotReceiveWithAnyArgs().ImportAsync(default!, default, default, default);
     }
 
     [Fact(DisplayName = "Импорт пакета: подразделения нет в справочнике — отказ ДО чтения пакета")]
@@ -92,11 +92,11 @@ public sealed class LoadingHandlersTests
         var importer = Substitute.For<IBundleImporter>();
         var taskQueue = Substitute.For<IBackgroundTaskQueue>();
         var response = await new ImportBundleCommand.Handler(importer, Divisions(1, 2, 3), taskQueue)
-            .Handle(new ImportBundleCommand(@"C:\any\manifest.json", DivisionId: 10), CancellationToken.None);
+            .Handle(new ImportBundleCommand(@"C:\any\manifest.json", DivisionId: 10, Classification: 0), CancellationToken.None);
 
         response.Status.ShouldBeFalse();
         response.StatusMessage.ShouldContain("№10");
-        await importer.DidNotReceiveWithAnyArgs().ImportAsync(default!, default, default);
+        await importer.DidNotReceiveWithAnyArgs().ImportAsync(default!, default, default, default);
     }
 
     [Fact(DisplayName = "Импорт пакета: существующий манифест → импортёр вызывается с подразделением оператора, счётчики проброшены")]
@@ -108,17 +108,18 @@ public sealed class LoadingHandlersTests
         {
             var importer = Substitute.For<IBundleImporter>();
         var taskQueue = Substitute.For<IBackgroundTaskQueue>();
-        importer.ImportAsync(path, 2, Arg.Any<CancellationToken>())
+        importer.ImportAsync(path, 2, (short)3, Arg.Any<CancellationToken>())
                 .Returns(new BundleImportResult(Total: 3, Imported: 2, Duplicates: 1, Rejected: 0));
 
             var response = await new ImportBundleCommand.Handler(importer, Divisions(1, 2), taskQueue)
-                .Handle(new ImportBundleCommand(path, DivisionId: 2), CancellationToken.None);
+                .Handle(new ImportBundleCommand(path, DivisionId: 2, Classification: 3), CancellationToken.None);
 
             response.Status.ShouldBeTrue();
             response.Data!.Imported.ShouldBe(2);
             response.Data.Duplicates.ShouldBe(1);
-            // Подразделение оператора ПЕРЕКРЫВАЕТ записанное в пакете — именно оно уходит импортёру.
-            await importer.Received(1).ImportAsync(path, 2, Arg.Any<CancellationToken>());
+            // Подразделение И ГРИФ оператора ПЕРЕКРЫВАЮТ записанные в пакете (ТБ-024) —
+            // именно они уходят импортёру.
+            await importer.Received(1).ImportAsync(path, 2, (short)3, Arg.Any<CancellationToken>());
             // После успешного импорта картотека достраивается фоном (синхронизация из метаданных ЦБД).
             await taskQueue.ReceivedWithAnyArgs(1).EnqueueAsync(default!, default!, default);
         }
