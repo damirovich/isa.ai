@@ -11,10 +11,14 @@
    обычная разметка страницы и не зависит ни от поповеров, ни от порядка их провайдеров. *@
 @implements IAsyncDisposable
 @using ISC.AI.Abstractions.Application
+@using ISC.AI.Abstractions.Security
 @using ISC.AI.Modules.DocFlow.Application.Features.Notifications
+@using ISC.AI.Modules.DocFlow.Domain.Services
 @using Mediator
 @inject IMediator Dispatcher
 @inject NavigationManager Navigation
+@inject INotificationSignal Signal
+@inject IAccessContextProvider AccessProvider
 
 <MudBadge Content="_unreadCount" Color="Color.Error" Overlap="true" Visible="_unreadCount > 0"
           Max="99" Bordered="true">
@@ -26,12 +30,13 @@
     /// <summary>Маршрут ленты — дашборд документооборота, где она и живёт.</summary>
     private const string FeedRoute = "/docflow/dashboard";
 
-    // Опрос счётчика: уведомления рождаются и фоновой проверкой сроков, и действиями ДРУГИХ
-    // пользователей — без периодического обновления колокольчик бы «просыпался» только при
-    // перезагрузке страницы. Минута — компромисс между свежестью и нагрузкой на БД.
-    private static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(1);
+    // Свежесть теперь даёт живой сигнал (INotificationSignal): писатель уведомления будит
+    // подписанные страницы сразу. Опрос остаётся СТРАХОВКОЙ на случай пропущенного сигнала
+    // (обрыв/восстановление circuit) — потому редкий, а не минутный, как до шины.
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(5);
 
     private int _unreadCount;
+    private IDisposable? _signalSubscription;
 
     // Механика цикла (защита от предрендера, гашение ObjectDisposedException, остановка) — в общем
     // ComponentPoller: колокольчик живёт в шапке, то есть на КАЖДОМ экране, и необработанное
@@ -46,6 +51,18 @@
     protected override async Task OnInitializedAsync()
     {
         await RefreshAsync();
+
+        // Живой сигнал: писатель уведомления будит колокольчик сразу. Через шину идёт только
+        // «перечитай» — счётчик берётся обычным запросом через решётку доступа.
+        var access = await AccessProvider.GetCurrentAsync();
+        if (access.NumericSubjectId is { } userId)
+        {
+            _signalSubscription = Signal.Subscribe(userId, () => InvokeAsync(async () =>
+            {
+                await RefreshAsync();
+                StateHasChanged();
+            }));
+        }
 
         // Всё, что трогает состояние компонента, — через InvokeAsync (свой поток рендера).
         _poller.Start(() => InvokeAsync(async () =>
@@ -73,5 +90,10 @@
     }
 
     /// <inheritdoc />
-    public ValueTask DisposeAsync() => _poller.DisposeAsync();
+    public ValueTask DisposeAsync()
+    {
+        // Отписка обязательна: иначе шина держала бы колбэк умершего circuit до конца процесса.
+        _signalSubscription?.Dispose();
+        return _poller.DisposeAsync();
+    }
 }

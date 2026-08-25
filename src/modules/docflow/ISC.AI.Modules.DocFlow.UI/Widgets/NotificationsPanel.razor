@@ -8,11 +8,14 @@
 @implements IAsyncDisposable
 @using Microsoft.AspNetCore.Components.Web
 @using ISC.AI.Abstractions.Application
+@using ISC.AI.Abstractions.Security
 @using ISC.AI.Modules.DocFlow.Application.Features.Notifications
 @using ISC.AI.Modules.DocFlow.Domain.Services
 @using Mediator
 @inject IMediator Dispatcher
 @inject NavigationManager Navigation
+@inject INotificationSignal Signal
+@inject IAccessContextProvider AccessProvider
 
 <MudPaper Outlined="true" Class="pa-0 h-100 d-flex flex-column">
     <div class="d-flex align-center justify-space-between px-4 py-3">
@@ -92,9 +95,9 @@
 </MudPaper>
 
 @code {
-    // Опрос: уведомления рождаются фоновой проверкой сроков и действиями ДРУГИХ пользователей —
-    // без обновления панель «просыпалась» бы только при перезагрузке страницы.
-    private static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(1);
+    // Свежесть даёт живой сигнал (INotificationSignal); опрос — страховка на случай пропущенного
+    // сигнала (обрыв/восстановление circuit), потому редкий, а не минутный, как до шины.
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(5);
 
     /// <summary>Сколько уведомлений показывать. По умолчанию — как в ленте СКИД.</summary>
     [Parameter]
@@ -104,6 +107,7 @@
     private int _unreadCount;
     private bool _busy;
     private string? _error;
+    private IDisposable? _signalSubscription;
     // Механика цикла (защита от предрендера, гашение ObjectDisposedException, остановка) — в общем
     // ComponentPoller, том же, что у колокольчика в шапке.
     private readonly ComponentPoller _poller = new(PollInterval);
@@ -112,6 +116,18 @@
     protected override async Task OnInitializedAsync()
     {
         await ReloadAsync();
+
+        // Живой сигнал: новое уведомление появляется в ленте сразу, без ожидания опроса. Через
+        // шину идёт только «перечитай» — состав ленты берётся запросом через решётку доступа.
+        var access = await AccessProvider.GetCurrentAsync();
+        if (access.NumericSubjectId is { } userId)
+        {
+            _signalSubscription = Signal.Subscribe(userId, () => InvokeAsync(async () =>
+            {
+                await ReloadAsync();
+                StateHasChanged();
+            }));
+        }
 
         // Всё, что трогает состояние компонента, — через InvokeAsync (поток рендера).
         _poller.Start(() => InvokeAsync(async () =>
@@ -200,5 +216,10 @@
     };
 
     /// <inheritdoc />
-    public ValueTask DisposeAsync() => _poller.DisposeAsync();
+    public ValueTask DisposeAsync()
+    {
+        // Отписка обязательна: иначе шина держала бы колбэк умершего circuit до конца процесса.
+        _signalSubscription?.Dispose();
+        return _poller.DisposeAsync();
+    }
 }

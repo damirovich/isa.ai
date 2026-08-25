@@ -61,6 +61,11 @@ public static class DocFlowPersistenceServiceCollectionExtensions
         // Уведомления (этап 2.2b, разд. 5): сроки, статусы, упоминания. Только в интерфейсе, без email.
         services.AddScoped<Domain.Services.INotificationStore, NotificationStore>();
 
+        // Шина живых уведомлений: SINGLETON — подписки circuit-ов должны переживать scope запроса,
+        // а писатель из любого scope должен видеть тех же подписчиков. Через шину идёт только
+        // «перечитай» (инвариант — в контракте), содержимое — запросом через решётку.
+        services.AddSingleton<Domain.Services.INotificationSignal, NotificationSignal>();
+
         // Данные отчётов (этап 5, разд. 6): разграничение — В ЗАПРОСЕ, отчёт это массовая выгрузка.
         services.AddScoped<Domain.Services.IReportDataSource, ReportDataSource>();
 
