@@ -105,6 +105,17 @@ public sealed class DivisionAdminStore(
         };
         db.Divisions.Add(division);
         await db.SaveChangesAsync(cancellationToken);
+
+        // Пустой код система назначает САМА (решение заказчика 2026-08-25): «Т-{id}»/«Л-{id}» по
+        // типу. Номер — от идентификатора записи: уникален по построению, без гонок «max+1» и без
+        // повторного использования после удалений (дыры в нумерации честнее совпадений). Вписанный
+        // вручную код (официальное условное обозначение) не трогается.
+        if (division.Code is null)
+        {
+            division.Code = $"{(kind == DivisionKind.Linear ? "Л" : "Т")}-{division.Id}";
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
         return division.Id;
     }
 

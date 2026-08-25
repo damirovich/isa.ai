@@ -23,8 +23,8 @@
     <div class="d-flex gap-3 align-end flex-wrap">
         <MudTextField @bind-Value="_newName" Label="Наименование" Variant="Variant.Outlined" MaxLength="500"
                       Immediate="true" Style="min-width:260px;" Class="flex-grow-1" />
-        <MudTextField @bind-Value="_newCode" Label="Код (для СКИД)" Variant="Variant.Outlined" MaxLength="100"
-                      Style="width:160px;" />
+        <MudTextField @bind-Value="_newCode" Label="Код подразделения" Variant="Variant.Outlined" MaxLength="100"
+                      Style="width:180px;" HelperText="пусто — номер назначит система" />
         <MudSelect T="int?" @bind-Value="_newParentId" Label="Родитель (пусто — верхний уровень)"
                    Variant="Variant.Outlined" Clearable="true" Style="min-width:260px;">
             @foreach (var node in KindFlat)
@@ -133,7 +133,7 @@
     <DialogContent>
         <MudTextField @bind-Value="_renameName" Label="Наименование" Variant="Variant.Outlined" MaxLength="500"
                       Immediate="true" AutoFocus="true" Class="mb-2" />
-        <MudTextField @bind-Value="_renameCode" Label="Код (для СКИД)" Variant="Variant.Outlined" MaxLength="100"
+        <MudTextField @bind-Value="_renameCode" Label="Код подразделения" Variant="Variant.Outlined" MaxLength="100"
                       Class="mb-2" />
         <MudSelect T="DivisionKind" @bind-Value="_renameKind" Label="Тип" Variant="Variant.Outlined" Dense="true">
             <MudSelectItem T="DivisionKind" Value="DivisionKind.Territorial">Территориальное</MudSelectItem>

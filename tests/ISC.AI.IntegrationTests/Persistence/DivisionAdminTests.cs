@@ -3,6 +3,7 @@ using ISC.AI.Persistence;
 using ISC.AI.Persistence.Entities;
 using ISC.AI.Profile.Inspector.Data;
 using ISC.AI.Profile.Inspector.Domain.Entities;
+using ISC.AI.Profile.Inspector.Domain.Enums;
 using ISC.AI.Profile.Inspector.Domain.Services;
 using Microsoft.EntityFrameworkCore;
 using Pgvector.EntityFrameworkCore;
@@ -52,6 +53,21 @@ public sealed class DivisionAdminTests : IAsyncLifetime
         (await store.DeleteAsync(parent)).ShouldBe(DivisionWriteResult.InUse);
         (await store.DeleteAsync(free)).ShouldBe(DivisionWriteResult.Ok);
         (await store.DeleteAsync(free)).ShouldBe(DivisionWriteResult.NotFound);
+    }
+
+    [Fact(DisplayName = "Пустой код назначается системой по типу (Т-/Л-{id}); вписанный вручную — хранится как есть")]
+    public async Task Empty_code_is_assigned_automatically()
+    {
+        var store = await BuildAsync(new StubUsage());
+
+        var territorial = await store.CreateAsync("Нарынская инспекция", code: null, parentId: null);
+        var linear = await store.CreateAsync("Служба связи", code: "  ", parentId: null, DivisionKind.Linear);
+        var manual = await store.CreateAsync("В/ч 2025", code: "ВЧ-2025", parentId: null);
+
+        var list = await store.ListAsync();
+        list.Single(d => d.Id == territorial).Code.ShouldBe($"Т-{territorial}");
+        list.Single(d => d.Id == linear).Code.ShouldBe($"Л-{linear}");   // пробельный код = пустой
+        list.Single(d => d.Id == manual).Code.ShouldBe("ВЧ-2025");       // официальное обозначение не трогается
     }
 
     [Fact(DisplayName = "Подразделение с документами и поручениями удалить нельзя, счётчики видны")]

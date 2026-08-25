@@ -16,6 +16,6 @@ public class DivisionConfiguration : IEntityTypeConfiguration<Division>
                .HasForeignKey(e => e.ParentId).OnDelete(DeleteBehavior.Restrict);
 
         builder.HasIndex(e => e.ParentId);
-        builder.HasIndex(e => e.Code); // сопоставление с подразделением СКИД по значению (§4.2)
+        builder.HasIndex(e => e.Code); // поиск по условному обозначению (§4.2; сверки со СКИД больше нет — Э4-35)
     }
 }
