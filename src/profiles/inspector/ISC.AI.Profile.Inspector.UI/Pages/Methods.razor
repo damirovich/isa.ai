@@ -10,13 +10,17 @@
 @using ISC.AI.Profile.Inspector.Domain.Enums
 @using ISC.AI.Profile.Inspector.Domain.Services
 @using Microsoft.JSInterop
+@inject EditorDraftHandoff EditorHandoff
+@inject NavigationManager Navigation
 
-@* Модуль «Методики проверок» (§5.2.9, ТФ-МЕТ-01) — генерация НАСТОЯЩАЯ + РЕЕСТР сохранённых методик
+@* Модуль «Методики проверок» (§5.2.9, ТФ-МЕТ-01/02) — генерация НАСТОЯЩАЯ + РЕЕСТР сохранённых методик
    (Ц-03 «институциональная память»): сформированное сохраняется черновиком, дорабатывается человеком
    и утверждается Руководителем/Администратором; правка утверждённой возвращает её в черновики.
    Выдача реестра — по допуску (гриф методики наследован от генерации, ТБ-020-стиль).
    Конвейер генерации: извлечение по допуску → модель → грунтовка (ТБ-040, GATE-2) → черновик
-   (HITL, ТБ-042) → экспорт .docx с грифом (ТБ-033). ТФ-МЕТ-02 (планы, дорожные карты) — P2. *@
+   (HITL, ТБ-042) → экспорт .docx с грифом (ТБ-033).
+   ТФ-МЕТ-02 — вкладка «План работы»: проект плана/дорожной карты из проблемных зон живого учёта
+   (факт-блок общий с отчётом руководству), сроки ИИ не назначает. *@
 
 <PageHeader Title="Методики проверок"
             Subtitle="Программы, чек-листы, инструкции и памятки — формирование и реестр"
@@ -164,7 +168,73 @@
         </MudGrid>
     </MudTabPanel>
 
-    @* ================= Вкладка 2: реестр методик ================= *@
+    @* ================= Вкладка 2: план работы (ТФ-МЕТ-02) ================= *@
+    <MudTabPanel Text="План работы" Icon="@Icons.Material.Filled.Timeline">
+        <MudPaper Outlined="true" Class="pa-4 my-3">
+            <SectionCaption Text="Проект плана работы / дорожной карты" Class="mb-2" />
+            <div class="d-flex gap-3 align-end flex-wrap">
+                <MudSelect T="int" @bind-Value="_planPeriodDays" Label="Период анализа"
+                           Variant="Variant.Outlined" Dense="true" Style="width:180px;">
+                    <MudSelectItem T="int" Value="30">30 дней</MudSelectItem>
+                    <MudSelectItem T="int" Value="90">90 дней</MudSelectItem>
+                    <MudSelectItem T="int" Value="180">Полгода</MudSelectItem>
+                    <MudSelectItem T="int" Value="365">Год</MudSelectItem>
+                </MudSelect>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="GeneratePlanAsync"
+                           Disabled="_planBusy" StartIcon="@Icons.Material.Filled.AutoAwesome">
+                    @(_planBusy ? "Формирую…" : "Сформировать план")
+                </MudButton>
+            </div>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2 d-block">
+                Основания плана — проблемные зоны живого учёта (просрочки, повторы, болевые сферы);
+                числа считает система, ИИ пишет только текст. Календарные сроки и ответственных
+                ИИ не назначает — их вписывает человек.
+            </MudText>
+        </MudPaper>
+
+        @if (_planError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+                      ShowCloseIcon="true" CloseIconClicked="@(() => _planError = null)">@_planError</MudAlert>
+        }
+
+        @if (Plan is { } plan)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3">
+                ПРОЕКТ — утверждает человек (ТБ-042). Гриф: @plan.ResultClassification.
+            </MudAlert>
+            @if (_planSavedId is { } planSavedId)
+            {
+                <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                    Сохранено в реестр (№ @planSavedId) — вкладка «Реестр методик».
+                </MudAlert>
+            }
+            <div class="mb-3" style="max-height:55vh; overflow-y:auto;">
+                <DocumentSheet Title="Проект плана работы инспекции"
+                               Subtitle="@($"по проблемным зонам за последние {_planGeneratedDays} дней")"
+                               Body="@plan.DraftText" EmblemUrl="@NpaDocument.EmblemUrl" />
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+                @if (_planSavedId is null)
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                               OnClick="SavePlanToRegistryAsync" Disabled="_planSaving">
+                        Сохранить в реестр
+                    </MudButton>
+                }
+                <MudButton Variant="Variant.Outlined" Disabled="_exporting"
+                           OnClick="@(() => ExportAsync("План работы", $"за {_planGeneratedDays} дней", Plan!.DraftText, Plan!.ResultClassification))">
+                    Экспорт .docx
+                </MudButton>
+                <MudButton StartIcon="@Icons.Material.Filled.EditNote" Variant="Variant.Outlined"
+                           OnClick="OpenPlanInEditor">
+                    Доработать в Редакторе
+                </MudButton>
+            </div>
+        }
+    </MudTabPanel>
+
+    @* ================= Вкладка 3: реестр методик ================= *@
     <MudTabPanel Text="Реестр методик" Icon="@Icons.Material.Filled.LibraryBooks">
         @if (_registryError is not null)
         {
@@ -176,7 +246,7 @@
             <div class="d-flex gap-3 align-end flex-wrap">
                 <MudSelect T="string" Value="_filterKind" ValueChanged="@(async (string? v) => { _filterKind = v; await ReloadRegistryAsync(true); })"
                            Label="Вид документа" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:200px;">
-                    @foreach (var kind in ArtifactKinds)
+                    @foreach (var kind in RegistryKinds)
                     {
                         <MudSelectItem T="string" Value="@kind">@kind</MudSelectItem>
                     }
@@ -337,6 +407,11 @@
     // Пять видов методических артефактов ТФ-МЕТ-01 (P1-объём §5.2.9).
     private static readonly string[] ArtifactKinds =
         ["Программа проверки", "Чек-лист", "Инструкция", "Памятка", "Учебный материал"];
+
+    // Фильтр реестра шире видов формирования: план (ТФ-МЕТ-02, вкладка здесь) и правила контроля
+    // (ТФ-РСК-02, страница «Риски») сохраняются в этот же реестр своими видами.
+    private static readonly string[] RegistryKinds =
+        [.. ArtifactKinds, "План работы", "Правила контроля"];
 
     // Типы проверок — из прототипа; свободный тип можно дописать в «направлении/указаниях».
     private static readonly string[] InspectionTypes =
@@ -640,6 +715,84 @@
         finally
         {
             _exporting = false;
+        }
+    }
+
+    // --- ТФ-МЕТ-02: план работы / дорожная карта ---
+    private int _planPeriodDays = 90;
+    private int _planGeneratedDays = 90; // период на момент генерации: селект после — не меняет лист
+    private bool _planBusy;
+    private bool _planSaving;
+    private int? _planSavedId;
+    private string? _planError;
+    private ResponseDto<GenerateReferenceResult>? _planResponse;
+
+    private GenerateReferenceResult? Plan => _planResponse?.Data;
+
+    private async Task GeneratePlanAsync()
+    {
+        _planBusy = true;
+        _planError = null;
+        _planResponse = null;
+        _planSavedId = null;
+        try
+        {
+            var response = await Dispatcher.Send(new GenerateWorkPlanCommand(_planPeriodDays));
+            if (response.Status)
+            {
+                _planResponse = response;
+                _planGeneratedDays = _planPeriodDays;
+            }
+            else
+            {
+                _planError = response.StatusMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _planError = $"Ошибка формирования: {ex.Message}";
+        }
+        finally
+        {
+            _planBusy = false;
+        }
+    }
+
+    // План — методический документ (Ц-03): судьба та же, что у методик, — реестр с утверждением.
+    private async Task SavePlanToRegistryAsync()
+    {
+        if (Plan is not { } plan)
+        {
+            return;
+        }
+
+        _planSaving = true;
+        try
+        {
+            var response = await Dispatcher.Send(new SaveMethodDocumentCommand(
+                "План работы", "Внутренний контроль", $"по проблемным зонам за {_planGeneratedDays} дней",
+                plan.DraftText, plan.Citations, plan.AllCitationsConfirmed, plan.ResultClassification));
+            if (response is { Status: true, Data: var savedId })
+            {
+                _planSavedId = savedId;
+            }
+            else
+            {
+                _planError = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _planSaving = false;
+        }
+    }
+
+    private void OpenPlanInEditor()
+    {
+        if (Plan is { } plan)
+        {
+            EditorHandoff.Put(plan.DraftText, null);
+            Navigation.NavigateTo("/editor");
         }
     }
 

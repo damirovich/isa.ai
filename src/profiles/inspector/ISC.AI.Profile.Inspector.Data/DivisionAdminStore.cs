@@ -1,6 +1,7 @@
 using ISC.AI.Modules.DocFlow.Domain.Services;
 using ISC.AI.Persistence;
 using ISC.AI.Profile.Inspector.Domain.Entities;
+using ISC.AI.Profile.Inspector.Domain.Enums;
 using ISC.AI.Profile.Inspector.Domain.Services;
 using Microsoft.EntityFrameworkCore;
 
@@ -32,6 +33,7 @@ public sealed class DivisionAdminStore(
                 d.Code,
                 d.ParentId,
                 d.IsActive,
+                d.Kind,
                 Children = db.Divisions.Count(child => child.ParentId == d.Id),
             })
             .ToListAsync(cancellationToken);
@@ -54,7 +56,8 @@ public sealed class DivisionAdminStore(
                     users.TryGetValue(d.Id, out var userCount) ? userCount : 0,
                     used.Documents,
                     used.Assignments,
-                    d.Children);
+                    d.Children,
+                    d.Kind);
             })
             .ToList();
     }
@@ -86,7 +89,8 @@ public sealed class DivisionAdminStore(
 
     /// <inheritdoc />
     public async Task<int> CreateAsync(
-        string name, string? code, int? parentId, CancellationToken cancellationToken = default)
+        string name, string? code, int? parentId,
+        DivisionKind kind = DivisionKind.Territorial, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
@@ -97,6 +101,7 @@ public sealed class DivisionAdminStore(
             Name = name.Trim(),
             Code = string.IsNullOrWhiteSpace(code) ? null : code.Trim(),
             ParentId = parentId,
+            Kind = kind,
         };
         db.Divisions.Add(division);
         await db.SaveChangesAsync(cancellationToken);
@@ -105,7 +110,8 @@ public sealed class DivisionAdminStore(
 
     /// <inheritdoc />
     public async Task<bool> RenameAsync(
-        int id, string name, string? code, CancellationToken cancellationToken = default)
+        int id, string name, string? code,
+        DivisionKind kind = DivisionKind.Territorial, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
@@ -119,6 +125,7 @@ public sealed class DivisionAdminStore(
 
         division.Name = name.Trim();
         division.Code = string.IsNullOrWhiteSpace(code) ? null : code.Trim();
+        division.Kind = kind;
         await db.SaveChangesAsync(cancellationToken);
         return true;
     }

@@ -1,13 +1,22 @@
 @namespace ISC.AI.Profile.Inspector.UI
 @page "/risks"
 @rendermode InteractiveServer
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Abstractions.Grounding
+@using ISC.AI.Profile.Inspector.Application.Features.Generation
+@using ISC.AI.Profile.Inspector.Application.Features.Methods
 @using ISC.AI.Profile.Inspector.Application.Features.Risks
 @using ISC.AI.Profile.Inspector.Domain.Enums
 @using ISC.AI.Profile.Inspector.Domain.Services
+@using Microsoft.JSInterop
+@inject EditorDraftHandoff EditorHandoff
+@inject NavigationManager Navigation
 
 @* Модуль «Риски и внутренний контроль» (§5.2.5.1) на ЖИВОМ учёте нарушений (Э5-01) — демо снято.
    Балл каждого подразделения считает RiskScoreCalculator по формуле Приложения §2 (детерминированно,
-   код, не ИИ); здесь сигналы формулы показываются по отдельности — виден разбор, а не только итог. *@
+   код, не ИИ); здесь сигналы формулы показываются по отдельности — виден разбор, а не только итог.
+   ТФ-РСК-02: проект правил/критериев оценки формирует ИИ ролью Draft из показателей, которые
+   система реально считает (ControlRulesFacts) — вкладка «Правила контроля». *@
 
 <PageHeader Title="Риски и внутренний контроль"
             Subtitle="Выявление рисков, правила и процедуры контроля"
@@ -102,6 +111,54 @@
                             <MudText Typo="Typo.body2"><b>@rule.Title</b></MudText>
                             <MudText Typo="Typo.caption" Class="mud-text-secondary">@rule.Note</MudText>
                         </MudPaper>
+                    }
+
+                    @* --- ТФ-РСК-02: проект правил и критериев из показателей системы --- *@
+                    <MudDivider Class="my-3" />
+                    <div class="d-flex align-center gap-3 flex-wrap">
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="GenerateRulesAsync"
+                                   Disabled="_rulesBusy" StartIcon="@Icons.Material.Filled.AutoAwesome">
+                            @(_rulesBusy ? "Формирую…" : "Проект правил и критериев (ИИ)")
+                        </MudButton>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary" Style="max-width:420px;">
+                            Показатели — только те, что система реально считает; пороги ИИ не назначает,
+                            их утверждает человек. Период — как выбран на странице.
+                        </MudText>
+                    </div>
+
+                    @if (Rules is { } rules)
+                    {
+                        <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="my-3">
+                            ПРОЕКТ — утверждает человек (ТБ-042). Гриф: @rules.ResultClassification.
+                        </MudAlert>
+                        @if (_savedMethodId is { } savedId)
+                        {
+                            <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                                Сохранено в реестр методик (№ @savedId) — страница «Методики проверок».
+                            </MudAlert>
+                        }
+                        <div style="max-height:55vh; overflow-y:auto;" class="mb-3">
+                            <DocumentSheet Title="Проект правил внутреннего контроля и критериев оценки"
+                                           Subtitle="@($"по показателям за последние {_rulesGeneratedDays} дней")"
+                                           Body="@rules.DraftText" EmblemUrl="@NpaDocument.EmblemUrl" />
+                        </div>
+                        <div class="d-flex gap-2 flex-wrap">
+                            @if (_savedMethodId is null)
+                            {
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                                           OnClick="SaveRulesToRegistryAsync" Disabled="_savingRules">
+                                    Сохранить в реестр методик
+                                </MudButton>
+                            }
+                            <MudButton OnClick="ExportRulesAsync" Disabled="_exportingRules" Variant="Variant.Outlined">
+                                Экспорт .docx
+                            </MudButton>
+                            <MudButton StartIcon="@Icons.Material.Filled.EditNote" Variant="Variant.Outlined"
+                                       OnClick="OpenRulesInEditor">
+                                Доработать в Редакторе
+                            </MudButton>
+                            <MudButton OnClick="@(() => _rulesResponse = null)">Скрыть</MudButton>
+                        </div>
                     }
                 </MudTabPanel>
 
@@ -223,6 +280,113 @@
     ];
 
     private int CountOf(params RiskLevel[] levels) => _risks.Count(r => levels.Contains(r.Assessment.Level));
+
+    // --- ТФ-РСК-02: проект правил и критериев оценки ---
+    private int _rulesGeneratedDays = 90; // период на момент генерации: смена периода после — не меняет лист
+    private bool _rulesBusy;
+    private bool _exportingRules;
+    private bool _savingRules;
+    private int? _savedMethodId;
+    private ResponseDto<GenerateReferenceResult>? _rulesResponse;
+
+    private GenerateReferenceResult? Rules => _rulesResponse?.Data;
+
+    private async Task GenerateRulesAsync()
+    {
+        _rulesBusy = true;
+        _error = null;
+        _rulesResponse = null;
+        _savedMethodId = null;
+        try
+        {
+            var response = await Dispatcher.Send(new GenerateControlRulesCommand(_periodDays));
+            if (response.Status)
+            {
+                _rulesResponse = response;
+                _rulesGeneratedDays = _periodDays;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Ошибка формирования: {ex.Message}";
+        }
+        finally
+        {
+            _rulesBusy = false;
+        }
+    }
+
+    // Правила — методический документ (Ц-03): судьба та же, что у методик, — реестр с утверждением.
+    private async Task SaveRulesToRegistryAsync()
+    {
+        if (Rules is not { } rules)
+        {
+            return;
+        }
+
+        _savingRules = true;
+        try
+        {
+            var response = await Dispatcher.Send(new SaveMethodDocumentCommand(
+                "Правила контроля", "Внутренний контроль",
+                $"критерии оценки подразделений (по показателям за {_rulesGeneratedDays} дней)",
+                rules.DraftText, rules.Citations, rules.AllCitationsConfirmed, rules.ResultClassification));
+            if (response is { Status: true, Data: var savedId })
+            {
+                _savedMethodId = savedId;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _savingRules = false;
+        }
+    }
+
+    private async Task ExportRulesAsync()
+    {
+        if (Rules is not { } rules)
+        {
+            return;
+        }
+
+        _exportingRules = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ExportReferenceCommand(
+                "Проект правил внутреннего контроля и критериев оценки",
+                rules.DraftText, rules.ResultClassification));
+            if (response is { Status: true, Data: { } file })
+            {
+                using var streamReference = new DotNetStreamReference(new MemoryStream(file.Content));
+                await JS.InvokeVoidAsync("downloadFileFromStream", file.FileName, streamReference);
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _exportingRules = false;
+        }
+    }
+
+    private void OpenRulesInEditor()
+    {
+        if (Rules is { } rules)
+        {
+            EditorHandoff.Put(rules.DraftText, null);
+            Navigation.NavigateTo("/editor");
+        }
+    }
 
     // 4 уровня — 4 оттенка (на дашборде они сворачиваются в 3 цвета светофора, Приложение §2).
     private static string LevelColor(RiskLevel level) => level switch

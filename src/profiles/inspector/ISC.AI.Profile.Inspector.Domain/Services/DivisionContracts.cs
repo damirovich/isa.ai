@@ -11,6 +11,7 @@ namespace ISC.AI.Profile.Inspector.Domain.Services;
 /// <param name="Documents">Сколько документов принадлежит подразделению.</param>
 /// <param name="Assignments">Сколько поручений выдано на подразделение.</param>
 /// <param name="Children">Сколько дочерних подразделений.</param>
+/// <param name="Kind">Тип: территориальное/линейное (§4.2; разрез аналитики ТФ-АРХ-03).</param>
 public sealed record DivisionNode(
     int Id,
     string Name,
@@ -20,7 +21,8 @@ public sealed record DivisionNode(
     int Users = 0,
     int Documents = 0,
     int Assignments = 0,
-    int Children = 0)
+    int Children = 0,
+    Enums.DivisionKind Kind = Enums.DivisionKind.Territorial)
 {
     /// <summary>
     /// Можно ли удалить: за подразделением не числится ничего и у него нет потомков.
