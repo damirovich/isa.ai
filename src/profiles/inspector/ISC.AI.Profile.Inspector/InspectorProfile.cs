@@ -19,13 +19,20 @@ namespace ISC.AI.Profile.Inspector;
 /// <remarks>
 /// Реестр модулей соответствует набору из §5.2 ТЗ (11 модулей) плюс операционная «Загрузка корпуса».
 /// Все модули §5.2 реализованы (заглушек не осталось; Коллегия — последняя, Э5-09).
-/// Секции меню объявляет профиль (<c>MenuGroup</c>) — хост лишь группирует.
+/// Секции меню объявляет профиль (<c>MenuGroup</c>) — хост лишь группирует; порядок секций —
+/// порядок первого появления в списке. Группировка — по логике рабочего дня (решение заказчика
+/// 2026-08-25): Контроль → ИИ-инструменты → Нормативная база → Организация работы →
+/// Документооборот → Подразделения → Администрирование → Учётная запись.
 /// </remarks>
 public sealed class InspectorProfile : IProfile
 {
-    private const string GroupMain = "Навигация";
+    private const string GroupControl = "Контроль";
+    private const string GroupAi = "ИИ-инструменты";
+    private const string GroupNpa = "Нормативная база";
+    private const string GroupOrg = "Организация работы";
     private const string GroupDivisions = "Подразделения";
     private const string GroupAdmin = "Администрирование";
+    private const string GroupAccount = "Учётная запись";
     private const string ReadPolicy = "inspector.read";
 
     /// <inheritdoc />
@@ -43,54 +50,63 @@ public sealed class InspectorProfile : IProfile
     /// <inheritdoc />
     public IReadOnlyList<IModule> Modules { get; } =
     [
-        // --- Реализованные модули ---
+        // --- Секция «Контроль»: ежедневная работа инспекции — увидел картину → занёс факты →
+        // оценил риск → проконтролировал устранение → поднял историю ---
         new ModuleDescriptor("dashboard", "/dashboard", "Дашборд", Icons.Material.Filled.Dashboard,
-            typeof(Dashboard), ReadPolicy, GroupMain),
+            typeof(Dashboard), ReadPolicy, GroupControl),
+        // Учёт нарушений (Э5-01, Приложение §4): реестр фактов, которыми живут светофор риска и дашборд.
+        new ModuleDescriptor("violations", "/violations", "Учёт нарушений", Icons.Material.Filled.ReportProblem,
+            typeof(Violations), ReadPolicy, GroupControl),
+        new ModuleDescriptor("risks", "/risks", "Риски и контроль", Icons.Material.Filled.Warning,
+            typeof(Risks), ReadPolicy, GroupControl),
+        new ModuleDescriptor("monitoring", "/monitoring", "Мониторинг", Icons.Material.Filled.MonitorHeart,
+            typeof(Monitoring), ReadPolicy, GroupControl),
+        // Архив проверок (§5.2.4, ТФ-АРХ-01/02): история нарушений по справкам-проверкам и
+        // подразделениям; метаданные справок — из документооборота через решётку доступа.
+        new ModuleDescriptor("archive", "/archive", "Архив", Icons.Material.Filled.Inventory2,
+            typeof(Archive), ReadPolicy, GroupControl),
+
+        // --- Секция «ИИ-инструменты»: создать → доработать → проверить → спросить ---
         new ModuleDescriptor("generator", "/generator", "Генератор", Icons.Material.Filled.AutoAwesome,
-            typeof(Generator), ReadPolicy, GroupMain),
+            typeof(Generator), ReadPolicy, GroupAi),
+        // Редактор (§5.2.10, ТФ-РЕД-01..03): ИИ-правка по команде с сохранением грунтовки.
+        new ModuleDescriptor("editor", "/editor", "Редактор", Icons.Material.Filled.EditNote,
+            typeof(Editor), ReadPolicy, GroupAi),
+        // Анализ / Сравнение (§5.2.3, ТФ-НПА-03/04, ТФ-АНПА-02): противоречия между НПА, анализ
+        // документа, сверка проекта — вдумчивая роль Analysis (размышления по-ролево, ADR-0011).
+        new ModuleDescriptor("analysis", "/analysis", "Анализ / Сравнение", Icons.Material.Filled.CompareArrows,
+            typeof(Analysis), ReadPolicy, GroupAi),
         new ModuleDescriptor("chat", "/chat", "Чат-ассистент", Icons.Material.Filled.Forum,
-            typeof(ChatAssistant), ReadPolicy, GroupMain),
+            typeof(ChatAssistant), ReadPolicy, GroupAi),
+
+        // --- Секция «Нормативная база»: поиск, ведение и наполнение — в одном месте ---
         new ModuleDescriptor("npa-search", "/npa", "База НПА", Icons.Material.Filled.Gavel,
-            typeof(NpaSearch), ReadPolicy, GroupMain),
+            typeof(NpaSearch), ReadPolicy, GroupNpa),
         // Картотека НПА (ТФ-НПА-02): ведение норм/редакций и связок с корпусом — то, что делает
         // смену статуса редакции действенной (GATE-3). Маршрут /norms, НЕ /npa/*: NavMenu подсвечивает
         // пункты по префиксу, и вложенный маршрут подсвечивал бы «Базу НПА» вместе с картотекой.
         new ModuleDescriptor("npa-registry", "/norms", "Картотека НПА", Icons.Material.Filled.LibraryBooks,
-            typeof(NpaRegistry), ReadPolicy, GroupMain),
-        // Учёт нарушений (Э5-01, Приложение §4): реестр фактов, которыми живут светофор риска и дашборд.
-        new ModuleDescriptor("violations", "/violations", "Учёт нарушений", Icons.Material.Filled.ReportProblem,
-            typeof(Violations), ReadPolicy, GroupMain),
-        // Архив проверок (§5.2.4, ТФ-АРХ-01/02): история нарушений по справкам-проверкам и
-        // подразделениям; метаданные справок — из документооборота через решётку доступа.
-        new ModuleDescriptor("archive", "/archive", "Архив", Icons.Material.Filled.Inventory2,
-            typeof(Archive), ReadPolicy, GroupMain),
-        // Редактор (§5.2.10, ТФ-РЕД-01..03): ИИ-правка по команде с сохранением грунтовки.
-        new ModuleDescriptor("editor", "/editor", "Редактор", Icons.Material.Filled.EditNote,
-            typeof(Editor), ReadPolicy, GroupMain),
-        // Анализ / Сравнение (§5.2.3, ТФ-НПА-03/04): противоречия и пробелы между НПА, анализ
-        // документа — вдумчивая роль Analysis (размышления по-ролево, ADR-0011). Последний P1.
-        new ModuleDescriptor("analysis", "/analysis", "Анализ / Сравнение", Icons.Material.Filled.CompareArrows,
-            typeof(Analysis), ReadPolicy, GroupMain),
-        new ModuleDescriptor("risks", "/risks", "Риски и контроль", Icons.Material.Filled.Warning,
-            typeof(Risks), ReadPolicy, GroupMain),
+            typeof(NpaRegistry), ReadPolicy, GroupNpa),
+        // Операционный модуль (вне §5.2): наполнение корпуса — рядом с базой, которую он кормит.
+        new ModuleDescriptor("load", "/load", "Загрузка корпуса", Icons.Material.Filled.CloudUpload,
+            typeof(CorpusLoad), ReadPolicy, GroupNpa),
+
+        // --- Секция «Организация работы»: методическое и организационное ---
         new ModuleDescriptor("methods", "/methods", "Методики проверок", Icons.Material.Filled.MenuBook,
-            typeof(Methods), ReadPolicy, GroupMain),
-        new ModuleDescriptor("monitoring", "/monitoring", "Мониторинг", Icons.Material.Filled.MonitorHeart,
-            typeof(Monitoring), ReadPolicy, GroupMain),
+            typeof(Methods), ReadPolicy, GroupOrg),
         // Совещания (§5.2.7, ТФ-СОВ-01/02): протоколы — документы группы «Исполнение» документооборота
         // (пункты = назначения, контроль сроков — там); модуль добавляет реестр протоколов и справку
         // об исполнении (факты считает код, ИИ ролью Draft пишет только текст).
         new ModuleDescriptor("meetings", "/meetings", "Совещания", Icons.Material.Filled.EventNote,
-            typeof(Meetings), ReadPolicy, GroupMain),
+            typeof(Meetings), ReadPolicy, GroupOrg),
         // Коллегия (§5.2.8, ТФ-КОЛ-01/02): доклад, проект решения и материалы к совещанию руководства
         // на одном факт-блоке с отчётом руководству (числа — код, ИИ ролью Draft — только текст).
-        // Последний модуль §5.2 — заглушек больше нет.
         new ModuleDescriptor("collegium", "/collegium", "Коллегия", Icons.Material.Filled.Groups,
-            typeof(Collegium), ReadPolicy, GroupMain),
+            typeof(Collegium), ReadPolicy, GroupOrg),
 
-        // --- Операционный модуль (вне §5.2): наполнение корпуса ---
-        new ModuleDescriptor("load", "/load", "Загрузка корпуса", Icons.Material.Filled.CloudUpload,
-            typeof(CorpusLoad), ReadPolicy, GroupMain),
+        // --- Секция «Документооборот»: подключаемый пакет модулей docflow (ADR-0017, Э4-35) ---
+        // Страницы объявляет САМ модуль; профиль лишь включает их в свой реестр.
+        .. DocFlowModule.Modules,
 
         // --- Секция «Подразделения» (объекты контроля, §4.2) ---
         new ModuleDescriptor("divisions-territorial", "/divisions/territorial", "Территориальные",
@@ -124,13 +140,11 @@ public sealed class InspectorProfile : IProfile
         new ModuleDescriptor("admin-violation-categories", "/admin/violation-categories", "Виды нарушений",
             Icons.Material.Filled.Category, typeof(ViolationCategories), ReadPolicy, GroupAdmin),
 
-        // Смена СВОЕГО пароля — не администрирование, доступна любому вошедшему.
+        // --- Секция «Учётная запись»: смена СВОЕГО пароля — не администрирование, доступна любому
+        // вошедшему, поэтому вынесена из админ-секции (рядовой сотрудник не должен искать её среди
+        // ролей и допусков). ---
         new ModuleDescriptor("account-password", "/account/password", "Смена пароля",
-            Icons.Material.Filled.Password, typeof(ChangePassword), ReadPolicy, GroupAdmin),
-
-        // --- Секция «Документооборот»: подключаемый пакет модулей docflow (ADR-0017, Э4-35) ---
-        // Страницы объявляет САМ модуль; профиль лишь включает их в свой реестр. Пока пусто (скелет, этап 0).
-        .. DocFlowModule.Modules,
+            Icons.Material.Filled.Password, typeof(ChangePassword), ReadPolicy, GroupAccount),
     ];
 
     /// <inheritdoc />
