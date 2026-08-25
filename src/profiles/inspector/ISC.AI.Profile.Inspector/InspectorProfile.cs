@@ -32,7 +32,6 @@ public sealed class InspectorProfile : IProfile
     private const string GroupOrg = "Организация работы";
     private const string GroupDivisions = "Подразделения";
     private const string GroupAdmin = "Администрирование";
-    private const string GroupAccount = "Учётная запись";
     private const string ReadPolicy = "inspector.read";
 
     /// <inheritdoc />
@@ -140,16 +139,23 @@ public sealed class InspectorProfile : IProfile
         new ModuleDescriptor("admin-violation-categories", "/admin/violation-categories", "Виды нарушений",
             Icons.Material.Filled.Category, typeof(ViolationCategories), ReadPolicy, GroupAdmin),
 
-        // --- Секция «Учётная запись»: смена СВОЕГО пароля — не администрирование, доступна любому
-        // вошедшему, поэтому вынесена из админ-секции (рядовой сотрудник не должен искать её среди
-        // ролей и допусков). ---
-        new ModuleDescriptor("account-password", "/account/password", "Смена пароля",
-            Icons.Material.Filled.Password, typeof(ChangePassword), ReadPolicy, GroupAccount),
+        // Смена пароля из меню убрана (решение заказчика 2026-08-25): она — диалог из шапки
+        // (AccountWidget в ShellWidgets). Маршрут /account/password при этом ЖИВ без записи в
+        // реестре (@page на самой странице): он нужен принудительной смене временного пароля
+        // (RequirePasswordChange хоста запирает туда MustChangePassword-пользователя).
     ];
 
     /// <inheritdoc />
-    /// <remarks>Колокольчик уведомлений даёт пакет docflow — профиль лишь включает его в оболочку.</remarks>
-    public IReadOnlyList<IShellWidget> ShellWidgets { get; } = [.. DocFlowModule.ShellWidgets];
+    /// <remarks>
+    /// Колокольчик уведомлений даёт пакет docflow; кнопку «Сменить пароль» (диалог с любого
+    /// экрана) — сам профиль. Порядок: колокольчик (10), затем пароль (20).
+    /// </remarks>
+    public IReadOnlyList<IShellWidget> ShellWidgets { get; } =
+    [
+        .. DocFlowModule.ShellWidgets,
+        new ShellWidgetDescriptor("account-password", ShellWidgetSlot.AppBarRight, Order: 20,
+            typeof(AccountWidget)),
+    ];
 
     /// <inheritdoc />
     public IReadOnlyList<IModelContributor> ModelContributors { get; } = [];

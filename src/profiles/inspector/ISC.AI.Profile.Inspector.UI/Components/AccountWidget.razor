@@ -1,0 +1,43 @@
+@namespace ISC.AI.Profile.Inspector.UI
+
+@* Кнопка «Сменить пароль» в шапке (виджет IShellWidget, слот AppBarRight): смена пароля —
+   диалогом с любого экрана, без отдельной страницы в меню (решение заказчика 2026-08-25).
+   Собственный @rendermode НЕ объявляется — виджет живёт в MainLayout, режим задаёт App.razor
+   (то же правило, что у колокольчика уведомлений).
+   Именно ДИАЛОГ, а не MudMenu с кастомным активатором: меню такого рода в шапке не открывалось
+   (известный случай колокольчика) — диалоги через MudDialogProvider работают везде. *@
+
+<MudTooltip Text="Сменить пароль">
+    <MudIconButton Icon="@Icons.Material.Filled.Password" Color="Color.Inherit"
+                   OnClick="@(() => _open = true)" aria-label="Сменить пароль" />
+</MudTooltip>
+
+<MudDialog @bind-Visible="_open" Options="DialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Смена пароля</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-3">
+            Пароль меняете только вы — администратор его не видит.
+        </MudText>
+        @* Форма пересоздаётся при каждом открытии (@key): прошлые поля/ошибки не всплывают. *@
+        <ChangePasswordForm @key="_generation" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Закрыть</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly DialogOptions DialogOptions =
+        new() { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, CloseOnEscapeKey = true, CloseButton = true };
+
+    private bool _open;
+    private int _generation;
+
+    private void Close()
+    {
+        _open = false;
+        _generation++; // следующий показ — с чистой формой (и без паролей в памяти circuit)
+    }
+}
