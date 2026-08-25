@@ -38,6 +38,9 @@ public sealed class InspectorProfile : IProfile
     public string? Subtitle => "ГКНБ КР · Главная инспекция";
 
     /// <inheritdoc />
+    public string? EmblemUrl => "/images/Emblem_of_State_Committee_for_National_Security.png";
+
+    /// <inheritdoc />
     public IReadOnlyList<IModule> Modules { get; } =
     [
         // --- Реализованные модули ---
