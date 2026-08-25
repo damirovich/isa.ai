@@ -138,10 +138,12 @@
                         </div>
 
                         <SectionCaption Text="Текст" Class="mb-1" />
-                        @* Длинный черновик не растягивает страницу — прокрутка внутри блока. *@
-                        <MudPaper Class="pa-3 mb-3" Outlined="true" Style="max-height:55vh; overflow-y:auto;">
-                            <MudText Typo="Typo.body2" Style="white-space: pre-wrap;">@Result.DraftText</MudText>
-                        </MudPaper>
+                        @* Документный вид — как лист НПА; длинный черновик прокручивается внутри. *@
+                        <div class="mb-3" style="max-height:55vh; overflow-y:auto;">
+                            <DocumentSheet Title="@_artifactKind"
+                                           Subtitle="@($"{_inspectionType} проверка · {BuildScope()}")"
+                                           Body="@Result.DraftText" EmblemUrl="@NpaDocument.EmblemUrl" />
+                        </div>
 
                         @if (Result.Citations.Count > 0)
                         {
@@ -278,7 +280,7 @@
             else
             {
                 @* Документный вид — как лист НПА: бумага, засечки, герб; читается, а не редактируется. *@
-                <MethodDocumentSheet Title="@card.ArtifactKind"
+                <DocumentSheet Title="@card.ArtifactKind"
                                      Subtitle="@($"{card.InspectionType} проверка · {card.Scope}")"
                                      Body="@_cardBody" EmblemUrl="@NpaDocument.EmblemUrl" />
 
