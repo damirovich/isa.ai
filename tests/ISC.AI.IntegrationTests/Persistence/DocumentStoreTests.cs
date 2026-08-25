@@ -270,6 +270,36 @@ public sealed class DocumentStoreTests : IAsyncLifetime
         details.Attachments.ShouldHaveSingleItem().FileName.ShouldBe("приложение.pdf");
     }
 
+    [Fact(DisplayName = "Пустой рег. номер выдаёт журнал (Вх/Вн-{n}/{год} по направлению); ручной — как есть")]
+    public async Task Empty_reg_number_is_assigned_from_journal()
+    {
+        var factory = new DocFlowContextFactory(_postgres.GetConnectionString());
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+        }
+
+        var typeStore = new DocumentTypeStore(factory);
+        var store = new DocumentStore(factory, new TempFileStorage(), new AllowAllAccessPolicy(), TestUserDirectory.AllowAll);
+        var typeId = (await typeStore.CreateAsync("Справка", DocumentGroup.Storage, isActive: true))!.Value;
+
+        async Task<string?> RegisterAsync(string? number, DocumentDirection direction)
+        {
+            var result = await store.CreateAsync(
+                new DocumentDraft(number, new DateOnly(2026, 8, 25), typeId, direction,
+                    null, "Документ журнала", null, null, null, null, 0, 10, 42),
+                [], useCommonDeadline: false, commonDeadline: null, FullAccess);
+            result.Status.ShouldBe(DocumentWriteStatus.Ok);
+            await using var db = factory.CreateDbContext();
+            return (await db.Documents.SingleAsync(d => d.Id == result.DocumentId)).RegNumber;
+        }
+
+        (await RegisterAsync(null, DocumentDirection.Incoming)).ShouldBe("Вх-1/2026");
+        (await RegisterAsync(null, DocumentDirection.Incoming)).ShouldBe("Вх-2/2026");   // счётчик растёт
+        (await RegisterAsync(null, DocumentDirection.Internal)).ShouldBe("Вн-1/2026");   // журналы раздельные
+        (await RegisterAsync("ГИ-7", DocumentDirection.Incoming)).ShouldBe("ГИ-7");      // ручной — как есть
+    }
+
     [Fact(DisplayName = "Решётка доступа (6.1, ТБ-020/021): чужой гриф/подразделение не выдаются ни списком, ни карточкой")]
     public async Task List_and_get_enforce_classification_and_division()
     {

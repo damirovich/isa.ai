@@ -24,8 +24,8 @@
     <PackageReference Include="ClosedXML" />
     <PackageReference Include="PDFsharp" />
     <PackageReference Include="DocumentFormat.OpenXml" />
-    <!-- Фоновая проверка сроков (BackgroundService) — как очередь ИИ-задач ядра. -->
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <!-- Явной ссылки на Hosting.Abstractions (BackgroundService) больше нет: SDK .NET 10 даёт её
+         неявно, а явная дублировала и сыпала NU1510 при каждом restore. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

@@ -45,8 +45,9 @@
                 </MudSelect>
             </MudItem>
             <MudItem xs="12" sm="6">
-                <MudTextField @bind-Value="_regNumber" Label="Рег. номер (пусто — до присвоения)"
-                              Variant="Variant.Outlined" MaxLength="200" />
+                <MudTextField @bind-Value="_regNumber" Label="Рег. номер"
+                              Variant="Variant.Outlined" MaxLength="200"
+                              HelperText="пусто — присвоит система (журнал «Вн-…»)" />
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudDatePicker @bind-Date="_regDate" Label="Дата регистрации" Variant="Variant.Outlined"

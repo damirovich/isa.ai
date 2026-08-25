@@ -33,8 +33,8 @@
                 <MudSelectItem T="int?" Value="@type.Id">@($"{type.Name} ({type.Group.Label()})")</MudSelectItem>
             }
         </MudSelect>
-        <MudTextField @bind-Value="_regNumber" Label="Рег. номер (уникален)" Variant="Variant.Outlined" MaxLength="200"
-                      Style="width:200px;" />
+        <MudTextField @bind-Value="_regNumber" Label="Рег. номер" Variant="Variant.Outlined" MaxLength="200"
+                      Style="width:200px;" HelperText="пусто — присвоит система (журнал по году)" />
         @* Ширина календарей — ОБЁРТКОЙ, не Style: MudBlazor копирует Style пикера на раскрытый
            календарь, и попап сжимался до ширины поля (дата в шапке обрезалась до года). *@
         <div style="width:190px;">
@@ -293,6 +293,11 @@
 
         _maxClassification = limits.MaxClassification;
         _ownerDivisions.AddRange(limits.OwnerDivisions);
+
+        // Своё подразделение подставляется ПО УМОЛЧАНИЮ (решение заказчика 2026-08-25): список
+        // владельцев — уже пересечение с допуском субъекта, первый пункт и есть «его» подразделение.
+        // Это дефолт, не запрет: канцелярия может выбрать другое из своего допуска.
+        _divisionId ??= _ownerDivisions.Count > 0 ? _ownerDivisions[0].Id : null;
 
         _scopeError = (_ownerDivisions.Count, _divisionsLoaded, _divisions.Count) switch
         {

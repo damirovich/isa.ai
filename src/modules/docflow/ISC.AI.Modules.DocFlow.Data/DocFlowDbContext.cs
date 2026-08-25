@@ -71,6 +71,9 @@ public class DocFlowDbContext(DbContextOptions<DocFlowDbContext> options) : Audi
     /// <summary>Системные настройки модуля (§9) — «ключ-значение», меняются без перезапуска.</summary>
     public DbSet<SystemSetting> SystemSettings { get; set; } = null!;
 
+    /// <summary>Счётчики журнала регистрации (§3.2): нумерация «направление × год».</summary>
+    public DbSet<RegistrationCounter> RegistrationCounters { get; set; } = null!;
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

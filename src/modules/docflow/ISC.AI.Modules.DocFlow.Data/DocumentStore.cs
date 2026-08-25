@@ -105,9 +105,16 @@ public sealed partial class DocumentStore(
             return new DocumentCreateResult(DocumentWriteStatus.ExecutionFieldsMissing);
         }
 
+        // Пустой номер выдаёт СИСТЕМА (журнал §3.2, решение заказчика 2026-08-25): «Вх/Вн/Исх-{n}/{год}»
+        // по направлению и году регистрации. Вписанный вручную номер (перенос из бумажного журнала)
+        // хранится как есть — его уникальность проверена выше и добита unique-индексом.
+        var regNumber = string.IsNullOrWhiteSpace(draft.RegNumber)
+            ? await NextRegNumberAsync(db, draft.Direction, draft.RegDate.Year, cancellationToken)
+            : draft.RegNumber.Trim();
+
         var document = new Document
         {
-            RegNumber = string.IsNullOrWhiteSpace(draft.RegNumber) ? null : draft.RegNumber.Trim(),
+            RegNumber = regNumber,
             RegDate = draft.RegDate,
             TypeId = draft.TypeId,
             DirectionFlag = draft.Direction,
@@ -182,6 +189,33 @@ public sealed partial class DocumentStore(
             [.. createdAssignments.Select(a => new CreatedAssignmentNotice(a.Id, a.AssigneeUserId, a.Deadline))]);
 
         return new DocumentCreateResult(DocumentWriteStatus.Ok, document.Id, notice);
+    }
+
+    /// <summary>
+    /// Следующий номер журнала регистрации (§3.2): атомарный UPSERT строки счётчика
+    /// «направление × год» — при одновременной регистрации двумя людьми каждый получает СВОЙ номер
+    /// (никаких «max+1» с гонкой). Выданный номер не переиспользуется: если регистрация после
+    /// выдачи сорвалась, в журнале останется дыра — это честнее совпадающих номеров.
+    /// </summary>
+    private static async Task<string> NextRegNumberAsync(
+        DocFlowDbContext db, DocumentDirection direction, int year, CancellationToken cancellationToken)
+    {
+        // Сырой SQL — намеренно: инкремент должен быть атомарным на строке БД; alias "Value" —
+        // требование EF для скалярного SqlQuery.
+        var next = (await db.Database.SqlQuery<int>($@"
+            INSERT INTO docflow.reg_counter (direction, year, last_number)
+            VALUES ({(int)direction}, {year}, 1)
+            ON CONFLICT (direction, year)
+            DO UPDATE SET last_number = reg_counter.last_number + 1
+            RETURNING last_number AS ""Value""").ToListAsync(cancellationToken)).Single();
+
+        var prefix = direction switch
+        {
+            DocumentDirection.Incoming => "Вх",
+            DocumentDirection.Outgoing => "Исх",
+            _ => "Вн",
+        };
+        return $"{prefix}-{next}/{year}";
     }
 
     /// <inheritdoc />
