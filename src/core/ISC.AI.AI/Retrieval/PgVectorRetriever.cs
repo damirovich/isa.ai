@@ -1,3 +1,4 @@
+using System.Globalization;
 using ISC.AI.AI.Security;
 using ISC.AI.Abstractions.AI;
 using ISC.AI.Abstractions.Enums;
@@ -53,6 +54,15 @@ public sealed class PgVectorRetriever(
 
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
 
+        // Широта обхода HNSW-графа — на каждую поисковую транзакцию (ТБ-022). Дефолт pgvector (40
+        // кандидатов) доказанно пропускает малые семантические «острова»: документ есть в корпусе,
+        // точный скан его находит, индексный — нет (инцидент 26.08.2026). set_config(..., is_local:
+        // true) ≡ SET LOCAL, поэтому нужна явная транзакция; без HNSW-индекса настройка безвредна.
+        var efSearch = Math.Clamp(options.HnswEfSearch, 10, 1000).ToString(CultureInfo.InvariantCulture);
+        await using var searchTransaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.Database.ExecuteSqlAsync(
+            $"SELECT set_config('hnsw.ef_search', {efSearch}, true)", cancellationToken);
+
         // PRE-FILTER (ТБ-020): floor ядра (гриф ≤ допуск ∧ подразделение ∈ разрешённых) + сужение профиля.
         IQueryable<EmbeddingEntity> candidates = db.Embeddings
             .Where(BaselineAccess.Filter<EmbeddingEntity>(access))
@@ -83,7 +93,7 @@ public sealed class PgVectorRetriever(
             scored = scored.Where(s => s.Distance <= maxDistance);
         }
 
-        return await scored
+        var results = await scored
             .OrderBy(s => s.Distance)
             .Take(topK)
             .Select(s => new RetrievedChunk(
@@ -96,5 +106,9 @@ public sealed class PgVectorRetriever(
                 s.Distance,
                 s.Embedding.Chunk.Document!.Metadata))
             .ToListAsync(cancellationToken);
+
+        // Транзакция только скоупит SET LOCAL — изменений данных нет.
+        await searchTransaction.CommitAsync(cancellationToken);
+        return results;
     }
 }

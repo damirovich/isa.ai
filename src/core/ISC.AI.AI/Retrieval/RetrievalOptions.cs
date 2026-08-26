@@ -33,7 +33,18 @@ public enum RetrievalMetric
 /// Метрика ранжирования (ТО-мат-04). По умолчанию <see cref="RetrievalMetric.Cosine"/> — совпадает с
 /// HNSW-индексом; смена метрики меняет порядок выдачи и смысл <paramref name="MaxDistance"/>.
 /// </param>
-public sealed record RetrievalOptions(double? MaxDistance = null, RetrievalMetric Metric = RetrievalMetric.Cosine)
+/// <param name="HnswEfSearch">
+/// Широта обхода HNSW-графа при поиске (<c>hnsw.ef_search</c>, ТБ-022): сколько кандидатов индекс
+/// рассматривает до отбора top-K. Дефолт PostgreSQL (40) доказанно ПРОПУСКАЕТ малые семантические
+/// «острова» — группы из нескольких документов, непохожих на основной корпус (инцидент 26.08.2026:
+/// загруженный документ находился точным сканом и терялся индексным). Значение 200 в паре со сборкой
+/// индекса <c>ef_construction=512</c> возвращает такие документы; ретривер выставляет его на каждую
+/// поисковую транзакцию. Без HNSW-индекса настройка безвредна. Диапазон 10–1000 (ограничение pgvector).
+/// </param>
+public sealed record RetrievalOptions(
+    double? MaxDistance = null,
+    RetrievalMetric Metric = RetrievalMetric.Cosine,
+    int HnswEfSearch = 200)
 {
     /// <summary>Без отсечения по релевантности, метрика по умолчанию (Cosine) — поведение до калибровки.</summary>
     public static readonly RetrievalOptions None = new();

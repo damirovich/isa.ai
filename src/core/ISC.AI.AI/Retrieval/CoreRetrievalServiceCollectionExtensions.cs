@@ -26,7 +26,8 @@ public static class CoreRetrievalServiceCollectionExtensions
     }
 
     // Порог и метрика ранжирования — из секции Retrieval (ТО-мат-04). MaxDistance не задан/не парсится →
-    // отсечения нет; Metric не задан/не парсится → Cosine (совпадает с HNSW-индексом).
+    // отсечения нет; Metric не задан/не парсится → Cosine (совпадает с HNSW-индексом); HnswEfSearch не
+    // задан/не парсится → 200 (см. RetrievalOptions: дефолт pgvector 40 пропускает «острова», ТБ-022).
     private static RetrievalOptions ReadRetrievalOptions(IConfiguration configuration)
     {
         double? maxDistance = double.TryParse(
@@ -38,6 +39,11 @@ public static class CoreRetrievalServiceCollectionExtensions
             ? m
             : RetrievalMetric.Cosine;
 
-        return new RetrievalOptions(maxDistance, metric);
+        var hnswEfSearch = int.TryParse(
+            configuration["Retrieval:HnswEfSearch"], NumberStyles.Integer, CultureInfo.InvariantCulture, out var ef)
+            ? ef
+            : 200;
+
+        return new RetrievalOptions(maxDistance, metric, hnswEfSearch);
     }
 }
