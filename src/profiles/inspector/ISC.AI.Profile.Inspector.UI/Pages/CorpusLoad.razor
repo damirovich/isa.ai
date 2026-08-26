@@ -36,10 +36,13 @@
     <MudGrid Spacing="2">
         <MudItem xs="12" sm="4">
             @* Тип — С ПОДСКАЗКАМИ из уже существующих в корпусе (единообразие: не «Приказ»/«приказ»/
-               «прик.»), но НЕ закрытым списком: корпус типонезависим, новый тип вводится свободно. *@
-            <MudAutocomplete T="string" @bind-Value="_docType" Label="Тип документа" Variant="Variant.Outlined"
+               «прик.»), но НЕ закрытым списком: корпус типонезависим, новый тип вводится свободно.
+               БЕЗ умолчания (заказчик 2026-08-26): предзаполненное «положение» помечало бы чужие
+               типы по забывчивости — тот же приём, что у грифа. *@
+            <MudAutocomplete T="string" @bind-Value="_docType" Label="Тип документа *" Variant="Variant.Outlined"
                              SearchFunc="SearchDocTypesAsync" CoerceValue="true" Clearable="true"
-                             MinCharacters="0" HelperText="выберите из списка или введите свой" />
+                             MinCharacters="0" Placeholder="Выберите или введите тип"
+                             HelperText="выберите из списка или введите свой" />
         </MudItem>
         <MudItem xs="6" sm="4">
             @* Гриф БЕЗ умолчания и В ПРЕДЕЛАХ допуска — тот же приём, что в регистрации документа
@@ -103,7 +106,7 @@
         <div class="mt-2 d-flex align-center gap-3 flex-wrap">
             <MudButton Variant="Variant.Filled" Color="Color.Primary"
                        StartIcon="@Icons.Material.Filled.CloudUpload" OnClick="UploadFilesAsync"
-                       Disabled="@(_busy || _divisionId is null || _classification is null)">
+                       Disabled="@(_busy || string.IsNullOrWhiteSpace(_docType) || _divisionId is null || _classification is null)">
                 @(_busy ? "Загружаю…" : $"Загрузить {FileCountLabel(_pendingFiles.Count)}")
             </MudButton>
             <MudButton Variant="Variant.Text" OnClick="@(() => _pendingFiles.Clear())" Disabled="_busy">
@@ -111,10 +114,10 @@
             </MudButton>
         </div>
     }
-    @if (_divisionId is null || _classification is null)
+    @if (string.IsNullOrWhiteSpace(_docType) || _divisionId is null || _classification is null)
     {
         <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
-            Загрузка станет доступна после выбора грифа и подразделения.
+            Загрузка станет доступна после выбора типа документа, грифа и подразделения.
         </MudText>
     }
 
@@ -273,7 +276,8 @@
     // (скажем, 1000) не должен превращать список в тысячу строк.
     private const short MaxSelectableClassification = 9;
 
-    private string _docType = "положение";
+    // Тип файлов — БЕЗ умолчания, как и гриф: оператор называет его сам (валидатор не пропустит пустой).
+    private string _docType = string.Empty;
     private short? _classification;        // гриф файлов — БЕЗ умолчания (ТБ-024)
     private int? _divisionId;
     private int? _bundleDivisionId;
@@ -452,9 +456,9 @@
     private async Task UploadFilesAsync()
     {
         // Дубль к disabled на кнопке — защита от гонки состояния формы (ТБ-024).
-        if (_divisionId is null || _classification is null)
+        if (string.IsNullOrWhiteSpace(_docType) || _divisionId is null || _classification is null)
         {
-            _error = "Выберите гриф и подразделение из справочника.";
+            _error = "Укажите тип документа, гриф и подразделение.";
             return;
         }
 
