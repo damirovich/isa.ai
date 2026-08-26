@@ -12,10 +12,11 @@ namespace ISC.AI.Documents.Extraction;
 /// Движок <see cref="TesseractEngine"/> НЕ потокобезопасен и дорог в создании: создаётся ЛЕНИВО один раз,
 /// доступ к <see cref="TesseractEngine.Process(Pix)"/> сериализуется семафором. Если OCR не настроен или
 /// файлы <c>{язык}.traineddata</c>/native-библиотеки отсутствуют — ЯВНАЯ ошибка (не молчаливый пустой
-/// результат, ср. принцип «явный отказ» в конвейере загрузки). PDF-сканы требуют предварительной
-/// растеризации страниц в изображения — отдельный шаг, здесь не выполняется.
+/// результат, ср. принцип «явный отказ» в конвейере загрузки). PDF-сканы сюда не попадают как файл:
+/// их страницы-изображения достаёт <see cref="PdfTextExtractor"/> и распознаёт через <see cref="IImageOcr"/>
+/// этого же класса (один движок и одна очередь на процесс).
 /// </remarks>
-public sealed class TesseractOcrTextExtractor(OcrOptions options) : IFormatTextExtractor, IDisposable
+public sealed class TesseractOcrTextExtractor(OcrOptions options) : IFormatTextExtractor, IImageOcr, IDisposable
 {
     /// <inheritdoc />
     public IReadOnlyCollection<string> Extensions { get; } = [".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"];
@@ -33,7 +34,15 @@ public sealed class TesseractOcrTextExtractor(OcrOptions options) : IFormatTextE
         // Tesseract читает из памяти — копируем поток целиком (файлы сканов умеренного размера).
         using var buffer = new MemoryStream();
         await content.CopyToAsync(buffer, cancellationToken);
-        var imageBytes = buffer.ToArray();
+
+        var text = await RecognizeAsync(buffer.ToArray(), cancellationToken);
+        return new ExtractedDocument(text, Title: null);
+    }
+
+    /// <inheritdoc />
+    public async Task<string> RecognizeAsync(byte[] imageBytes, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(imageBytes);
 
         await _gate.WaitAsync(cancellationToken);
         try
@@ -41,8 +50,7 @@ public sealed class TesseractOcrTextExtractor(OcrOptions options) : IFormatTextE
             var engine = GetOrCreateEngine();
             using var image = Pix.LoadFromMemory(imageBytes);
             using var page = engine.Process(image);
-            var text = (page.GetText() ?? string.Empty).Trim();
-            return new ExtractedDocument(text, Title: null);
+            return (page.GetText() ?? string.Empty).Trim();
         }
         finally
         {

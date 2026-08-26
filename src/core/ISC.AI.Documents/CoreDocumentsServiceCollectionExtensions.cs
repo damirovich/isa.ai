@@ -15,13 +15,19 @@ public static class CoreDocumentsServiceCollectionExtensions
     {
         services.AddSingleton<IFormatTextExtractor, PlainTextExtractor>();
         services.AddSingleton<IFormatTextExtractor, DocxTextExtractor>();
-        services.AddSingleton<IFormatTextExtractor, PdfTextExtractor>();
 
         // OCR сканов (ПОДГ-02) регистрируется ВСЕГДА: сканы/изображения распознаются как OCR-формат, а при
         // ненастроенном OCR попытка даёт ЯВНУЮ ошибку «OCR не настроен» (а не «формат не поддерживается»).
         // Путь к tessdata и языки — из конфигурации (офлайн-ассеты оператора, изолированный контур).
+        // Экземпляр ОДИН на оба применения (файлы-изображения и страницы-сканы PDF): движок Tesseract
+        // дорог и не потокобезопасен, очередь распознавания должна быть общей.
         services.AddSingleton(ReadOcrOptions(configuration));
-        services.AddSingleton<IFormatTextExtractor, TesseractOcrTextExtractor>();
+        services.AddSingleton<TesseractOcrTextExtractor>();
+        services.AddSingleton<IFormatTextExtractor>(sp => sp.GetRequiredService<TesseractOcrTextExtractor>());
+        services.AddSingleton<IImageOcr>(sp => sp.GetRequiredService<TesseractOcrTextExtractor>());
+
+        // PDF — после OCR: страницы-сканы внутри PDF распознаются тем же движком (IImageOcr).
+        services.AddSingleton<IFormatTextExtractor, PdfTextExtractor>();
 
         services.TryAddSingleton<ITextExtractor, CompositeTextExtractor>();
 
