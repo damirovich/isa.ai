@@ -67,17 +67,18 @@
     </MudGrid>
 
     <div class="mt-3 d-flex align-center gap-3 flex-wrap">
-        @* MudBlazor 9.5: своя кнопка — через CustomContent + OpenFilePickerAsync (ActivatorContent
+        @* ДВА ШАГА: выбор файлов лишь наполняет список, загрузку запускает отдельная кнопка —
+           случайно выбранный файл не должен улетать в корпус сам (замечание заказчика 2026-08-26).
+           MudBlazor 9.5: своя кнопка — через CustomContent + OpenFilePickerAsync (ActivatorContent
            из старых версий удалён; без CustomContent рисуется английская «Browse files»). *@
-        <MudFileUpload T="IReadOnlyList<IBrowserFile>" FilesChanged="UploadFilesAsync"
+        <MudFileUpload T="IReadOnlyList<IBrowserFile>" FilesChanged="OnFilesSelected"
                        Accept=".txt,.docx,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp" MaximumFileCount="50"
-                       Disabled="@(_busy || _divisionId is null || _classification is null)">
+                       Disabled="_busy">
             <CustomContent Context="upload">
-                <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                           Disabled="@(_busy || _divisionId is null || _classification is null)"
-                           StartIcon="@Icons.Material.Filled.UploadFile"
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="_busy"
+                           StartIcon="@Icons.Material.Filled.AttachFile"
                            OnClick="@(() => upload.OpenFilePickerAsync())">
-                    @(_busy ? "Загружаю…" : "Выбрать файлы и загрузить")
+                    Выбрать файлы…
                 </MudButton>
             </CustomContent>
         </MudFileUpload>
@@ -86,10 +87,34 @@
             Старый .doc не поддерживается — сохраните как .docx.
         </MudText>
     </div>
+
+    @if (_pendingFiles.Count > 0)
+    {
+        <div class="mt-2 d-flex align-center gap-2 flex-wrap">
+            @foreach (var file in _pendingFiles)
+            {
+                var pending = file; // копия для замыкания OnClose
+                <MudChip T="string" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Description"
+                         OnClose="@(() => _pendingFiles.Remove(pending))" Disabled="_busy">
+                    @pending.Name · @SizeLabel(pending.Size)
+                </MudChip>
+            }
+        </div>
+        <div class="mt-2 d-flex align-center gap-3 flex-wrap">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.CloudUpload" OnClick="UploadFilesAsync"
+                       Disabled="@(_busy || _divisionId is null || _classification is null)">
+                @(_busy ? "Загружаю…" : $"Загрузить {FileCountLabel(_pendingFiles.Count)}")
+            </MudButton>
+            <MudButton Variant="Variant.Text" OnClick="@(() => _pendingFiles.Clear())" Disabled="_busy">
+                Очистить список
+            </MudButton>
+        </div>
+    }
     @if (_divisionId is null || _classification is null)
     {
         <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
-            Кнопка станет доступна после выбора грифа и подразделения.
+            Загрузка станет доступна после выбора грифа и подразделения.
         </MudText>
     }
 
@@ -306,6 +331,24 @@
     private string? _error;
     private readonly List<IngestFileResult> _fileResults = [];
 
+    /// <summary>Выбранные, но ещё НЕ загруженные файлы (шаг 1 из 2; см. OnFilesSelected).</summary>
+    private readonly List<IBrowserFile> _pendingFiles = [];
+
+    /// <summary>Счётчик с русским склонением: 1 файл, 2 файла, 5 файлов (и 11–14 — «файлов»).</summary>
+    private static string FileCountLabel(int count) => (count % 100 is >= 11 and <= 14 ? 0 : count % 10) switch
+    {
+        1 => $"{count} файл",
+        2 or 3 or 4 => $"{count} файла",
+        _ => $"{count} файлов",
+    };
+
+    private static string SizeLabel(long bytes) => bytes switch
+    {
+        >= 1024 * 1024 => $"{bytes / (1024.0 * 1024.0):0.#} МБ",
+        >= 1024 => $"{bytes / 1024.0:0.#} КБ",
+        _ => $"{bytes} Б",
+    };
+
     private string _manifestPath = string.Empty;
     private string? _bundleStatus;
 
@@ -384,7 +427,29 @@
     private static string DocumentLabel(CorpusCatalogItem item) =>
         $"#{item.DocumentId} · {item.Title}{(item.DocDate is { } date ? $" ({date:dd.MM.yyyy})" : string.Empty)}";
 
-    private async Task UploadFilesAsync(IReadOnlyList<IBrowserFile>? files)
+    /// <summary>
+    /// Шаг 1: выбор файлов только НАПОЛНЯЕТ список (без загрузки — заказчик 2026-08-26: случайный
+    /// файл улетал в корпус сразу). Повторный выбор ДОБАВЛЯЕТ к списку; дубли по имени и размеру
+    /// не плодятся. Загрузка — отдельной кнопкой (шаг 2).
+    /// </summary>
+    private void OnFilesSelected(IReadOnlyList<IBrowserFile>? files)
+    {
+        if (files is null)
+        {
+            return;
+        }
+
+        foreach (var file in files)
+        {
+            if (!_pendingFiles.Any(p => p.Name == file.Name && p.Size == file.Size))
+            {
+                _pendingFiles.Add(file);
+            }
+        }
+    }
+
+    /// <summary>Шаг 2: явная загрузка всего выбранного списка.</summary>
+    private async Task UploadFilesAsync()
     {
         // Дубль к disabled на кнопке — защита от гонки состояния формы (ТБ-024).
         if (_divisionId is null || _classification is null)
@@ -393,7 +458,7 @@
             return;
         }
 
-        if (files is null || files.Count == 0)
+        if (_pendingFiles.Count == 0)
         {
             return;
         }
@@ -402,7 +467,7 @@
         _error = null;
         try
         {
-            foreach (var file in files)
+            foreach (var file in _pendingFiles)
             {
                 using var buffer = new MemoryStream();
                 await using (var stream = file.OpenReadStream(maxAllowedSize: 25 * 1024 * 1024))
@@ -427,8 +492,10 @@
             }
 
             // Замена версии — одноразовое намерение: после загрузки сбрасывается, чтобы следующий
-            // файл случайно не «заменил» тот же документ ещё раз.
+            // файл случайно не «заменил» тот же документ ещё раз. Список выбранного — тоже:
+            // загруженное не должно уйти в корпус повторно следующим нажатием.
             _supersedesDocument = null;
+            _pendingFiles.Clear();
         }
         catch (Exception ex)
         {
