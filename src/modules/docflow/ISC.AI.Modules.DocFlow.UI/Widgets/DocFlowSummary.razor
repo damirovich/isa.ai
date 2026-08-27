@@ -1,12 +1,12 @@
 @namespace ISC.AI.Modules.DocFlow.UI
-@* Дашборд документооборота (перенос экрана Dashboard СКИД). СВОЙ экран у модуля, а не панель на
-   дашборде профиля: у документооборота своя сводка, и смешивать её с показателями инспекции значит
-   заставлять читателя разбирать, что из чисел про что.
+@* Сводка документооборота — КОМПОНЕНТ, а не страница: с объединением дашбордов (решение заказчика
+   2026-08-27) модуль отдаёт сводку профилю, и тот сам решает, где её показать (у «ИнспекторAI» —
+   вкладка общего дашборда /dashboard). Прежнее решение 2026-08-07 «свой экран у модуля» отменено:
+   два пункта «Дашборд» в меню путали. Довод «не смешивать числа инспекции и канцелярии» сохранён —
+   вкладки разделяют их не хуже отдельных страниц.
    Всё, что здесь показано, посчитано В ПРЕДЕЛАХ ДОПУСКА: счётчик — тоже выдача данных, «просрочено: 7»
    при пустом реестре сообщало бы о существовании семи недоступных поручений. *@
-@page "/docflow/dashboard"
-@rendermode InteractiveServer
-@inject NavigationManager Navigation
+@using Microsoft.AspNetCore.Components.Web
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Modules.DocFlow.Application.Features.Dashboard
 @using ISC.AI.Modules.DocFlow.Application.Features.Documents
@@ -14,14 +14,14 @@
 @using ISC.AI.Modules.DocFlow.Application.Features.Comments
 @using ISC.AI.Modules.DocFlow.Application.Features.Directory
 @using ISC.AI.Modules.DocFlow.Domain.Services
+@using Mediator
+@inject IMediator Dispatcher
+@inject NavigationManager Navigation
 
 <div class="d-flex align-center justify-space-between flex-wrap gap-2">
-    <div>
-        <MudText Typo="Typo.h5">Документооборот</MudText>
-        <MudText Typo="Typo.body2" Class="mud-text-secondary">
-            Сводка по поручениям · только то, что доступно вам по грифу и подразделению
-        </MudText>
-    </div>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary">
+        Сводка по поручениям · только то, что доступно вам по грифу и подразделению
+    </MudText>
     <MudIconButton Icon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync" Disabled="_busy"
                    aria-label="Обновить" />
 </div>

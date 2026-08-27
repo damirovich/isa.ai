@@ -19,6 +19,9 @@
     <!-- Профиль → docflow (направление разрешено, ADR-0017): страницы профиля шлют команды модуля
          (регистрация ИИ-документов) через общий Mediator. Обратной ссылки docflow на профиль нет. -->
     <ProjectReference Include="..\..\..\modules\docflow\ISC.AI.Modules.DocFlow.Application\ISC.AI.Modules.DocFlow.Application.csproj" />
+    <!-- Сводка документооборота (DocFlowSummary) — вкладка общего дашборда (решение 2026-08-27).
+         Направление допустимое: профиль знает модуль, модуль профиля — никогда (ADR-0017). -->
+    <ProjectReference Include="..\..\..\modules\docflow\ISC.AI.Modules.DocFlow.UI\ISC.AI.Modules.DocFlow.UI.csproj" />
   </ItemGroup>
 
   <ItemGroup>
