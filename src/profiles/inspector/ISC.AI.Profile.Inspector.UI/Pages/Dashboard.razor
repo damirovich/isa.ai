@@ -1,27 +1,29 @@
 @namespace ISC.AI.Profile.Inspector.UI
 @page "/dashboard"
 @rendermode InteractiveServer
+@using ISC.AI.Modules.DocFlow.UI
 @using ISC.AI.Profile.Inspector.Application.Features.Dashboard
 @using ISC.AI.Profile.Inspector.Application.Features.Divisions
 @using ISC.AI.Profile.Inspector.Application.Features.ViolationCategories
 @using ISC.AI.Profile.Inspector.Domain.Enums
 @using ISC.AI.Profile.Inspector.Domain.Services
+@inject NavigationManager Navigation
 
 @* Модуль «Дашборд» (§5.2.5, Э5-01): ЖИВЫЕ данные из учёта нарушений — демо-набор снят. Светофор —
    детерминированный балл RiskScore (Приложение §2), считает код (RiskScoreCalculator), не ИИ.
    Отбор ТФ-ДШ-02 (подразделение/вид/тяжесть/статус) применяется в самом источнике данных —
-   счётчики, светофор и лента пересчитываются в рамках отбора, тренд — в тех же рамках. *@
+   счётчики, светофор и лента пересчитываются в рамках отбора, тренд — в тех же рамках.
+   ЕДИНЫЙ дашборд с вкладками (решение заказчика 2026-08-27): сводка документооборота — второй
+   вкладкой (компонент DocFlowSummary модуля), два пункта «Дашборд» в меню путали. Числа инспекции
+   и канцелярии по-прежнему не смешаны — они на разных вкладках. Вкладку выбирает и адрес:
+   ?tab=docflow (туда ведут колокольчик уведомлений и старый /docflow/dashboard). *@
 
-<PageHeader Title="Дашборд" Subtitle="Сводная картина по подразделениям — светофор риска"
-            Icon="@Icons.Material.Filled.Dashboard">
-    <MudSelect T="int" Value="_periodDays" ValueChanged="ChangePeriodAsync" Label="Период"
-               Variant="Variant.Outlined" Dense="true" Style="width:180px;">
-        <MudSelectItem T="int" Value="30">30 дней</MudSelectItem>
-        <MudSelectItem T="int" Value="90">90 дней</MudSelectItem>
-        <MudSelectItem T="int" Value="180">Полгода</MudSelectItem>
-        <MudSelectItem T="int" Value="365">Год</MudSelectItem>
-    </MudSelect>
-</PageHeader>
+<PageHeader Title="Дашборд" Subtitle="Риски инспекции и сводка документооборота"
+            Icon="@Icons.Material.Filled.Dashboard" />
+
+<MudTabs Elevation="0" Border="true" Rounded="true" Class="mt-1" @bind-ActivePanelIndex="_activeTab">
+<MudTabPanel Text="Риски инспекции" Icon="@Icons.Material.Filled.Traffic">
+<div class="pt-3">
 
 @if (_error is not null)
 {
@@ -29,9 +31,16 @@
               ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
 }
 
-@* --- Отбор (ТФ-ДШ-02): подразделение, вид (сфера включает её виды), тяжесть, статус --- *@
+@* --- Отбор (ТФ-ДШ-02): период, подразделение, вид (сфера включает её виды), тяжесть, статус --- *@
 <MudPaper Outlined="true" Class="pa-3 mb-4">
     <div class="d-flex gap-3 align-end flex-wrap">
+        <MudSelect T="int" Value="_periodDays" ValueChanged="ChangePeriodAsync" Label="Период"
+                   Variant="Variant.Outlined" Dense="true" Style="width:150px;">
+            <MudSelectItem T="int" Value="30">30 дней</MudSelectItem>
+            <MudSelectItem T="int" Value="90">90 дней</MudSelectItem>
+            <MudSelectItem T="int" Value="180">Полгода</MudSelectItem>
+            <MudSelectItem T="int" Value="365">Год</MudSelectItem>
+        </MudSelect>
         <MudSelect T="int?" Value="_divisionId" ValueChanged="@(async (int? v) => { _divisionId = v; await ReloadAsync(); })"
                    Label="Подразделение" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:220px;">
             @foreach (var division in _divisions)
@@ -170,6 +179,15 @@ else if (_busy)
     <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-4" />
 }
 
+</div>
+</MudTabPanel>
+<MudTabPanel Text="Документооборот" Icon="@Icons.Material.Filled.MoveToInbox">
+    <div class="pt-3">
+        <DocFlowSummary />
+    </div>
+</MudTabPanel>
+</MudTabs>
+
 @code {
     private static readonly ViolationSeverity[] Severities =
         [ViolationSeverity.Low, ViolationSeverity.Medium, ViolationSeverity.High, ViolationSeverity.Critical];
@@ -181,6 +199,10 @@ else if (_busy)
     private int _periodDays = 90;
     private bool _busy;
     private string? _error;
+
+    // 0 — «Риски инспекции», 1 — «Документооборот». Начальную вкладку задаёт адрес (?tab=docflow):
+    // туда ведут колокольчик уведомлений и старый маршрут /docflow/dashboard.
+    private int _activeTab;
 
     // --- Отбор ТФ-ДШ-02 ---
     private readonly List<DivisionNode> _divisions = [];
@@ -208,6 +230,13 @@ else if (_busy)
 
     protected override async Task OnInitializedAsync()
     {
+        // Разбор ?tab= без сторонних утилит: значение одно и известно наперечёт.
+        var query = new Uri(Navigation.Uri).Query;
+        if (query.Contains("tab=docflow", StringComparison.OrdinalIgnoreCase))
+        {
+            _activeTab = 1;
+        }
+
         var divisions = await Dispatcher.Send(new ListDivisionTreeQuery());
         if (divisions is { Status: true, Data: { } divisionList })
         {

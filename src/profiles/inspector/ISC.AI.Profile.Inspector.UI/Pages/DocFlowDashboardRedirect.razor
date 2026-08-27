@@ -1,0 +1,12 @@
+@namespace ISC.AI.Profile.Inspector.UI
+@* Старый адрес дашборда документооборота. Своей страницы у модуля больше нет (объединение
+   дашбордов, решение заказчика 2026-08-27) — сводка живёт вкладкой общего дашборда. Маршрут
+   сохраняется ПРОФИЛЕМ: на него ведут колокольчик уведомлений модуля и закладки пользователей,
+   а сам модуль маршрутов профиля не знает (инвариант ADR-0017), поэтому сопоставление здесь. *@
+@page "/docflow/dashboard"
+@inject NavigationManager Navigation
+
+@code {
+    protected override void OnInitialized() =>
+        Navigation.NavigateTo("/dashboard?tab=docflow", replace: true);
+}

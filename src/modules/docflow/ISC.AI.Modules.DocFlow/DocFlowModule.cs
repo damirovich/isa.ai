@@ -92,10 +92,15 @@ public static class DocFlowModule
     /// Реестр страниц модуля — профиль подмешивает его в свой <c>IProfile.Modules</c>.
     /// Этап 1 Э4-35: справочник типов; остальные страницы СКИД — этап 5.
     /// </summary>
+    /// <remarks>
+    /// Отдельной страницы «Дашборд» у модуля больше НЕТ (объединение дашбордов, решение заказчика
+    /// 2026-08-27): сводка отдана компонентом <c>DocFlowSummary</c>, и ПРОФИЛЬ сам решает, где её
+    /// показать (у «ИнспекторAI» — вкладка общего дашборда <c>/dashboard</c>). Модульный маршрут
+    /// <c>/docflow/dashboard</c> продолжает работать: профиль держит на нём страницу-перенаправление —
+    /// модуль маршрутов профиля не знает (инвариант ADR-0017).
+    /// </remarks>
     public static IReadOnlyList<IModule> Modules { get; } =
     [
-        new ModuleDescriptor("docflow-dashboard", "/docflow/dashboard", "Дашборд",
-            Icons.Material.Filled.SpaceDashboard, typeof(DocFlowDashboard), ReadPolicy, MenuGroup),
         new ModuleDescriptor("docflow-documents", "/docflow/documents", "Документы",
             Icons.Material.Filled.Description, typeof(Documents), ReadPolicy, MenuGroup),
         new ModuleDescriptor("docflow-reports", "/docflow/reports", "Отчёты",
@@ -108,12 +113,12 @@ public static class DocFlowModule
 
     /// <summary>
     /// Виджеты оболочки — профиль подмешивает их в свой <c>IProfile.ShellWidgets</c>: счётчик
-    /// уведомлений в шапке и лента уведомлений на общем дашборде (разд. 5 ТЗ СКИД).
+    /// уведомлений в шапке (разд. 5 ТЗ СКИД).
     /// </summary>
     /// <remarks>
-    /// У документооборота СВОЙ дашборд (<c>/docflow/dashboard</c>, решение заказчика 2026-08-07),
-    /// и лента уведомлений живёт там. В оболочке хоста остаётся только счётчик в шапке, ведущий туда же:
-    /// колокольчик нужен на каждом экране, а лента — нет.
+    /// Лента уведомлений живёт в сводке модуля (<c>DocFlowSummary</c>). Колокольчик в шапке ведёт на
+    /// СВОЙ маршрут модуля <c>/docflow/dashboard</c> — куда тот приземляется, решает профиль
+    /// (страница-перенаправление на вкладку общего дашборда): модуль не знает маршрутов профиля.
     /// </remarks>
     public static IReadOnlyList<IShellWidget> ShellWidgets { get; } =
     [
