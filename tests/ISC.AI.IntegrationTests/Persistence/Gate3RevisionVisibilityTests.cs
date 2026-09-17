@@ -1,5 +1,4 @@
 using ISC.AI.AI.Retrieval;
-using ISC.AI.AI.Security;
 using ISC.AI.Abstractions.Retrieval;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Persistence;

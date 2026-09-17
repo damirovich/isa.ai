@@ -47,6 +47,24 @@ public sealed class ModelRegistrationTests
         provider.GetKeyedService<IChatClient>(ModelRole.Draft).ShouldBeNull();
     }
 
+    [Fact(DisplayName = "Роль ImageEmbeddings ядро не регистрирует и конфигурации для неё не требует (ADR-0018)")]
+    public void Image_embeddings_role_is_declared_but_not_registered_by_core()
+    {
+        // Профиль «Инспектор» ничего не знает о векторизации изображений: наличие новой роли в enum
+        // не должно ни требовать секции Llm:Models:ImageEmbeddings, ни ронять старт хоста.
+        var configuration = Substitute.For<IConfiguration>();
+        configuration["Llm:Models:Draft:Endpoint"].Returns("http://10.0.0.1:9000/v1");
+        configuration["Llm:Models:Draft:Model"].Returns("gemma");
+
+        using var provider = new ServiceCollection()
+            .AddCoreAiModels(configuration)
+            .BuildServiceProvider();
+
+        provider.GetKeyedService<IChatClient>(ModelRole.Draft).ShouldNotBeNull();
+        provider.GetKeyedService<IEmbeddingGenerator<DataContent, Embedding<float>>>(ModelRole.ImageEmbeddings).ShouldBeNull();
+        provider.GetKeyedService<IChatClient>(ModelRole.ImageEmbeddings).ShouldBeNull();
+    }
+
     [Fact(DisplayName = "Имя модели: явное из конфигурации используется как есть (без обращения к серверу)")]
     public void Explicit_model_name_is_used_as_is()
     {
