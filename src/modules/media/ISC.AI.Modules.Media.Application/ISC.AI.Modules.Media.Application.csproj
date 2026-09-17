@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Сценарии пакета «Медиа» (ДОК-13 §5): загрузка носителя в дело, фоновая индексация, поиск по лицу
+       с аудитом ТБ-072, двойная верификация (ТБ-073), удаление. Только Abstractions + Media.Domain:
+       ни EF, ни ONNX — реализации портов приходят из Media.Data и Vision.Onnx через DI.
+       Обработчики Mediator регистрирует source-генератор хоста (Mediator.Abstractions здесь). -->
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+    <ProjectReference Include="..\ISC.AI.Modules.Media.Domain\ISC.AI.Modules.Media.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Mediator.Abstractions" />
+    <PackageReference Include="FluentValidation" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+</Project>

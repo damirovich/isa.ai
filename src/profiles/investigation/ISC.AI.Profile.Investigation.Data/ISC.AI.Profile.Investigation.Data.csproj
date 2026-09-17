@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- InvestigationDbContext (схема investigation) и миграции; реализации портов профиля и портов
+       подключённых пакетов («Документооборот», «Медиа»). Единственное место профиля, ссылающееся на
+       конкретный проект ядра (Persistence) — DependencyRulesTests. -->
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+    <ProjectReference Include="..\ISC.AI.Profile.Investigation.Domain\ISC.AI.Profile.Investigation.Domain.csproj" />
+    <ProjectReference Include="..\..\..\core\ISC.AI.Persistence\ISC.AI.Persistence.csproj" />
+    <!-- Профиль реализует порты пакетов (направление профиль → модуль, ADR-0017). -->
+    <ProjectReference Include="..\..\..\modules\docflow\ISC.AI.Modules.DocFlow.Domain\ISC.AI.Modules.DocFlow.Domain.csproj" />
+    <ProjectReference Include="..\..\..\modules\media\ISC.AI.Modules.Media.Domain\ISC.AI.Modules.Media.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="EFCore.NamingConventions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

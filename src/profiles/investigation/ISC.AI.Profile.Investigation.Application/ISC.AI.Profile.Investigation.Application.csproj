@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Сценарии профиля «Следствие» (ТФ-ДЕЛ, ТФ-ПЕР, ТФ-АДМ): команды/запросы Mediator, валидаторы,
+       гварды по ролям ТП-004. Зависит от Abstractions и своего Domain; порты пакета «Медиа» — через
+       Media.Domain (направление профиль → модуль разрешено, ADR-0017). -->
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+    <ProjectReference Include="..\ISC.AI.Profile.Investigation.Domain\ISC.AI.Profile.Investigation.Domain.csproj" />
+    <ProjectReference Include="..\..\..\modules\media\ISC.AI.Modules.Media.Domain\ISC.AI.Modules.Media.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Mediator.Abstractions" />
+    <PackageReference Include="FluentValidation" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+  </ItemGroup>
+
+</Project>
