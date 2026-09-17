@@ -50,6 +50,15 @@
     <PackageVersion Include="AngleSharp" Version="1.5.2" />
     <!-- Headless-браузер для рендеринга JS-сайтов (SPA, Э4-15). MIT. Только в сборщике (вне контура). -->
     <PackageVersion Include="Microsoft.Playwright" Version="1.61.0" />
+    <!-- Распознавание лиц для профиля «Следствие» (ADR-0020, ТСТ-004): ONNX Runtime — MIT, инференс
+         в процессе на CPU (GPU-пакеты тянут проприетарные CUDA/DirectML — отдельное решение);
+         SkiaSharp — MIT (нативный Skia — BSD-3, эквивалентно-пермиссивная); FFMpegCore — MIT,
+         вызывает ffmpeg внешним процессом (сам бинарник — только LGPL-сборка, в дистрибутиве
+         с текстом лицензии; линковки нет). Модели YuNet (MIT) и SFace (Apache-2.0) — файлы из
+         deploy/offline/models, поставляются с пинами SHA-256 (export-vision-models.ps1). -->
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.30.0" />
+    <PackageVersion Include="SkiaSharp" Version="4.152.0" />
+    <PackageVersion Include="FFMpegCore" Version="5.4.0" />
     <!-- UI: Blazor + MudBlazor -->
     <PackageVersion Include="MudBlazor" Version="9.5.0" />
     <PackageVersion Include="Microsoft.AspNetCore.Components.Web" Version="10.0.9" />
