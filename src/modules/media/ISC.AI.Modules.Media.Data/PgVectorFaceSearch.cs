@@ -74,6 +74,17 @@ public sealed class PgVectorFaceSearch(
 
         candidates = candidates.Where(t => t.QualityAcceptable);
 
+        // ОБЛАСТЬ ПОИСКА (ТБ-071, ТФ-ПЛ-05): носители дел, доступных субъекту — ПОСЛЕ решётки, а не вместо
+        // неё: шаблон в области, но вне допуска, всё равно не выдаётся. Пустая коллекция — пустая выдача
+        // (у субъекта нет ни одного носителя в области), а не «все носители»: null и [] здесь различаются.
+        if (query.AssetIds is { } assetIds)
+        {
+            var ids = assetIds as int[] ?? assetIds.ToArray();
+            candidates = ids.Length == 0
+                ? candidates.Where(t => false)
+                : candidates.Where(t => ids.Contains(t.AssetId));
+        }
+
         var scored = candidates.Select(t => new { Template = t, Distance = t.Embedding.CosineDistance(probe) });
 
         // Порог — ПОСЛЕ фильтра доступа, не вместо него (ТО-мат-05): сужает выдачу по качеству совпадения.

@@ -13,8 +13,8 @@ using Microsoft.Extensions.Logging;
 namespace ISC.AI.Modules.Media.Data;
 
 /// <summary>
-/// Раздача файлов пакета «Медиа» (ТС-010, ТБ-073): исходники носителей и вырезки лиц для показа в
-/// выдаче. Перед стримом байтов проверяется ДОПУСК субъекта против грифа/подразделения носителя
+/// Раздача файлов пакета «Медиа» (ТС-010, ТБ-073): исходники носителей, вырезки лиц для показа в
+/// выдаче и вырезки проб поисковых сессий (категория <c>media-probes</c>; сегмент «носитель» маршрута — идентификатор сессии). Перед стримом байтов проверяется ДОПУСК субъекта против грифа/подразделения носителя
 /// (fail-closed ТБ-020/021) — биометрический материал несёт ту же чувствительность, что и сам носитель.
 /// Причина отказа наружу не различается: единый 404 (не подтверждаем существование файла тому, кому
 /// его видеть нельзя).
@@ -34,7 +34,7 @@ public static class MediaFileEndpoints
         "video/mp4", "video/webm",
     };
 
-    /// <summary>Маршрут <c>GET /media/files/{category}/{assetId}/{storedFileName}</c>.</summary>
+    /// <summary>Маршрут <c>GET /media/files/{category}/{assetId}/{storedFileName}</c> (для <c>media-probes</c> — <c>{sessionId}</c>).</summary>
     public static void MapMediaFileEndpoints(this IEndpointRouteBuilder endpoints)
     {
         endpoints.MapGet("/media/files/{category}/{assetId:int}/{storedFileName}", ServeFileAsync)
@@ -56,7 +56,7 @@ public static class MediaFileEndpoints
     {
         httpContext.Response.Headers.Append("X-Content-Type-Options", "nosniff");
 
-        if (category is not (MediaFileCategories.Originals or MediaFileCategories.FaceCrops)
+        if (category is not (MediaFileCategories.Originals or MediaFileCategories.FaceCrops or MediaFileCategories.Probes)
             || !StoredFileNamePattern.IsMatch(storedFileName))
         {
             MediaFileEndpointsLog.RejectedBadRoute(logger, category, storedFileName);

@@ -1,15 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Манифест пакета модулей «Медиа» (ADR-0017, ДОК-13 §5): собирает Domain, Data и интеграцию
-       распознавания (Vision.Onnx) и отдаёт профилю точки регистрации. Страниц (UI) пока нет —
+  <!-- Манифест пакета модулей «Медиа» (ADR-0017, ДОК-13 §5): собирает Domain, Application, Data и
+       интеграцию распознавания (Vision.Onnx) и отдаёт профилю точки регистрации. Страниц (UI) пока нет —
        появятся отдельным проектом .UI на этапе ЭС4. -->
   <ItemGroup>
     <ProjectReference Include="..\ISC.AI.Modules.Media.Domain\ISC.AI.Modules.Media.Domain.csproj" />
+    <ProjectReference Include="..\ISC.AI.Modules.Media.Application\ISC.AI.Modules.Media.Application.csproj" />
     <ProjectReference Include="..\ISC.AI.Modules.Media.Data\ISC.AI.Modules.Media.Data.csproj" />
     <ProjectReference Include="..\..\..\integrations\ISC.AI.Vision.Onnx\ISC.AI.Vision.Onnx.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
   </ItemGroup>
 
   <!-- MapEndpoints делегирует в Data (см. её csproj) — сигнатура несёт IEndpointRouteBuilder. -->

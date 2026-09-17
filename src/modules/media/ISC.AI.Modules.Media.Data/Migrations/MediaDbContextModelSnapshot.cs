@@ -365,6 +365,251 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                     b.ToTable("frame", "media");
                 });
 
+            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.SearchCandidate", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AssetId")
+                        .HasColumnType("integer")
+                        .HasColumnName("asset_id");
+
+                    b.Property<short>("Classification")
+                        .HasColumnType("smallint")
+                        .HasColumnName("classification");
+
+                    b.Property<double>("CosineDistance")
+                        .HasColumnType("double precision")
+                        .HasColumnName("cosine_distance");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CropStoredFileName")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("crop_stored_file_name");
+
+                    b.Property<int>("DivisionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("division_id");
+
+                    b.Property<int>("FaceId")
+                        .HasColumnType("integer")
+                        .HasColumnName("face_id");
+
+                    b.Property<int?>("FrameIndex")
+                        .HasColumnType("integer")
+                        .HasColumnName("frame_index");
+
+                    b.Property<long?>("FrameTimestampMs")
+                        .HasColumnType("bigint")
+                        .HasColumnName("frame_timestamp_ms");
+
+                    b.Property<string>("ModelVersion")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("model_version");
+
+                    b.Property<int?>("PersonRef")
+                        .HasColumnType("integer")
+                        .HasColumnName("person_ref");
+
+                    b.Property<int>("Rank")
+                        .HasColumnType("integer")
+                        .HasColumnName("rank");
+
+                    b.Property<int>("SessionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("session_id");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_search_candidate");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("ix_search_candidate_status");
+
+                    b.HasIndex("Classification", "DivisionId")
+                        .HasDatabaseName("ix_search_candidate_classification_division_id");
+
+                    b.HasIndex("SessionId", "Rank")
+                        .IsUnique()
+                        .HasDatabaseName("ix_search_candidate_session_id_rank");
+
+                    b.ToTable("search_candidate", "media");
+                });
+
+            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.SearchSession", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AuthorizationRef")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("authorization_ref");
+
+                    b.Property<int>("CaseId")
+                        .HasColumnType("integer")
+                        .HasColumnName("case_id");
+
+                    b.PrimitiveCollection<int[]>("CaseIds")
+                        .IsRequired()
+                        .HasColumnType("integer[]")
+                        .HasColumnName("case_ids");
+
+                    b.Property<short>("Classification")
+                        .HasColumnType("smallint")
+                        .HasColumnName("classification");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("DetectorVersion")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("detector_version");
+
+                    b.Property<int>("DivisionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("division_id");
+
+                    b.Property<string>("EmbedderVersion")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("embedder_version");
+
+                    b.Property<int>("HnswEfSearch")
+                        .HasColumnType("integer")
+                        .HasColumnName("hnsw_ef_search");
+
+                    b.Property<double?>("MaxCosineDistance")
+                        .HasColumnType("double precision")
+                        .HasColumnName("max_cosine_distance");
+
+                    b.Property<string>("ProbeCropStoredFileName")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("probe_crop_stored_file_name");
+
+                    b.Property<int?>("ProbeFaceId")
+                        .HasColumnType("integer")
+                        .HasColumnName("probe_face_id");
+
+                    b.Property<string>("ProbeSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("probe_sha256");
+
+                    b.Property<int?>("RequestedByUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("requested_by_user_id");
+
+                    b.Property<int>("Scope")
+                        .HasColumnType("integer")
+                        .HasColumnName("scope");
+
+                    b.Property<int>("TopK")
+                        .HasColumnType("integer")
+                        .HasColumnName("top_k");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_search_session");
+
+                    b.HasIndex("CaseId")
+                        .HasDatabaseName("ix_search_session_case_id");
+
+                    b.HasIndex("ProbeCropStoredFileName")
+                        .IsUnique()
+                        .HasDatabaseName("ix_search_session_probe_crop_stored_file_name")
+                        .HasFilter("probe_crop_stored_file_name IS NOT NULL");
+
+                    b.HasIndex("Classification", "DivisionId")
+                        .HasDatabaseName("ix_search_session_classification_division_id");
+
+                    b.ToTable("search_session", "media");
+                });
+
+            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.VerificationDecisionEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CandidateId")
+                        .HasColumnType("integer")
+                        .HasColumnName("candidate_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTime>("DecidedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("decided_at_utc");
+
+                    b.Property<string>("Rationale")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("rationale");
+
+                    b.Property<int>("Stage")
+                        .HasColumnType("integer")
+                        .HasColumnName("stage");
+
+                    b.Property<int>("SubjectId")
+                        .HasColumnType("integer")
+                        .HasColumnName("subject_id");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<int>("Verdict")
+                        .HasColumnType("integer")
+                        .HasColumnName("verdict");
+
+                    b.HasKey("Id")
+                        .HasName("pk_verification_decision");
+
+                    b.HasIndex("CandidateId", "Stage")
+                        .IsUnique()
+                        .HasDatabaseName("ix_verification_decision_candidate_id_stage");
+
+                    b.ToTable("verification_decision", "media");
+                });
+
             modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.Face", b =>
                 {
                     b.HasOne("ISC.AI.Modules.Media.Data.Entities.MediaAsset", "Asset")
@@ -414,6 +659,28 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                         .HasConstraintName("fk_frame_asset_asset_id");
 
                     b.Navigation("Asset");
+                });
+
+            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.SearchCandidate", b =>
+                {
+                    b.HasOne("ISC.AI.Modules.Media.Data.Entities.SearchSession", "Session")
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_search_candidate_search_sessions_session_id");
+
+                    b.Navigation("Session");
+                });
+
+            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.VerificationDecisionEntity", b =>
+                {
+                    b.HasOne("ISC.AI.Modules.Media.Data.Entities.SearchCandidate", null)
+                        .WithMany()
+                        .HasForeignKey("CandidateId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_verification_decision_search_candidate_candidate_id");
                 });
 #pragma warning restore 612, 618
         }

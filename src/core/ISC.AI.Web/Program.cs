@@ -16,7 +16,7 @@ using ISC.AI.Persistence;
 using ISC.AI.Persistence.Security;
 using ISC.AI.Web.Common.Behaviors;
 using ISC.AI.Web.Security;
-using ISC.AI.Profile.Inspector;
+using ISC.AI.Web;
 using ISC.AI.Web.Components;
 using Mediator;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -97,7 +97,7 @@ try
     builder.Services.AddCoreBackgroundTasks();
 
     // --- Точка композиции профиля (ТО-прог-05/06). Только хост знает о конкретном профиле. ---
-    var profile = new InspectorProfile();
+    var profile = HostProfile.Create();
     builder.Services.AddSingleton<IProfile>(profile);
     profile.RegisterServices(builder.Services, builder.Configuration);
     profile.RegisterDataContexts(builder.Services, builder.Configuration);

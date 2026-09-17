@@ -5,7 +5,8 @@ using Microsoft.EntityFrameworkCore;
 namespace ISC.AI.Modules.Media.Data;
 
 /// <summary>
-/// Контекст данных пакета «Медиа» (схема <c>media</c>, ДОК-13 §5.2): носители, кадры, лица, шаблоны.
+/// Контекст данных пакета «Медиа» (схема <c>media</c>, ДОК-13 §5.2): носители, кадры, лица, шаблоны,
+/// поисковые сессии с кандидат-листами и решениями верификации (ТО-инф-12, ТБ-073).
 /// Ведёт собственную историю миграций (<c>media.__ef_migrations_history</c>, ADR-0017, ТО-инф-08).
 /// </summary>
 /// <remarks>
@@ -32,6 +33,15 @@ public class MediaDbContext(DbContextOptions<MediaDbContext> options) : AuditedD
 
     /// <summary>Шаблоны лиц (векторы).</summary>
     public DbSet<FaceTemplate> Templates { get; set; } = null!;
+
+    /// <summary>Поисковые сессии (ТО-инф-12).</summary>
+    public DbSet<SearchSession> SearchSessions { get; set; } = null!;
+
+    /// <summary>Кандидаты поисковых сессий (ТФ-ПЛ-02).</summary>
+    public DbSet<SearchCandidate> SearchCandidates { get; set; } = null!;
+
+    /// <summary>Решения верификации (ТБ-073).</summary>
+    public DbSet<VerificationDecisionEntity> VerificationDecisions { get; set; } = null!;
 
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)

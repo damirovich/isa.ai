@@ -1,5 +1,7 @@
 using ISC.AI.Abstractions.Modules;
+using ISC.AI.Modules.Media.Application;
 using ISC.AI.Modules.Media.Data;
+using ISC.AI.Modules.Media.Domain.Services;
 using ISC.AI.Vision.Onnx;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
@@ -23,19 +25,38 @@ public static class MediaModule
     public const string MenuGroup = "Медиа";
 
     /// <summary>
-    /// Нейтральные службы ядра, которые ОБЯЗАН дать хост/профиль (ADR-0018): без любой из них
-    /// контейнер не соберёт обработчик и приложение не запустится — намеренно (молчаливая заглушка
-    /// вместо правила доступа опаснее остановки).
+    /// ПОРТЫ ПРОФИЛЯ — что обязан реализовать подключающий профиль (ТС-013): область дел субъекта и
+    /// связь носителей/фигурантов с делами (<see cref="ICaseScope"/>), права по ролям
+    /// (<see cref="IMediaAdministration"/>) и роли стадий верификации (<see cref="IVerificationPolicy"/>).
+    /// Всё остальное пакет закрывает сам (MediaContractTests). Без любой из них контейнер не соберёт
+    /// обработчик и приложение не запустится — намеренно.
     /// </summary>
     public static IReadOnlyList<Type> RequiredServices { get; } =
+    [
+        typeof(ICaseScope),
+        typeof(IMediaAdministration),
+        typeof(IVerificationPolicy),
+    ];
+
+    /// <summary>
+    /// Нейтральные службы ядра, которые ОБЯЗАН дать хост (ADR-0018): хранилище файлов, неизменяемый
+    /// журнал, политика и контекст доступа, субъект, фоновая очередь. Молчаливая заглушка вместо
+    /// правила доступа опаснее остановки — отсутствие любой из них должно ронять старт.
+    /// </summary>
+    public static IReadOnlyList<Type> RequiredCoreServices { get; } =
     [
         typeof(Abstractions.Storage.IFileStorage),
         typeof(Abstractions.Audit.IAuditWriter),
         typeof(Abstractions.Security.IAccessPolicy),
         typeof(Abstractions.Security.IAccessContextProvider),
+        typeof(Abstractions.Security.ISubjectProvider),
+        typeof(Abstractions.BackgroundTasks.IBackgroundTaskQueue),
     ];
 
-    /// <summary>Ключи конфигурации, которые читает пакет (строка подключения и модели — обязательны).</summary>
+    /// <summary>
+    /// Ключи конфигурации, которые читает пакет: строка подключения и модели — обязательны; параметры
+    /// поиска (ТН-008, ТФ-ПЛ-06), раскадровки (ТО-мат-06) и копии пробы в аудите (ТБ-072) — с умолчаниями.
+    /// </summary>
     public static IReadOnlyList<string> ConfigurationKeys { get; } =
     [
         "ConnectionStrings:Media",
@@ -45,20 +66,30 @@ public static class MediaModule
         "Vision:Ffmpeg:Folder",
         "Vision:Detection:ScoreThreshold", "Vision:Detection:NmsIou", "Vision:Detection:MaxInputSide",
         "Vision:Quality:MinInterocular", "Vision:Quality:MinDetectionScore",
+        MediaSearchOptions.CandidateListSizeKey,
+        MediaSearchOptions.MinCandidateListSizeKey,
+        MediaSearchOptions.MaxCandidateListSizeKey,
+        MediaSearchOptions.MaxCosineDistanceKey,
+        MediaSearchOptions.MaxAllowedCosineDistanceKey,
+        MediaSearchOptions.SampleFpsKey,
+        MediaSearchOptions.ProbeCopyMaxBytesKey,
     ];
 
     /// <summary>Политика доступа страниц пакета (регистрируется хостом из реестра профиля).</summary>
     public const string ReadPolicy = "media.read";
 
-    /// <summary>Реестр страниц пакета — пока пуст: UI появится на этапе ЭС4 отдельным проектом .UI.</summary>
+    /// <summary>Реестр страниц пакета — пока пуст: UI появится отдельным проектом .UI.</summary>
     public static IReadOnlyList<IModule> Modules { get; } = [];
 
     /// <summary>Виджеты оболочки — пока нет.</summary>
     public static IReadOnlyList<IShellWidget> ShellWidgets { get; } = [];
 
-    /// <summary>Конвейер распознавания (ONNX Runtime, ffmpeg) — вызывается профилем в <c>IProfile.RegisterServices</c>.</summary>
+    /// <summary>
+    /// Конвейер распознавания (ONNX Runtime, ffmpeg) и сценарии пакета (валидаторы, индексатор, настройки
+    /// поиска) — вызывается профилем в <c>IProfile.RegisterServices</c>. Обработчики Mediator регистрирует хост.
+    /// </summary>
     public static IServiceCollection RegisterServices(IServiceCollection services, IConfiguration configuration) =>
-        services.AddVisionOnnx(configuration);
+        services.AddVisionOnnx(configuration).AddMediaApplication(configuration);
 
     /// <summary>Контекст данных и порты хранения/поиска — вызывается профилем в <c>IProfile.RegisterDataContexts</c>.</summary>
     public static IServiceCollection RegisterDataContexts(IServiceCollection services, IConfiguration configuration) =>

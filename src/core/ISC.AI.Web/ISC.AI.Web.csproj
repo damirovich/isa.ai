@@ -5,10 +5,37 @@
     <UserSecretsId>83466b43-4aa9-405c-8edf-d1cc57bf3bd0</UserSecretsId>
   </PropertyGroup>
 
+  <!-- Профиль поставки (ТС-004, ADR-0002): хост — единственная точка композиции, и именно здесь
+       выбирается, КАКОЙ профиль подключается. По умолчанию — inspector («ИнспекторAI»).
+       Переключение на поставку «Следствие»: dotnet build -p:IscProfile=investigation
+       или переменная окружения IscProfile=investigation (MSBuild читает свойства из окружения,
+       поэтому это работает и в Visual Studio, запущенной с выставленной переменной).
+       В обоих вариантах хост подключает РОВНО ОДИН профиль — это проверяет архитектурный тест
+       DependencyRulesTests.Host_references_exactly_one_profile.
+       ВАЖНО: obj/ у хоста общий для обоих профилей — при смене профиля делать
+       dotnet clean src/core/ISC.AI.Web, иначе в obj остаются артефакты прежнего профиля. -->
+  <PropertyGroup>
+    <IscProfile Condition="'$(IscProfile)' == ''">inspector</IscProfile>
+  </PropertyGroup>
+
   <!-- Хост и единственная точка композиции. Ссылается на ядро И на выбранный профиль
        (единственное допустимое исключение из правила «ядро не знает профиль»). -->
-  <ItemGroup>
+  <ItemGroup Condition="'$(IscProfile)' == 'inspector'">
     <ProjectReference Include="..\..\profiles\inspector\ISC.AI.Profile.Inspector\ISC.AI.Profile.Inspector.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(IscProfile)' == 'investigation'">
+    <ProjectReference Include="..\..\profiles\investigation\ISC.AI.Profile.Investigation\ISC.AI.Profile.Investigation.csproj" />
+  </ItemGroup>
+
+  <!-- Композиция профиля: в сборку попадает ТОЛЬКО каталог Composition/<IscProfile>/ — там лежит
+       HostProfile.Create(), единственный код хоста, знающий конкретный тип профиля. Каталоги других
+       профилей из компиляции исключены (их типы в этой поставке недоступны). -->
+  <ItemGroup>
+    <Compile Remove="Composition\**" />
+    <Compile Include="Composition\$(IscProfile)\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Адаптер идентичности СКИД (Э3-08): подключает ТОЛЬКО хост; ядро о СКИД не знает. -->
     <ProjectReference Include="..\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
     <ProjectReference Include="..\ISC.AI.AI\ISC.AI.AI.csproj" />

@@ -5,8 +5,9 @@ using Microsoft.EntityFrameworkCore;
 namespace ISC.AI.Modules.Media.Data;
 
 /// <summary>
-/// Разрешение имени файла носителя/вырезки в описание с режимными полями (ТБ-073) для эндпоинта
-/// раздачи. Файл, принадлежащий ДРУГОМУ носителю, чем указан в маршруте, не разрешается — наружу
+/// Разрешение имени файла носителя/вырезки/вырезки пробы в описание с режимными полями (ТБ-073) для
+/// эндпоинта раздачи. Для категории <see cref="MediaFileCategories.Probes"/> параметр «носитель» маршрута —
+/// идентификатор ПОИСКОВОЙ СЕССИИ, режимные поля — сессии (гриф дела, ТБ-070). Файл, принадлежащий ДРУГОМУ носителю, чем указан в маршруте, не разрешается — наружу
 /// единый «не найден» (как у <c>DocumentFileAccessResolver</c> документооборота).
 /// </summary>
 public sealed class MediaFileAccessResolver(IDbContextFactory<MediaDbContext> contextFactory) : IMediaFileAccess
@@ -44,8 +45,30 @@ public sealed class MediaFileAccessResolver(IDbContextFactory<MediaDbContext> co
                         storedFileName, category, subPath, "image/jpeg", face.Classification, face.DivisionId);
             }
 
+            case MediaFileCategories.Probes:
+            {
+                // Вырезка пробы принадлежит СЕССИИ: параметр маршрута — идентификатор сессии, режим — сессии
+                // (гриф дела, ТБ-070). Файл лежит в подкаталоге ДЕЛА (идентификатор дела известен ДО создания
+                // сессии, идентификатор сессии — нет), поэтому SubPath = CaseId. Вектор пробы в базе нет (ТБ-074).
+                var session = await db.SearchSessions
+                    .Where(s => s.Id == assetId && s.ProbeCropStoredFileName == storedFileName)
+                    .Select(s => new { s.CaseId, s.Classification, s.DivisionId })
+                    .FirstOrDefaultAsync(cancellationToken);
+                return session is null
+                    ? null
+                    : new MediaFileDescriptor(
+                        storedFileName, category, ProbeSubPath(session.CaseId), "image/jpeg",
+                        session.Classification, session.DivisionId);
+            }
+
             default:
                 return null;
         }
     }
+
+    /// <summary>
+    /// Подкаталог хранилища для вырезок проб (категория <see cref="MediaFileCategories.Probes"/>): идентификатор
+    /// ДЕЛА. Сценарий поиска обязан сохранять вырезку пробы под этим же подкаталогом до создания сессии.
+    /// </summary>
+    public static string ProbeSubPath(int caseId) => caseId.ToString(CultureInfo.InvariantCulture);
 }

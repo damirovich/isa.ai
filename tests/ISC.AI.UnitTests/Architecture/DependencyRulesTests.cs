@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Shouldly;
 
@@ -19,12 +20,27 @@ namespace ISC.AI.UnitTests.Architecture;
 /// теряется его переиспользуемость другими профилями (ровно ради неё документооборот вынесен из профиля);
 /// (е) модуль зависит «внутрь» по тому же правилу, что и профиль (<c>&lt;Модуль&gt;.Data → Persistence</c>).
 /// Ссылка «профиль → модуль» разрешена и является единственным направлением связи между ними.
+///
+/// Профиль поставки (ТС-004, ADR-0002). С появлением второго профиля («Следствие») в репозитории
+/// лежат ДВА манифеста, а хост обязан подключать ровно один — тот, что выбран свойством MSBuild
+/// <c>IscProfile</c> (<c>ISC.AI.Web.csproj</c>: условные <c>ItemGroup</c>). Поэтому граф строится с
+/// учётом атрибутов <c>Condition</c>: без этого тест «ровно один профиль» видел бы обе ссылки сразу и
+/// ложно падал, а с «наивным» отбрасыванием условных ссылок — ложно проходил. Условия вида
+/// <c>'$(IscProfile)' == 'x'</c> / <c>!= 'x'</c> вычисляются подстановкой выбранного значения; любое
+/// другое (неизвестное тесту) условие считается ИСТИННЫМ — это направление «падать громко»: лишняя
+/// ссылка в графе может только ужесточить проверку, но не спрятать нарушение.
 /// </remarks>
 public sealed class DependencyRulesTests
 {
     private const string Abstractions = "ISC.AI.Abstractions";
     private const string Persistence = "ISC.AI.Persistence";
     private const string Host = "ISC.AI.Web";
+
+    /// <summary>Имя свойства MSBuild, выбирающего профиль поставки (ТС-004).</summary>
+    private const string ProfileProperty = "IscProfile";
+
+    /// <summary>Профиль поставки по умолчанию — «ИнспекторAI».</summary>
+    private const string DefaultProfile = "inspector";
 
     /// <summary>
     /// Проекты-библиотеки ядра (без хоста <c>Web</c>): им запрещено ссылаться на профиль. Список НЕ
@@ -33,6 +49,19 @@ public sealed class DependencyRulesTests
     /// </summary>
     private static readonly string[] CoreLibraries = DiscoverCoreLibraries();
 
+    // Условие MSBuild вида  'левая' == 'правая'  /  'левая' != 'правая'  (единственная форма, которую тест понимает).
+    // ВАЖНО: объявлено ДО Graph — статические поля инициализируются в порядке объявления, а LoadProjectGraph
+    // уже пользуется этими регулярными выражениями.
+    private static readonly Regex EqualityCondition = new(
+        @"^\s*'(?<left>[^']*)'\s*(?<op>==|!=)\s*'(?<right>[^']*)'\s*$",
+        RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture);
+
+    // Ссылка на свойство MSBuild:  $(Имя)
+    private static readonly Regex PropertyReference = new(
+        @"\$\((?<name>[A-Za-z_][A-Za-z0-9_]*)\)",
+        RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture);
+
+    /// <summary>Граф ссылок в конфигурации по умолчанию (<c>IscProfile=inspector</c>).</summary>
     private static readonly IReadOnlyDictionary<string, string[]> Graph = LoadProjectGraph();
 
     // Ядровые библиотеки — все *.csproj из src/core, кроме хоста Web (хосту профиль подключать МОЖНО).
@@ -75,12 +104,63 @@ public sealed class DependencyRulesTests
         }
     }
 
-    [Fact(DisplayName = "Хост подключает ровно один профиль")]
-    public void Host_references_exactly_one_profile()
+    /// <summary>
+    /// ТС-004 при двух профилях в репозитории: для КАЖДОГО значения <c>IscProfile</c> хост подключает ровно
+    /// один манифест — и именно выбранный. Проверяются оба значения, а не только текущее, чтобы поставка
+    /// «Следствие» не могла молча остаться с двумя профилями (или без единого) до момента её сборки.
+    /// </summary>
+    [Theory(DisplayName = "Хост подключает ровно один профиль — выбранный свойством IscProfile")]
+    [InlineData("inspector")]
+    [InlineData("investigation")]
+    public void Host_references_exactly_one_profile(string iscProfile)
     {
-        var manifests = Graph[Host].Where(IsProfileManifest).ToArray();
+        var graph = LoadProjectGraph(iscProfile);
+
+        var manifests = graph[Host].Where(IsProfileManifest).ToArray();
         manifests.Length.ShouldBe(1,
-            $"Хост «{Host}» должен подключать ровно один профиль-манифест, найдено: [{string.Join(", ", manifests)}]");
+            $"Хост «{Host}» при {ProfileProperty}={iscProfile} должен подключать ровно один профиль-манифест, найдено: [{string.Join(", ", manifests)}]");
+
+        // Переключатель обязан переключать: подключён манифест ВЫБРАННОГО профиля («ISC.AI.Profile.<Имя>»),
+        // а не какой-то один из имеющихся.
+        string.Equals(manifests[0], $"ISC.AI.Profile.{iscProfile}", StringComparison.OrdinalIgnoreCase).ShouldBeTrue(
+            $"При {ProfileProperty}={iscProfile} хост подключил не тот профиль: «{manifests[0]}».");
+    }
+
+    /// <summary>
+    /// Поставка по умолчанию — «ИнспекторAI»: без явного свойства (обычный <c>dotnet build</c>, Visual Studio
+    /// без переменной окружения) хост обязан подключать <c>inspector</c>. Проверяется сам csproj хоста:
+    /// свойство объявлено с условием «если не задано» и значением по умолчанию.
+    /// </summary>
+    [Fact(DisplayName = "По умолчанию (без свойства IscProfile) хост подключает inspector")]
+    public void Host_profile_defaults_to_inspector()
+    {
+        var hostProject = Directory
+            .GetFiles(Path.Combine(FindRepoRoot(), "src", "core"), $"{Host}.csproj", SearchOption.AllDirectories)
+            .ShouldHaveSingleItem($"Не найден проект хоста «{Host}.csproj» в src/core.");
+
+        var declarations = XDocument.Load(hostProject)
+            .Descendants(ProfileProperty)
+            .Where(e => e.Parent?.Name.LocalName == "PropertyGroup")
+            .ToArray();
+
+        var declaration = declarations.ShouldHaveSingleItem(
+            $"В «{Host}.csproj» должно быть ровно одно объявление свойства {ProfileProperty}, найдено: {declarations.Length}.");
+
+        // Значение по умолчанию применяется ТОЛЬКО когда свойство не задано снаружи (-p / переменная окружения):
+        // условие «'$(IscProfile)' == ''» истинно при пустом значении и ложно при любом заданном.
+        var condition = (string?)declaration.Attribute("Condition");
+        condition.ShouldNotBeNull(
+            $"Свойство {ProfileProperty} должно объявляться с условием «если не задано», иначе его нельзя переопределить снаружи.");
+        EvaluateCondition(condition, iscProfile: string.Empty).ShouldBeTrue(
+            $"Условие «{condition}» должно срабатывать при НЕ заданном {ProfileProperty}.");
+        EvaluateCondition(condition, iscProfile: "investigation").ShouldBeFalse(
+            $"Условие «{condition}» не должно перекрывать значение, заданное снаружи.");
+
+        declaration.Value.Trim().ShouldBe(DefaultProfile,
+            $"Профиль поставки по умолчанию должен быть «{DefaultProfile}» (ТС-004).");
+
+        // И граф по умолчанию (без явного значения) действительно содержит только Inspector.
+        Graph[Host].Where(IsProfileManifest).ShouldBe(["ISC.AI.Profile.Inspector"]);
     }
 
     [Fact(DisplayName = "Профиль зависит внутрь; на Persistence ссылается только <Профиль>.Data")]
@@ -200,7 +280,13 @@ public sealed class DependencyRulesTests
         return false;
     }
 
-    private static Dictionary<string, string[]> LoadProjectGraph()
+    /// <summary>
+    /// Строит граф «проект → ссылки» по всем <c>*.csproj</c> из <c>src</c> так, как его увидел бы MSBuild
+    /// при заданном профиле поставки: ссылка учитывается, только если истинны условия самого элемента
+    /// <c>ProjectReference</c> И всех его предков (<c>ItemGroup</c>, <c>When</c>/<c>Otherwise</c> и т.п.).
+    /// </summary>
+    /// <param name="iscProfile">Значение свойства <c>IscProfile</c>; по умолчанию — поставка «ИнспекторAI».</param>
+    private static Dictionary<string, string[]> LoadProjectGraph(string iscProfile = DefaultProfile)
     {
         var root = FindRepoRoot();
         var projectFiles = Directory.GetFiles(Path.Combine(root, "src"), "*.csproj", SearchOption.AllDirectories);
@@ -211,6 +297,7 @@ public sealed class DependencyRulesTests
             var name = Path.GetFileNameWithoutExtension(path);
             var references = XDocument.Load(path)
                 .Descendants("ProjectReference")
+                .Where(e => IsEffectivelyIncluded(e, iscProfile))
                 .Select(e => (string?)e.Attribute("Include"))
                 .Where(include => !string.IsNullOrWhiteSpace(include))
                 .Select(include => Path.GetFileNameWithoutExtension(include!.Replace('\\', '/')))
@@ -220,6 +307,58 @@ public sealed class DependencyRulesTests
         }
 
         return graph;
+    }
+
+    // Элемент включён, если истинно его собственное условие и условия всех предков до корня <Project>.
+    private static bool IsEffectivelyIncluded(XElement element, string iscProfile)
+    {
+        for (var current = element; current is not null; current = current.Parent)
+        {
+            var condition = (string?)current.Attribute("Condition");
+            if (!string.IsNullOrWhiteSpace(condition) && !EvaluateCondition(condition, iscProfile))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Упрощённый вычислитель условий MSBuild: понимает <c>'a' == 'b'</c> и <c>'a' != 'b'</c> с подстановкой
+    /// <c>$(IscProfile)</c>; сравнение без учёта регистра (как в MSBuild). Любая другая форма условия или
+    /// ссылка на неизвестное свойство → условие считается ИСТИННЫМ, чтобы тест не мог «потерять» ссылку
+    /// (см. remarks класса).
+    /// </summary>
+    private static bool EvaluateCondition(string condition, string iscProfile)
+    {
+        var match = EqualityCondition.Match(condition);
+        if (!match.Success)
+        {
+            return true;
+        }
+
+        var unknownProperty = false;
+        string Expand(string text) => PropertyReference.Replace(text, m =>
+        {
+            if (string.Equals(m.Groups["name"].Value, ProfileProperty, StringComparison.OrdinalIgnoreCase))
+            {
+                return iscProfile;
+            }
+
+            unknownProperty = true;
+            return m.Value;
+        });
+
+        var left = Expand(match.Groups["left"].Value);
+        var right = Expand(match.Groups["right"].Value);
+        if (unknownProperty)
+        {
+            return true;
+        }
+
+        var equal = string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
+        return match.Groups["op"].Value == "==" ? equal : !equal;
     }
 
     private static string FindRepoRoot()

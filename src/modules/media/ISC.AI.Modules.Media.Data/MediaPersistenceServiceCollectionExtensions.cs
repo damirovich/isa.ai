@@ -49,6 +49,8 @@ public static class MediaPersistenceServiceCollectionExtensions
         services.AddScoped<IMediaStore, MediaStore>();
         services.AddScoped<IMediaPurger, MediaPurger>();
         services.AddScoped<IMediaFileAccess, MediaFileAccessResolver>();
+        services.AddScoped<IMediaCatalog, MediaCatalog>();
+        services.AddScoped<ISearchSessionStore, SearchSessionStore>();
 
         return services;
     }

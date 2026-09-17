@@ -2,6 +2,7 @@ using System.Globalization;
 using ISC.AI.Modules.Media.Domain.Services;
 using ISC.AI.Vision.Onnx.Detection;
 using ISC.AI.Vision.Onnx.Embedding;
+using ISC.AI.Vision.Onnx.Imaging;
 using ISC.AI.Vision.Onnx.Quality;
 using ISC.AI.Vision.Onnx.Video;
 using Microsoft.Extensions.Configuration;
@@ -13,7 +14,8 @@ namespace ISC.AI.Vision.Onnx;
 public static class VisionOnnxServiceCollectionExtensions
 {
     /// <summary>
-    /// Читает секцию <c>Vision</c> и регистрирует детектор, векторизатор, оценку качества и раскадровку.
+    /// Читает секцию <c>Vision</c> и регистрирует детектор, векторизатор, оценку качества, раскадровку
+    /// и утилиты изображений (размер, вырезка лица в JPEG).
     /// Модели загружаются лениво при первом обращении — регистрация не трогает диск; ошибки целостности
     /// всплывают явно на первом использовании (ТИ-004).
     /// </summary>
@@ -26,6 +28,7 @@ public static class VisionOnnxServiceCollectionExtensions
         services.AddSingleton<IFaceEmbedder>(sp => sp.GetRequiredService<SFaceEmbedder>());
         services.AddSingleton<IFaceQualityAssessor, BasicFaceQualityAssessor>();
         services.AddSingleton<IFrameExtractor, FfmpegFrameExtractor>();
+        services.AddSingleton<IImageTools, SkiaImageTools>();
         return services;
     }
 
