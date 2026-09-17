@@ -1,0 +1,163 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Поисковая сессия (ТФ-ПЛ-07): реквизиты поиска и кандидат-лист с решениями верификации. Это ПОЛНАЯ
+   строка (для инициатора поиска и руководителя): кто, когда и с каким исходом решал. Очередь
+   верификатора такой картины не видит — там слепая проекция (ТФ-ВЕР-02). Формулировки — ТЭ-005:
+   до двух решений только «кандидат». Просмотр аудируется сценарием (ТБ-030). *@
+@page "/media/sessions/{Id:int}"
+@rendermode InteractiveServer
+@using ISC.AI.Modules.Media.Application.Features.Scope
+@using ISC.AI.Modules.Media.Application.Features.Search
+@using ISC.AI.Modules.Media.Domain.Model
+@using ISC.AI.Modules.Media.Domain.Services
+
+<PageTitle>Сессия поиска</PageTitle>
+
+@if (_details is null)
+{
+    <MudText Typo="Typo.h5">Сессия поиска № @Id</MudText>
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3">@_error</MudAlert>
+    }
+    else
+    {
+        <MudProgressLinear Indeterminate="true" Class="my-4" />
+    }
+}
+else
+{
+    var session = _details.Session;
+    <div class="d-flex align-center justify-space-between flex-wrap gap-2">
+        <div>
+            <MudText Typo="Typo.h5">Сессия поиска № @session.Id</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                @session.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm") · дело
+                <MudLink Href="@($"/media/cases/{session.CaseId}")" Typo="Typo.body2">№ @session.CaseId</MudLink>
+                · основание: @session.AuthorizationRef
+            </MudText>
+        </div>
+        <div class="d-flex align-center gap-2 flex-wrap">
+            <ClassificationChip Classification="@session.Classification" />
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.PersonSearch"
+                       Href="@($"/media/search?caseId={session.CaseId}")">Новый поиск</MudButton>
+        </div>
+    </div>
+
+    <MudPaper Outlined="true" Class="pa-4 my-4">
+        <MudText Typo="Typo.subtitle1" Class="mb-2">Параметры поиска</MudText>
+        <div class="d-flex gap-4 flex-wrap align-start">
+            <FaceCropTile Url="@ProbeUrl(session)" Size="128" Caption="@ProbeCaption(session)" />
+            <div class="d-flex flex-column gap-1">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Область: @session.Scope.Label() (@session.CaseIds.Count дел: @string.Join(", ", session.CaseIds))</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Кандидатов запрошено: @session.TopK · выдано: @session.CandidateCount@(session.MaxCosineDistance is { } t ? $" · порог расстояния {t:0.00}" : " · без порога")</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Детектор @session.DetectorVersion · векторизатор @session.EmbedderVersion</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">SHA-256 пробы: <code>@session.ProbeSha256</code></MudText>
+                @if (session.RequestedByUserId is { } user)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">Инициатор: пользователь № @user</MudText>
+                }
+            </div>
+        </div>
+    </MudPaper>
+
+    @* ================= Кандидат-лист с решениями ================= *@
+    <MudTable T="SearchCandidateRow" Items="_details.Candidates" Hover="true" Dense="true" Outlined="true">
+        <HeaderContent>
+            <MudTh>№</MudTh><MudTh>Кандидат</MudTh><MudTh>Схожесть</MudTh><MudTh>Статус</MudTh><MudTh>Решения</MudTh><MudTh>Носитель</MudTh><MudTh>Гриф</MudTh><MudTh></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="№">@context.Rank</MudTd>
+            <MudTd DataLabel="Кандидат">
+                <FaceCropTile Url="@(context.CropStoredFileName is { } crop ? MediaFileUrl.FaceCrop(context.AssetId, crop) : null)" Size="64" />
+            </MudTd>
+            <MudTd DataLabel="Схожесть"><SimilarityChip Similarity="@context.Similarity" /></MudTd>
+            <MudTd DataLabel="Статус">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@context.Status.ChipColor()">@context.Status.Label()</MudChip>
+                @if (context.Status == CandidateStatus.Confirmed)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Success" Class="d-block">@TwoPersonRule.ConfirmedMarker</MudText>
+                }
+                @if (context.PersonRef is { } person)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">фигурант № @person</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Решения">
+                @if (context.Decisions.Count == 0)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">решений нет</MudText>
+                }
+                else
+                {
+                    @foreach (var decision in context.Decisions)
+                    {
+                        <MudText Typo="Typo.caption" Class="d-block">
+                            @decision.Stage.Label(): <b>@decision.Verdict.Label()</b> · пользователь № @decision.SubjectId · @decision.DecidedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                        </MudText>
+                    }
+                }
+            </MudTd>
+            <MudTd DataLabel="Носитель">
+                <MudLink Href="@($"/media/assets/{context.AssetId}?face={context.FaceId}")" Typo="Typo.body2">№ @context.AssetId</MudLink>
+                @if (context.FrameTimestampMs is { } ms)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">кадр @MediaLabels.Timecode(ms)</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Гриф"><ClassificationChip Classification="@context.Classification" /></MudTd>
+            <MudTd>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.FactCheck"
+                           Href="@($"/media/verification/{context.Id}?stage={NextStage(context)}")">Верификация</MudButton>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Кандидатов нет либо они вне вашего допуска.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+}
+
+@code {
+    /// <summary>Сессия из маршрута.</summary>
+    [Parameter] public int Id { get; set; }
+
+    private SearchSessionDetails? _details;
+    private FaceRow? _probeFace;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var response = await Dispatcher.Send(new GetSearchSessionQuery(Id));
+        if (response is not { Status: true, Data: { } details })
+        {
+            _error = response.StatusMessage;
+            return;
+        }
+
+        _details = details;
+        if (details.Session.ProbeFaceId is { } probeFaceId)
+        {
+            // Проба — лицо носителя: вырезка лежит под ЕГО носителем, узнаём его отдельным запросом (аудит View).
+            var face = await Dispatcher.Send(new GetFaceQuery(probeFaceId));
+            _probeFace = face is { Status: true, Data: { } row } ? row : null;
+        }
+    }
+
+    private string? ProbeUrl(SearchSessionRow session)
+    {
+        if (session.ProbeFaceId is not null)
+        {
+            var crop = _probeFace?.CropStoredFileName ?? session.ProbeCropStoredFileName;
+            return _probeFace is { } face && crop is not null ? MediaFileUrl.FaceCrop(face.AssetId, crop) : null;
+        }
+
+        return session.ProbeCropStoredFileName is { } probeCrop ? MediaFileUrl.ProbeCrop(session.Id, probeCrop) : null;
+    }
+
+    private string ProbeCaption(SearchSessionRow session) => session.ProbeFaceId is { } faceId
+        ? (_probeFace is null ? $"проба: лицо № {faceId} (недоступно)" : $"проба: лицо № {faceId}")
+        : "проба: изображение";
+
+    /// <summary>Стадия, которой кандидат ждёт: без решения эксперта — эксперт, иначе — верификатор.</summary>
+    private static string NextStage(SearchCandidateRow candidate) =>
+        candidate.Decisions.Any(d => d.Stage == VerificationStage.Expert) ? nameof(VerificationStage.Verifier) : nameof(VerificationStage.Expert);
+}

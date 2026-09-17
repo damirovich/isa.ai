@@ -1,0 +1,154 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using ISC.AI.Abstractions.Security;
+using ISC.AI.Modules.DocFlow;
+using ISC.AI.Modules.Media;
+using ISC.AI.Profile.Investigation;
+using ISC.AI.Profile.Investigation.Data;
+using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Shouldly;
+using Xunit;
+
+namespace ISC.AI.UnitTests.Investigation;
+
+/// <summary>
+/// Манифест профиля «Следствие» (ADR-0021/0022): реестр страниц, контракт подключённых пакетов и
+/// обязательные маршруты оболочки. Тот же принцип, что у <c>DocFlowContractTests</c>/<c>MediaContractTests</c>:
+/// обязанности профиля сверяются с фактом регистрации в контейнере, а не со словами в документации.
+/// </summary>
+public sealed class InvestigationProfileTests
+{
+    // Сборки, из которых профиль вправе брать страницы: свой UI и UI подключённых пакетов.
+    private static readonly string[] AllowedUiAssemblies =
+    [
+        "ISC.AI.Profile.Investigation.UI",
+        "ISC.AI.Modules.Media.UI",
+        "ISC.AI.Modules.DocFlow.UI",
+    ];
+
+    [Fact(DisplayName = "Манифест: Id/DisplayName заданы, реестр непуст, политики заполнены, маршруты уникальны, страницы — из сборок UI профиля и пакетов")]
+    public void Registry_is_well_formed()
+    {
+        var profile = new InvestigationProfile();
+
+        profile.Id.ShouldBe("investigation");
+        profile.DisplayName.ShouldBe("СледствиеAI");
+        profile.Modules.ShouldNotBeEmpty();
+
+        profile.Modules.ShouldAllBe(m => !string.IsNullOrWhiteSpace(m.RequiredPolicy));
+        profile.Modules.ShouldAllBe(m => !string.IsNullOrWhiteSpace(m.Route));
+        profile.Modules.ShouldAllBe(m => !string.IsNullOrWhiteSpace(m.Id));
+
+        var routes = profile.Modules.Select(m => m.Route).ToList();
+        routes.Distinct(StringComparer.OrdinalIgnoreCase).Count().ShouldBe(routes.Count, "маршруты реестра должны быть уникальны");
+
+        var ids = profile.Modules.Select(m => m.Id).ToList();
+        ids.Distinct(StringComparer.Ordinal).Count().ShouldBe(ids.Count, "идентификаторы модулей должны быть уникальны");
+
+        var foreign = profile.Modules
+            .Select(m => m.ComponentType.Assembly.GetName().Name ?? string.Empty)
+            .Where(name => !AllowedUiAssemblies.Contains(name, StringComparer.Ordinal))
+            .Distinct()
+            .ToList();
+        foreign.ShouldBeEmpty("страницы реестра берутся только из UI профиля и подключённых пакетов");
+    }
+
+    [Fact(DisplayName = "Реестр: есть /dashboard и /cases; секции меню — «Дела», затем пакеты, затем «Администрирование»")]
+    public void Registry_contains_profile_pages_in_expected_order()
+    {
+        var profile = new InvestigationProfile();
+
+        profile.Modules.ShouldContain(m => m.Route == "/dashboard");
+        profile.Modules.ShouldContain(m => m.Route == "/cases");
+        profile.Modules.ShouldContain(m => m.Route == "/admin/roles");
+        profile.Modules.ShouldContain(m => m.Route == "/admin/clearances");
+        profile.Modules.ShouldContain(m => m.Route == "/admin/divisions");
+
+        // Страницы пакета docflow подмешаны как есть.
+        foreach (var module in DocFlowModule.Modules)
+        {
+            profile.Modules.ShouldContain(m => m.Route == module.Route && m.ComponentType == module.ComponentType);
+        }
+
+        // Порядок секций — порядок первого появления: «Дела» первой, «Администрирование» последней.
+        var groups = profile.Modules.Select(m => m.MenuGroup).Where(g => g is not null).Distinct().ToList();
+        groups.First().ShouldBe("Дела");
+        groups.Last().ShouldBe("Администрирование");
+        groups.ShouldContain(DocFlowModule.MenuGroup);
+    }
+
+    [Fact(DisplayName = "Контракт пакетов: после RegisterServices + RegisterDataContexts зарегистрированы все порты docflow и «Медиа» и IAccessPolicy профиля")]
+    public void Profile_registers_every_required_port_of_attached_modules()
+    {
+        var profile = new InvestigationProfile();
+        var services = new ServiceCollection();
+        var configuration = Configuration();
+
+        profile.RegisterServices(services, configuration);
+        profile.RegisterDataContexts(services, configuration);
+
+        var registered = services.Select(d => d.ServiceType).ToHashSet();
+
+        var missing = DocFlowModule.RequiredServices.Concat(MediaModule.RequiredServices)
+            .Where(port => !registered.Contains(port))
+            .Select(port => port.Name)
+            .ToList();
+        missing.ShouldBeEmpty("профиль обязан закрыть каждый порт подключённых пакетов, иначе приложение не стартует");
+
+        // Политика доступа — профильная (переопределяет заглушку ядра; последняя регистрация побеждает).
+        var policy = services.LastOrDefault(d => d.ServiceType == typeof(IAccessPolicy));
+        policy.ShouldNotBeNull();
+        policy.ImplementationType.ShouldBe(typeof(InvestigationAccessPolicy));
+        policy.Lifetime.ShouldBe(ServiceLifetime.Singleton);
+    }
+
+    [Fact(DisplayName = "Виджеты оболочки: кнопка смены пароля профиля и колокольчик уведомлений docflow")]
+    public void Shell_widgets_include_password_and_docflow_bell()
+    {
+        var profile = new InvestigationProfile();
+
+        profile.ShellWidgets.ShouldContain(w => w.Id == "account-password");
+        profile.ShellWidgets.ShouldContain(w => w.Id == "docflow-notifications");
+        foreach (var widget in DocFlowModule.ShellWidgets)
+        {
+            profile.ShellWidgets.ShouldContain(w => w.Id == widget.Id && w.ComponentType == widget.ComponentType);
+        }
+
+        profile.ShellWidgets.Select(w => w.Id).Distinct(StringComparer.Ordinal).Count().ShouldBe(profile.ShellWidgets.Count);
+        profile.ShellWidgets.First(w => w.Id == "account-password").ComponentType.Assembly.GetName().Name
+            .ShouldBe("ISC.AI.Profile.Investigation.UI");
+    }
+
+    [Theory(DisplayName = "Обязательные маршруты оболочки существуют в сборке UI профиля (страницы с RouteAttribute)")]
+    [InlineData("/account/password")]
+    [InlineData("/docflow/dashboard")]
+    public void Shell_required_routes_exist_as_pages(string route)
+    {
+        // Маршруты без пункта меню: принудительная смена временного пароля (RequirePasswordChange хоста)
+        // и адрес колокольчика docflow. Сборка попадает в маршрутизацию через записи реестра (Routes.razor).
+        var uiAssembly = new InvestigationProfile().Modules
+            .Select(m => m.ComponentType.Assembly)
+            .First(a => a.GetName().Name == "ISC.AI.Profile.Investigation.UI");
+
+        var templates = uiAssembly.GetTypes()
+            .SelectMany(type => type.GetCustomAttributes<RouteAttribute>(inherit: false))
+            .Select(attribute => attribute.Template)
+            .ToList();
+
+        templates.ShouldContain(route);
+    }
+
+    private static IConfiguration Configuration() =>
+        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Core"] = "Host=localhost;Database=test;Username=u",
+            ["Vision:Detector:Path"] = "d.onnx",
+            ["Vision:Detector:Sha256"] = "00",
+            ["Vision:Embedder:Path"] = "e.onnx",
+            ["Vision:Embedder:Sha256"] = "00",
+        }).Build();
+}

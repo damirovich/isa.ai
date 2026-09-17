@@ -1,0 +1,371 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Поиск по лицу (ТФ-ПЛ-01..06, ТБ-071): дело и ОСНОВАНИЕ обязательны — без основания поиск не запускается;
+   область — текущее дело / выбранные / все доступные (ТФ-ПЛ-05); проба — изображение либо лицо носителя
+   (faceId из query, ТФ-ПЛ-03). Порог ослабить сверх предела эксплуатанта нельзя (ТН-008, ТФ-ПЛ-06).
+   Выдача — КАНДИДАТ-ЛИСТ (ТЭ-005): никаких «совпадений»; статус «подтверждён» — только после
+   независимых решений двух сотрудников (ТБ-073). Балл — с предупреждением (ТЭ-006). *@
+@page "/media/search"
+@rendermode InteractiveServer
+@inject NavigationManager Navigation
+@using Microsoft.AspNetCore.Components.Forms
+@using ISC.AI.Modules.Media.Application.Features.Scope
+@using ISC.AI.Modules.Media.Application.Features.Search
+@using ISC.AI.Modules.Media.Domain.Model
+@using ISC.AI.Modules.Media.Domain.Services
+
+<PageTitle>Поиск по лицу</PageTitle>
+
+<div class="d-flex align-center justify-space-between flex-wrap gap-2">
+    <div>
+        <MudText Typo="Typo.h5">Поиск по лицу</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">Кандидат-лист по материалам дел в пределах вашего допуска</MudText>
+    </div>
+</div>
+
+<MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="my-3">
+    Результат — кандидат-лист. Статус «подтверждён» присваивается только после независимых решений
+    двух сотрудников (ТБ-073). Балл схожести — вероятностная оценка модели, не установление личности (ТЭ-006).
+</MudAlert>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+<MudPaper Outlined="true" Class="pa-4 my-3">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" sm="6">
+            <MudSelect T="int?" Value="_caseId" ValueChanged="OnCaseChangedAsync" Label="Дело *" Variant="Variant.Outlined"
+                       Placeholder="Выберите дело" Dense="true" Disabled="_busy">
+                @foreach (var c in _cases)
+                {
+                    <MudSelectItem T="int?" Value="@c.CaseId">№ @c.Number · @c.Title</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="6">
+            @* Основание — ОБЯЗАТЕЛЬНО (ТБ-071): фиксируется в сессии и аудите. *@
+            <MudSelect T="int?" @bind-Value="_authorizationId" Label="Основание поиска *" Variant="Variant.Outlined"
+                       Placeholder="Выберите основание" Dense="true" Disabled="@(_busy || _caseId is null)">
+                @foreach (var a in _authorizations)
+                {
+                    <MudSelectItem T="int?" Value="@a.AuthorizationId">@a.Reference</MudSelectItem>
+                }
+            </MudSelect>
+            @if (_caseId is not null && _authorizationsLoaded && _authorizations.Count == 0)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-1">
+                    У дела нет оснований поиска — добавьте основание в карточке дела.
+                </MudText>
+            }
+        </MudItem>
+        <MudItem xs="12" sm="6">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">Область поиска (ТФ-ПЛ-05)</MudText>
+            <MudRadioGroup T="SearchScopeKind" @bind-Value="_scope">
+                <MudRadio T="SearchScopeKind" Value="SearchScopeKind.CurrentCase" Dense="true">текущее дело</MudRadio>
+                <MudRadio T="SearchScopeKind" Value="SearchScopeKind.SelectedCases" Dense="true">выбранные дела</MudRadio>
+                <MudRadio T="SearchScopeKind" Value="SearchScopeKind.AllAccessibleCases" Dense="true">все доступные дела</MudRadio>
+            </MudRadioGroup>
+            @if (_scope == SearchScopeKind.SelectedCases)
+            {
+                <MudSelect T="int" MultiSelection="true" @bind-SelectedValues="_selectedCaseIds" Label="Дела" Variant="Variant.Outlined"
+                           Dense="true" Disabled="_busy" MultiSelectionTextFunc="@SelectedCasesSummary">
+                    @foreach (var c in _cases)
+                    {
+                        <MudSelectItem T="int" Value="@c.CaseId">№ @c.Number · @c.Title</MudSelectItem>
+                    }
+                </MudSelect>
+            }
+        </MudItem>
+        <MudItem xs="12" sm="6">
+            <div class="d-flex gap-3 flex-wrap">
+                <MudNumericField T="int" @bind-Value="_topK" Label="Кандидатов (5..50)" Variant="Variant.Outlined" Min="5" Max="50"
+                                 Margin="Margin.Dense" Style="max-width:180px;" Disabled="_busy" />
+                <MudNumericField T="double?" @bind-Value="_threshold" Label="Порог расстояния" Variant="Variant.Outlined" Min="0" Max="1" Step="0.05"
+                                 Margin="Margin.Dense" Style="max-width:200px;" Disabled="_busy" Clearable="true"
+                                 HelperText="необязательно; ослабить сверх предела эксплуатанта нельзя" />
+            </div>
+        </MudItem>
+    </MudGrid>
+
+    <MudDivider Class="my-3" />
+    <MudText Typo="Typo.subtitle2" Class="mb-2">Проба</MudText>
+    <div class="d-flex align-center gap-4 flex-wrap">
+        @if (_probeFace is { } probeFace)
+        {
+            @* Проба — лицо уже проиндексированного носителя (ТФ-ПЛ-03): вектор берётся из базы, изображение не грузится. *@
+            <FaceCropTile Url="@(probeFace.CropStoredFileName is { } crop ? MediaFileUrl.FaceCrop(probeFace.AssetId, crop) : null)"
+                          Size="128" Caption="@($"лицо № {probeFace.Id} носителя № {probeFace.AssetId}")"
+                          Unusable="@(!probeFace.QualityAcceptable)" UnusableReason="@probeFace.QualityReason">
+                <MudLink Href="@($"/media/assets/{probeFace.AssetId}")" Typo="Typo.caption">открыть носитель</MudLink>
+            </FaceCropTile>
+            <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="ClearProbe" Disabled="_busy">Сбросить пробу</MudButton>
+        }
+        else if (_probeFaceId is { } missingFaceId)
+        {
+            <MudText Typo="Typo.body2" Color="Color.Warning">Лицо № @missingFaceId недоступно: его нет либо оно вне вашего допуска.</MudText>
+            <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="ClearProbe" Disabled="_busy">Сбросить пробу</MudButton>
+        }
+        else
+        {
+            <MudFileUpload T="IBrowserFile" FilesChanged="OnProbeSelectedAsync" Accept=".jpg,.jpeg,.png,.bmp,.webp" Disabled="_busy">
+                <CustomContent Context="upload">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="_busy"
+                               StartIcon="@Icons.Material.Filled.AddAPhoto" OnClick="@(() => upload.OpenFilePickerAsync())">
+                        @(_probeBytes is null ? "Выбрать изображение…" : "Заменить изображение…")
+                    </MudButton>
+                </CustomContent>
+            </MudFileUpload>
+            @if (_probeBytes is { } bytes)
+            {
+                <MudChip T="string" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Image" OnClose="ClearProbe" Disabled="_busy">
+                    @_probeFileName · @MediaLabels.FormatSize(bytes.LongLength)
+                </MudChip>
+            }
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                Изображение с лицом, не более @MediaLabels.FormatSize(SearchByFaceValidator.MaxProbeBytes). Проба в базу шаблонов не попадает;
+                копия хранится только в журнале поиска (ТБ-072/074).
+            </MudText>
+            @if (_result is { DetectedFaces: > 1 })
+            {
+                <MudNumericField T="int?" @bind-Value="_probeFaceIndex" Label="Номер лица на пробе" Variant="Variant.Outlined" Min="0"
+                                 Margin="Margin.Dense" Style="max-width:200px;" Disabled="_busy" Clearable="true" HelperText="0 — самое крупное" />
+            }
+        }
+    </div>
+
+    <div class="d-flex align-center gap-3 mt-4 flex-wrap">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Search"
+                   Disabled="@(!CanSearch)" OnClick="SearchAsync">@(_busy ? "Ищу…" : "Искать")</MudButton>
+        @if (!CanSearch && !_busy)
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">Для поиска нужны дело, основание и проба.</MudText>
+        }
+    </div>
+    @if (_busy)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mt-2" />
+    }
+</MudPaper>
+
+@* ================= Выдача: кандидат-лист (ТФ-ПЛ-02) ================= *@
+@if (_result is { } result)
+{
+    <MudPaper Outlined="true" Class="pa-4 my-3">
+        <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+            <MudText Typo="Typo.subtitle1">Кандидаты: @result.Candidates.Count</MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                сессия <MudLink Href="@($"/media/sessions/{result.SessionId}")" Typo="Typo.caption">№ @result.SessionId</MudLink>
+                · область: @_scope.Label() (@result.CaseIds.Count дел)
+                · детектор @result.DetectorVersion · векторизатор @result.EmbedderVersion
+                · до @result.TopK кандидатов@(result.MaxCosineDistance is { } threshold ? $" · порог {threshold:0.00}" : string.Empty)
+            </MudText>
+        </div>
+        @if (result.DetectedFaces > 1)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                На пробе несколько лиц (@result.DetectedFaces); для поиска выбрано самое крупное. Если нужно другое —
+                укажите номер лица на пробе и повторите поиск.
+            </MudAlert>
+        }
+        @if (result.Candidates.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                Кандидатов нет: в области поиска нет похожих лиц либо материалы вне вашего допуска.
+            </MudText>
+        }
+        else
+        {
+            <div class="d-flex flex-wrap gap-4">
+                @foreach (var candidate in result.Candidates)
+                {
+                    var current = candidate;
+                    <MudPaper Outlined="true" Class="pa-2 d-flex flex-column align-center" Style="width:200px;">
+                        <FaceCropTile Url="@(current.CropStoredFileName is { } crop ? MediaFileUrl.FaceCrop(current.AssetId, crop) : null)"
+                                      Size="128" Caption="@($"кандидат № {current.Rank}")" />
+                        <div class="d-flex flex-column align-center gap-1 mt-1">
+                            <SimilarityChip Similarity="@current.Similarity" />
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@current.Status.ChipColor()">@current.Status.Label()</MudChip>
+                            <ClassificationChip Classification="@current.Classification" />
+                            <MudLink Href="@($"/media/assets/{current.AssetId}?face={current.FaceId}")" Typo="Typo.caption">
+                                носитель № @current.AssetId@(current.FrameTimestampMs is { } ms ? $" · кадр {MediaLabels.Timecode(ms)}" : string.Empty)
+                            </MudLink>
+                            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.FactCheck"
+                                       Href="@($"/media/verification/{current.Id}?stage=Expert")">Верификация</MudButton>
+                        </div>
+                    </MudPaper>
+                }
+            </div>
+        }
+    </MudPaper>
+}
+
+@code {
+    /// <summary>Дело из адресной строки (переход из медиатеки дела / карточки носителя).</summary>
+    [SupplyParameterFromQuery(Name = "caseId")] public int? QueryCaseId { get; set; }
+
+    /// <summary>Лицо носителя как проба (ТФ-ПЛ-03) из адресной строки.</summary>
+    [SupplyParameterFromQuery(Name = "faceId")] public int? QueryFaceId { get; set; }
+
+    private IReadOnlyList<CaseScopeItem> _cases = [];
+    private IReadOnlyList<CaseAuthorizationItem> _authorizations = [];
+    private bool _authorizationsLoaded;
+    private int? _caseId;
+    private int? _authorizationId;
+    private SearchScopeKind _scope = SearchScopeKind.CurrentCase;
+    private IReadOnlyCollection<int> _selectedCaseIds = [];
+    private FaceRow? _probeFace;
+    private int? _probeFaceId;
+    private byte[]? _probeBytes;
+    private string? _probeFileName;
+    private int? _probeFaceIndex;
+    private int _topK = 20;
+    private double? _threshold;
+    private FaceSearchResult? _result;
+    private bool _busy;
+    private string? _error;
+
+    private bool HasProbe => _probeFace is not null || _probeBytes is not null;
+
+    private bool CanSearch => !_busy && _caseId is not null && _authorizationId is not null && HasProbe
+        && (_scope != SearchScopeKind.SelectedCases || _selectedCaseIds.Count > 0);
+
+    private string SelectedCasesSummary(IReadOnlyList<string> selected) => selected.Count switch
+    {
+        0 => "не выбрано",
+        1 => selected[0],
+        _ => $"дел: {selected.Count}",
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        var cases = await Dispatcher.Send(new ListAccessibleCasesQuery());
+        if (cases is { Status: true, Data: { } list })
+        {
+            _cases = list;
+        }
+        else if (cases is { Status: false })
+        {
+            _error = cases.StatusMessage;
+        }
+
+        // Дело из адреса принимается ТОЛЬКО если оно среди доступных (ТБ-071); иначе выбор остаётся пустым.
+        if (QueryCaseId is { } queryCase && _cases.Any(c => c.CaseId == queryCase))
+        {
+            await OnCaseChangedAsync(queryCase);
+        }
+
+        if (QueryFaceId is { } faceId)
+        {
+            _probeFaceId = faceId;
+            var face = await Dispatcher.Send(new GetFaceQuery(faceId));
+            _probeFace = face is { Status: true, Data: { } row } ? row : null;
+        }
+    }
+
+    private async Task OnCaseChangedAsync(int? caseId)
+    {
+        _caseId = caseId;
+        _authorizationId = null;
+        _authorizations = [];
+        _authorizationsLoaded = false;
+        if (caseId is not { } id)
+        {
+            return;
+        }
+
+        var response = await Dispatcher.Send(new ListCaseAuthorizationsQuery(id));
+        if (response is { Status: true, Data: { } list })
+        {
+            _authorizations = list;
+            if (list.Count == 1)
+            {
+                _authorizationId = list[0].AuthorizationId;
+            }
+        }
+        else if (response is { Status: false })
+        {
+            _error = response.StatusMessage;
+        }
+
+        _authorizationsLoaded = true;
+    }
+
+    private async Task OnProbeSelectedAsync(IBrowserFile? file)
+    {
+        if (file is null)
+        {
+            return;
+        }
+
+        _error = null;
+        try
+        {
+            using var buffer = new MemoryStream();
+            await using (var stream = file.OpenReadStream(SearchByFaceValidator.MaxProbeBytes))
+            {
+                await stream.CopyToAsync(buffer);
+            }
+
+            _probeBytes = buffer.ToArray();
+            _probeFileName = file.Name;
+            _probeFace = null;
+            _probeFaceId = null;
+            _probeFaceIndex = null;
+            _result = null;
+        }
+        catch (IOException)
+        {
+            _error = $"Изображение больше допустимых {MediaLabels.FormatSize(SearchByFaceValidator.MaxProbeBytes)} или не прочитано.";
+        }
+    }
+
+    private void ClearProbe()
+    {
+        _probeBytes = null;
+        _probeFileName = null;
+        _probeFace = null;
+        _probeFaceId = null;
+        _probeFaceIndex = null;
+        _result = null;
+    }
+
+    private async Task SearchAsync()
+    {
+        if (_caseId is not { } caseId || _authorizationId is not { } authorizationId || !HasProbe)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new SearchByFaceQuery(
+                caseId,
+                authorizationId,
+                _scope,
+                _scope == SearchScopeKind.SelectedCases ? _selectedCaseIds.Distinct().ToList() : null,
+                _probeFace is null ? _probeBytes : null,
+                _probeFace?.Id,
+                _probeFace is null ? _probeFaceIndex : null,
+                _topK,
+                _threshold));
+
+            if (response is { Status: true, Data: { } result })
+            {
+                _result = result;
+            }
+            else
+            {
+                _result = null;
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

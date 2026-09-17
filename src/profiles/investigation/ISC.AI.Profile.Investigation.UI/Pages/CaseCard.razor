@@ -1,0 +1,770 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@page "/cases/{Id:int}"
+@rendermode InteractiveServer
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Abstractions.Security
+@using ISC.AI.Modules.Media.Application.Features.Assets
+@using ISC.AI.Modules.Media.Application.Features.Search
+@using ISC.AI.Modules.Media.Domain.Model
+@using ISC.AI.Modules.Media.Domain.Services
+@using ISC.AI.Profile.Investigation.Application.Features.Accounts
+@using ISC.AI.Profile.Investigation.Application.Features.Cases
+@using ISC.AI.Profile.Investigation.Application.Features.Divisions
+@using ISC.AI.Profile.Investigation.Application.Features.Persons
+@using ISC.AI.Profile.Investigation.Domain.Enums
+@using ISC.AI.Profile.Investigation.Domain.Services
+@inject NavigationManager Navigation
+
+@* Карточка дела (ТФ-ДЕЛ-02): реквизиты, смена статуса, фигуранты, носители, основания поиска и
+   поисковые сессии. Носители и сессии — данные пакета «Медиа» (ListCaseMediaQuery,
+   ListCaseSearchSessionsQuery), их страницы — по URL (/media/...): на Media.UI профиль не ссылается
+   (ADR-0022). Вкладки грузятся по первому открытию: каждое обращение к биометрии пишется в журнал
+   (ТБ-030), и незачем плодить записи ради невидимых вкладок. Недоступное дело неотличимо от
+   несуществующего (ТБ-020) — ответ NotFound показывается как есть. Закрытие дела — с подтверждением
+   и напоминанием о регламенте удаления шаблонов (ТФ-ДЕЛ-04, ТБ-074). *@
+
+@if (_case is null)
+{
+    <PageHeader Title="Дело" Icon="@Icons.Material.Filled.FolderOpen" />
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_error</MudAlert>
+        <MudButton Href="/cases" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack">К списку дел</MudButton>
+    }
+    else
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-4" />
+    }
+}
+else
+{
+    <PageHeader Title="@($"Дело {_case.Number}")" Subtitle="@_case.Title" Icon="@Icons.Material.Filled.FolderOpen">
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@_case.Kind.Label()</MudChip>
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@Dashboard.StatusColor(_case.Status)">@_case.Status.Label()</MudChip>
+        <ClassificationChip Value="@_case.Classification" Prefix="гриф " />
+        <MudButton Href="/cases" Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.ArrowBack">К списку</MudButton>
+    </PageHeader>
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+    }
+    @if (_notice is not null)
+    {
+        <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _notice = null)">@_notice</MudAlert>
+    }
+
+    @* --- Реквизиты и статус --- *@
+    <MudGrid Class="mb-3">
+        <MudItem xs="12" md="8">
+            <MudPaper Outlined="true" Class="pa-4 h-100">
+                <div class="d-flex align-center justify-space-between mb-2">
+                    <MudText Typo="Typo.subtitle1">Реквизиты</MudText>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit"
+                               OnClick="OpenEdit" Disabled="_busy">Изменить</MudButton>
+                </div>
+                <MudSimpleTable Dense="true" Elevation="0" Class="requisites">
+                    <tbody>
+                        <tr><td class="mud-text-secondary">Номер</td><td>@_case.Number</td></tr>
+                        <tr><td class="mud-text-secondary">Вид</td><td>@_case.Kind.Label()</td></tr>
+                        <tr><td class="mud-text-secondary">Дата открытия</td><td>@_case.OpenedAt.ToString("dd.MM.yyyy")</td></tr>
+                        <tr><td class="mud-text-secondary">Следователь</td><td>@UserName(_case.InvestigatorUserId)</td></tr>
+                        <tr><td class="mud-text-secondary">Подразделение</td><td>@DivisionName(_case.DivisionId)</td></tr>
+                        <tr><td class="mud-text-secondary">Гриф</td><td><ClassificationChip Value="@_case.Classification" /></td></tr>
+                        <tr><td class="mud-text-secondary">Основание</td><td style="white-space:pre-wrap;">@(string.IsNullOrWhiteSpace(_case.Basis) ? "—" : _case.Basis)</td></tr>
+                        <tr><td class="mud-text-secondary">Заведено</td><td>@_case.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td></tr>
+                        @if (_case.ClosedAt is { } closedAt)
+                        {
+                            <tr><td class="mud-text-secondary">Закрыто</td><td>@closedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td></tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudPaper Outlined="true" Class="pa-4 h-100">
+                <MudText Typo="Typo.subtitle1" Class="mb-2">Статус</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">
+                    Сейчас: <b>@_case.Status.Label()</b>. Право смены статуса проверяет сервер — при отказе
+                    причина будет показана здесь.
+                </MudText>
+                <MudStack Spacing="2">
+                    @if (_case.Status != CaseStatus.InProgress)
+                    {
+                        <MudButton Variant="Variant.Outlined" Color="Color.Info" FullWidth="true" Disabled="_busy"
+                                   StartIcon="@Icons.Material.Filled.PlayArrow"
+                                   OnClick="@(() => SetStatusAsync(CaseStatus.InProgress))">В производство</MudButton>
+                    }
+                    @if (_case.Status != CaseStatus.Suspended)
+                    {
+                        <MudButton Variant="Variant.Outlined" Color="Color.Warning" FullWidth="true" Disabled="_busy"
+                                   StartIcon="@Icons.Material.Filled.Pause"
+                                   OnClick="@(() => SetStatusAsync(CaseStatus.Suspended))">Приостановить</MudButton>
+                    }
+                    @if (_case.Status != CaseStatus.Closed)
+                    {
+                        <MudButton Variant="Variant.Filled" Color="Color.Success" FullWidth="true" Disabled="_busy"
+                                   StartIcon="@Icons.Material.Filled.Lock"
+                                   OnClick="@(() => _closeConfirmOpen = true)">Закрыть дело…</MudButton>
+                    }
+                </MudStack>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <MudTabs Elevation="0" Border="true" Rounded="true" ActivePanelIndex="_activeTab" ActivePanelIndexChanged="OnTabChangedAsync">
+    @* --- Фигуранты (ТФ-ПЕР-01) --- *@
+    <MudTabPanel Text="Фигуранты" Icon="@Icons.Material.Filled.People" BadgeData="@_persons.Count" BadgeColor="Color.Default">
+        <div class="pt-3">
+            <div class="d-flex justify-end mb-2">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonAdd"
+                           OnClick="OpenCreatePerson" Disabled="_busy">Добавить фигуранта</MudButton>
+            </div>
+            @if (_personsError is not null)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_personsError</MudAlert>
+            }
+            <MudTable T="PersonRow" Items="_persons" Hover="true" Dense="true" Outlined="true" Loading="_busy"
+                      OnRowClick="@(row => Navigation.NavigateTo($"/persons/{row.Item!.Id}"))" RowClass="cursor-pointer">
+                <HeaderContent>
+                    <MudTh>Фигурант</MudTh>
+                    <MudTh>Роль в деле</MudTh>
+                    <MudTh Style="text-align:right;">Эталонов</MudTh>
+                    <MudTh Style="text-align:right;">Появлений</MudTh>
+                    <MudTh>Гриф</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Фигурант">
+                        @context.DisplayName
+                        @if (context.IsUnidentified)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ml-2">личность не установлена</MudChip>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Роль в деле">@(context.RoleInCase ?? "—")</MudTd>
+                    <MudTd DataLabel="Эталонов" Style="text-align:right;">@context.ReferencePhotoCount</MudTd>
+                    <MudTd DataLabel="Появлений" Style="text-align:right;">@context.AppearanceCount</MudTd>
+                    <MudTd DataLabel="Гриф"><ClassificationChip Value="@context.Classification" /></MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                        Здесь пусто: фигурантов нет либо они вне вашего допуска.
+                    </MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </div>
+    </MudTabPanel>
+
+    @* --- Материалы: носители пакета «Медиа» (ТФ-МЕД-03); страницы пакета — по URL --- *@
+    <MudTabPanel Text="Материалы" Icon="@Icons.Material.Filled.PermMedia" BadgeData="@_case.Media.Count" BadgeColor="Color.Default">
+        <div class="pt-3">
+            <div class="d-flex justify-end gap-2 mb-2 flex-wrap">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.CloudUpload"
+                           Href="@($"/media/cases/{Id}")">Медиатека дела (загрузка)</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonSearch"
+                           Href="@($"/media/search?caseId={Id}")">Поиск по лицу</MudButton>
+            </div>
+            @if (_mediaError is not null)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_mediaError</MudAlert>
+            }
+            <MudTable T="MediaAssetRow" Items="_media" Hover="true" Dense="true" Outlined="true" Loading="@(_busy || !_mediaLoaded)">
+                <HeaderContent>
+                    <MudTh>Файл</MudTh>
+                    <MudTh>Вид</MudTh>
+                    <MudTh>Снято</MudTh>
+                    <MudTh>Источник</MudTh>
+                    <MudTh>Индексация</MudTh>
+                    <MudTh Style="text-align:right;">Лиц</MudTh>
+                    <MudTh>Гриф</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Файл"><MudLink Href="@($"/media/assets/{context.Id}")">@context.OriginalFileName</MudLink></MudTd>
+                    <MudTd DataLabel="Вид">@(context.Kind == MediaKind.Video ? "Видео" : "Фото")</MudTd>
+                    <MudTd DataLabel="Снято">@(context.CapturedAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—")</MudTd>
+                    <MudTd DataLabel="Источник">@(context.Source ?? "—")</MudTd>
+                    <MudTd DataLabel="Индексация">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@IndexColor(context.IndexStatus)">@IndexLabel(context.IndexStatus)</MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="Лиц" Style="text-align:right;">@context.FaceCount</MudTd>
+                    <MudTd DataLabel="Гриф"><ClassificationChip Value="@context.Classification" /></MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                        Здесь пусто: носителей нет либо они вне вашего допуска.
+                    </MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </div>
+    </MudTabPanel>
+
+    @* --- Основания поиска (ТБ-071): без основания поиск технически невозможен --- *@
+    <MudTabPanel Text="Основания поиска" Icon="@Icons.Material.Filled.Gavel" BadgeData="@_case.Authorizations.Count" BadgeColor="Color.Default">
+        <div class="pt-3">
+            <div class="d-flex justify-end mb-2">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add"
+                           OnClick="OpenCreateAuthorization" Disabled="_busy">Добавить основание</MudButton>
+            </div>
+            <MudTable T="SearchAuthorizationRow" Items="_case.Authorizations" Hover="true" Dense="true" Outlined="true">
+                <HeaderContent>
+                    <MudTh>Вид</MudTh>
+                    <MudTh>Реквизиты</MudTh>
+                    <MudTh>Выдано</MudTh>
+                    <MudTh>Действует до</MudTh>
+                    <MudTh>Внёс</MudTh>
+                    <MudTh>Примечание</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Вид">@context.Kind.Label()</MudTd>
+                    <MudTd DataLabel="Реквизиты">@context.Reference</MudTd>
+                    <MudTd DataLabel="Выдано">@context.IssuedAt.ToString("dd.MM.yyyy")</MudTd>
+                    <MudTd DataLabel="Действует до">
+                        @if (context.ValidUntil is { } until)
+                        {
+                            <span class="@(until < DateOnly.FromDateTime(DateTime.Today) ? "mud-error-text" : null)">@until.ToString("dd.MM.yyyy")</span>
+                        }
+                        else
+                        {
+                            <span>бессрочно</span>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Внёс">@UserName(context.IssuedByUserId)</MudTd>
+                    <MudTd DataLabel="Примечание">@(context.Notes ?? "—")</MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                        Оснований пока нет. Поиск по лицу в рамках дела невозможен без основания (ТБ-071).
+                    </MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </div>
+    </MudTabPanel>
+
+    @* --- Поисковые сессии пакета «Медиа» (ТФ-ПЛ-02); карточка сессии — по URL --- *@
+    <MudTabPanel Text="Поиски" Icon="@Icons.Material.Filled.ManageSearch">
+        <div class="pt-3">
+            @if (_sessionsError is not null)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_sessionsError</MudAlert>
+            }
+            <MudTable T="SearchSessionRow" Items="_sessions" Hover="true" Dense="true" Outlined="true" Loading="@(_busy || !_sessionsLoaded)"
+                      OnRowClick="@(row => Navigation.NavigateTo($"/media/sessions/{row.Item!.Id}"))" RowClass="cursor-pointer">
+                <HeaderContent>
+                    <MudTh>Дата</MudTh>
+                    <MudTh>Основание</MudTh>
+                    <MudTh>Область</MudTh>
+                    <MudTh>Запросил</MudTh>
+                    <MudTh Style="text-align:right;">Кандидатов</MudTh>
+                    <MudTh>Гриф</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Дата">@context.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudTd>
+                    <MudTd DataLabel="Основание">@context.AuthorizationRef</MudTd>
+                    <MudTd DataLabel="Область">@ScopeLabel(context.Scope)</MudTd>
+                    <MudTd DataLabel="Запросил">@UserName(context.RequestedByUserId)</MudTd>
+                    <MudTd DataLabel="Кандидатов" Style="text-align:right;">@context.CandidateCount</MudTd>
+                    <MudTd DataLabel="Гриф"><ClassificationChip Value="@context.Classification" /></MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                        Здесь пусто: поисков по делу не было либо они вне вашего допуска.
+                    </MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </div>
+    </MudTabPanel>
+    </MudTabs>
+}
+
+@* --- Правка реквизитов (UpdateCaseCommand): гриф и подразделение НЕ меняются — иначе рассинхрон с
+       производными (фигуранты, эталоны, носители копируют их с дела). --- *@
+<MudDialog @bind-Visible="_editOpen" Options="FormDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Изменить реквизиты дела</MudText></TitleContent>
+    <DialogContent>
+        @if (_editError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_editError</MudAlert>
+        }
+        <MudGrid Spacing="2">
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_editTitle" Label="Название *" Variant="Variant.Outlined" MaxLength="500" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="CaseKind?" @bind-Value="_editKind" Label="Вид *" Variant="Variant.Outlined" Dense="true">
+                    @foreach (var kind in Enum.GetValues<CaseKind>())
+                    {
+                        <MudSelectItem T="CaseKind?" Value="@kind">@kind.Label()</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <div>
+                    <MudDatePicker @bind-Date="_editOpenedAt" Label="Дата открытия *" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" />
+                </div>
+            </MudItem>
+            <MudItem xs="12">
+                <MudSelect T="int?" @bind-Value="_editInvestigatorId" Label="Следователь" Variant="Variant.Outlined" Dense="true"
+                           Clearable="true" Placeholder="Не назначен">
+                    @foreach (var account in _accounts)
+                    {
+                        <MudSelectItem T="int?" Value="@account.UserId">@AccountLabel(account)</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_editBasis" Label="Основание" Variant="Variant.Outlined" Lines="3" MaxLength="4000" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _editOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!EditValid || _busy)" OnClick="SaveEditAsync">Сохранить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* --- Подтверждение закрытия: ТФ-ДЕЛ-04 / ТБ-074 --- *@
+<MudDialog @bind-Visible="_closeConfirmOpen" Options="ConfirmDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Закрыть дело?</MudText></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-2">
+            Дело будет переведено в статус «Закрыто» с фиксацией даты закрытия.
+        </MudText>
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+            Закрытие запускает регламент удаления биометрических шаблонов (ТФ-ДЕЛ-04, ТБ-074): по истечении
+            установленного срока хранения шаблоны лиц с носителей дела удаляются гарантированно и не
+            восстанавливаются. Сейчас фиксируется только факт закрытия; сам регламент выполняется отдельным шагом.
+        </MudAlert>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _closeConfirmOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Success" Variant="Variant.Filled" Disabled="_busy" OnClick="ConfirmCloseAsync">Закрыть дело</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* --- Новый фигурант (CreatePersonCommand): имя либо «неустановленное лицо» (номер даст хранилище) --- *@
+<MudDialog @bind-Visible="_personOpen" Options="FormDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Новый фигурант</MudText></TitleContent>
+    <DialogContent>
+        @if (_personError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_personError</MudAlert>
+        }
+        <MudGrid Spacing="2">
+            <MudItem xs="12">
+                <MudCheckBox T="bool" @bind-Value="_personUnidentified" Label="Личность не установлена (номер присвоится автоматически)" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_personName" Label="@(_personUnidentified ? "Имя (необязательно)" : "Имя *")"
+                              Variant="Variant.Outlined" MaxLength="300" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_personRole" Label="Роль в деле" Variant="Variant.Outlined" MaxLength="200"
+                              HelperText="Подозреваемый, свидетель, потерпевший…" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_personNotes" Label="Примечания" Variant="Variant.Outlined" Lines="3" MaxLength="4000" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _personOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!PersonValid || _busy)" OnClick="SavePersonAsync">Добавить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* --- Новое основание поиска (AddSearchAuthorizationCommand, ТБ-071) --- *@
+<MudDialog @bind-Visible="_authOpen" Options="FormDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Новое основание поиска</MudText></TitleContent>
+    <DialogContent>
+        @if (_authError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_authError</MudAlert>
+        }
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="6">
+                <MudSelect T="AuthorizationKind?" @bind-Value="_authKind" Label="Вид *" Variant="Variant.Outlined" Dense="true" Placeholder="Выберите вид">
+                    @foreach (var kind in Enum.GetValues<AuthorizationKind>())
+                    {
+                        <MudSelectItem T="AuthorizationKind?" Value="@kind">@kind.Label()</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_authReference" Label="Реквизиты (номер, кем выдано) *" Variant="Variant.Outlined" MaxLength="300" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <div>
+                    <MudDatePicker @bind-Date="_authIssuedAt" Label="Дата выдачи *" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" />
+                </div>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <div>
+                    <MudDatePicker @bind-Date="_authValidUntil" Label="Действует до" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" Clearable="true" />
+                </div>
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_authNotes" Label="Примечание" Variant="Variant.Outlined" Lines="2" MaxLength="2000" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _authOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!AuthValid || _busy)" OnClick="SaveAuthorizationAsync">Добавить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly DialogOptions FormDialogOptions =
+        new() { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true };
+    private static readonly DialogOptions ConfirmDialogOptions =
+        new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true };
+
+    /// <summary>Идентификатор дела из маршрута.</summary>
+    [Parameter] public int Id { get; set; }
+
+    private CaseDetails? _case;
+    private readonly List<PersonRow> _persons = [];
+    private readonly List<MediaAssetRow> _media = [];
+    private readonly List<SearchSessionRow> _sessions = [];
+    private readonly List<DivisionNode> _divisions = [];
+    private readonly List<UserAccountRow> _accounts = [];
+    private bool _mediaLoaded;
+    private bool _sessionsLoaded;
+    private int _activeTab;
+    private bool _busy;
+    private string? _error;
+    private string? _notice;
+    private string? _personsError;
+    private string? _mediaError;
+    private string? _sessionsError;
+
+    // --- Правка реквизитов ---
+    private bool _editOpen;
+    private string? _editError;
+    private string? _editTitle;
+    private CaseKind? _editKind;
+    private DateTime? _editOpenedAt;
+    private int? _editInvestigatorId;
+    private string? _editBasis;
+    private bool EditValid => !string.IsNullOrWhiteSpace(_editTitle) && _editKind is not null && _editOpenedAt is not null;
+
+    // --- Закрытие ---
+    private bool _closeConfirmOpen;
+
+    // --- Новый фигурант ---
+    private bool _personOpen;
+    private string? _personError;
+    private string? _personName;
+    private bool _personUnidentified;
+    private string? _personRole;
+    private string? _personNotes;
+    private bool PersonValid => _personUnidentified || !string.IsNullOrWhiteSpace(_personName);
+
+    // --- Новое основание ---
+    private bool _authOpen;
+    private string? _authError;
+    private AuthorizationKind? _authKind;
+    private string? _authReference;
+    private DateTime? _authIssuedAt;
+    private DateTime? _authValidUntil;
+    private string? _authNotes;
+    private bool AuthValid => _authKind is not null && !string.IsNullOrWhiteSpace(_authReference) && _authIssuedAt is not null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Справочники — для имён вместо номеров; отказ (например, нет роли) не мешает карточке.
+        var divisions = await Dispatcher.Send(new ListDivisionsQuery());
+        if (divisions is { Status: true, Data: { } list })
+        {
+            _divisions.AddRange(list);
+        }
+
+        var accounts = await Dispatcher.Send(new ListUserAccountsQuery());
+        if (accounts is { Status: true, Data: { } rows })
+        {
+            _accounts.AddRange(rows);
+        }
+
+        await ReloadAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Переход между карточками дел без размонтирования страницы: сбрасываем ленивые вкладки.
+        if (_case is { } current && current.Id != Id)
+        {
+            _mediaLoaded = false;
+            _sessionsLoaded = false;
+            _media.Clear();
+            _sessions.Clear();
+            await ReloadAsync();
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new GetCaseQuery(Id));
+            if (response is { Status: true, Data: { } details })
+            {
+                _case = details;
+            }
+            else
+            {
+                _case = null;
+                _error = response.StatusMessage;
+                return;
+            }
+
+            await LoadPersonsAsync();
+            if (_activeTab == 1) { await LoadMediaAsync(); }
+            if (_activeTab == 3) { await LoadSessionsAsync(); }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task LoadPersonsAsync()
+    {
+        _personsError = null;
+        var response = await Dispatcher.Send(new ListPersonsQuery(Id));
+        _persons.Clear();
+        if (response is { Status: true, Data: { } rows })
+        {
+            _persons.AddRange(rows);
+        }
+        else
+        {
+            _personsError = response.StatusMessage;
+        }
+    }
+
+    private async Task LoadMediaAsync()
+    {
+        _mediaError = null;
+        var response = await Dispatcher.Send(new ListCaseMediaQuery(Id));
+        _media.Clear();
+        if (response is { Status: true, Data: { } rows })
+        {
+            _media.AddRange(rows);
+        }
+        else
+        {
+            _mediaError = response.StatusMessage;
+        }
+
+        _mediaLoaded = true;
+    }
+
+    private async Task LoadSessionsAsync()
+    {
+        _sessionsError = null;
+        var response = await Dispatcher.Send(new ListCaseSearchSessionsQuery(Id));
+        _sessions.Clear();
+        if (response is { Status: true, Data: { } rows })
+        {
+            _sessions.AddRange(rows);
+        }
+        else
+        {
+            _sessionsError = response.StatusMessage;
+        }
+
+        _sessionsLoaded = true;
+    }
+
+    // Вкладки «Материалы» (1) и «Поиски» (3) грузятся при первом открытии — см. комментарий к странице.
+    private async Task OnTabChangedAsync(int index)
+    {
+        _activeTab = index;
+        if (index == 1 && !_mediaLoaded) { await LoadMediaAsync(); }
+        if (index == 3 && !_sessionsLoaded) { await LoadSessionsAsync(); }
+    }
+
+    private async Task SetStatusAsync(CaseStatus status)
+    {
+        _busy = true;
+        _error = null;
+        _notice = null;
+        try
+        {
+            var response = await Dispatcher.Send(new SetCaseStatusCommand(Id, status));
+            if (!response.Status)
+            {
+                _error = response.StatusMessage;
+                return;
+            }
+
+            _notice = $"Статус дела изменён: {status.Label()}.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task ConfirmCloseAsync()
+    {
+        _closeConfirmOpen = false;
+        await SetStatusAsync(CaseStatus.Closed);
+    }
+
+    private void OpenEdit()
+    {
+        if (_case is not { } c) { return; }
+        _editError = null;
+        _editTitle = c.Title;
+        _editKind = c.Kind;
+        _editOpenedAt = c.OpenedAt.ToDateTime(TimeOnly.MinValue);
+        _editInvestigatorId = c.InvestigatorUserId;
+        _editBasis = c.Basis;
+        _editOpen = true;
+    }
+
+    private async Task SaveEditAsync()
+    {
+        if (_editKind is not { } kind || _editOpenedAt is not { } openedAt) { return; }
+        _busy = true;
+        _editError = null;
+        try
+        {
+            var response = await Dispatcher.Send(new UpdateCaseCommand(
+                Id, _editTitle!.Trim(), kind, DateOnly.FromDateTime(openedAt), _editInvestigatorId, _editBasis));
+            if (!response.Status)
+            {
+                _editError = response.StatusMessage;
+                return;
+            }
+
+            _editOpen = false;
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    private void OpenCreatePerson()
+    {
+        _personError = null;
+        _personName = null;
+        _personUnidentified = false;
+        _personRole = null;
+        _personNotes = null;
+        _personOpen = true;
+    }
+
+    private async Task SavePersonAsync()
+    {
+        _busy = true;
+        _personError = null;
+        try
+        {
+            var response = await Dispatcher.Send(new CreatePersonCommand(
+                Id, string.IsNullOrWhiteSpace(_personName) ? null : _personName.Trim(), _personUnidentified,
+                string.IsNullOrWhiteSpace(_personRole) ? null : _personRole.Trim(), _personNotes));
+            if (!response.Status)
+            {
+                _personError = response.StatusMessage;
+                return;
+            }
+
+            _personOpen = false;
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    private void OpenCreateAuthorization()
+    {
+        _authError = null;
+        _authKind = null;
+        _authReference = null;
+        _authIssuedAt = DateTime.Today;
+        _authValidUntil = null;
+        _authNotes = null;
+        _authOpen = true;
+    }
+
+    private async Task SaveAuthorizationAsync()
+    {
+        if (_authKind is not { } kind || _authIssuedAt is not { } issuedAt) { return; }
+        _busy = true;
+        _authError = null;
+        try
+        {
+            var response = await Dispatcher.Send(new AddSearchAuthorizationCommand(
+                Id, kind, _authReference!.Trim(), DateOnly.FromDateTime(issuedAt),
+                _authValidUntil is { } until ? DateOnly.FromDateTime(until) : null, _authNotes));
+            if (!response.Status)
+            {
+                _authError = response.StatusMessage;
+                return;
+            }
+
+            _authOpen = false;
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    // --- Подписи ---
+    private string DivisionName(int id) => _divisions.FirstOrDefault(d => d.Id == id)?.Name ?? $"№ {id}";
+
+    private string UserName(int? id)
+    {
+        if (id is not { } userId) { return "не назначен"; }
+        var account = _accounts.FirstOrDefault(a => a.UserId == userId);
+        return account is null ? $"пользователь № {userId}" : AccountLabel(account);
+    }
+
+    private static string AccountLabel(UserAccountRow account)
+    {
+        var name = string.IsNullOrWhiteSpace(account.DisplayName) ? account.UserName : account.DisplayName;
+        return string.IsNullOrWhiteSpace(account.Position) ? name : $"{name} · {account.Position}";
+    }
+
+    private static string IndexLabel(MediaIndexStatus status) => status switch
+    {
+        MediaIndexStatus.Uploaded => "Загружен",
+        MediaIndexStatus.Processing => "Обрабатывается",
+        MediaIndexStatus.Indexed => "Проиндексирован",
+        MediaIndexStatus.Failed => "Ошибка",
+        _ => status.ToString(),
+    };
+
+    private static Color IndexColor(MediaIndexStatus status) => status switch
+    {
+        MediaIndexStatus.Indexed => Color.Success,
+        MediaIndexStatus.Failed => Color.Error,
+        MediaIndexStatus.Processing => Color.Info,
+        _ => Color.Default,
+    };
+
+    private static string ScopeLabel(SearchScopeKind scope) => scope switch
+    {
+        SearchScopeKind.CurrentCase => "Текущее дело",
+        SearchScopeKind.SelectedCases => "Выбранные дела",
+        SearchScopeKind.AllAccessibleCases => "Все доступные дела",
+        _ => scope.ToString(),
+    };
+}

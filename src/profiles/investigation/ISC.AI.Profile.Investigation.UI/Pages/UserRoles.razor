@@ -1,0 +1,105 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@* Роли пользователей профиля «Следствие» (ТП-004, ТФ-АДМ-01): Администратор, Руководитель, Следователь,
+   Эксперт по лицам, Верификатор, Офицер ИБ. Страница видна всем (в claim'ах сессии роли нет), но
+   обработчики (RoleGuard) сами решают, вправе ли вызывающий: Администратор — всегда; любой вошедший —
+   ТОЛЬКО пока Администратора в системе нет (режим первичной настройки — признак IsBootstrap ответа).
+   На «кнопку не покажем» не полагаемся. Последнего Администратора снять нельзя — откажет сервер. *@
+@page "/admin/roles"
+@rendermode InteractiveServer
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Profile.Investigation.Application.Features.Roles
+@using ISC.AI.Profile.Investigation.Domain.Enums
+@using ISC.AI.Profile.Investigation.Domain.Services
+
+<PageHeader Title="Роли пользователей" Subtitle="Роли профиля «Следствие» (ТП-004) · ведёт Администратор"
+            Icon="@Icons.Material.Filled.AdminPanelSettings" />
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@* Признак режима первичной настройки приходит С СЕРВЕРА (IsBootstrap) — баннер и правило не разъедутся. *@
+@if (_isBootstrap)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-3">
+        <MudText Typo="Typo.body2"><b>Режим первичной настройки: Администратор не назначен.</b></MudText>
+        <MudText Typo="Typo.body2">
+            Пока в системе нет ни одного Администратора, эта страница открыта любому вошедшему — иначе
+            назначить первого Администратора было бы некому. Как только Администратор появится,
+            страница станет доступна только ему.
+        </MudText>
+        <MudText Typo="Typo.body2" Class="mt-1">
+            Назначьте себе <b>Администратора</b> — он ведёт учётные записи, роли, допуски и справочники.
+        </MudText>
+    </MudAlert>
+}
+
+<MudTable T="UserRoleRow" Items="_rows" Hover="true" Dense="true" Outlined="true" Loading="_busy">
+    <HeaderContent>
+        <MudTh>Пользователь</MudTh>
+        <MudTh>Роль</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Пользователь">@context.DisplayName</MudTd>
+        <MudTd DataLabel="Роль">
+            <MudSelect T="InvestigationRole?" Value="@context.Role" ValueChanged="@(role => SetRoleAsync(context.UserId, role))"
+                       Variant="Variant.Outlined" Dense="true" Margin="Margin.Dense" Clearable="true"
+                       Style="min-width:220px;" Placeholder="Роль не назначена">
+                @foreach (var role in Enum.GetValues<InvestigationRole>())
+                {
+                    <MudSelectItem T="InvestigationRole?" Value="@role">@role.Label()</MudSelectItem>
+                }
+            </MudSelect>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Активных пользователей нет либо реестр вам недоступен.</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    private readonly List<UserRoleRow> _rows = [];
+    private bool _isBootstrap;
+    private bool _busy;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ListUserRolesQuery());
+            _rows.Clear();
+            if (response is { Status: true, Data: { } registry })
+            {
+                _rows.AddRange(registry.Users);
+                _isBootstrap = registry.IsBootstrap;
+            }
+            else
+            {
+                _isBootstrap = false;
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SetRoleAsync(int userId, InvestigationRole? role)
+    {
+        _error = null;
+        var response = await Dispatcher.Send(new SetUserRoleCommand(userId, role));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+}

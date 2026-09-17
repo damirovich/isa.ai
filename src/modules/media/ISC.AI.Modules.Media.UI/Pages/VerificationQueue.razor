@@ -1,0 +1,124 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Очередь двойной верификации (ТФ-ВЕР-01/02, ТБ-073): две вкладки — стадия эксперта и стадия
+   верификатора. Каждая — СЛЕПАЯ проекция: без чужих решений и без фигуранта. Кнопки/вкладки по ролям
+   не прячем — право проверяет обработчик, отказ показываем текстом (StatusMessage). Мини-пара
+   «проба ↔ кандидат» в равном масштабе, балл — с предупреждением (ТЭ-006), формулировки — ТЭ-005. *@
+@page "/media/verification"
+@rendermode InteractiveServer
+@using ISC.AI.Modules.Media.Application.Features.Verification
+@using ISC.AI.Modules.Media.Domain.Model
+
+<PageTitle>Верификация</PageTitle>
+
+<div class="d-flex align-center justify-space-between flex-wrap gap-2">
+    <div>
+        <MudText Typo="Typo.h5">Верификация кандидатов</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            Два независимых решения разных сотрудников; верификатор решения эксперта не видит (ТБ-073)
+        </MudText>
+    </div>
+    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Disabled="_busy" OnClick="ReloadAsync">Обновить</MudButton>
+</div>
+
+<MudTabs Elevation="0" Border="true" Rounded="true" Class="mt-3" ActivePanelIndex="_activeTab" ActivePanelIndexChanged="OnTabChangedAsync">
+    <MudTabPanel Text="Эксперт" Icon="@Icons.Material.Filled.Person">
+        @RenderQueue(VerificationStage.Expert)
+    </MudTabPanel>
+    <MudTabPanel Text="Верификатор" Icon="@Icons.Material.Filled.VerifiedUser">
+        @RenderQueue(VerificationStage.Verifier)
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private int _activeTab;
+    private bool _busy;
+    private readonly Dictionary<VerificationStage, IReadOnlyList<VerificationQueueItem>> _items = [];
+    private readonly Dictionary<VerificationStage, string?> _denied = [];
+
+    private VerificationStage ActiveStage => _activeTab == 1 ? VerificationStage.Verifier : VerificationStage.Expert;
+
+    protected override Task OnInitializedAsync() => LoadAsync(ActiveStage);
+
+    private Task OnTabChangedAsync(int index)
+    {
+        _activeTab = index;
+        return LoadAsync(ActiveStage);
+    }
+
+    private Task ReloadAsync() => LoadAsync(ActiveStage);
+
+    /// <summary>Очередь стадии; отказ по роли/допуску — текстом на вкладке, а не скрытой вкладкой.</summary>
+    private async Task LoadAsync(VerificationStage stage)
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ListVerificationQueueQuery(stage));
+            if (response is { Status: true, Data: { } list })
+            {
+                _items[stage] = list;
+                _denied[stage] = null;
+            }
+            else
+            {
+                _items[stage] = [];
+                _denied[stage] = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private RenderFragment RenderQueue(VerificationStage stage) => __builder =>
+    {
+        var denied = _denied.GetValueOrDefault(stage);
+        var items = _items.GetValueOrDefault(stage) ?? [];
+        var stageName = stage.ToString();
+
+        @if (_busy && !_items.ContainsKey(stage))
+        {
+            <MudProgressLinear Indeterminate="true" Class="my-3" />
+        }
+        @if (denied is not null)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="my-3">@denied</MudAlert>
+        }
+        else if (items.Count == 0)
+        {
+            @* Текст НЕ утверждает «пусто»: кандидаты могут быть вне допуска (ТБ-020/021). *@
+            <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                Очередь пуста: кандидатов, ждущих вашего решения на этой стадии, нет либо они вне вашего допуска.
+            </MudText>
+        }
+        else
+        {
+            <div class="d-flex flex-wrap gap-3 pa-2">
+                @foreach (var item in items)
+                {
+                    var current = item;
+                    <MudPaper Outlined="true" Class="pa-3 d-flex flex-column align-center gap-1" Style="width:300px;">
+                        <CandidatePair Item="@current" Size="96" ShowLinks="false" />
+                        <SimilarityChip Similarity="@current.Similarity" />
+                        <div class="d-flex align-center gap-1 flex-wrap justify-center">
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@current.Status.ChipColor()">@current.Status.Label()</MudChip>
+                            <ClassificationChip Classification="@current.Classification" />
+                        </div>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary text-center">
+                            дело № @current.CaseId · сессия № @current.SessionId · кандидат № @current.Rank
+                        </MudText>
+                        @if (current.OwnDecision is { } own)
+                        {
+                            <MudText Typo="Typo.caption" Class="text-center">ваше решение: @own.Verdict.Label() · @own.DecidedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudText>
+                        }
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.FactCheck"
+                                   Href="@($"/media/verification/{current.CandidateId}?stage={stageName}")">
+                            @(current.OwnDecision is null ? "Принять решение" : "Открыть")
+                        </MudButton>
+                    </MudPaper>
+                }
+            </div>
+        }
+    };
+}

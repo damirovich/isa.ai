@@ -1,0 +1,210 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@* Справочник подразделений профиля (ТФ-АДМ-01): идентификаторы — словарь допусков ядра (ТБ-011), поэтому
+   подразделение не удаляется, а выключается: номер в допусках и делах должен оставаться разрешимым.
+   Ведёт Администратор (режим первичной настройки — любой вошедший); право проверяет обработчик,
+   отказ показывается. Родитель задаётся при создании и не меняется (переименование — только имя/код). *@
+@page "/admin/divisions"
+@rendermode InteractiveServer
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Profile.Investigation.Application.Features.Divisions
+@using ISC.AI.Profile.Investigation.Domain.Services
+
+<PageHeader Title="Подразделения" Subtitle="Справочник подразделений — словарь допусков и дел (ТФ-АДМ-01) · ведёт Администратор"
+            Icon="@Icons.Material.Filled.AccountTree">
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="OpenCreate" Disabled="_busy">Новое подразделение</MudButton>
+</PageHeader>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+<MudTable T="DivisionNode" Items="Ordered" Hover="true" Dense="true" Outlined="true" Loading="_busy"
+          RowClassFunc="@((node, _) => node.IsActive ? string.Empty : "mud-text-secondary")">
+    <HeaderContent>
+        <MudTh>Наименование</MudTh>
+        <MudTh>Код</MudTh>
+        <MudTh>Родитель</MudTh>
+        <MudTh>Состояние</MudTh>
+        <MudTh Style="text-align:right;">В допусках у</MudTh>
+        <MudTh Style="width:220px;">Действия</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Наименование">@(context.ParentId is null ? context.Name : "— " + context.Name)</MudTd>
+        <MudTd DataLabel="Код">@(context.Code ?? "—")</MudTd>
+        <MudTd DataLabel="Родитель">@(context.ParentId is { } parent ? Name(parent) : "—")</MudTd>
+        <MudTd DataLabel="Состояние">
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@(context.IsActive ? Color.Success : Color.Default)">
+                @(context.IsActive ? "действует" : "выключено")
+            </MudChip>
+        </MudTd>
+        <MudTd DataLabel="В допусках у" Style="text-align:right;">@context.Users</MudTd>
+        <MudTd DataLabel="Действия">
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="_busy"
+                       OnClick="@(() => OpenRename(context))">Переименовать</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Text" Color="@(context.IsActive ? Color.Error : Color.Success)" Disabled="_busy"
+                       OnClick="@(() => SetActiveAsync(context, !context.IsActive))">@(context.IsActive ? "Выключить" : "Включить")</MudButton>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Справочник пуст либо недоступен вам.</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@* Одна форма на создание и переименование (_formId is null → создание); родитель — только при создании. *@
+<MudDialog @bind-Visible="_formOpen" Options="FormDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">@(_formId is null ? "Новое подразделение" : "Переименовать подразделение")</MudText></TitleContent>
+    <DialogContent>
+        @if (_formError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_formError</MudAlert>
+        }
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="8">
+                <MudTextField @bind-Value="_formName" Label="Наименование *" Variant="Variant.Outlined" MaxLength="300" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudTextField @bind-Value="_formCode" Label="Код" Variant="Variant.Outlined" MaxLength="50" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudSelect T="int?" @bind-Value="_formParentId" Label="Родительское подразделение" Variant="Variant.Outlined" Dense="true"
+                           Clearable="true" Placeholder="Верхний уровень" Disabled="_formId is not null">
+                    @foreach (var node in _nodes.Where(n => n.IsActive && n.Id != _formId))
+                    {
+                        <MudSelectItem T="int?" Value="@node.Id">@node.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _formOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(string.IsNullOrWhiteSpace(_formName) || _busy)" OnClick="SaveAsync">Сохранить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly DialogOptions FormDialogOptions =
+        new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true };
+
+    private readonly List<DivisionNode> _nodes = [];
+    private bool _busy;
+    private string? _error;
+
+    private bool _formOpen;
+    private string? _formError;
+    private int? _formId;
+    private string? _formName;
+    private string? _formCode;
+    private int? _formParentId;
+
+    // Порядок «родитель, под ним дочерние»: справочник плоский, навигаций у узла нет.
+    private IEnumerable<DivisionNode> Ordered
+    {
+        get
+        {
+            foreach (var parent in _nodes.Where(n => n.ParentId is null).OrderBy(n => n.Name, StringComparer.CurrentCulture))
+            {
+                yield return parent;
+                foreach (var child in _nodes.Where(n => n.ParentId == parent.Id).OrderBy(n => n.Name, StringComparer.CurrentCulture))
+                {
+                    yield return child;
+                }
+            }
+
+            // Узлы с несуществующим родителем (после выключения/удаления вручную) — в конце, чтобы не потерялись.
+            foreach (var orphan in _nodes.Where(n => n.ParentId is { } p && _nodes.All(x => x.Id != p)))
+            {
+                yield return orphan;
+            }
+        }
+    }
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private string Name(int id) => _nodes.FirstOrDefault(n => n.Id == id)?.Name ?? $"№ {id}";
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ListDivisionsQuery());
+            _nodes.Clear();
+            if (response is { Status: true, Data: { } list })
+            {
+                _nodes.AddRange(list);
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void OpenCreate()
+    {
+        _formId = null;
+        _formName = null;
+        _formCode = null;
+        _formParentId = null;
+        _formError = null;
+        _formOpen = true;
+    }
+
+    private void OpenRename(DivisionNode node)
+    {
+        _formId = node.Id;
+        _formName = node.Name;
+        _formCode = node.Code;
+        _formParentId = node.ParentId;
+        _formError = null;
+        _formOpen = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_formName)) { return; }
+        _busy = true;
+        _formError = null;
+        try
+        {
+            var name = _formName.Trim();
+            var code = string.IsNullOrWhiteSpace(_formCode) ? null : _formCode.Trim();
+            IResponseDto response = _formId is { } id
+                ? await Dispatcher.Send(new RenameDivisionCommand(id, name, code))
+                : await Dispatcher.Send(new CreateDivisionCommand(name, code, _formParentId));
+            if (!response.Status)
+            {
+                _formError = response.StatusMessage;
+                return;
+            }
+
+            _formOpen = false;
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task SetActiveAsync(DivisionNode node, bool isActive)
+    {
+        _error = null;
+        var response = await Dispatcher.Send(new SetDivisionActiveCommand(node.Id, isActive));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+}

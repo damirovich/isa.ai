@@ -1,0 +1,37 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@inject ISC.AI.Abstractions.Profiles.IProfile Profile
+
+@* Единая шапка страницы профиля «Следствие»: значок, заголовок, подзаголовок и произвольный «хвост»
+   (чипы статуса и т.п.). Заголовок вкладки браузера — «<Title> — <имя профиля>»: имя берётся из
+   манифеста (IProfile.DisplayName), а не зашито в разметку, чтобы компонент не знал о поставке. *@
+
+<PageTitle>@Title — @Profile.DisplayName</PageTitle>
+
+<div class="@($"d-flex align-center gap-3 flex-wrap {Class}")">
+    <MudIcon Icon="@Icon" Color="Color.Primary" Size="Size.Large" />
+    <div class="flex-grow-1">
+        <MudText Typo="Typo.h4">@Title</MudText>
+        @if (!string.IsNullOrWhiteSpace(Subtitle))
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">@Subtitle</MudText>
+        }
+    </div>
+    @ChildContent
+</div>
+
+@code {
+    /// <summary>Заголовок страницы (он же — заголовок вкладки браузера).</summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+
+    /// <summary>Подзаголовок — кратко о назначении экрана; <c>null</c> — не показывать.</summary>
+    [Parameter] public string? Subtitle { get; set; }
+
+    /// <summary>Значок модуля (константа MudBlazor).</summary>
+    [Parameter, EditorRequired] public string Icon { get; set; } = string.Empty;
+
+    /// <summary>CSS-классы контейнера шапки (по умолчанию отступ снизу).</summary>
+    [Parameter] public string Class { get; set; } = "mb-4";
+
+    /// <summary>Необязательный «хвост» шапки справа (чипы статуса и т.п.).</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

@@ -1,0 +1,89 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Пара «пробное ↔ кандидат» (ТФ-ВЕР-01): ОБА изображения в ОДНОМ масштабе (равные квадраты), как есть,
+   без «улучшений» (ТЭ-007); оригиналы — по ссылке «открыть носитель». Проба ветвится по ProbeFaceId:
+   лицо носителя → вырезка в категории вырезок ЕГО носителя (носитель узнаём запросом GetFaceQuery,
+   в очереди его идентификатора нет); изображение-проба → вырезка пробы под идентификатором сессии.
+   Никаких слов «совпадение»/«это он» — только «кандидат» (ТЭ-005). *@
+@using ISC.AI.Modules.Media.Application.Features.Scope
+@using ISC.AI.Modules.Media.Application.Features.Verification
+@using ISC.AI.Modules.Media.Domain.Services
+
+<div class="d-flex align-start justify-center flex-wrap" style="@($"gap:{Gap}px;")">
+    <FaceCropTile Url="@_probeUrl" Size="@Size" Alt="проба" Caption="@ProbeCaption">
+        @if (ShowLinks && _probeFace is { } probeFace)
+        {
+            <MudLink Href="@($"/media/assets/{probeFace.AssetId}?face={probeFace.Id}")" Typo="Typo.caption">открыть носитель</MudLink>
+        }
+    </FaceCropTile>
+    <div class="d-flex flex-column align-center justify-center" style="@($"height:{Size}px;")">
+        <MudIcon Icon="@Icons.Material.Filled.CompareArrows" Size="@(Size >= 200 ? MudBlazor.Size.Large : MudBlazor.Size.Small)" Class="mud-text-secondary" />
+    </div>
+    <FaceCropTile Url="@CandidateUrl" Size="@Size" Alt="кандидат" Caption="@CandidateCaption">
+        @if (ShowLinks)
+        {
+            <MudLink Href="@($"/media/assets/{Item.AssetId}?face={Item.FaceId}")" Typo="Typo.caption">открыть носитель</MudLink>
+        }
+    </FaceCropTile>
+</div>
+
+@code {
+    /// <summary>Кандидат с реквизитами пробы (слепая проекция очереди, ТФ-ВЕР-02).</summary>
+    [Parameter, EditorRequired] public VerificationQueueItem Item { get; set; } = default!;
+
+    /// <summary>Сторона квадрата обоих изображений (по умолчанию 256 — карточка; 96 — очередь).</summary>
+    [Parameter] public int Size { get; set; } = 256;
+
+    /// <summary>Показывать ссылки «открыть носитель» под плитками.</summary>
+    [Parameter] public bool ShowLinks { get; set; } = true;
+
+    private int Gap => Size >= 200 ? 24 : 8;
+
+    private FaceRow? _probeFace;
+    private string? _probeUrl;
+    private int? _resolvedProbeFaceId;
+    private bool _probeUnavailable;
+
+    private string? CandidateUrl => Item.CropStoredFileName is { } crop ? MediaFileUrl.FaceCrop(Item.AssetId, crop) : null;
+
+    private string ProbeCaption => Item.ProbeFaceId is { } faceId
+        ? (_probeUnavailable ? $"проба: лицо № {faceId} (недоступно)" : $"проба: лицо № {faceId}")
+        : "проба: изображение";
+
+    private string CandidateCaption => Item.FrameTimestampMs is { } ms
+        ? $"кандидат № {Item.Rank} · кадр {MediaLabels.Timecode(ms)}"
+        : $"кандидат № {Item.Rank}";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Item.ProbeFaceId is not { } probeFaceId)
+        {
+            // Проба — загруженное изображение: вырезка хранится под идентификатором сессии (ТБ-070).
+            _probeFace = null;
+            _resolvedProbeFaceId = null;
+            _probeUrl = Item.ProbeCropStoredFileName is { } probeCrop ? MediaFileUrl.ProbeCrop(Item.SessionId, probeCrop) : null;
+            return;
+        }
+
+        if (_resolvedProbeFaceId == probeFaceId)
+        {
+            return;
+        }
+
+        _resolvedProbeFaceId = probeFaceId;
+        _probeUnavailable = false;
+        var response = await Dispatcher.Send(new GetFaceQuery(probeFaceId));
+        if (response is { Status: true, Data: { } face })
+        {
+            _probeFace = face;
+            var crop = face.CropStoredFileName ?? Item.ProbeCropStoredFileName;
+            _probeUrl = crop is null ? null : MediaFileUrl.FaceCrop(face.AssetId, crop);
+        }
+        else
+        {
+            // Лицо пробы вне допуска или удалено — пары не будет; причины не различаем (ТБ-020/021).
+            _probeFace = null;
+            _probeUrl = null;
+            _probeUnavailable = true;
+        }
+    }
+}

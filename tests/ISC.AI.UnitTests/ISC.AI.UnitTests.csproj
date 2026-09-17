@@ -33,6 +33,7 @@
     <!-- Профиль «Следствие» (ЭС3): сценарии и домен — гварды, валидаторы, правило двух лиц. -->
     <ProjectReference Include="..\..\src\profiles\investigation\ISC.AI.Profile.Investigation.Application\ISC.AI.Profile.Investigation.Application.csproj" />
     <ProjectReference Include="..\..\src\profiles\investigation\ISC.AI.Profile.Investigation.Domain\ISC.AI.Profile.Investigation.Domain.csproj" />
+    <ProjectReference Include="..\..\src\profiles\investigation\ISC.AI.Profile.Investigation\ISC.AI.Profile.Investigation.csproj" />
     <ProjectReference Include="..\..\src\integrations\ISC.AI.Vision.Onnx\ISC.AI.Vision.Onnx.csproj" />
     <!-- Рендереры отчётов лежат в слое данных (там пакеты ClosedXML/OpenXml/PDFsharp), но БД не трогают:
          это чистая отрисовка готовой модели, и место её проверке — в юнит-тестах, а не в интеграционных. -->

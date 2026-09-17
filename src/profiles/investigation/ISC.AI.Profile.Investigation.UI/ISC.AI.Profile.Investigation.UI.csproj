@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <!-- Страницы профиля «Следствие» (Razor Class Library, ДОК-13 §6), монтируемые хостом через реестр
+       манифеста InvestigationProfile. Пакет «Медиа» подключается ТОЛЬКО ссылками по URL на его страницы
+       (/media/...) и запросами Media.Application для карточки дела; на Media.UI ссылки нет, на профиль
+       «Инспектор» — тем более (ADR-0017, ADR-0021). -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+    <ProjectReference Include="..\ISC.AI.Profile.Investigation.Application\ISC.AI.Profile.Investigation.Application.csproj" />
+    <ProjectReference Include="..\ISC.AI.Profile.Investigation.Domain\ISC.AI.Profile.Investigation.Domain.csproj" />
+    <!-- Профиль → docflow (направление разрешено, ADR-0017): сводка документооборота (DocFlowSummary)
+         вкладкой общего дашборда и сценарии модуля через общий Mediator. -->
+    <ProjectReference Include="..\..\..\modules\docflow\ISC.AI.Modules.DocFlow.Application\ISC.AI.Modules.DocFlow.Application.csproj" />
+    <ProjectReference Include="..\..\..\modules\docflow\ISC.AI.Modules.DocFlow.UI\ISC.AI.Modules.DocFlow.UI.csproj" />
+    <!-- Профиль → медиа (ADR-0022): носители и поисковые сессии дела в карточке дела
+         (ListCaseMediaQuery, ListCaseSearchSessionsQuery). -->
+    <ProjectReference Include="..\..\..\modules\media\ISC.AI.Modules.Media.Domain\ISC.AI.Modules.Media.Domain.csproj" />
+    <ProjectReference Include="..\..\..\modules\media\ISC.AI.Modules.Media.Application\ISC.AI.Modules.Media.Application.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
+    <PackageReference Include="MudBlazor" />
+  </ItemGroup>
+
+</Project>

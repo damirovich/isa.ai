@@ -1,0 +1,187 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@page "/dashboard"
+@rendermode InteractiveServer
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Modules.DocFlow.UI
+@using ISC.AI.Profile.Investigation.Application.Features.Cases
+@using ISC.AI.Profile.Investigation.Domain.Enums
+@using ISC.AI.Profile.Investigation.Domain.Services
+@inject NavigationManager Navigation
+
+@* Дашборд профиля «Следствие» (ДОК-13 §6): сводка по делам субъекта и вкладка сводки документооборота
+   (компонент DocFlowSummary пакета docflow — его данные с делами не смешиваются). Счётчики по статусам
+   считаются на клиенте из первой страницы списка (PageSize 200): отдельного агрегирующего запроса у
+   сценариев нет, а список уже идёт под решёткой доступа (ТБ-020). Вкладку выбирает и адрес:
+   ?tab=docflow (туда ведут колокольчик уведомлений и модульный маршрут /docflow/dashboard). *@
+
+<PageHeader Title="Дашборд" Subtitle="Дела в работе и сводка документооборота"
+            Icon="@Icons.Material.Filled.Dashboard" />
+
+<MudTabs Elevation="0" Border="true" Rounded="true" Class="mt-1" @bind-ActivePanelIndex="_activeTab">
+<MudTabPanel Text="Дела" Icon="@Icons.Material.Filled.FolderOpen">
+<div class="pt-3">
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+<MudGrid Class="mb-2">
+    <MudItem xs="12" sm="4">
+        <MudPaper Outlined="true" Class="pa-4" Style="border-left:4px solid var(--mud-palette-info);">
+            <MudText Typo="Typo.h4">@_inProgress</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">В производстве</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" sm="4">
+        <MudPaper Outlined="true" Class="pa-4" Style="border-left:4px solid var(--mud-palette-warning);">
+            <MudText Typo="Typo.h4">@_suspended</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Приостановлено</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" sm="4">
+        <MudPaper Outlined="true" Class="pa-4" Style="border-left:4px solid var(--mud-palette-success);">
+            <MudText Typo="Typo.h4">@_closed</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Закрыто</MudText>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@if (_truncated)
+{
+    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
+        Счётчики — по первым @SampleSize делам из @_total доступных; полный список — в разделе «Дела».
+    </MudText>
+}
+
+<MudGrid>
+    <MudItem xs="12" md="8">
+        <MudPaper Outlined="true" Class="pa-4 h-100">
+            <MudText Typo="Typo.subtitle1" Class="mb-3">Последние дела</MudText>
+            <MudTable T="CaseRow" Items="_recent" Hover="true" Dense="true" Elevation="0" Loading="_busy"
+                      OnRowClick="@(row => Open(row.Item!))" RowClass="cursor-pointer">
+                <HeaderContent>
+                    <MudTh>Номер</MudTh>
+                    <MudTh>Название</MudTh>
+                    <MudTh>Вид</MudTh>
+                    <MudTh>Статус</MudTh>
+                    <MudTh>Открыто</MudTh>
+                    <MudTh>Гриф</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Номер">@context.Number</MudTd>
+                    <MudTd DataLabel="Название">@context.Title</MudTd>
+                    <MudTd DataLabel="Вид">@context.Kind.Label()</MudTd>
+                    <MudTd DataLabel="Статус">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@StatusColor(context.Status)">
+                            @context.Status.Label()
+                        </MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="Открыто">@context.OpenedAt.ToString("dd.MM.yyyy")</MudTd>
+                    <MudTd DataLabel="Гриф"><ClassificationChip Value="@context.Classification" /></MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    @* Текст НЕ утверждает «пусто»: недоступное неотличимо от несуществующего (ТБ-020/021). *@
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                        Здесь пусто: дел нет либо они вне вашего допуска и роли.
+                    </MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" md="4">
+        <MudPaper Outlined="true" Class="pa-4">
+            <MudText Typo="Typo.subtitle1" Class="mb-3">Быстрый старт</MudText>
+            <MudStack Spacing="2">
+                <MudButton Href="/cases" Variant="Variant.Outlined" FullWidth="true"
+                           StartIcon="@Icons.Material.Filled.FolderOpen" Class="justify-start">Дела</MudButton>
+                <MudButton Href="/media/search" Variant="Variant.Outlined" FullWidth="true"
+                           StartIcon="@Icons.Material.Filled.PersonSearch" Class="justify-start">Поиск по лицу</MudButton>
+                <MudButton Href="/docflow/documents" Variant="Variant.Outlined" FullWidth="true"
+                           StartIcon="@Icons.Material.Filled.Description" Class="justify-start">Документы дела</MudButton>
+            </MudStack>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+</div>
+</MudTabPanel>
+<MudTabPanel Text="Документооборот" Icon="@Icons.Material.Filled.MoveToInbox">
+    <div class="pt-3">
+        <DocFlowSummary />
+    </div>
+</MudTabPanel>
+</MudTabs>
+
+@code {
+    // Размер выборки для счётчиков: одна страница списка дел, без отдельного агрегирующего запроса.
+    private const int SampleSize = 200;
+    private const int RecentCount = 10;
+
+    private readonly List<CaseRow> _recent = [];
+    private int _inProgress;
+    private int _suspended;
+    private int _closed;
+    private int _total;
+    private bool _truncated;
+    private bool _busy;
+    private string? _error;
+
+    // 0 — «Дела», 1 — «Документооборот». Начальную вкладку задаёт адрес (?tab=docflow).
+    private int _activeTab;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Разбор ?tab= без сторонних утилит: значение одно и известно наперечёт.
+        var query = new Uri(Navigation.Uri).Query;
+        if (query.Contains("tab=docflow", StringComparison.OrdinalIgnoreCase))
+        {
+            _activeTab = 1;
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new ListCasesQuery(Page: 1, PageSize: SampleSize));
+            _recent.Clear();
+            if (response is { Status: true, Data: { } page })
+            {
+                _total = page.TotalCount;
+                _truncated = page.TotalCount > page.Rows.Count;
+                _inProgress = page.Rows.Count(r => r.Status == CaseStatus.InProgress);
+                _suspended = page.Rows.Count(r => r.Status == CaseStatus.Suspended);
+                _closed = page.Rows.Count(r => r.Status == CaseStatus.Closed);
+                _recent.AddRange(page.Rows
+                    .OrderByDescending(r => r.OpenedAt)
+                    .ThenByDescending(r => r.Id)
+                    .Take(RecentCount));
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Open(CaseRow row) => Navigation.NavigateTo($"/cases/{row.Id}");
+
+    // Цвета статусов согласованы со списком дел и карточкой дела.
+    internal static Color StatusColor(CaseStatus status) => status switch
+    {
+        CaseStatus.InProgress => Color.Info,
+        CaseStatus.Suspended => Color.Warning,
+        CaseStatus.Closed => Color.Success,
+        _ => Color.Default,
+    };
+}

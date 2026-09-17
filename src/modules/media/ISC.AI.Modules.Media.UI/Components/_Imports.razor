@@ -1,0 +1,6 @@
+@* Общая обвязка компонентов пакета «Медиа» — тот же набор, что у Pages/_Imports.razor:
+   компоненты шлют запросы через Mediator сами, а не через каскад колбэков к странице. *@
+@using Mediator
+@using Microsoft.JSInterop
+@inject IMediator Dispatcher
+@inject IJSRuntime JS

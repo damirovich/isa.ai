@@ -24,12 +24,15 @@
     <Project Path="src/modules/media/ISC.AI.Modules.Media.Domain/ISC.AI.Modules.Media.Domain.csproj" />
     <Project Path="src/modules/media/ISC.AI.Modules.Media/ISC.AI.Modules.Media.csproj" />
     <Project Path="src/modules/media/ISC.AI.Modules.Media.Application/ISC.AI.Modules.Media.Application.csproj" />
+    <Project Path="src/modules/media/ISC.AI.Modules.Media.UI/ISC.AI.Modules.Media.UI.csproj" />
   </Folder>
   <Folder Name="/src/profiles/" />
   <Folder Name="/src/profiles/investigation/">
     <Project Path="src/profiles/investigation/ISC.AI.Profile.Investigation.Application/ISC.AI.Profile.Investigation.Application.csproj" />
     <Project Path="src/profiles/investigation/ISC.AI.Profile.Investigation.Data/ISC.AI.Profile.Investigation.Data.csproj" />
     <Project Path="src/profiles/investigation/ISC.AI.Profile.Investigation.Domain/ISC.AI.Profile.Investigation.Domain.csproj" />
+    <Project Path="src/profiles/investigation/ISC.AI.Profile.Investigation.UI/ISC.AI.Profile.Investigation.UI.csproj" />
+    <Project Path="src/profiles/investigation/ISC.AI.Profile.Investigation/ISC.AI.Profile.Investigation.csproj" />
   </Folder>
   <Folder Name="/src/profiles/inspector/">
     <Project Path="src/profiles/inspector/ISC.AI.Profile.Inspector.Application/ISC.AI.Profile.Inspector.Application.csproj" Id="bc718037-f85a-434f-82eb-6903528f2700" />

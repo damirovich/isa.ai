@@ -1,0 +1,363 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Карточка носителя (ТФ-МЕД-03, ТФ-ПЛ-03): реквизиты, гриф, дело; изображение/видео КАК ЕСТЬ (ТЭ-007);
+   лица носителя — вырезки с пригодностью и баллом детектора; у видео — таймкоды с кнопкой «к кадру»
+   (перемотка через ленивый JS-модуль пакета, только в OnAfterRenderAsync — предрендер JS не умеет).
+   У каждого лица — «Найти этого человека в других материалах» (проба = лицо носителя, ТФ-ПЛ-03).
+   Допуск проверяет сервер: и запрос карточки, и каждая отдача файла (ТБ-020/021, ТБ-073). *@
+@page "/media/assets/{Id:int}"
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@inject NavigationManager Navigation
+@using ISC.AI.Modules.Media.Application.Features.Assets
+@using ISC.AI.Modules.Media.Domain.Model
+@using ISC.AI.Modules.Media.Domain.Services
+
+<PageTitle>Носитель</PageTitle>
+
+@if (_details is null)
+{
+    <MudText Typo="Typo.h5">Носитель</MudText>
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3">@_error</MudAlert>
+    }
+    else
+    {
+        <MudProgressLinear Indeterminate="true" Class="my-4" />
+    }
+}
+else
+{
+    var asset = _details.Asset;
+    <div class="d-flex align-center justify-space-between flex-wrap gap-2">
+        <div>
+            <MudText Typo="Typo.h5">@asset.OriginalFileName</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                @asset.Kind.Label() · @MediaLabels.FormatSize(asset.ByteSize) · загружен @asset.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                @if (asset.DurationMs is { } duration)
+                {
+                    <span> · длительность @MediaLabels.Timecode(duration)</span>
+                }
+            </MudText>
+        </div>
+        <div class="d-flex align-center gap-2 flex-wrap">
+            <MudChip T="string" Variant="Variant.Text" Color="@asset.IndexStatus.ChipColor()">@asset.IndexStatus.Label()</MudChip>
+            <ClassificationChip Classification="@asset.Classification" />
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" Disabled="_busy" OnClick="ReindexAsync">Переиндексировать</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteForever" Disabled="_busy"
+                       OnClick="@(() => _purgeOpen = true)">Удалить</MudButton>
+            @if (_details.CaseId is { } caseId)
+            {
+                <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" Href="@($"/media/cases/{caseId}")">К медиатеке дела</MudButton>
+            }
+        </div>
+    </div>
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+    }
+    @if (_notice is not null)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="my-3"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _notice = null)">@_notice</MudAlert>
+    }
+    @if (asset.IndexStatus == MediaIndexStatus.Failed && !string.IsNullOrWhiteSpace(asset.IndexError))
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="my-3">Ошибка обработки: @asset.IndexError</MudAlert>
+    }
+
+    <MudPaper Outlined="true" Class="pa-4 my-4">
+        <MudText Typo="Typo.subtitle1" Class="mb-2">Реквизиты</MudText>
+        <div class="d-flex gap-4 flex-wrap">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                Дело:
+                @if (_details.CaseId is { } linkedCase)
+                {
+                    <MudLink Href="@($"/media/cases/{linkedCase}")" Typo="Typo.caption">№ @linkedCase</MudLink>
+                }
+                else
+                {
+                    <span>не привязан</span>
+                }
+            </MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">Тип: @asset.ContentType</MudText>
+            @if (asset.CapturedAt is { } captured)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Съёмка: @captured.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudText>
+            }
+            @if (!string.IsNullOrWhiteSpace(asset.Source))
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Источник: @asset.Source</MudText>
+            }
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">Подразделение: @asset.DivisionId</MudText>
+            @if (asset.IndexedAt is { } indexedAt)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    Обработан @indexedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm") · детектор @asset.DetectorVersion · векторизатор @asset.EmbedderVersion
+                </MudText>
+            }
+        </div>
+    </MudPaper>
+
+    @* ================= Само изображение / видео — как есть (ТЭ-007) ================= *@
+    <MudPaper Outlined="true" Class="pa-4 my-4">
+        @if (asset.Kind == MediaKind.Video)
+        {
+            @* Перемотка работает благодаря Range на эндпоинте; каждый запрос диапазона — отдельная проверка допуска и запись аудита. *@
+            <video id="@VideoElementId" controls preload="metadata" src="@MediaFileUrl.Originals(asset.Id, asset.StoredFileName)"
+                   style="max-width:100%;max-height:70vh;display:block;margin:0 auto;"></video>
+        }
+        else
+        {
+            <img src="@MediaFileUrl.Originals(asset.Id, asset.StoredFileName)" alt="@asset.OriginalFileName"
+                 style="max-width:100%;max-height:70vh;display:block;margin:0 auto;" />
+        }
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2 text-center">
+            Изображение показано без обработки. Если оно не отображается — файла нет либо он вне вашего допуска.
+        </MudText>
+    </MudPaper>
+
+    @* ================= Лица носителя ================= *@
+    <MudPaper Outlined="true" Class="pa-4 my-4">
+        <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+            <MudText Typo="Typo.subtitle1">Лица на носителе: @_details.Faces.Count</MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                Балл детектора — уверенность, что это лицо; непригодные для сравнения помечены с причиной.
+            </MudText>
+        </div>
+        @if (_details.Faces.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                @(asset.IndexStatus == MediaIndexStatus.Indexed ? "Лиц не найдено." : "Лица появятся после обработки носителя.")
+            </MudText>
+        }
+        else if (asset.Kind == MediaKind.Video)
+        {
+            <MudTable T="FaceRow" Items="_details.Faces" Dense="true" Hover="true" Elevation="0">
+                <HeaderContent>
+                    <MudTh>Вырезка</MudTh><MudTh>Таймкод</MudTh><MudTh>Лицо</MudTh><MudTh>Детектор</MudTh><MudTh>Пригодность</MudTh><MudTh></MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Вырезка">
+                        <FaceCropTile Url="@CropUrl(context)" Size="64" Highlighted="@(HighlightFaceId == context.Id)" />
+                    </MudTd>
+                    <MudTd DataLabel="Таймкод">
+                        @if (context.FrameTimestampMs is { } ms)
+                        {
+                            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.PlayCircle"
+                                       OnClick="@(() => SeekAsync(ms))">@MediaLabels.Timecode(ms)</MudButton>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Лицо">№ @context.Id@(context.TrackId is { } track ? $" · трек {track}" : string.Empty)</MudTd>
+                    <MudTd DataLabel="Детектор">@context.DetectionScore.ToString("0.00")</MudTd>
+                    <MudTd DataLabel="Пригодность">
+                        @if (context.QualityAcceptable)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">пригодно · @context.QualityScore.ToString("0.00")</MudChip>
+                        }
+                        else
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text">непригодно: @(context.QualityReason ?? "причина не указана")</MudChip>
+                        }
+                    </MudTd>
+                    <MudTd>
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonSearch"
+                                   Disabled="@(!context.QualityAcceptable)" OnClick="@(() => SearchFace(context.Id))">Найти в других материалах</MudButton>
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+        else
+        {
+            <div class="d-flex flex-wrap gap-4">
+                @foreach (var face in _details.Faces)
+                {
+                    var current = face;
+                    <FaceCropTile Url="@CropUrl(current)" Size="128" Highlighted="@(HighlightFaceId == current.Id)"
+                                  Caption="@($"лицо № {current.Id} · детектор {current.DetectionScore:0.00}")"
+                                  Unusable="@(!current.QualityAcceptable)" UnusableReason="@current.QualityReason">
+                        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonSearch" Class="mt-1"
+                                   Disabled="@(!current.QualityAcceptable)" OnClick="@(() => SearchFace(current.Id))">Найти в других материалах</MudButton>
+                    </FaceCropTile>
+                }
+            </div>
+        }
+    </MudPaper>
+}
+
+@* --- Подтверждение гарантированного удаления (ТБ-064/075, GATE-6) --- *@
+<MudDialog @bind-Visible="_purgeOpen" Options="PurgeDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Удалить носитель?</MudText></TitleContent>
+    <DialogContent>
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+            Удаление гарантированное и необратимое: будут уничтожены исходный файл, все найденные лица,
+            их вырезки и биометрические шаблоны. Факт удаления записывается в неизменяемый журнал.
+        </MudAlert>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _purgeOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Filled" Disabled="_busy" OnClick="PurgeAsync">Удалить безвозвратно</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private const string MediaModulePath = "./_content/ISC.AI.Modules.Media.UI/js/media.js";
+
+    private static readonly DialogOptions PurgeDialogOptions =
+        new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true };
+
+    /// <summary>Носитель из маршрута.</summary>
+    [Parameter] public int Id { get; set; }
+
+    /// <summary>Лицо, к которому пришли по ссылке (с выдачи поиска / верификации) — подсвечивается рамкой.</summary>
+    [SupplyParameterFromQuery(Name = "face")] public int? HighlightFaceId { get; set; }
+
+    private MediaAssetDetails? _details;
+    private string? _error;
+    private string? _notice;
+    private bool _busy;
+    private bool _purgeOpen;
+    private IJSObjectReference? _module;
+
+    private string VideoElementId => $"media-video-{Id}";
+
+    private static string? CropUrl(FaceRow face) =>
+        face.CropStoredFileName is { } crop ? MediaFileUrl.FaceCrop(face.AssetId, crop) : null;
+
+    protected override Task OnInitializedAsync() => ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        var response = await Dispatcher.Send(new GetMediaAssetQuery(Id));
+        if (response is { Status: true, Data: { } details })
+        {
+            _details = details;
+        }
+        else
+        {
+            _details = null;
+            _error = response.StatusMessage;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // JS-модуль нужен только видео (перемотка); грузим лениво и ТОЛЬКО здесь — предрендер JS не умеет.
+        if (!firstRender || _details?.Asset.Kind != MediaKind.Video || _module is not null)
+        {
+            return;
+        }
+
+        try
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", MediaModulePath);
+        }
+        catch (JSException)
+        {
+            // Без модуля страница живёт, просто «к кадру» не сработает — покажем при нажатии.
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit уже закрыт.
+        }
+    }
+
+    /// <summary>«К кадру»: перемотать плеер к таймкоду лица (ничего не обрабатывая, ТЭ-007).</summary>
+    private async Task SeekAsync(long milliseconds)
+    {
+        try
+        {
+            _module ??= await JS.InvokeAsync<IJSObjectReference>("import", MediaModulePath);
+            var ok = await _module.InvokeAsync<bool>("seek", VideoElementId, milliseconds / 1000.0);
+            if (!ok)
+            {
+                _notice = "Плеер не найден на странице — обновите её и попробуйте снова.";
+            }
+        }
+        catch (JSException ex)
+        {
+            _error = $"Не удалось перемотать видео: {ex.Message}";
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit уже закрыт — показывать некому.
+        }
+    }
+
+    /// <summary>ТФ-ПЛ-03: проба = лицо носителя; дело — то, к которому привязан носитель.</summary>
+    private void SearchFace(int faceId)
+    {
+        var caseQuery = _details?.CaseId is { } caseId ? $"caseId={caseId}&" : string.Empty;
+        Navigation.NavigateTo($"/media/search?{caseQuery}faceId={faceId}");
+    }
+
+    private async Task ReindexAsync()
+    {
+        _busy = true;
+        _error = null;
+        _notice = null;
+        try
+        {
+            var response = await Dispatcher.Send(new ReindexMediaCommand(Id));
+            if (response.Status)
+            {
+                _notice = "Носитель поставлен в очередь на повторную обработку; лица обновятся после её завершения.";
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task PurgeAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new PurgeMediaCommand(Id));
+            if (!response.Status)
+            {
+                _error = response.StatusMessage;
+                _purgeOpen = false;
+                return;
+            }
+
+            _purgeOpen = false;
+            // После гарантированного удаления карточки больше нет — уходим в медиатеку дела либо к поиску.
+            Navigation.NavigateTo(_details?.CaseId is { } caseId ? $"/media/cases/{caseId}" : "/media/search");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit уже закрыт — освобождать на клиенте нечего.
+            }
+            catch (JSException)
+            {
+                // Сбой очистки не должен ронять уход со страницы.
+            }
+        }
+    }
+}

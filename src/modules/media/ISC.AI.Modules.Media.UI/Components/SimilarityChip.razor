@@ -1,0 +1,23 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Балл схожести (ТЭ-006): ВСЕГДА с предупреждением о вероятностной природе — число само по себе
+   не говорит «это он», оно лишь упорядочивает кандидатов. Цвет — только градация близости, не вердикт. *@
+
+<MudTooltip Text="Вероятностная оценка схожести по модели, не установление личности (ТЭ-006). Итог — только по независимым решениям двух сотрудников.">
+    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@ChipColor" Icon="@Icons.Material.Filled.Percent">
+        схожесть @Percent%
+    </MudChip>
+</MudTooltip>
+
+@code {
+    /// <summary>Косинусная схожесть 0..1 (1 − расстояние).</summary>
+    [Parameter, EditorRequired] public double Similarity { get; set; }
+
+    private int Percent => (int)Math.Round(Math.Clamp(Similarity, 0, 1) * 100);
+
+    private Color ChipColor => Similarity switch
+    {
+        >= 0.6 => Color.Primary,
+        >= 0.4 => Color.Info,
+        _ => Color.Default,
+    };
+}

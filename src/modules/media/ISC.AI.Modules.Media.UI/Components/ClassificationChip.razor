@@ -1,0 +1,17 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Гриф на карточках/строках — чипом (образец Documents.razor документооборота). Показывается всегда,
+   где есть режимный материал (ТБ-073): пользователь должен видеть, с чем работает. *@
+
+@if (Classification > 0)
+{
+    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text">гриф @Classification</MudChip>
+}
+else
+{
+    <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Text">0 — открытый</MudChip>
+}
+
+@code {
+    /// <summary>Гриф (0 — открытый).</summary>
+    [Parameter, EditorRequired] public short Classification { get; set; }
+}
