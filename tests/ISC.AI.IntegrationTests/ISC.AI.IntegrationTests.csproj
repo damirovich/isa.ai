@@ -15,6 +15,8 @@
     <ProjectReference Include="..\..\src\profiles\inspector\ISC.AI.Profile.Inspector.Data\ISC.AI.Profile.Inspector.Data.csproj" />
     <!-- Пакет модулей документооборота (Э4-35): хранилище справочника + DocFlowDbContext. -->
     <ProjectReference Include="..\..\src\modules\docflow\ISC.AI.Modules.DocFlow.Data\ISC.AI.Modules.DocFlow.Data.csproj" />
+    <!-- Пакет модулей «Медиа» (ЭС2-03): MediaDbContext, поиск по лицу с решёткой (GATE-4), удаление (GATE-6). -->
+    <ProjectReference Include="..\..\src\modules\media\ISC.AI.Modules.Media.Data\ISC.AI.Modules.Media.Data.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.AI\ISC.AI.AI.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.Documents\ISC.AI.Documents.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.Ingestion\ISC.AI.Ingestion.csproj" />

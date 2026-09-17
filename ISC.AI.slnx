@@ -20,7 +20,9 @@
     <Project Path="src/modules/docflow/ISC.AI.Modules.DocFlow/ISC.AI.Modules.DocFlow.csproj" />
   </Folder>
   <Folder Name="/src/modules/media/">
+    <Project Path="src/modules/media/ISC.AI.Modules.Media.Data/ISC.AI.Modules.Media.Data.csproj" />
     <Project Path="src/modules/media/ISC.AI.Modules.Media.Domain/ISC.AI.Modules.Media.Domain.csproj" />
+    <Project Path="src/modules/media/ISC.AI.Modules.Media/ISC.AI.Modules.Media.csproj" />
   </Folder>
   <Folder Name="/src/profiles/" />
   <Folder Name="/src/profiles/inspector/">

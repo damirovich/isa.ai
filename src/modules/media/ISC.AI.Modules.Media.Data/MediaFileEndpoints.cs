@@ -1,0 +1,139 @@
+using System.Text.RegularExpressions;
+using ISC.AI.Abstractions.Audit;
+using ISC.AI.Abstractions.Enums;
+using ISC.AI.Abstractions.Security;
+using ISC.AI.Abstractions.Storage;
+using ISC.AI.Modules.Media.Domain.Services;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Logging;
+
+namespace ISC.AI.Modules.Media.Data;
+
+/// <summary>
+/// Раздача файлов пакета «Медиа» (ТС-010, ТБ-073): исходники носителей и вырезки лиц для показа в
+/// выдаче. Перед стримом байтов проверяется ДОПУСК субъекта против грифа/подразделения носителя
+/// (fail-closed ТБ-020/021) — биометрический материал несёт ту же чувствительность, что и сам носитель.
+/// Причина отказа наружу не различается: единый 404 (не подтверждаем существование файла тому, кому
+/// его видеть нельзя).
+/// </summary>
+public static class MediaFileEndpoints
+{
+    // Строгий формат имени в хранилище (GUID + расширение) — часть defense-in-depth наравне с
+    // route-констрейнтом {assetId:int} и проверкой принадлежности в резолвере.
+    private static readonly Regex StoredFileNamePattern = new(
+        @"^[0-9a-fA-F]{32}\.[A-Za-z0-9]{2,5}$", RegexOptions.Compiled);
+
+    // Только типы, которые безопасно показывать inline; всё прочее — принудительно вложением
+    // (MIME-confusion: same-origin XSS через text/html).
+    private static readonly HashSet<string> SafeInlineContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "image/png", "image/jpeg", "image/gif", "image/bmp", "image/webp",
+        "video/mp4", "video/webm",
+    };
+
+    /// <summary>Маршрут <c>GET /media/files/{category}/{assetId}/{storedFileName}</c>.</summary>
+    public static void MapMediaFileEndpoints(this IEndpointRouteBuilder endpoints)
+    {
+        endpoints.MapGet("/media/files/{category}/{assetId:int}/{storedFileName}", ServeFileAsync)
+            .RequireAuthorization()
+            .WithName("MediaFiles");
+    }
+
+    private static async Task<IResult> ServeFileAsync(
+        HttpContext httpContext,
+        [FromRoute] string category,
+        [FromRoute] int assetId,
+        [FromRoute] string storedFileName,
+        [FromServices] IMediaFileAccess fileAccess,
+        [FromServices] IFileStorage storage,
+        [FromServices] IAccessContextProvider accessProvider,
+        [FromServices] IAuditWriter auditWriter,
+        [FromServices] ILogger<MediaFileEndpointsCategory> logger,
+        CancellationToken cancellationToken)
+    {
+        httpContext.Response.Headers.Append("X-Content-Type-Options", "nosniff");
+
+        if (category is not (MediaFileCategories.Originals or MediaFileCategories.FaceCrops)
+            || !StoredFileNamePattern.IsMatch(storedFileName))
+        {
+            MediaFileEndpointsLog.RejectedBadRoute(logger, category, storedFileName);
+            return Results.NotFound();
+        }
+
+        var file = await fileAccess.ResolveAsync(category, assetId, storedFileName, cancellationToken);
+        if (file is null)
+        {
+            MediaFileEndpointsLog.RejectedNotResolved(logger, category, assetId, storedFileName);
+            return Results.NotFound();
+        }
+
+        // Fail-closed (ТБ-020/021): без контекста или вне допуска — 404, не 403.
+        AccessContext access;
+        try
+        {
+            access = await accessProvider.GetCurrentAsync(cancellationToken);
+        }
+        catch (AccessContextRequiredException)
+        {
+            MediaFileEndpointsLog.RejectedNoAccessContext(logger, category, assetId, storedFileName);
+            return Results.NotFound();
+        }
+
+        // Тот же floor, что и в поиске (BaselineAccess): гриф ≤ допуск ∧ подразделение ∈ разрешённых.
+        if (!BaselineAccess.Filter<MediaFileDescriptor>(access).Compile()(file))
+        {
+            MediaFileEndpointsLog.RejectedOutsideClearance(
+                logger, access.SubjectId, access.MaxClassification, file.Classification, file.DivisionId);
+            return Results.NotFound();
+        }
+
+        Stream stream;
+        try
+        {
+            stream = await storage.OpenReadAsync(storedFileName, category, file.SubPath, cancellationToken);
+        }
+        catch (FileNotFoundException)
+        {
+            MediaFileEndpointsLog.RejectedMissingOnDisk(logger, category, file.SubPath, storedFileName);
+            return Results.NotFound();
+        }
+
+        // Просмотр биометрического материала — аудируемое событие (ТБ-030/072); гриф записи — гриф носителя.
+        await auditWriter.WriteAsync(
+            new AuditEntry(
+                AuditAction.View, file.Classification, access.NumericSubjectId,
+                ObjectRef: $"media:file:{category}:{assetId}:{storedFileName}",
+                DivisionId: file.DivisionId),
+            cancellationToken);
+
+        var attach = !SafeInlineContentTypes.Contains(file.ContentType);
+        return Results.File(
+            stream, file.ContentType, fileDownloadName: attach ? storedFileName : null,
+            enableRangeProcessing: true);
+    }
+}
+
+/// <summary>Категория логгера эндпоинтов раздачи (DI-якорь для <see cref="ILogger{TCategoryName}"/>).</summary>
+public sealed class MediaFileEndpointsCategory;
+
+/// <summary>Строго-типизированные лог-сообщения раздачи (LoggerMessage — CA1848); клиенту всегда единый 404.</summary>
+internal static partial class MediaFileEndpointsLog
+{
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Медиа: неизвестная категория «{Category}» или неверный формат имени «{StoredFileName}»")]
+    public static partial void RejectedBadRoute(ILogger logger, string category, string storedFileName);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Медиа: файл {Category}/{AssetId}/{StoredFileName} не разрешён (нет строки или чужой носитель)")]
+    public static partial void RejectedNotResolved(ILogger logger, string category, int assetId, string storedFileName);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Медиа: файл {Category}/{AssetId}/{StoredFileName} запрошен без контекста доступа")]
+    public static partial void RejectedNoAccessContext(ILogger logger, string category, int assetId, string storedFileName);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Медиа: субъект {SubjectId} (допуск {MaxClassification}) вне допуска к файлу (гриф {Classification}, подразделение {DivisionId})")]
+    public static partial void RejectedOutsideClearance(ILogger logger, string subjectId, short maxClassification, short classification, int divisionId);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Медиа: файл {Category}/{SubPath}/{StoredFileName} есть в БД, но отсутствует на диске")]
+    public static partial void RejectedMissingOnDisk(ILogger logger, string category, string subPath, string storedFileName);
+}
