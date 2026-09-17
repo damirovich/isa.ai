@@ -99,6 +99,29 @@ public sealed partial class MediaStore(
     }
 
     /// <inheritdoc />
+    public async Task<MediaAssetIndexingInfo?> GetForIndexingAsync(int assetId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var asset = await db.Assets.AsNoTracking()
+            .Where(a => a.Id == assetId)
+            .Select(a => new { a.Id, a.Kind, a.StoredFileName, a.ContentType, a.Classification, a.DivisionId })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (asset is null)
+        {
+            return null;
+        }
+
+        // Имена прежних вырезок — индексатор удалит их с диска перед перезаписью (иначе сироты).
+        var crops = await db.Faces.AsNoTracking()
+            .Where(f => f.AssetId == assetId && f.CropStoredFileName != null)
+            .Select(f => f.CropStoredFileName!)
+            .ToListAsync(cancellationToken);
+
+        return new MediaAssetIndexingInfo(
+            asset.Id, asset.Kind, asset.StoredFileName, asset.ContentType, asset.Classification, asset.DivisionId, crops);
+    }
+
+    /// <inheritdoc />
     public async Task MarkProcessingAsync(int assetId, CancellationToken cancellationToken = default)
     {
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);

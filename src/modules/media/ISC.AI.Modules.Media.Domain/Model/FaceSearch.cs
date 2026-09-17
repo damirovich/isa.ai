@@ -12,11 +12,16 @@ namespace ISC.AI.Modules.Media.Domain.Model;
 /// <see langword="null"/> — без отсечения (только ранжирование). Порог задаёт эксплуатант (ТО-мат-05).
 /// </param>
 /// <param name="IncludeStale">Включать шаблоны неактуальных носителей (по умолчанию — нет, ADR-0013).</param>
+/// <param name="AssetIds">
+/// Область поиска — носители дел, доступных субъекту (ТФ-ПЛ-05, ТБ-071); применяется ПОСЛЕ решётки, а не
+/// вместо неё. <see langword="null"/> — все доступные по решётке носители (только для служебных сценариев).
+/// </param>
 public sealed record FaceSearchQuery(
     float[] Probe,
     int TopK = 20,
     double? MaxCosineDistance = null,
-    bool IncludeStale = false);
+    bool IncludeStale = false,
+    IReadOnlyCollection<int>? AssetIds = null);
 
 /// <summary>
 /// Кандидат выдачи поиска по лицу (ТС-012): какое лицо, на каком носителе/кадре, насколько близко.
@@ -102,3 +107,20 @@ public sealed record MediaPurgeResult(bool Found, int FacesRemoved, int FilesRem
     /// <summary>Носитель не найден — удалять нечего.</summary>
     public static MediaPurgeResult NotFound { get; } = new(false, 0, 0);
 }
+
+/// <summary>Метаданные носителя для конвейера индексации (фон, без субъекта — решётка здесь не применяется).</summary>
+/// <param name="AssetId">Носитель.</param>
+/// <param name="Kind">Вид.</param>
+/// <param name="StoredFileName">Имя исходника в хранилище (категория <c>media-originals</c>).</param>
+/// <param name="ContentType">MIME.</param>
+/// <param name="Classification">Гриф носителя — наследуется лицами и шаблонами (ТБ-070).</param>
+/// <param name="DivisionId">Подразделение.</param>
+/// <param name="ExistingCropFileNames">Имена вырезок прежней индексации — удалить с диска перед перезаписью.</param>
+public sealed record MediaAssetIndexingInfo(
+    int AssetId,
+    MediaKind Kind,
+    string StoredFileName,
+    string ContentType,
+    short Classification,
+    int DivisionId,
+    IReadOnlyList<string> ExistingCropFileNames);

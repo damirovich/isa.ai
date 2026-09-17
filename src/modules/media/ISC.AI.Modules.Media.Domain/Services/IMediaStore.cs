@@ -20,6 +20,13 @@ public interface IMediaStore
     Task<MediaAssetReceipt> ReceiveAsync(
         MediaAssetDraft draft, Stream content, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Метаданные носителя для фоновой индексации — БЕЗ контекста доступа: конвейер выполняется от имени
+    /// системы, гриф/подразделение берутся у носителя и переносятся на производные (ТБ-070).
+    /// <see langword="null"/> — носителя нет.
+    /// </summary>
+    Task<MediaAssetIndexingInfo?> GetForIndexingAsync(int assetId, CancellationToken cancellationToken = default);
+
     /// <summary>Переводит носитель в <see cref="MediaIndexStatus.Processing"/> (идемпотентно).</summary>
     Task MarkProcessingAsync(int assetId, CancellationToken cancellationToken = default);
 

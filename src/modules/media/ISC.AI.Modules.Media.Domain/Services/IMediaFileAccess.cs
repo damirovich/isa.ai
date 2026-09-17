@@ -28,6 +28,13 @@ public static class MediaFileCategories
 
     /// <summary>Вырезки лиц (JPEG) для показа в выдаче поиска.</summary>
     public const string FaceCrops = "media-faces";
+
+    /// <summary>
+    /// Вырезка лица ПРОБНОГО изображения (JPEG) для показа пары «пробное ↔ кандидат» на верификации
+    /// (ТФ-ВЕР-01). Хранится под решёткой сессии (ТБ-070); вектор пробы в базу не пишется (ТБ-074),
+    /// оригинал пробы — только в аудите (ТБ-072).
+    /// </summary>
+    public const string Probes = "media-probes";
 }
 
 /// <summary>
