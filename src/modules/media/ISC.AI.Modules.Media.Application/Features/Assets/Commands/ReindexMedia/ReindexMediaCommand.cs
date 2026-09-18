@@ -39,7 +39,7 @@ public sealed record ReindexMediaCommand(int AssetId) : IRequest<ResponseDto<Gui
 
             if (!await administration.CanUploadAsync(cancellationToken))
             {
-                return ResponseDto<Guid>.BadRequest("Переиндексация носителей доступна ролям Следователь/Администратор.");
+                return ResponseDto<Guid>.BadRequest("Переиндексация носителей доступна ролям Следователь и Администратор.");
             }
 
             // Fail-closed (ТБ-020/021): носитель вне допуска неотличим от несуществующего.

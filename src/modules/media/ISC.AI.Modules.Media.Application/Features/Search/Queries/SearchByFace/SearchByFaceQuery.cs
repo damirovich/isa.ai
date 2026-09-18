@@ -73,7 +73,7 @@ public sealed record SearchByFaceQuery(
             if (!await administration.CanSearchAsync(cancellationToken))
             {
                 await AuditDeniedAsync(query, access, caseItem: null, "роль не даёт права поиска (ТП-004)", cancellationToken);
-                return ResponseDto<FaceSearchResult>.BadRequest("Поиск по лицу доступен ролям Следователь/Эксперт по лицам.");
+                return ResponseDto<FaceSearchResult>.BadRequest("Поиск по лицу доступен ролям Следователь, Эксперт по лицам и Администратор.");
             }
 
             // ТБ-071: поиск только в контексте дела; недоступное дело неотличимо от несуществующего (ТБ-020).

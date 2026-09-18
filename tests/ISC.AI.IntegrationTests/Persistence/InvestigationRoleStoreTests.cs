@@ -71,7 +71,7 @@ public sealed class InvestigationRoleStoreTests : IAsyncLifetime
         }
     }
 
-    [Fact(DisplayName = "Порты «Медиа»: без роли и без субъекта — отказ даже без Администратора в контуре; Администратор не эксперт и не верификатор (ТБ-073)")]
+    [Fact(DisplayName = "Порты «Медиа»: без роли и без субъекта — отказ даже без Администратора в контуре (операции с материалами — не первичная настройка)")]
     public async Task Media_ports_answer_by_role_without_bootstrap_mode()
     {
         // Полная матрица ролей × {загрузка, поиск, удаление} — InvestigationRoleMatrixTests (ТП-004, ADR-0022 п. 8).
@@ -106,9 +106,10 @@ public sealed class InvestigationRoleStoreTests : IAsyncLifetime
         (await policy.CanActAsync(VerificationStage.Verifier, 40)).ShouldBeFalse();
         (await policy.CanActAsync(VerificationStage.Expert, 41)).ShouldBeFalse();
         (await policy.CanActAsync(VerificationStage.Verifier, 41)).ShouldBeTrue();
-        (await policy.CanActAsync(VerificationStage.Expert, 20)).ShouldBeFalse();
-        (await policy.CanActAsync(VerificationStage.Verifier, 10)).ShouldBeFalse();
-        (await policy.CanActAsync(VerificationStage.Expert, 50)).ShouldBeFalse();
+        (await policy.CanActAsync(VerificationStage.Expert, 20)).ShouldBeFalse();    // Руководитель утверждает, решений не пишет
+        (await policy.CanActAsync(VerificationStage.Verifier, 10)).ShouldBeFalse();  // Следователь — не верификатор
+        (await policy.CanActAsync(VerificationStage.Expert, 50)).ShouldBeFalse();    // без роли — ничего
+
     }
 
     [Fact(DisplayName = "Справочник подразделений: число пользователей в допуске из core.clearance; для докфлоу — только действующие, «Родитель / Дочернее»")]

@@ -54,8 +54,22 @@
 
         // Живой сигнал: писатель уведомления будит колокольчик сразу. Через шину идёт только
         // «перечитай» — счётчик берётся обычным запросом через решётку доступа.
-        var access = await AccessProvider.GetCurrentAsync();
-        if (access.NumericSubjectId is { } userId)
+        // Колокольчик висит в ШАПКЕ и рисуется на КАЖДОЙ странице: у пользователя без записи допуска
+        // (свежее развёртывание — допуск выдаётся отдельно, ТБ-012) провайдер бросает
+        // AccessContextRequiredException, и вместо любой страницы пользователь получал
+        // необработанную ошибку. Отсутствие допуска — штатное состояние: подписки нет, счётчик пуст,
+        // страницы работают; данные всё равно не выдаются (fail-closed сохраняется).
+        AccessContext? access;
+        try
+        {
+            access = await AccessProvider.GetCurrentAsync();
+        }
+        catch (AccessContextRequiredException)
+        {
+            access = null;
+        }
+
+        if (access?.NumericSubjectId is { } userId)
         {
             _signalSubscription = Signal.Subscribe(userId, () => InvokeAsync(async () =>
             {

@@ -57,7 +57,7 @@ public sealed record LinkFaceToPersonCommand(int FaceId, int AuthorizationId, in
             if (!await administration.CanSearchAsync(cancellationToken))
             {
                 await AuditDeniedAsync(command, access, caseItem: null, "роль не даёт права поиска (ТП-004)", cancellationToken);
-                return ResponseDto<int>.BadRequest("Привязка лица к фигуранту доступна ролям Следователь/Эксперт по лицам.");
+                return ResponseDto<int>.BadRequest("Привязка лица к фигуранту доступна ролям Следователь, Эксперт по лицам и Администратор.");
             }
 
             // ТБ-020/021 + сужение по делам (ТБ-071): лицо под решёткой и только из носителя дел субъекта; отказы неразличимы.
