@@ -19,8 +19,17 @@ public static class ModelFileIntegrity
 
         if (!File.Exists(path))
         {
+            // Путь из конфигурации может быть ОТНОСИТЕЛЬНЫМ, и тогда он считается от рабочего каталога
+            // процесса, а он разный: Visual Studio запускает из каталога проекта хоста, dotnet run из
+            // корня репозитория, служба — из каталога публикации. Сообщение обязано показать, ГДЕ
+            // искали и откуда считали, иначе «файл не найден» отправляет искать несуществующую проблему.
+            var fullPath = Path.GetFullPath(path);
             throw new FileNotFoundException(
-                $"Файл модели «{purpose}» не найден: {path}. Модели поставляются офлайн (export-vision-models.ps1, ТИ-004).", path);
+                $"Файл модели «{purpose}» не найден: {fullPath}. Путь в конфигурации: «{path}»"
+                + (Path.IsPathRooted(path) ? "" : $" (относительный, считается от рабочего каталога {Directory.GetCurrentDirectory()})")
+                + ". Модели поставляются офлайн (export-vision-models.ps1, ТИ-004); задайте абсолютный путь"
+                + " в Vision:Detector:Path и Vision:Embedder:Path либо путь относительно рабочего каталога процесса.",
+                fullPath);
         }
 
         if (string.IsNullOrWhiteSpace(expectedSha256))
