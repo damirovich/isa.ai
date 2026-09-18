@@ -324,6 +324,53 @@ public sealed class CaseStore(
             .ToListAsync(cancellationToken);
     }
 
+    /// <inheritdoc />
+    public async Task SaveClosureActAsync(CaseClosureActDraft draft, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Акт на дело один: повторное закрытие перезаписывает числа последнего исполненного регламента.
+        // Хранить историю попыток незачем — полная хронология удалений и без того в журнале аудита.
+        var act = await db.ClosureActs.FirstOrDefaultAsync(a => a.CaseId == draft.CaseId, cancellationToken)
+            ?? db.ClosureActs.Add(new CaseClosureAct { CaseId = draft.CaseId }).Entity;
+
+        act.ExecutedAt = DateTime.UtcNow;
+        act.ExecutedByUserId = draft.ExecutedByUserId;
+        act.MediaAssetsTotal = draft.MediaAssetsTotal;
+        act.AssetsAffected = draft.AssetsAffected;
+        act.TemplatesRemoved = draft.TemplatesRemoved;
+        act.CropsRemoved = draft.CropsRemoved;
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<CaseClosureActRow?> GetClosureActAsync(
+        int caseId, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+
+        var role = await ResolveRoleAsync(access, cancellationToken);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Акт виден ровно тем, кому видно дело: отдельного правила у него нет, и придумывать его нельзя —
+        // иначе акт стал бы окном в закрытое чужое дело (ТБ-020/021, ТФ-ДЕЛ-03).
+        var accessible = await CaseAccessRule.Apply(db.Cases.AsNoTracking(), access, policy, role)
+            .AnyAsync(c => c.Id == caseId, cancellationToken);
+        if (!accessible)
+        {
+            return null;
+        }
+
+        return await db.ClosureActs.AsNoTracking()
+            .Where(a => a.CaseId == caseId)
+            .Select(a => new CaseClosureActRow(
+                a.CaseId, a.ExecutedAt, a.ExecutedByUserId, a.MediaAssetsTotal, a.AssetsAffected, a.TemplatesRemoved, a.CropsRemoved))
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     private async Task<InvestigationRole?> ResolveRoleAsync(AccessContext access, CancellationToken cancellationToken) =>
         access.NumericSubjectId is { } userId
             ? await roles.GetRoleAsync(userId, cancellationToken)

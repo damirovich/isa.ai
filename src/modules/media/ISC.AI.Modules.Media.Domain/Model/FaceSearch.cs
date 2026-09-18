@@ -112,6 +112,19 @@ public sealed record MediaPurgeResult(bool Found, int FacesRemoved, int FilesRem
     public static MediaPurgeResult NotFound { get; } = new(false, 0, 0);
 }
 
+/// <summary>
+/// Результат снятия биометрического слоя с носителей (ТБ-074, ТФ-ДЕЛ-04): что именно удалено.
+/// Числа попадают в акт об удалении шаблонов, поэтому это не отладочная сводка, а документируемый факт.
+/// </summary>
+/// <param name="AssetsAffected">Сколько носителей затронуто (у которых был хотя бы один шаблон или вырезка).</param>
+/// <param name="TemplatesRemoved">Сколько шаблонов лиц снято — ровно столько векторов ушло из индекса поиска.</param>
+/// <param name="CropsRemoved">Сколько файлов вырезок удалено из хранилища.</param>
+public sealed record TemplatePurgeResult(int AssetsAffected, int TemplatesRemoved, int CropsRemoved)
+{
+    /// <summary>Удалять было нечего (шаблонов нет или список носителей пуст) — аудит не пишется.</summary>
+    public static TemplatePurgeResult Empty { get; } = new(0, 0, 0);
+}
+
 /// <summary>Метаданные носителя для конвейера индексации (фон, без субъекта — решётка здесь не применяется).</summary>
 /// <param name="AssetId">Носитель.</param>
 /// <param name="Kind">Вид.</param>

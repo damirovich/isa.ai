@@ -42,6 +42,9 @@ public class InvestigationDbContext(DbContextOptions<InvestigationDbContext> opt
     /// <summary>Основания поиска (ТБ-071).</summary>
     public DbSet<SearchAuthorization> SearchAuthorizations { get; set; } = null!;
 
+    /// <summary>Акты об удалении шаблонов по закрытию дел (ТФ-ДЕЛ-04, ТБ-074).</summary>
+    public DbSet<CaseClosureAct> ClosureActs { get; set; } = null!;
+
     /// <summary>Справочник подразделений (ТФ-АДМ-01).</summary>
     public DbSet<Division> Divisions { get; set; } = null!;
 

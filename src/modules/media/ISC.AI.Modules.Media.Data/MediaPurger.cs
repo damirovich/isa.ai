@@ -79,4 +79,91 @@ public sealed class MediaPurger(
 
         return new MediaPurgeResult(Found: true, FacesRemoved: faceCount, FilesRemoved: filesRemoved);
     }
+
+    /// <inheritdoc />
+    public async Task<TemplatePurgeResult> PurgeTemplatesAsync(
+        IReadOnlyCollection<int> assetIds,
+        string reason,
+        int? subjectId = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(assetIds);
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+
+        if (assetIds.Count == 0)
+        {
+            return TemplatePurgeResult.Empty;
+        }
+
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Что именно снимаем — считаем ДО удаления: после каскада ни чисел, ни имён файлов не останется,
+        // а они идут в акт (ТБ-074) и в журнал.
+        var targets = await db.Assets
+            .Where(a => assetIds.Contains(a.Id))
+            .Select(a => new
+            {
+                a.Id,
+                a.Classification,
+                a.DivisionId,
+                Templates = db.Templates.Count(t => t.AssetId == a.Id),
+                Crops = db.Faces
+                    .Where(f => f.AssetId == a.Id && f.CropStoredFileName != null)
+                    .Select(f => f.CropStoredFileName!)
+                    .ToList(),
+            })
+            .Where(a => a.Templates > 0 || a.Crops.Count > 0)
+            .ToListAsync(cancellationToken);
+
+        if (targets.Count == 0)
+        {
+            return TemplatePurgeResult.Empty; // идемпотентно: биометрии уже нет — ни удаления, ни записи
+        }
+
+        // FAIL-CLOSED (ТБ-064/074): аудит ДО уничтожения, по каждому носителю отдельной записью — с его
+        // собственным грифом и подразделением. Общая запись «по делу» усреднила бы гриф, а журнал грифов
+        // не усредняет. Недоступен журнал — WriteAsync бросит, и ни один шаблон не будет удалён.
+        foreach (var target in targets)
+        {
+            await auditWriter.WriteAsync(
+                new AuditEntry(
+                    AuditAction.Purge,
+                    target.Classification,
+                    SubjectId: subjectId,
+                    ObjectRef: "media:asset:" + target.Id.ToString(CultureInfo.InvariantCulture),
+                    DivisionId: target.DivisionId,
+                    PayloadSensitive:
+                        $"Удаление биометрических шаблонов носителя ({reason}): шаблонов {target.Templates}, "
+                        + $"вырезок {target.Crops.Count}. Носитель, кадры и лица сохранены (ТБ-074, ТФ-ДЕЛ-04)."),
+                cancellationToken);
+        }
+
+        var ids = targets.Select(t => t.Id).ToList();
+
+        // Атомарно: шаблоны снимаются целиком (вектор уходит из индекса вместе со строкой), у лиц
+        // обнуляется ссылка на вырезку — сама строка лица остаётся: это «появление» фигуранта,
+        // результат работы по делу (ТФ-ПЕР-02), а не биометрический материал поиска.
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var templatesRemoved = await db.Templates
+            .Where(t => ids.Contains(t.AssetId))
+            .ExecuteDeleteAsync(cancellationToken);
+        await db.Faces
+            .Where(f => ids.Contains(f.AssetId) && f.CropStoredFileName != null)
+            .ExecuteUpdateAsync(set => set.SetProperty(f => f.CropStoredFileName, (string?)null), cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        // Файлы — после фиксации: осиротевший файл без строки безвреден, строка без файла — дефект.
+        var cropsRemoved = 0;
+        foreach (var target in targets)
+        {
+            var subPath = target.Id.ToString(CultureInfo.InvariantCulture);
+            foreach (var crop in target.Crops)
+            {
+                await fileStorage.DeleteAsync(crop, MediaFileCategories.FaceCrops, subPath, cancellationToken);
+                cropsRemoved++;
+            }
+        }
+
+        return new TemplatePurgeResult(targets.Count, templatesRemoved, cropsRemoved);
+    }
 }
