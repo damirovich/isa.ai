@@ -2,7 +2,6 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using ISC.AI.Modules.Media.Domain.Services;
-using ISC.AI.Profile.Investigation.Data;
 using ISC.AI.Profile.Investigation.Domain.Enums;
 using ISC.AI.Profile.Investigation.Domain.Services;
 using Shouldly;
@@ -35,7 +34,7 @@ public sealed class InvestigationCaseScopeTests : IAsyncLifetime
 
         var cases = InvestigationTestKit.CreateCaseStore(factory, core);
         var persons = InvestigationTestKit.CreatePersonStore(factory, core);
-        var scope = new CaseScope(cases, persons);
+        var scope = InvestigationTestKit.CreateCaseScope(factory, core);
 
         var owner = InvestigationTestKit.Access(10, 9, 5);
         var stranger = InvestigationTestKit.Access(11, 9, 5);
@@ -75,8 +74,8 @@ public sealed class InvestigationCaseScopeTests : IAsyncLifetime
         (await scope.GetAssetIdsAsync([caseA.CaseId])).OrderBy(id => id).ShouldBe([100, 101]);
         (await scope.GetAssetIdsAsync([caseA.CaseId, caseB.CaseId])).OrderBy(id => id).ShouldBe([100, 101, 200]);
         (await scope.GetAssetIdsAsync([])).ShouldBeEmpty();
-        (await scope.GetCaseIdForAssetAsync(200)).ShouldBe(caseB.CaseId);
-        (await scope.GetCaseIdForAssetAsync(999)).ShouldBeNull();
+        (await scope.GetCaseIdForAssetAsync(200, owner)).ShouldBe(caseB.CaseId);
+        (await scope.GetCaseIdForAssetAsync(999, owner)).ShouldBeNull();
         await Should.ThrowAsync<InvalidOperationException>(() => scope.LinkAssetAsync(999_999, 300, null, 10));
 
         var details = (await cases.GetAsync(caseA.CaseId, owner)).ShouldNotBeNull();
@@ -106,5 +105,67 @@ public sealed class InvestigationCaseScopeTests : IAsyncLifetime
         appearance.MediaAssetId.ShouldBe(100);
         appearance.ExpertUserId.ShouldBe(40);
         appearance.VerifierUserId.ShouldBe(41);
+    }
+
+    [Fact(DisplayName = "ICaseScope: носитель доступен только через ДОСТУПНОЕ дело — следователь не видит носитель чужого дела того же подразделения, руководитель видит, без роли — ничего; из двух привязок наружу выдаётся доступное дело")]
+    public async Task Asset_accessibility_follows_case_lattice_and_role()
+    {
+        var factory = new InvestigationContextFactory(_postgres.GetConnectionString());
+        var core = new CoreContextFactory(_postgres.GetConnectionString());
+        await InvestigationTestKit.MigrateAsync(factory);
+        await InvestigationTestKit.AssignRolesAsync(factory,
+            (10, InvestigationRole.Investigator),
+            (11, InvestigationRole.Investigator),
+            (20, InvestigationRole.Head));
+
+        var cases = InvestigationTestKit.CreateCaseStore(factory, core);
+        var scope = InvestigationTestKit.CreateCaseScope(factory, core);
+
+        // Одно подразделение (5), один гриф (2), одинаковый допуск — различие только в роли и владении делом.
+        var investigatorA = InvestigationTestKit.Access(10, 9, 5);
+        var investigatorB = InvestigationTestKit.Access(11, 9, 5);
+        var head = InvestigationTestKit.Access(20, 9, 5);
+        var noRole = InvestigationTestKit.Access(50, 9, 5);
+
+        var caseA = await cases.CreateAsync(InvestigationTestKit.Draft("A-1", 5, 2, 10), head);
+        var caseB = await cases.CreateAsync(InvestigationTestKit.Draft("B-1", 5, 2, 11), head);
+        caseA.Result.ShouldBe(CaseWriteResult.Ok);
+        caseB.Result.ShouldBe(CaseWriteResult.Ok);
+
+        // 100 — только в деле A; 200 — только в деле B; 300 — в обоих (дедупликация по хешу), сначала A.
+        await scope.LinkAssetAsync(caseA.CaseId, 100, null, 10);
+        await scope.LinkAssetAsync(caseB.CaseId, 200, null, 11);
+        await scope.LinkAssetAsync(caseA.CaseId, 300, null, 10);
+        await scope.LinkAssetAsync(caseB.CaseId, 300, null, 11);
+
+        // Следователь A: своё дело — да, чужое (тот же отдел, тот же допуск) — нет (ТБ-071, ТФ-ДЕЛ-03).
+        (await scope.IsAssetAccessibleAsync(100, investigatorA)).ShouldBeTrue();
+        (await scope.IsAssetAccessibleAsync(200, investigatorA)).ShouldBeFalse();
+        (await scope.IsAssetAccessibleAsync(300, investigatorA)).ShouldBeTrue();
+        (await scope.GetCaseIdForAssetAsync(100, investigatorA)).ShouldBe(caseA.CaseId);
+        (await scope.GetCaseIdForAssetAsync(200, investigatorA)).ShouldBeNull();
+
+        // Следователь B: носитель 300 привязан к A (недоступно) и B (доступно) → наружу только B (ТБ-020/021).
+        (await scope.IsAssetAccessibleAsync(100, investigatorB)).ShouldBeFalse();
+        (await scope.IsAssetAccessibleAsync(300, investigatorB)).ShouldBeTrue();
+        (await scope.GetCaseIdForAssetAsync(300, investigatorB)).ShouldBe(caseB.CaseId);
+        (await scope.GetCaseIdForAssetAsync(100, investigatorB)).ShouldBeNull();
+
+        // Руководитель — дела подразделения целиком.
+        (await scope.IsAssetAccessibleAsync(100, head)).ShouldBeTrue();
+        (await scope.IsAssetAccessibleAsync(200, head)).ShouldBeTrue();
+        (await scope.GetCaseIdForAssetAsync(300, head)).ShouldBe(caseA.CaseId);
+
+        // Без роли — default-deny (ТБ-012), даже при достаточном допуске.
+        (await scope.IsAssetAccessibleAsync(100, noRole)).ShouldBeFalse();
+        (await scope.GetCaseIdForAssetAsync(100, noRole)).ShouldBeNull();
+
+        // Floor ядра поверх роли: руководитель с допуском ниже грифа или чужим подразделением — нет.
+        (await scope.IsAssetAccessibleAsync(100, InvestigationTestKit.Access(20, 1, 5))).ShouldBeFalse();
+        (await scope.IsAssetAccessibleAsync(100, InvestigationTestKit.Access(20, 9, 6))).ShouldBeFalse();
+
+        // Непривязанный носитель неотличим от недоступного.
+        (await scope.IsAssetAccessibleAsync(999, head)).ShouldBeFalse();
+        (await scope.GetCaseIdForAssetAsync(999, head)).ShouldBeNull();
     }
 }

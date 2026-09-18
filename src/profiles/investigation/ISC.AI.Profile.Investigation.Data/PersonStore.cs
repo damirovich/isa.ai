@@ -3,6 +3,7 @@ using ISC.AI.Profile.Investigation.Domain.Entities;
 using ISC.AI.Profile.Investigation.Domain.Enums;
 using ISC.AI.Profile.Investigation.Domain.Services;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace ISC.AI.Profile.Investigation.Data;
 
@@ -11,6 +12,8 @@ namespace ISC.AI.Profile.Investigation.Data;
 /// Чтение — под решёткой: floor ядра и политика профиля применяются к самому фигуранту (у него свои
 /// режимные поля, ТБ-070), а сужение по роли/владению — через дело (<see cref="CaseAccessRule"/>):
 /// фигурант виден ровно тогда, когда видно его дело. Гриф/подразделение при создании копируются с дела.
+/// Появления читаются ПОД СОБСТВЕННЫМ floor'ом (у строки свои гриф/подразделение) поверх видимости фигуранта.
+/// Номер «неустановленного лица» выдаётся под advisory-блокировкой дела — гонка двух создателей исключена.
 /// </summary>
 public sealed class PersonStore(
     IDbContextFactory<InvestigationDbContext> contextFactory,
@@ -18,6 +21,12 @@ public sealed class PersonStore(
     IUserRoleStore roles) : IPersonStore
 {
     private const string UnidentifiedPrefix = "Неустановленное лицо № ";
+    private const string UniqueViolation = "23505";
+
+    // Пространство ключей advisory-блокировки нумерации неустановленных лиц: двухцелочисленная форма
+    // pg_advisory_xact_lock(int, int) не пересекается с одноключевой формой (bigint), которой пользуется
+    // хеш-цепочка аудита ядра. Значение произвольное, фиксированное.
+    private const int UnidentifiedNumberLockNamespace = 0x4950_534E; // "IPSN" — investigation.person number
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<PersonRow>> ListByCaseAsync(int caseId, AccessContext access, CancellationToken cancellationToken = default)
@@ -72,6 +81,10 @@ public sealed class PersonStore(
             DivisionId = caseFile.DivisionId,
         };
 
+        // Номер и запись — в одной транзакции под блокировкой дела: два одновременных «неустановленных»
+        // в одном деле получают разные номера, а не 23505 на уникальном индексе.
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
         if (draft.IsUnidentified)
         {
             entity.UnidentifiedNumber = await NextUnidentifiedNumberAsync(db, caseFile.Id, cancellationToken);
@@ -81,6 +94,7 @@ public sealed class PersonStore(
 
         db.Persons.Add(entity);
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return (PersonWriteResult.Ok, entity.Id);
     }
 
@@ -103,6 +117,9 @@ public sealed class PersonStore(
 
         // Номер неустановленного лица выдаётся один раз и при установлении личности сохраняется:
         // «неустановленное лицо № 3» в материалах дела остаётся ссылкой на этого же человека.
+        // Выдача — в транзакции под блокировкой дела (см. NextUnidentifiedNumberAsync).
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
         if (isUnidentified && entity.UnidentifiedNumber is null)
         {
             entity.UnidentifiedNumber = await NextUnidentifiedNumberAsync(db, entity.CaseId, cancellationToken);
@@ -113,6 +130,7 @@ public sealed class PersonStore(
         entity.RoleInCase = Clean(roleInCase);
         entity.Notes = Clean(notes);
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return PersonWriteResult.Ok;
     }
 
@@ -126,7 +144,12 @@ public sealed class PersonStore(
 
         var visible = AccessiblePersons(db, access, role).Where(p => p.Id == personId);
 
+        // ТБ-020/070: у появления СВОИ гриф/подразделение (с кандидата — носителя другого дела), и они
+        // могут быть выше грифа фигуранта. Видимость фигуранта — необходимое, но не достаточное условие:
+        // floor ядра и политика профиля применяются к самой строке появления.
         return await db.Appearances.AsNoTracking()
+            .Where(BaselineAccess.Filter<Appearance>(access))
+            .Where(policy.BuildFilter<Appearance>(access))
             .Where(a => visible.Any(p => p.Id == a.PersonId))
             .OrderByDescending(a => a.ConfirmedAtUtc)
             .ThenByDescending(a => a.Id)
@@ -142,6 +165,9 @@ public sealed class PersonStore(
     /// Без решётки по контракту: факт подтверждения уже проверен модулем «Медиа» (правило двух лиц —
     /// <c>TwoPersonRule</c>). Здесь — последний рубеж ТБ-073: эксперт и верификатор обязаны быть
     /// разными людьми, статус — всегда «следственная версия», что бы ни пришло в черновике.
+    /// Идемпотентно по кандидату: повторный вызов с тем же <see cref="AppearanceDraft.CandidateId"/>
+    /// (повтор после сбоя между фиксацией решения и записью появления, ТФ-ВЕР-03) возвращает идентификатор
+    /// уже существующего появления — уникальный индекс <c>candidate_id</c> гарантирует «один кандидат — одно появление».
     /// </remarks>
     public async Task<int> AddAppearanceAsync(AppearanceDraft draft, CancellationToken cancellationToken = default)
     {
@@ -174,7 +200,28 @@ public sealed class PersonStore(
             DivisionId = draft.DivisionId,
         };
         db.Appearances.Add(entity);
-        await db.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: UniqueViolation })
+        {
+            // Единственный уникальный индекс таблицы — candidate_id: появление для этого кандидата уже есть
+            // (параллельный или повторный вызов). Возвращаем существующий, ничего не дублируя.
+            db.Entry(entity).State = EntityState.Detached;
+            var existingId = await db.Appearances.AsNoTracking()
+                .Where(a => a.CandidateId == draft.CandidateId)
+                .Select(a => (int?)a.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (existingId is { } id)
+            {
+                return id;
+            }
+
+            throw;
+        }
+
         return entity.Id;
     }
 
@@ -285,9 +332,23 @@ public sealed class PersonStore(
                 db.ReferencePhotos.Count(r => r.PersonId == p.Id),
                 db.Appearances.Count(a => a.PersonId == p.Id)));
 
-    /// <summary>Следующий номер неустановленного лица в деле: max + 1 (уникальность страхует индекс).</summary>
+    /// <summary>
+    /// Следующий номер неустановленного лица в деле: max + 1 под транзакционной advisory-блокировкой дела.
+    /// Вызывать ТОЛЬКО внутри открытой транзакции: блокировка <c>pg_advisory_xact_lock</c> держится до её
+    /// конца, поэтому второй создатель в том же деле дождётся фиксации первого и прочитает уже новый max —
+    /// уникальный индекс (case_id, unidentified_number) остаётся страховкой, а не рабочим механизмом.
+    /// </summary>
     private static async Task<int> NextUnidentifiedNumberAsync(InvestigationDbContext db, int caseId, CancellationToken cancellationToken)
     {
+        if (db.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException("Номер неустановленного лица выдаётся только внутри транзакции.");
+        }
+
+        await db.Database.ExecuteSqlAsync(
+            $"SELECT pg_advisory_xact_lock({UnidentifiedNumberLockNamespace}, {caseId})",
+            cancellationToken);
+
         var max = await db.Persons
             .Where(p => p.CaseId == caseId && p.UnidentifiedNumber != null)
             .MaxAsync(p => p.UnidentifiedNumber, cancellationToken);

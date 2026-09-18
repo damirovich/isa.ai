@@ -32,6 +32,57 @@ public sealed class RecordVerificationCommandTests
         _subjects.GetCurrentUserIdAsync(Arg.Any<CancellationToken>()).Returns(CurrentUser);
         _policy.CanActAsync(Arg.Any<VerificationStage>(), Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(true);
         _accessProvider.GetCurrentAsync(Arg.Any<CancellationToken>()).Returns(new AccessContext("7", 2, [1]));
+        // Фигуранты дела кандидата (3): только 77 (ТФ-ВЕР-03 «фигурант дела»).
+        _caseScope.ListPersonsAsync(3, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
+            .Returns([new CasePersonItem(77, "Фигурант 1")]);
+    }
+
+    [Fact(DisplayName = "Фигурант чужого/несуществующего дела на стадии эксперта → BadRequest, аудит decision-denied, решение не записано (ТФ-ВЕР-03)")]
+    public async Task Foreign_person_ref_is_rejected_and_audited()
+    {
+        GivenCandidate();
+
+        var response = await HandleAsync(new RecordVerificationCommand(11, VerificationStage.Expert, VerificationVerdict.Confirmed, "признаки", PersonRef: 88));
+
+        response.StatusCode.ShouldBe(ResponseStatusCode.BadRequest);
+        response.StatusMessage.ShouldContain("ТФ-ВЕР-03");
+        await _audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.ObjectRef == "media:candidate:11:decision-denied" && e.PayloadSensitive!.Contains("фигурант")),
+            Arg.Any<CancellationToken>());
+        await AssertNoDecisionRecordedAsync();
+        await _caseScope.DidNotReceive().RecordAppearanceAsync(Arg.Any<ConfirmedAppearance>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "Эксперт «подтверждён» без фигуранта → BadRequest (ТФ-ВЕР-03): статус без появления невозможен; валидатор тоже; «отклонён» без фигуранта — можно")]
+    public async Task Expert_confirmed_without_person_is_bad_request()
+    {
+        GivenCandidate();
+
+        var response = await HandleAsync(new RecordVerificationCommand(11, VerificationStage.Expert, VerificationVerdict.Confirmed, "признаки"));
+
+        response.StatusCode.ShouldBe(ResponseStatusCode.BadRequest);
+        response.StatusMessage.ShouldContain("ТФ-ВЕР-03");
+        await AssertNoDecisionRecordedAsync();
+        await _caseScope.DidNotReceive().RecordAppearanceAsync(Arg.Any<ConfirmedAppearance>(), Arg.Any<CancellationToken>());
+
+        var validator = new RecordVerificationValidator();
+        validator.Validate(new RecordVerificationCommand(11, VerificationStage.Expert, VerificationVerdict.Confirmed, "признаки")).IsValid.ShouldBeFalse();
+        validator.Validate(new RecordVerificationCommand(11, VerificationStage.Expert, VerificationVerdict.Confirmed, "признаки", PersonRef: 77)).IsValid.ShouldBeTrue();
+        validator.Validate(new RecordVerificationCommand(11, VerificationStage.Expert, VerificationVerdict.Rejected, "признаки")).IsValid.ShouldBeTrue();
+
+        var rejected = await HandleAsync(new RecordVerificationCommand(11, VerificationStage.Expert, VerificationVerdict.Rejected, "признаки не совпадают"));
+        rejected.Data.ShouldBe(CandidateStatus.PendingVerifier);
+    }
+
+    [Fact(DisplayName = "Валидатор: обоснование обязательно (ТЭ-006) и не длиннее предела; кандидат > 0")]
+    public void Validator_requires_rationale()
+    {
+        var validator = new RecordVerificationValidator();
+        validator.Validate(new RecordVerificationCommand(11, VerificationStage.Expert, VerificationVerdict.Rejected, "")).IsValid.ShouldBeFalse();
+        validator.Validate(new RecordVerificationCommand(11, VerificationStage.Expert, VerificationVerdict.Rejected, "   ")).IsValid.ShouldBeFalse();
+        validator.Validate(new RecordVerificationCommand(11, VerificationStage.Expert, VerificationVerdict.Rejected, new string('x', RecordVerificationValidator.MaxRationaleLength + 1))).IsValid.ShouldBeFalse();
+        validator.Validate(new RecordVerificationCommand(11, VerificationStage.Expert, VerificationVerdict.Rejected, "признаки")).IsValid.ShouldBeTrue();
+        validator.Validate(new RecordVerificationCommand(0, VerificationStage.Expert, VerificationVerdict.Rejected, "признаки")).IsValid.ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Самоподтверждение: верификатор = эксперт → отказ, аудит decision-denied, решение не записано")]

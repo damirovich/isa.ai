@@ -289,7 +289,8 @@ else
         }
         <MudGrid Spacing="2">
             <MudItem xs="12">
-                <MudTextField @bind-Value="_editTitle" Label="Название *" Variant="Variant.Outlined" MaxLength="500" />
+                @* Пределы длин — из валидатора (единственный источник), а не числом в разметке. *@
+                <MudTextField @bind-Value="_editTitle" Label="Название *" Variant="Variant.Outlined" MaxLength="@CreateCaseValidator.MaxTitleLength" />
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudSelect T="CaseKind?" @bind-Value="_editKind" Label="Вид *" Variant="Variant.Outlined" Dense="true">
@@ -314,7 +315,7 @@ else
                 </MudSelect>
             </MudItem>
             <MudItem xs="12">
-                <MudTextField @bind-Value="_editBasis" Label="Основание" Variant="Variant.Outlined" Lines="3" MaxLength="4000" />
+                <MudTextField @bind-Value="_editBasis" Label="Основание" Variant="Variant.Outlined" Lines="3" MaxLength="@CreateCaseValidator.MaxBasisLength" />
             </MudItem>
         </MudGrid>
     </DialogContent>
@@ -474,6 +475,11 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере (статический SSR до подключения circuit'а)
+        // карточку не грузим — иначе GetCaseQuery и списки попадали бы в журнал дважды. До интерактива
+        // страница показывает индикатор загрузки (_case is null && _error is null).
+        if (!RendererInfo.IsInteractive) { return; }
+
         // Справочники — для имён вместо номеров; отказ (например, нет роли) не мешает карточке.
         var divisions = await Dispatcher.Send(new ListDivisionsQuery());
         if (divisions is { Status: true, Data: { } list })
@@ -492,6 +498,9 @@ else
 
     protected override async Task OnParametersSetAsync()
     {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере не грузим (см. OnInitializedAsync).
+        if (!RendererInfo.IsInteractive) { return; }
+
         // Переход между карточками дел без размонтирования страницы: сбрасываем ленивые вкладки.
         if (_case is { } current && current.Id != Id)
         {

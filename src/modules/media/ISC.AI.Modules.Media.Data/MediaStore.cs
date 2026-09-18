@@ -10,7 +10,7 @@ using Pgvector;
 namespace ISC.AI.Modules.Media.Data;
 
 /// <summary>
-/// Хранилище носителей (ТС-010, ТП-004/005): приём файла с дедупликацией по SHA-256 и атомарная
+/// Хранилище носителей (ТС-010, ТП-004/005): приём файла с дедупликацией по (подразделение, гриф, SHA-256) и атомарная
 /// запись результата индексации. Байты — в <see cref="IFileStorage"/> ядра, метаданные — в схеме
 /// <c>media</c>. Гриф/подразделение носителя ДЕНОРМАЛИЗУЮТСЯ на каждое лицо и шаблон (ТБ-020).
 /// </summary>
@@ -42,8 +42,14 @@ public sealed partial class MediaStore(
 
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
 
+            // Ключ дедупликации — (подразделение, ГРИФ, хеш): гриф носителя равен грифу дела (ТБ-070), поэтому тот же
+            // файл, загруженный в дело с другим грифом, — отдельный носитель со своими производными. Иначе второй
+            // загрузчик получал бы «принят», а носитель оставался бы под режимом первого дела: невидим для дела
+            // с меньшим грифом либо биометрия секретного дела — под низким грифом. Уникальный индекс — страховка.
             var existingId = await db.Assets
-                .Where(a => a.DivisionId == draft.DivisionId && a.ContentHash == hash)
+                .Where(a => a.DivisionId == draft.DivisionId
+                    && a.Classification == draft.Classification
+                    && a.ContentHash == hash)
                 .Select(a => (int?)a.Id)
                 .FirstOrDefaultAsync(cancellationToken);
             if (existingId is { } duplicateId)
@@ -62,7 +68,9 @@ public sealed partial class MediaStore(
                 ContentHash = hash,
                 ByteSize = size,
                 Source = draft.Source,
-                CapturedAt = draft.CapturedAt,
+                // Npgsql пишет timestamptz только со смещением 0: значение из UI приходит в поясе сервера
+                // (+06:00 в контуре) — нормализуем к UTC, не доверяя вызывающему (как AsUtc у сессий).
+                CapturedAt = draft.CapturedAt?.ToUniversalTime(),
                 Classification = draft.Classification,
                 DivisionId = draft.DivisionId,
                 UploadedByUserId = draft.UploadedByUserId,

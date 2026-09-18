@@ -396,6 +396,9 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                     b.HasKey("Id")
                         .HasName("pk_person");
 
+                    b.HasIndex("CaseId")
+                        .HasDatabaseName("ix_person_case_id");
+
                     b.HasIndex("CaseId", "UnidentifiedNumber")
                         .IsUnique()
                         .HasDatabaseName("ix_person_case_id_unidentified_number")

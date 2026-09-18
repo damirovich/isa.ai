@@ -21,6 +21,7 @@ public sealed record PurgeMediaCommand(int AssetId) : IRequest<ResponseDto<Media
         IMediaAdministration administration,
         IAccessContextProvider accessProvider,
         IMediaCatalog catalog,
+        ICaseScope caseScope,
         IMediaPurger purger)
         : IRequestHandler<PurgeMediaCommand, ResponseDto<MediaPurgeResult>>
     {
@@ -32,7 +33,7 @@ public sealed record PurgeMediaCommand(int AssetId) : IRequest<ResponseDto<Media
 
             if (!await administration.CanPurgeAsync(cancellationToken))
             {
-                return ResponseDto<MediaPurgeResult>.BadRequest("Гарантированное удаление носителей доступно роли Администратор.");
+                return ResponseDto<MediaPurgeResult>.BadRequest("Гарантированное удаление носителей доступно ролям Администратор/Руководитель.");
             }
 
             // Fail-closed (ТБ-020/021): удалить можно только то, что субъекту доступно; недоступный носитель
@@ -40,6 +41,13 @@ public sealed record PurgeMediaCommand(int AssetId) : IRequest<ResponseDto<Media
             var access = await accessProvider.GetCurrentAsync(cancellationToken);
             var asset = await catalog.GetAsync(command.AssetId, access, cancellationToken);
             if (asset is null)
+            {
+                return ResponseDto<MediaPurgeResult>.NotFound("Носитель не найден или недоступен.");
+            }
+
+            // Сужение по делам субъекта поверх решётки (ТБ-071, ТФ-ДЕЛ-03): уничтожить чужой носитель по
+            // перебираемому идентификатору нельзя; отказ неотличим от «не найден».
+            if (!await caseScope.IsAssetAccessibleAsync(asset.Id, access, cancellationToken))
             {
                 return ResponseDto<MediaPurgeResult>.NotFound("Носитель не найден или недоступен.");
             }

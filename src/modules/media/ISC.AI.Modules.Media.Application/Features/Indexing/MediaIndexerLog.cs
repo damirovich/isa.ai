@@ -19,6 +19,14 @@ internal static partial class MediaIndexerLog
     public static partial void Failed(ILogger logger, Exception exception, int assetId, int frames);
 
     [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Индексация носителя {AssetId} отменена (кадров обработано {Frames}); статус носителя переведён в «ошибка: отменено».")]
+    public static partial void Cancelled(ILogger logger, int assetId, int frames);
+
+    [LoggerMessage(Level = LogLevel.Warning,
         Message = "Индексация носителя {AssetId}: временный файл «{TempPath}» не удалён — подберёт уборка.")]
     public static partial void TempFileNotDeleted(ILogger logger, Exception exception, int assetId, string tempPath);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Индексация носителя {AssetId}: вырезка «{CropStoredFileName}» не удалена — остаётся сиротой в хранилище.")]
+    public static partial void CropNotDeleted(ILogger logger, Exception exception, int assetId, string cropStoredFileName);
 }

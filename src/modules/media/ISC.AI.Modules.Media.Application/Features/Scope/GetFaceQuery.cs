@@ -24,7 +24,7 @@ public sealed record GetFaceQuery(int FaceId) : IRequest<ResponseDto<FaceRow>>, 
     public string? AuditSummary => $"media:face:{FaceId}:view";
 
     /// <inheritdoc cref="GetFaceQuery" />
-    public sealed class Handler(IAccessContextProvider accessProvider, IMediaCatalog catalog)
+    public sealed class Handler(IAccessContextProvider accessProvider, IMediaCatalog catalog, ICaseScope caseScope)
         : IRequestHandler<GetFaceQuery, ResponseDto<FaceRow>>
     {
         /// <inheritdoc />
@@ -35,9 +35,19 @@ public sealed record GetFaceQuery(int FaceId) : IRequest<ResponseDto<FaceRow>>, 
             // Fail-closed (ТБ-020/021): решётка применяется каталогом на стороне БД.
             var access = await accessProvider.GetCurrentAsync(cancellationToken);
             var face = await catalog.GetFaceAsync(query.FaceId, access, cancellationToken);
-            return face is null
-                ? ResponseDto<FaceRow>.NotFound("Лицо не найдено или недоступно.")
-                : ResponseDto<FaceRow>.Ok(face);
+            if (face is null)
+            {
+                return ResponseDto<FaceRow>.NotFound("Лицо не найдено или недоступно.");
+            }
+
+            // Сужение по делам субъекта поверх решётки (ТБ-071, ТФ-ДЕЛ-03): лицо — биометрия носителя,
+            // читается только если носитель входит в дела субъекта; отказ неотличим от «не найдено».
+            if (!await caseScope.IsAssetAccessibleAsync(face.AssetId, access, cancellationToken))
+            {
+                return ResponseDto<FaceRow>.NotFound("Лицо не найдено или недоступно.");
+            }
+
+            return ResponseDto<FaceRow>.Ok(face);
         }
     }
 }

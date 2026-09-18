@@ -18,7 +18,10 @@ namespace ISC.AI.Modules.Media.Application.Features.Verification;
 /// <param name="FrameTimestampMs">Таймкод кадра, мс (видео).</param>
 /// <param name="Similarity">Косинусная схожесть — показывается только с предупреждением о вероятностной природе (ТЭ-006).</param>
 /// <param name="CropStoredFileName">Вырезка лица-кандидата (категория вырезок, подкаталог — носитель).</param>
-/// <param name="ProbeCropStoredFileName">Вырезка пробы (категория проб, подкаталог — дело сессии; маршрут раздачи — по идентификатору сессии) либо вырезка лица-пробы.</param>
+/// <param name="ProbeCropStoredFileName">
+/// Вырезка пробы-ИЗОБРАЖЕНИЯ (только категория <c>media-probes</c>, подкаталог — дело сессии; маршрут раздачи —
+/// по идентификатору сессии). Для пробы-лица носителя — <see langword="null"/>: вырезка берётся по <paramref name="ProbeFaceId"/>.
+/// </param>
 /// <param name="ProbeSha256">SHA-256 пробы (ТБ-077: идентичность пробы без хранения вектора).</param>
 /// <param name="ProbeFaceId">Лицо-проба, если проба — лицо носителя (тогда вырезка — в категории вырезок его носителя).</param>
 /// <param name="Classification">Гриф (показывается обязательно, ТБ-073).</param>

@@ -88,10 +88,33 @@ public sealed record RecordVerificationCommand(
                 return ResponseDto<CandidateStatus>.BadRequest(reason ?? "Решение на этой стадии сейчас невозможно (ТБ-073).");
             }
 
+            var personRef = command.Stage == VerificationStage.Expert ? command.PersonRef : null;
+            if (command.Stage == VerificationStage.Expert)
+            {
+                // ТФ-ВЕР-03: «подтверждён» без фигуранта дал бы статус без «появления» — отказ (дублирует валидатор:
+                // обработчик вызывается и напрямую, не только через конвейер).
+                if (command.Verdict == VerificationVerdict.Confirmed && personRef is null)
+                {
+                    return ResponseDto<CandidateStatus>.BadRequest(RecordVerificationValidator.PersonRequiredMessage);
+                }
+
+                // ТБ-020/070, ТФ-ВЕР-03 «фигурант ДЕЛА»: фигурант — только из дела кандидата, видимого субъекту;
+                // чужой/несуществующий идентификатор ушёл бы «появлением» в чужое дело — отказ аудируется.
+                if (personRef is { } requestedPerson)
+                {
+                    var persons = await caseScope.ListPersonsAsync(candidate.CaseId, access, cancellationToken);
+                    if (!persons.Any(p => p.PersonId == requestedPerson))
+                    {
+                        await AuditDeniedAsync(command, subjectId, candidate.Classification, candidate.DivisionId,
+                            "фигурант не принадлежит делу кандидата (ТФ-ВЕР-03)", cancellationToken);
+                        return ResponseDto<CandidateStatus>.BadRequest("Фигурант не принадлежит делу кандидата либо недоступен (ТФ-ВЕР-03).");
+                    }
+                }
+            }
+
             var decision = new VerificationDecision(subjectId, command.Stage, command.Verdict, command.Rationale, DateTime.UtcNow);
             var decisions = new List<VerificationDecision>(candidate.Decisions) { decision };
             var newStatus = TwoPersonRule.Resolve(decisions);
-            var personRef = command.Stage == VerificationStage.Expert ? command.PersonRef : null;
 
             try
             {

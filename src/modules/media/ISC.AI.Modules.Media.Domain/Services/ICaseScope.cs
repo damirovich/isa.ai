@@ -57,8 +57,20 @@ public interface ICaseScope
 
     Task<IReadOnlyCollection<int>> GetAssetIdsAsync(IReadOnlyCollection<int> caseIds, CancellationToken cancellationToken = default);
 
-    /// <summary>Дело, к которому привязан носитель; <see langword="null"/> — не привязан.</summary>
-    Task<int?> GetCaseIdForAssetAsync(int assetId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Дело носителя, ДОСТУПНОЕ субъекту (первая из привязок, прошедшая решётку и роль); <see langword="null"/> —
+    /// носитель не привязан либо все его дела недоступны (неразличимо, ТБ-020/021). Носитель может быть
+    /// привязан к нескольким делам (дедупликация по хешу) — чужие дела наружу не раскрываются.
+    /// </summary>
+    Task<int?> GetCaseIdForAssetAsync(int assetId, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Входит ли носитель в дела субъекта (ТБ-071, ТФ-ДЕЛ-03): применяется ко ВСЕМ чтениям пакета по прямому
+    /// идентификатору (носитель, лицо, файл, сессия по носителю) ПОВЕРХ floor ядра — иначе следователь
+    /// того же подразделения перебором id читал бы материалы чужих дел, а субъект без роли — что угодно
+    /// в допуске. Без роли — всегда <see langword="false"/> (default-deny, ТБ-012).
+    /// </summary>
+    Task<bool> IsAssetAccessibleAsync(int assetId, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>Привязать носитель к делу (слабая ссылка по значению в схеме профиля, ТО-инф-08).</summary>
     Task LinkAssetAsync(int caseId, int assetId, string? place, int? linkedByUserId, CancellationToken cancellationToken = default);

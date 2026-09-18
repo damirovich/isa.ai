@@ -25,6 +25,10 @@ public class PersonConfiguration : IEntityTypeConfiguration<Person>
         builder.HasOne(e => e.Case).WithMany()
                .HasForeignKey(e => e.CaseId).OnDelete(DeleteBehavior.Cascade);
 
+        // Обычный индекс по делу: списки/счётчики фигурантов дела и каскад удаления. Частичный уникальный
+        // индекс ниже для `WHERE case_id = $1` непригоден (фильтр по unidentified_number).
+        builder.HasIndex(e => e.CaseId);
+
         // «Неустановленное лицо № N» — номер уникален в деле; установленные (NULL) индексом не ограничены.
         builder.HasIndex(e => new { e.CaseId, e.UnidentifiedNumber })
                .IsUnique()

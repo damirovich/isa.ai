@@ -93,7 +93,10 @@ public sealed class SearchSessionBlindnessTests
                 Decision(Verifier, VerificationStage.Verifier, VerificationVerdict.Confirmed)),
         });
 
-        var response = await new GetSearchSessionQuery.Handler(accessProvider, subjects, store)
+        var caseScope = Substitute.For<ICaseScope>();
+        caseScope.GetCaseAsync(1, access, Arg.Any<CancellationToken>()).Returns(new CaseScopeItem(1, "№ 1", "Дело", 1, 1));
+
+        var response = await new GetSearchSessionQuery.Handler(accessProvider, subjects, store, caseScope)
             .Handle(new GetSearchSessionQuery(5), CancellationToken.None);
 
         response.Status.ShouldBeTrue();
@@ -101,6 +104,14 @@ public sealed class SearchSessionBlindnessTests
         response.Data.Candidates[0].PersonRef.ShouldBeNull();
         response.Data.Candidates[1].Decisions.Count.ShouldBe(2);
         response.Data.Candidates[1].PersonRef.ShouldBe(43);
+
+        // ТБ-071 / ТФ-ПЛ-07: сессия дела, недоступного субъекту по роли/владению, — «не найдена», кандидаты не читаются.
+        caseScope.GetCaseAsync(1, access, Arg.Any<CancellationToken>()).Returns((CaseScopeItem?)null);
+        store.ClearReceivedCalls();
+        var denied = await new GetSearchSessionQuery.Handler(accessProvider, subjects, store, caseScope)
+            .Handle(new GetSearchSessionQuery(5), CancellationToken.None);
+        denied.StatusCode.ShouldBe(Abstractions.Application.ResponseStatusCode.NotFound);
+        await store.DidNotReceive().ListCandidatesAsync(Arg.Any<int>(), Arg.Any<AccessContext>(), Arg.Any<CancellationToken>());
     }
 
     private static VerificationDecision Decision(int subject, VerificationStage stage, VerificationVerdict verdict) =>

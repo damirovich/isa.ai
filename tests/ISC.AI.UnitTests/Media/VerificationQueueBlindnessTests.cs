@@ -78,6 +78,27 @@ public sealed class VerificationQueueBlindnessTests
         response.Data[0].OwnDecision.ShouldBeNull();
     }
 
+    [Fact(DisplayName = "Роль не даёт права стадии (ТП-004) → BadRequest, очередь хранилища и дела не читаются")]
+    public async Task Queue_query_rejects_forbidden_role_before_reading_store()
+    {
+        var subjects = Substitute.For<ISubjectProvider>();
+        subjects.GetCurrentUserIdAsync(Arg.Any<CancellationToken>()).Returns(Verifier);
+        var policy = Substitute.For<IVerificationPolicy>();
+        policy.CanActAsync(Arg.Any<VerificationStage>(), Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(false);
+        var accessProvider = Substitute.For<IAccessContextProvider>();
+        var caseScope = Substitute.For<ICaseScope>();
+        var store = Substitute.For<ISearchSessionStore>();
+
+        var handler = new ListVerificationQueueQuery.Handler(subjects, policy, accessProvider, caseScope, store);
+        var response = await handler.Handle(new ListVerificationQueueQuery(VerificationStage.Verifier), CancellationToken.None);
+
+        response.Status.ShouldBeFalse();
+        response.StatusCode.ShouldBe(Abstractions.Application.ResponseStatusCode.BadRequest);
+        await store.DidNotReceive().ListQueueAsync(
+            Arg.Any<VerificationStage>(), Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<AccessContext>(), Arg.Any<CancellationToken>());
+        await caseScope.DidNotReceive().ListAccessibleCasesAsync(Arg.Any<AccessContext>(), Arg.Any<CancellationToken>());
+    }
+
     private static SearchCandidateRow Candidate(params VerificationDecision[] decisions) =>
         new(Id: 11, SessionId: 5, CaseId: 3, Rank: 1, FaceId: 100, AssetId: 50, FrameIndex: null, FrameTimestampMs: null,
             CosineDistance: 0.2, CropStoredFileName: "crop.jpg", ModelVersion: "sface-1", Classification: 2, DivisionId: 1,

@@ -29,7 +29,10 @@ public sealed class SearchSessionConfiguration : IEntityTypeConfiguration<Search
 
         builder.HasIndex(s => s.CaseId);
         builder.HasIndex(s => new { s.Classification, s.DivisionId });
-        // Вырезка пробы разрешается в файл по (сессия, имя) — имя уникально в пределах категории.
-        builder.HasIndex(s => s.ProbeCropStoredFileName).IsUnique().HasFilter("probe_crop_stored_file_name IS NOT NULL");
+        // Вырезка пробы разрешается в файл по (сессия, имя) — имя уникально в пределах категории media-probes.
+        // Уникальность — только для пробы-изображения (probe_face_id IS NULL): у пробы-лица носителя своей вырезки
+        // нет, и повторный поиск по одному лицу не должен упираться в индекс (ТФ-ПЛ-03, страховка на уровне БД).
+        builder.HasIndex(s => s.ProbeCropStoredFileName).IsUnique()
+            .HasFilter("probe_crop_stored_file_name IS NOT NULL AND probe_face_id IS NULL");
     }
 }

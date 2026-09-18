@@ -61,6 +61,11 @@ else
     </MudPaper>
 
     @* ================= Кандидат-лист с решениями ================= *@
+    @* ТЭ-006: предупреждение — постоянным текстом рядом с баллами, а не только во всплывающей подсказке чипа. *@
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="my-3">
+        Балл схожести — вероятностная оценка модели, не установление личности (ТЭ-006). Статус «подтверждён» —
+        только после независимых решений двух сотрудников (ТБ-073).
+    </MudAlert>
     <MudTable T="SearchCandidateRow" Items="_details.Candidates" Hover="true" Dense="true" Outlined="true">
         <HeaderContent>
             <MudTh>№</MudTh><MudTh>Кандидат</MudTh><MudTh>Схожесть</MudTh><MudTh>Статус</MudTh><MudTh>Решения</MudTh><MudTh>Носитель</MudTh><MudTh>Гриф</MudTh><MudTh></MudTh>
@@ -68,7 +73,8 @@ else
         <RowTemplate>
             <MudTd DataLabel="№">@context.Rank</MudTd>
             <MudTd DataLabel="Кандидат">
-                <FaceCropTile Url="@(context.CropStoredFileName is { } crop ? MediaFileUrl.FaceCrop(context.AssetId, crop) : null)" Size="64" />
+                <FaceCropTile Url="@(context.CropStoredFileName is { } crop ? MediaFileUrl.FaceCrop(context.AssetId, crop) : null)" Size="64"
+                              Caption="@(context.QualityScore is { } quality ? $"качество лица {quality:0.00}" : null)" />
             </MudTd>
             <MudTd DataLabel="Схожесть"><SimilarityChip Similarity="@context.Similarity" /></MudTd>
             <MudTd DataLabel="Статус">
@@ -106,8 +112,13 @@ else
             </MudTd>
             <MudTd DataLabel="Гриф"><ClassificationChip Classification="@context.Classification" /></MudTd>
             <MudTd>
-                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.FactCheck"
-                           Href="@($"/media/verification/{context.Id}?stage={NextStage(context)}")">Верификация</MudButton>
+                @* Стадия — по СТАТУСУ, не по списку решений: для верификатора решения ослеплены (Decisions пусто),
+                   и расчёт по ним вёл бы его на чужую стадию. Завершённым кандидатам кнопка не нужна. *@
+                @if (NextStage(context) is { } stage)
+                {
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.FactCheck"
+                               Href="@($"/media/verification/{context.Id}?stage={stage}")">Верификация</MudButton>
+                }
             </MudTd>
         </RowTemplate>
         <NoRecordsContent>
@@ -126,6 +137,10 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере (статический SSR до подключения circuit'а)
+        // сессию не грузим — GetSearchSessionQuery и GetFaceQuery аудируются и попадали бы в журнал дважды.
+        if (!RendererInfo.IsInteractive) { return; }
+
         var response = await Dispatcher.Send(new GetSearchSessionQuery(Id));
         if (response is not { Status: true, Data: { } details })
         {
@@ -157,7 +172,11 @@ else
         ? (_probeFace is null ? $"проба: лицо № {faceId} (недоступно)" : $"проба: лицо № {faceId}")
         : "проба: изображение";
 
-    /// <summary>Стадия, которой кандидат ждёт: без решения эксперта — эксперт, иначе — верификатор.</summary>
-    private static string NextStage(SearchCandidateRow candidate) =>
-        candidate.Decisions.Any(d => d.Stage == VerificationStage.Expert) ? nameof(VerificationStage.Verifier) : nameof(VerificationStage.Expert);
+    /// <summary>Стадия, которой кандидат ждёт, — по статусу (ТБ-073); <see langword="null"/> — решения завершены.</summary>
+    private static string? NextStage(SearchCandidateRow candidate) => candidate.Status switch
+    {
+        CandidateStatus.Candidate => nameof(VerificationStage.Expert),
+        CandidateStatus.PendingVerifier => nameof(VerificationStage.Verifier),
+        _ => null,
+    };
 }

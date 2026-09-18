@@ -20,6 +20,12 @@
     <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Disabled="_busy" OnClick="ReloadAsync">Обновить</MudButton>
 </div>
 
+@* ТЭ-006: предупреждение — постоянным текстом над очередью, а не только во всплывающей подсказке чипа. *@
+<MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="my-3">
+    Балл схожести — вероятностная оценка модели, не установление личности (ТЭ-006). Решение — по морфологическим
+    признакам; статус «подтверждён» — только после независимых решений двух сотрудников (ТБ-073).
+</MudAlert>
+
 <MudTabs Elevation="0" Border="true" Rounded="true" Class="mt-3" ActivePanelIndex="_activeTab" ActivePanelIndexChanged="OnTabChangedAsync">
     <MudTabPanel Text="Эксперт" Icon="@Icons.Material.Filled.Person">
         @RenderQueue(VerificationStage.Expert)
@@ -37,7 +43,14 @@
 
     private VerificationStage ActiveStage => _activeTab == 1 ? VerificationStage.Verifier : VerificationStage.Expert;
 
-    protected override Task OnInitializedAsync() => LoadAsync(ActiveStage);
+    protected override Task OnInitializedAsync()
+    {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере (статический SSR до подключения circuit'а)
+        // очередь не грузим — ListVerificationQueueQuery и GetFaceQuery пар аудируются и попадали бы в журнал дважды.
+        if (!RendererInfo.IsInteractive) { return Task.CompletedTask; }
+
+        return LoadAsync(ActiveStage);
+    }
 
     private Task OnTabChangedAsync(int index)
     {

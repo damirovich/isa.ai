@@ -319,9 +319,9 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                     b.HasIndex("Classification", "DivisionId")
                         .HasDatabaseName("ix_asset_classification_division_id");
 
-                    b.HasIndex("DivisionId", "ContentHash")
+                    b.HasIndex("DivisionId", "Classification", "ContentHash")
                         .IsUnique()
-                        .HasDatabaseName("ix_asset_division_id_content_hash");
+                        .HasDatabaseName("ix_asset_division_id_classification_content_hash");
 
                     b.ToTable("asset", "media");
                 });
@@ -549,7 +549,7 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                     b.HasIndex("ProbeCropStoredFileName")
                         .IsUnique()
                         .HasDatabaseName("ix_search_session_probe_crop_stored_file_name")
-                        .HasFilter("probe_crop_stored_file_name IS NOT NULL");
+                        .HasFilter("probe_crop_stored_file_name IS NOT NULL AND probe_face_id IS NULL");
 
                     b.HasIndex("Classification", "DivisionId")
                         .HasDatabaseName("ix_search_session_classification_division_id");

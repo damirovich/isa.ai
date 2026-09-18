@@ -12,13 +12,37 @@ namespace ISC.AI.Modules.Media.Domain.Services;
 /// <param name="ContentType">MIME-тип для ответа.</param>
 /// <param name="Classification">Гриф носителя-владельца.</param>
 /// <param name="DivisionId">Подразделение носителя-владельца.</param>
+/// <param name="CaseRef">
+/// Дело (непрозрачный идентификатор профиля) для файлов, привязанных к делу напрямую — вырезка пробы
+/// (сессия поиска); для носителей и вырезок лиц <see langword="null"/>: их дело определяется по носителю
+/// (<see cref="ICaseScope.IsAssetAccessibleAsync"/>).
+/// </param>
 public sealed record MediaFileDescriptor(
     string StoredFileName,
     string Category,
     string SubPath,
     string ContentType,
     short Classification,
-    int DivisionId) : IClassified;
+    int DivisionId,
+    int? CaseRef = null) : IClassified;
+
+/// <summary>
+/// Маршрут раздачи файлов пакета — ЕДИНСТВЕННЫЙ источник шаблона и для эндпоинта (Media.Data), и для
+/// построения ссылок в UI (Media.UI не ссылается на Data): совпадение строк без общего источника
+/// однажды разошлось бы молча (404 на всех картинках).
+/// </summary>
+public static class MediaFileRoutes
+{
+    /// <summary>Префикс маршрута.</summary>
+    public const string Prefix = "/media/files";
+
+    /// <summary>Шаблон маршрута эндпоинта; для категории <see cref="MediaFileCategories.Probes"/> второй сегмент — идентификатор сессии.</summary>
+    public const string Template = Prefix + "/{category}/{assetId:int}/{storedFileName}";
+
+    /// <summary>Ссылка на файл: <c>/media/files/{category}/{id}/{storedFileName}</c>.</summary>
+    public static string Build(string category, int id, string storedFileName) =>
+        Prefix + "/" + category + "/" + id.ToString(System.Globalization.CultureInfo.InvariantCulture) + "/" + storedFileName;
+}
 
 /// <summary>Категории файлового хранилища пакета «Медиа» (подкаталоги <c>IFileStorage</c>).</summary>
 public static class MediaFileCategories

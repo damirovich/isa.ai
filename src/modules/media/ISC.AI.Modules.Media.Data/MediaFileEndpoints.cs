@@ -15,7 +15,8 @@ namespace ISC.AI.Modules.Media.Data;
 /// <summary>
 /// Раздача файлов пакета «Медиа» (ТС-010, ТБ-073): исходники носителей, вырезки лиц для показа в
 /// выдаче и вырезки проб поисковых сессий (категория <c>media-probes</c>; сегмент «носитель» маршрута — идентификатор сессии). Перед стримом байтов проверяется ДОПУСК субъекта против грифа/подразделения носителя
-/// (fail-closed ТБ-020/021) — биометрический материал несёт ту же чувствительность, что и сам носитель.
+/// (fail-closed ТБ-020/021) — биометрический материал несёт ту же чувствительность, что и сам носитель —
+/// и ПОВЕРХ него область дел субъекта через порт профиля <see cref="ICaseScope"/> (ТБ-071).
 /// Причина отказа наружу не различается: единый 404 (не подтверждаем существование файла тому, кому
 /// его видеть нельзя).
 /// </summary>
@@ -34,10 +35,14 @@ public static class MediaFileEndpoints
         "video/mp4", "video/webm",
     };
 
-    /// <summary>Маршрут <c>GET /media/files/{category}/{assetId}/{storedFileName}</c> (для <c>media-probes</c> — <c>{sessionId}</c>).</summary>
+    /// <summary>
+    /// Маршрут <see cref="MediaFileRoutes.Template"/> (<c>GET /media/files/{category}/{assetId}/{storedFileName}</c>;
+    /// для <c>media-probes</c> второй сегмент — идентификатор сессии). Шаблон — из общего источника в Domain,
+    /// тем же пользуется UI при построении ссылок.
+    /// </summary>
     public static void MapMediaFileEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapGet("/media/files/{category}/{assetId:int}/{storedFileName}", ServeFileAsync)
+        endpoints.MapGet(MediaFileRoutes.Template, ServeFileAsync)
             .RequireAuthorization()
             .WithName("MediaFiles");
     }
@@ -48,6 +53,7 @@ public static class MediaFileEndpoints
         [FromRoute] int assetId,
         [FromRoute] string storedFileName,
         [FromServices] IMediaFileAccess fileAccess,
+        [FromServices] ICaseScope caseScope,
         [FromServices] IFileStorage storage,
         [FromServices] IAccessContextProvider accessProvider,
         [FromServices] IAuditWriter auditWriter,
@@ -88,6 +94,19 @@ public static class MediaFileEndpoints
         {
             MediaFileEndpointsLog.RejectedOutsideClearance(
                 logger, access.SubjectId, access.MaxClassification, file.Classification, file.DivisionId);
+            return Results.NotFound();
+        }
+
+        // ПОВЕРХ floor — область дел субъекта (ТБ-071, ТФ-ДЕЛ-03): носитель/вырезка — по привязке носителя к
+        // доступным делам, вырезка пробы — по делу сессии (CaseRef). Иначе следователь того же подразделения
+        // перебором id читал бы материалы чужих дел, а субъект без роли профиля — всё в допуске
+        // (default-deny, ТБ-012/021). Наружу — тот же единый 404.
+        var withinCases = category == MediaFileCategories.Probes
+            ? file.CaseRef is { } caseRef && await caseScope.GetCaseAsync(caseRef, access, cancellationToken) is not null
+            : await caseScope.IsAssetAccessibleAsync(assetId, access, cancellationToken);
+        if (!withinCases)
+        {
+            MediaFileEndpointsLog.RejectedOutsideCases(logger, access.SubjectId, category, assetId, storedFileName);
             return Results.NotFound();
         }
 
@@ -141,6 +160,9 @@ internal static partial class MediaFileEndpointsLog
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Медиа: субъект {SubjectId} (допуск {MaxClassification}) вне допуска к файлу (гриф {Classification}, подразделение {DivisionId})")]
     public static partial void RejectedOutsideClearance(ILogger logger, string subjectId, short maxClassification, short classification, int divisionId);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Медиа: субъект {SubjectId} запросил файл {Category}/{AssetId}/{StoredFileName} вне дел субъекта (ТБ-071)")]
+    public static partial void RejectedOutsideCases(ILogger logger, string subjectId, string category, int assetId, string storedFileName);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Медиа: файл {Category}/{SubPath}/{StoredFileName} есть в БД, но отсутствует на диске")]
     public static partial void RejectedMissingOnDisk(ILogger logger, string category, string subPath, string storedFileName);

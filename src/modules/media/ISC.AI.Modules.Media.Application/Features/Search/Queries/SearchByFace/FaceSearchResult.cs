@@ -9,7 +9,11 @@ namespace ISC.AI.Modules.Media.Application.Features.Search;
 /// </summary>
 /// <param name="SessionId">Поисковая сессия (ТО-инф-12).</param>
 /// <param name="ProbeSha256">SHA-256 пробы (изображения либо байтов шаблона), hex.</param>
-/// <param name="ProbeCropStoredFileName">Вырезка лица пробы для показа пары; <see langword="null"/> — не сохранялась.</param>
+/// <param name="ProbeCropStoredFileName">
+/// Вырезка пробы-ИЗОБРАЖЕНИЯ (категория <c>media-probes</c>, подкаталог — дело сессии) для показа пары;
+/// для пробы-лица носителя всегда <see langword="null"/> — вырезка принадлежит носителю и берётся по
+/// <c>ProbeFaceId</c> (<c>GetFaceQuery</c>).
+/// </param>
 /// <param name="DetectedFaces">Сколько лиц найдено на пробном изображении (0 — проба задана шаблоном лица).</param>
 /// <param name="Candidates">Кандидат-лист по рангу, как записан в сессии.</param>
 /// <param name="DetectorVersion">Версия детектора.</param>

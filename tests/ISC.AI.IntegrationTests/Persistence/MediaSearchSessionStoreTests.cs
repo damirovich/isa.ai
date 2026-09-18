@@ -60,6 +60,7 @@ public sealed class MediaSearchSessionStoreTests : IAsyncLifetime
         candidates[0].CaseId.ShouldBe(100);
         candidates[0].Status.ShouldBe(CandidateStatus.Candidate);
         candidates[0].Decisions.ShouldBeEmpty();
+        candidates[0].QualityScore.ShouldBe(0.9f); // оценка качества лица — из лица базы (ТЭ-005)
         candidates[1].Rank.ShouldBe(2);
         candidates[1].CropStoredFileName.ShouldBeNull();
 
@@ -182,6 +183,41 @@ public sealed class MediaSearchSessionStoreTests : IAsyncLifetime
         {
             (await db.VerificationDecisions.CountAsync()).ShouldBe(2);
         }
+    }
+
+    [Fact(DisplayName = "ТФ-ПЛ-03: две сессии по одному лицу носителя создаются; проба-лицо с именем вырезки пробы отклоняется как противоречие")]
+    public async Task Probe_face_sessions_repeat_and_reject_probe_crop_name()
+    {
+        var factory = new MediaContextFactory(_postgres.GetConnectionString());
+        int probeFace, face;
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+            probeFace = await SeedFaceAsync(db, classification: 1, divisionId: 7, crop: "cccccccccccccccccccccccccccccccc.jpg");
+            face = await SeedFaceAsync(db, classification: 1, divisionId: 7, crop: null);
+        }
+
+        var store = new SearchSessionStore(factory, new AllowAllAccessPolicy());
+        var draft = Draft(caseId: 100, caseIds: [100]) with { ProbeFaceId = probeFace };
+
+        // Повторный поиск «найти этого человека в других материалах» по тому же лицу — обычное дело:
+        // вторая сессия обязана создаться (раньше упиралась в уникальный индекс имени вырезки пробы).
+        var first = await store.CreateAsync(draft, [Candidate(face, 0.1)]);
+        var second = await store.CreateAsync(draft, [Candidate(face, 0.1)]);
+        second.ShouldNotBe(first);
+        (await store.GetAsync(second, Insider)).ShouldNotBeNull().ProbeFaceId.ShouldBe(probeFace);
+        (await store.ListByCaseAsync(100, Insider)).Count.ShouldBe(2);
+
+        // Имя вырезки пробы — только для пробы-изображения: у пробы-лица вырезка берётся у самого лица.
+        var contradictory = draft with { ProbeCropStoredFileName = "cccccccccccccccccccccccccccccccc.jpg" };
+        var error = await Should.ThrowAsync<ArgumentException>(() => store.CreateAsync(contradictory, [Candidate(face, 0.1)]));
+        error.Message.ShouldContain("ТФ-ПЛ-03");
+        (await store.ListByCaseAsync(100, Insider)).Count.ShouldBe(2); // следа от отклонённой сессии нет
+
+        // Страховка на уровне БД: имя вырезки пробы-изображения уникально, а у проб-лиц индекс не действует.
+        var imageProbe = Draft(caseId: 100, caseIds: [100]) with { ProbeCropStoredFileName = "dddddddddddddddddddddddddddddddd.jpg" };
+        await store.CreateAsync(imageProbe, []);
+        await Should.ThrowAsync<DbUpdateException>(() => store.CreateAsync(imageProbe, []));
     }
 
     private static SearchSessionDraft Draft(int caseId, int[] caseIds) => new(

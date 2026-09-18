@@ -22,11 +22,14 @@ namespace ISC.AI.Profile.Investigation;
 /// </summary>
 /// <remarks>
 /// <para>
-/// ПОРТЫ ПАКЕТОВ, которые профиль обязан закрыть (иначе контейнер не соберёт обработчик и приложение
-/// не запустится — намеренно): <see cref="DocFlowModule.RequiredServices"/> (справочник подразделений,
-/// право настройки, кандидаты в исполнители) и <see cref="MediaModule.RequiredServices"/> (область дел
-/// субъекта, права по ролям, роли стадий верификации). Все реализации — в <c>Investigation.Data</c>
-/// (<c>AddInvestigationPersistence</c>); факт регистрации закреплён тестом <c>InvestigationProfileTests</c>.
+/// ПОРТЫ ПАКЕТОВ, которые профиль обязан закрыть: <see cref="DocFlowModule.RequiredServices"/> (справочник
+/// подразделений, право настройки, кандидаты в исполнители) и <see cref="MediaModule.RequiredServices"/>
+/// (область дел субъекта, права по ролям, роли стадий верификации). Все реализации — в
+/// <c>Investigation.Data</c> (<c>AddInvestigationPersistence</c>). Отсутствие любого порта профиль
+/// обнаруживает САМ в конце <see cref="RegisterDataContexts"/> (<see cref="EnsureModulePortsRegistered"/>)
+/// и бросает <see cref="InvalidOperationException"/> с именем порта — приложение не стартует в ЛЮБОМ
+/// окружении, а не только в Development, где контейнер ASP.NET валидирует граф при сборке. Факт
+/// регистрации закреплён тестом <c>InvestigationProfileTests</c>.
 /// </para>
 /// <para>
 /// Секции меню (порядок первого появления): «Дела» → «Медиа» (страницы пакета) → «Документооборот»
@@ -121,6 +124,35 @@ public sealed class InvestigationProfile : IProfile
         // Контексты пакетов — своя схема и своя история миграций у каждого (ADR-0017).
         DocFlowModule.RegisterDataContexts(services, configuration);
         MediaModule.RegisterDataContexts(services, configuration);
+
+        // Контракт пакетов проверяется ЗДЕСЬ, а не «когда-нибудь при первом запросе»: контейнер ASP.NET
+        // валидирует граф при сборке только в Development, в Production незакрытый порт всплыл бы как 500
+        // на первом обращении к обработчику.
+        EnsureModulePortsRegistered(services);
+    }
+
+    /// <summary>
+    /// Проверить, что профиль закрыл КАЖДЫЙ порт подключённых пакетов (<see cref="DocFlowModule.RequiredServices"/>,
+    /// <see cref="MediaModule.RequiredServices"/>): отсутствие любого — <see cref="InvalidOperationException"/>
+    /// с именем порта ещё на регистрации сервисов, то есть до старта хоста, в любом окружении (ТС-013).
+    /// </summary>
+    /// <param name="services">Коллекция сервисов после регистраций профиля и пакетов.</param>
+    /// <exception cref="InvalidOperationException">Хотя бы один порт пакета не зарегистрирован.</exception>
+    public static void EnsureModulePortsRegistered(IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var missing = DocFlowModule.RequiredServices.Concat(MediaModule.RequiredServices)
+            .Where(port => !services.Any(d => d.ServiceType == port))
+            .Select(port => port.FullName ?? port.Name)
+            .ToList();
+
+        if (missing.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Профиль «{nameof(InvestigationProfile)}» не закрыл порты подключённых пакетов: {string.Join(", ", missing)}. "
+                + "Без реализации порта приложение не запускается (ТС-013): зарегистрируйте её в AddInvestigationPersistence.");
+        }
     }
 
     /// <summary>

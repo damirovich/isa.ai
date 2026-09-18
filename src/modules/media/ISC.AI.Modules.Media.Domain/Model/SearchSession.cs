@@ -62,7 +62,8 @@ public sealed record SearchCandidateRow(
     int DivisionId,
     CandidateStatus Status,
     int? PersonRef,
-    IReadOnlyList<VerificationDecision> Decisions)
+    IReadOnlyList<VerificationDecision> Decisions,
+    float? QualityScore = null)
 {
     /// <summary>Косинусная схожесть (1 − расстояние) — показывается ТОЛЬКО с предупреждением о вероятностной природе (ТЭ-006).</summary>
     public double Similarity => 1 - CosineDistance;

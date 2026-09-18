@@ -21,6 +21,11 @@ namespace ISC.AI.UnitTests.Architecture;
 /// (е) модуль зависит «внутрь» по тому же правилу, что и профиль (<c>&lt;Модуль&gt;.Data → Persistence</c>).
 /// Ссылка «профиль → модуль» разрешена и является единственным направлением связи между ними.
 ///
+/// Интеграции <c>src/integrations/*</c> (ADR-0020) — четвёртый вид проектов: реализации портов домена модуля
+/// внешними библиотеками. (ж) Интеграция ссылается только на <c>Abstractions</c> и домены модулей; хост,
+/// <c>Persistence</c> и профили для неё недостижимы. Проверки (д) и (ж) — ТРАНЗИТИВНЫЕ (через <c>DependsOn</c>):
+/// цепочка «модуль → интеграция → профиль/хост» иначе прошла бы незамеченной.
+///
 /// Профиль поставки (ТС-004, ADR-0002). С появлением второго профиля («Следствие») в репозитории
 /// лежат ДВА манифеста, а хост обязан подключать ровно один — тот, что выбран свойством MSBuild
 /// <c>IscProfile</c> (<c>ISC.AI.Web.csproj</c>: условные <c>ItemGroup</c>). Поэтому граф строится с
@@ -168,8 +173,10 @@ public sealed class DependencyRulesTests
     {
         foreach (var (project, references) in Graph.Where(kv => IsProfileProject(kv.Key)))
         {
-            references.ShouldNotContain(Host,
-                $"Профиль «{project}» не должен ссылаться на хост «{Host}».");
+            // Транзитивно: цепочка «профиль → модуль/интеграция → хост» нарушает правило точно так же,
+            // как прямая ссылка, и без DependsOn прошла бы незамеченной.
+            DependsOn(project, Host).ShouldBeFalse(
+                $"Профиль «{project}» не должен зависеть от хоста «{Host}» — ни прямо, ни транзитивно.");
 
             foreach (var reference in references.Where(IsCoreLibrary))
             {
@@ -193,13 +200,49 @@ public sealed class DependencyRulesTests
 
         foreach (var project in modules)
         {
-            var toProfile = Graph[project].Where(IsProfileProject).ToArray();
+            // Транзитивно, а не только прямые ссылки: цепочка «модуль → интеграция (Vision.Onnx) → профиль/хост»
+            // компилируется и без DependsOn не была бы поймана ни одним тестом.
+            var toProfile = Graph.Keys.Where(IsProfileProject).Where(p => DependsOn(project, p)).ToArray();
             toProfile.ShouldBeEmpty(
-                $"Модуль «{project}» не должен зависеть от профиля (ссылается на: {string.Join(", ", toProfile)}). "
+                $"Модуль «{project}» не должен зависеть от профиля (прямо или транзитивно: {string.Join(", ", toProfile)}). "
                 + "Связь допустима ТОЛЬКО в обратную сторону: профиль подключает модуль (ADR-0017).");
 
-            Graph[project].ShouldNotContain(Host,
-                $"Модуль «{project}» не должен ссылаться на хост «{Host}».");
+            DependsOn(project, Host).ShouldBeFalse(
+                $"Модуль «{project}» не должен зависеть от хоста «{Host}» — ни прямо, ни транзитивно.");
+        }
+    }
+
+    /// <summary>
+    /// Интеграции (<c>src/integrations/*</c>, ADR-0020) — реализации портов ДОМЕНА модуля внешними
+    /// библиотеками (ONNX Runtime, ffmpeg…). Им разрешены только <c>Abstractions</c> и домены модулей
+    /// (<c>ISC.AI.Modules.&lt;Имя&gt;.Domain</c>): ни хост, ни <c>Persistence</c>, ни профиль, ни прикладной/UI/данных
+    /// слой модуля — иначе интеграция перестаёт быть заменяемой и тянет за собой слои, о которых знать не должна
+    /// (ТС-009/011). Проверяются и прямые ссылки, и транзитивная достижимость хоста/Persistence/профилей.
+    /// </summary>
+    [Fact(DisplayName = "Интеграция ссылается только на Abstractions и домены модулей; хост, Persistence и профили недостижимы")]
+    public void Integration_references_only_Abstractions_and_module_domains()
+    {
+        var integrations = Graph.Keys.Where(IsIntegrationProject).ToArray();
+
+        // Страховка от вхолостую прошедшего теста: интеграция в решении есть (src/integrations/ISC.AI.Vision.Onnx).
+        integrations.ShouldNotBeEmpty("Не найдено ни одной интеграции в src/integrations — проверь путь обнаружения.");
+
+        foreach (var project in integrations)
+        {
+            var forbidden = Graph[project]
+                .Where(reference => reference != Abstractions && !IsModuleDomainProject(reference))
+                .ToArray();
+            forbidden.ShouldBeEmpty(
+                $"Интеграция «{project}» ссылается на «{string.Join(", ", forbidden)}»: разрешены только {Abstractions} и домены модулей (ISC.AI.Modules.<Имя>.Domain).");
+
+            DependsOn(project, Host).ShouldBeFalse(
+                $"Интеграция «{project}» не должна зависеть от хоста «{Host}» — ни прямо, ни транзитивно.");
+            DependsOn(project, Persistence).ShouldBeFalse(
+                $"Интеграция «{project}» не должна зависеть от «{Persistence}» — ни прямо, ни транзитивно.");
+
+            var toProfile = Graph.Keys.Where(IsProfileProject).Where(p => DependsOn(project, p)).ToArray();
+            toProfile.ShouldBeEmpty(
+                $"Интеграция «{project}» не должна зависеть от профиля (прямо или транзитивно: {string.Join(", ", toProfile)}).");
         }
     }
 
@@ -240,6 +283,31 @@ public sealed class DependencyRulesTests
     // Слой данных модуля: «ISC.AI.Modules.<Имя>.Data» — единственное место модуля, которому разрешён Persistence.
     private static bool IsModuleDataProject(string name) =>
         IsModuleProject(name) && name.EndsWith(".Data", StringComparison.Ordinal);
+
+    // Домен модуля: «ISC.AI.Modules.<Имя>.Domain» — порты, которые реализуют интеграции.
+    private static bool IsModuleDomainProject(string name) =>
+        IsModuleProject(name) && name.EndsWith(".Domain", StringComparison.Ordinal);
+
+    // Интеграция (src/integrations/*, ADR-0020): определяется по КАТАЛОГУ, а не по префиксу имени, —
+    // новая интеграция с любым именем (ISC.AI.Vision.*, ISC.AI.Ocr.* …) попадает под правило автоматически.
+    private static readonly HashSet<string> IntegrationProjects = DiscoverIntegrationProjects();
+
+    private static bool IsIntegrationProject(string name) => IntegrationProjects.Contains(name);
+
+    private static HashSet<string> DiscoverIntegrationProjects()
+    {
+        var dir = Path.Combine(FindRepoRoot(), "src", "integrations");
+        if (!Directory.Exists(dir))
+        {
+            return new HashSet<string>(StringComparer.Ordinal);
+        }
+
+        return Directory.GetFiles(dir, "*.csproj", SearchOption.AllDirectories)
+            .Select(Path.GetFileNameWithoutExtension)
+            .Where(name => name is not null)
+            .Select(name => name!)
+            .ToHashSet(StringComparer.Ordinal);
+    }
 
     private static bool IsCoreLibrary(string name) => CoreLibraries.Contains(name);
 

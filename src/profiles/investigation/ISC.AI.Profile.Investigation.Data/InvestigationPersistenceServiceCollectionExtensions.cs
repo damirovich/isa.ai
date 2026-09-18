@@ -44,8 +44,10 @@ public static class InvestigationPersistenceServiceCollectionExtensions
         services.AddScoped<ISC.AI.Modules.DocFlow.Domain.Services.IDocFlowAdministration, InvestigationDocFlowAdministration>();
         services.AddScoped<ISC.AI.Modules.DocFlow.Domain.Services.IAssignmentCandidateDirectory, InvestigationAssignmentCandidateDirectory>();
 
-        // Порты пакета «Медиа»: область дел субъекта (ТБ-071), права по роли (ТП-004), стадии
-        // верификации (ТБ-073). Без ICaseScope приложение стартовать не должно (ТС-013).
+        // Порты пакета «Медиа»: область дел субъекта (ТБ-071) и доступность носителя по прямому
+        // идентификатору (CaseScope: хранилища + фабрика контекста + политика + роли — всё зарегистрировано
+        // выше), права по роли (ТП-004), стадии верификации (ТБ-073). Без ICaseScope приложение стартовать
+        // не должно (ТС-013).
         services.AddScoped<ISC.AI.Modules.Media.Domain.Services.ICaseScope, CaseScope>();
         services.AddScoped<ISC.AI.Modules.Media.Domain.Services.IMediaAdministration, MediaAdministration>();
         services.AddScoped<ISC.AI.Modules.Media.Domain.Services.IVerificationPolicy, VerificationPolicy>();

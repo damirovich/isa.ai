@@ -29,6 +29,32 @@ public sealed class CaseValidatorsTests
     public void Create_rejects_overlong_title() =>
         _create.Validate(Valid() with { Title = new string('а', 501) }).IsValid.ShouldBeFalse();
 
+    // Пределы длин — константы валидатора: их же читают MaxLength полей страниц (Cases, CaseCard), поэтому
+    // здесь закрепляются и значения, и то, что валидатор им действительно следует.
+    [Fact(DisplayName = "Пределы длин: константы валидатора равны 100/500/2000 и применяются к номеру, названию, основанию")]
+    public void Length_limits_are_constants_and_enforced()
+    {
+        CreateCaseValidator.MaxNumberLength.ShouldBe(100);
+        CreateCaseValidator.MaxTitleLength.ShouldBe(500);
+        CreateCaseValidator.MaxBasisLength.ShouldBe(2000);
+
+        _create.Validate(Valid() with { Number = new string('1', CreateCaseValidator.MaxNumberLength) }).IsValid.ShouldBeTrue();
+        _create.Validate(Valid() with { Title = new string('а', CreateCaseValidator.MaxTitleLength) }).IsValid.ShouldBeTrue();
+        _create.Validate(Valid() with { Basis = new string('о', CreateCaseValidator.MaxBasisLength) }).IsValid.ShouldBeTrue();
+        _create.Validate(Valid() with { Basis = new string('о', CreateCaseValidator.MaxBasisLength + 1) }).IsValid.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Правка: пределы названия и основания — те же константы, что при создании")]
+    public void Update_uses_the_same_length_limits()
+    {
+        var valid = new UpdateCaseCommand(3, "Кража", CaseKind.Material, new DateOnly(2026, 9, 1), null);
+
+        _update.Validate(valid with { Title = new string('а', CreateCaseValidator.MaxTitleLength) }).IsValid.ShouldBeTrue();
+        _update.Validate(valid with { Title = new string('а', CreateCaseValidator.MaxTitleLength + 1) }).IsValid.ShouldBeFalse();
+        _update.Validate(valid with { Basis = new string('о', CreateCaseValidator.MaxBasisLength) }).IsValid.ShouldBeTrue();
+        _update.Validate(valid with { Basis = new string('о', CreateCaseValidator.MaxBasisLength + 1) }).IsValid.ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Создание: неизвестный вид дела отклоняется")]
     public void Create_rejects_unknown_kind() =>
         _create.Validate(Valid() with { Kind = (CaseKind)42 }).IsValid.ShouldBeFalse();

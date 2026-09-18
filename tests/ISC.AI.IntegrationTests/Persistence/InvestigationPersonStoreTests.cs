@@ -165,12 +165,61 @@ public sealed class InvestigationPersonStoreTests : IAsyncLifetime
         list.ShouldAllBe(a => a.Status == AppearanceStatus.InvestigativeLead);
         list.ShouldAllBe(a => a.ExpertUserId != a.VerifierUserId);
 
-        // Один кандидат — одно появление (уникальный индекс).
-        await Should.ThrowAsync<Microsoft.EntityFrameworkCore.DbUpdateException>(
-            () => persons.AddAppearanceAsync(newer));
+        // Один кандидат — одно появление: повтор с тем же CandidateId идемпотентен — возвращает существующий Id,
+        // второй строки нет (повтор после сбоя между решением верификатора и записью появления, ТФ-ВЕР-03).
+        var newerId = list[0].Id;
+        (await persons.AddAppearanceAsync(newer)).ShouldBe(newerId);
+        (await persons.AddAppearanceAsync(newer with { Similarity = 0.5, MediaFaceId = 9999 })).ShouldBe(newerId);
+        (await persons.ListAppearancesAsync(person.PersonId, owner)).Count.ShouldBe(2);
 
         // Чужому субъекту появления не видны.
         (await persons.ListAppearancesAsync(person.PersonId, InvestigationTestKit.Access(11, 9, 5))).ShouldBeEmpty();
         (await persons.GetAsync(person.PersonId, owner)).ShouldNotBeNull().AppearanceCount.ShouldBe(2);
+    }
+
+    [Fact(DisplayName = "Появление выше допуска или чужого подразделения не выдаётся даже при видимом фигуранте (ТБ-020/070); параллельное создание неустановленных лиц даёт разные номера без 23505")]
+    public async Task Appearance_floor_and_concurrent_unidentified_numbering()
+    {
+        var factory = new InvestigationContextFactory(_postgres.GetConnectionString());
+        var core = new CoreContextFactory(_postgres.GetConnectionString());
+        await InvestigationTestKit.MigrateAsync(factory);
+        await InvestigationTestKit.AssignRolesAsync(factory, (10, InvestigationRole.Investigator));
+
+        var cases = InvestigationTestKit.CreateCaseStore(factory, core);
+        var persons = InvestigationTestKit.CreatePersonStore(factory, core);
+        var owner = InvestigationTestKit.Access(10, 2, 5);
+
+        var caseA = await cases.CreateAsync(InvestigationTestKit.Draft("A-1", 5, 1, 10), owner);
+        caseA.Result.ShouldBe(CaseWriteResult.Ok);
+        var person = await persons.CreateAsync(new PersonDraft(caseA.CaseId, "Иванов", false, null, null), owner);
+
+        var visible = new AppearanceDraft(person.PersonId, caseA.CaseId, 100, 1000, null, null, 7, 71, 0.8,
+            new DateTime(2026, 9, 1, 10, 0, 0, DateTimeKind.Utc), ExpertUserId: 40, VerifierUserId: 41, 1, 5);
+        await persons.AddAppearanceAsync(visible);
+        // Гриф появления (с кандидата чужого носителя) выше допуска субъекта.
+        await persons.AddAppearanceAsync(visible with { CandidateId = 72, Classification = 3 });
+        // Подразделение появления вне допуска субъекта.
+        await persons.AddAppearanceAsync(visible with { CandidateId = 73, DivisionId = 6 });
+
+        var list = await persons.ListAppearancesAsync(person.PersonId, owner);
+        list.ShouldHaveSingleItem().CandidateId.ShouldBe(71);
+        (await persons.ListAppearancesAsync(person.PersonId, InvestigationTestKit.Access(10, 3, 5, 6)))
+            .Select(a => a.CandidateId).OrderBy(c => c).ShouldBe([71, 72, 73]);
+
+        // Гонка: четыре одновременных «неустановленных» в одном деле — все Ok, номера 1..4 без повторов.
+        var created = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ =>
+            persons.CreateAsync(new PersonDraft(caseA.CaseId, null, IsUnidentified: true, null, null), owner)));
+        created.ShouldAllBe(c => c.Result == PersonWriteResult.Ok);
+
+        var rows = await persons.ListByCaseAsync(caseA.CaseId, owner);
+        rows.Where(r => r.IsUnidentified).Select(r => r.UnidentifiedNumber).OrderBy(n => n).ShouldBe([1, 2, 3, 4]);
+
+        // Перевод в «неустановлен» через UpdateAsync параллельно с созданием — тот же механизм, номер 5/6.
+        var updating = persons.UpdateAsync(person.PersonId, null, true, null, null, owner);
+        var creating = persons.CreateAsync(new PersonDraft(caseA.CaseId, null, IsUnidentified: true, null, null), owner);
+        (await updating).ShouldBe(PersonWriteResult.Ok);
+        (await creating).Result.ShouldBe(PersonWriteResult.Ok);
+        (await persons.ListByCaseAsync(caseA.CaseId, owner))
+            .Where(r => r.IsUnidentified).Select(r => r.UnidentifiedNumber).OrderBy(n => n).ShouldBe([1, 2, 3, 4, 5, 6]);
     }
 }

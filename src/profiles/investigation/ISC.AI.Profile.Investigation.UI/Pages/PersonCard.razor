@@ -94,7 +94,8 @@ else
                     <MudTh>Сессия</MudTh>
                 </HeaderContent>
                 <RowTemplate>
-                    <MudTd DataLabel="Носитель"><MudLink Href="@($"/media/assets/{context.MediaAssetId}")">носитель № @context.MediaAssetId · лицо № @context.MediaFaceId</MudLink></MudTd>
+                    @* Соглашение навигации пакета «Медиа»: ?face= подсвечивает лицо на карточке носителя (ТФ-ПЕР-02 «переход к кадру»). *@
+                    <MudTd DataLabel="Носитель"><MudLink Href="@($"/media/assets/{context.MediaAssetId}?face={context.MediaFaceId}")">носитель № @context.MediaAssetId · лицо № @context.MediaFaceId</MudLink></MudTd>
                     <MudTd DataLabel="Момент">@Moment(context)</MudTd>
                     <MudTd DataLabel="Схожесть">
                         <MudTooltip Text="Вероятностная оценка алгоритма; не является подтверждением личности (ТЭ-006)">
@@ -144,7 +145,7 @@ else
                 <RowTemplate>
                     <MudTd DataLabel="№">@context.Id</MudTd>
                     <MudTd DataLabel="Носитель">
-                        <MudLink Href="@($"/media/assets/{context.MediaAssetId}")">
+                        <MudLink Href="@(context.MediaFaceId is { } faceId ? $"/media/assets/{context.MediaAssetId}?face={faceId}" : $"/media/assets/{context.MediaAssetId}")">
                             носитель № @context.MediaAssetId@(context.MediaFaceId is { } face ? $" · лицо № {face}" : string.Empty)
                         </MudLink>
                     </MudTd>
@@ -298,6 +299,11 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере (статический SSR до подключения circuit'а)
+        // карточку не грузим — иначе GetPersonQuery/ListAppearancesQuery попадали бы в журнал дважды.
+        // До интерактива страница показывает индикатор загрузки (_person is null && _error is null).
+        if (!RendererInfo.IsInteractive) { return; }
+
         var accounts = await Dispatcher.Send(new ListUserAccountsQuery());
         if (accounts is { Status: true, Data: { } rows })
         {
@@ -309,6 +315,9 @@ else
 
     protected override async Task OnParametersSetAsync()
     {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере не грузим (см. OnInitializedAsync).
+        if (!RendererInfo.IsInteractive) { return; }
+
         if (_person is { } current && current.Id != Id)
         {
             await ReloadAsync();

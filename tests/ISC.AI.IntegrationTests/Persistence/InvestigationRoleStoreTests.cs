@@ -71,38 +71,27 @@ public sealed class InvestigationRoleStoreTests : IAsyncLifetime
         }
     }
 
-    [Fact(DisplayName = "Порты «Медиа» по роли: загрузка/поиск/удаление — по ТП-004; Администратор не эксперт и не верификатор (ТБ-073); без роли — ничего")]
+    [Fact(DisplayName = "Порты «Медиа»: без роли и без субъекта — отказ даже без Администратора в контуре; Администратор не эксперт и не верификатор (ТБ-073)")]
     public async Task Media_ports_answer_by_role_without_bootstrap_mode()
     {
+        // Полная матрица ролей × {загрузка, поиск, удаление} — InvestigationRoleMatrixTests (ТП-004, ADR-0022 п. 8).
         var (factory, core) = await MigrateBothAsync();
         await InvestigationTestKit.AssignRolesAsync(factory,
             (10, InvestigationRole.Investigator),
             (20, InvestigationRole.Head),
             (30, InvestigationRole.Administrator),
             (40, InvestigationRole.FaceExpert),
-            (41, InvestigationRole.Verifier),
-            (60, InvestigationRole.SecurityOfficer));
+            (41, InvestigationRole.Verifier));
 
         var roles = new UserRoleStore(core, factory);
 
         static MediaAdministration For(UserRoleStore roles, int? userId) => new(roles, new FixedSubjectProvider(userId));
 
-        (await For(roles, 10).CanUploadAsync()).ShouldBeTrue();
-        (await For(roles, 10).CanSearchAsync()).ShouldBeTrue();
-        (await For(roles, 10).CanPurgeAsync()).ShouldBeFalse();
-
-        (await For(roles, 40).CanUploadAsync()).ShouldBeFalse();
-        (await For(roles, 40).CanSearchAsync()).ShouldBeTrue();
-        (await For(roles, 40).CanPurgeAsync()).ShouldBeFalse();
-
-        (await For(roles, 20).CanPurgeAsync()).ShouldBeTrue();
-        (await For(roles, 30).CanPurgeAsync()).ShouldBeTrue();
-        (await For(roles, 41).CanSearchAsync()).ShouldBeFalse();
-        (await For(roles, 60).CanUploadAsync()).ShouldBeFalse();
-
         // Без роли и без субъекта — отказ; «пока Администратора нет — можно всем» здесь НЕ действует.
         (await For(roles, 50).CanSearchAsync()).ShouldBeFalse();
         (await For(roles, null).CanUploadAsync()).ShouldBeFalse();
+        (await For(roles, null).CanSearchAsync()).ShouldBeFalse();
+        (await For(roles, null).CanPurgeAsync()).ShouldBeFalse();
         await using (var db = factory.CreateDbContext())
         {
             db.UserRoleAssignments.RemoveRange(db.UserRoleAssignments.Where(r => r.Role == InvestigationRole.Administrator));

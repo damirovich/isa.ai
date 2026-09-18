@@ -16,13 +16,14 @@ namespace ISC.AI.Modules.Media.Application.Features.Indexing;
 /// Конвейер индексации носителя (ТП-005, ТО-мат-05): исходник из хранилища → (для видео) раскадровка
 /// (ТО-мат-06) → детекция лиц → оценка качества (ТО-мат-07) → векторизация пригодных → вырезки →
 /// атомарная запись шаблонов с грифом носителя (ТБ-070). Исполняется фоновой очередью ядра из
-/// per-operation scope; повторный запуск идемпотентен — прежние вырезки снимаются, шаблоны
-/// перезаписываются хранилищем одной транзакцией.
+/// per-operation scope; повторный запуск идемпотентен — шаблоны перезаписываются хранилищем одной
+/// транзакцией, прежние вырезки снимаются ПОСЛЕ её фиксации (половинчатого состояния нет, ТП-005).
 /// </summary>
 /// <remarks>
 /// Ошибка любого шага НЕ пробрасывается: фиксируется в статусе носителя (<see cref="IMediaStore.FailIndexingAsync"/>)
 /// и возвращается в <see cref="MediaIndexResult"/> — фоновой задаче незачем падать, оператор видит причину в
-/// карточке (ТФ-МЕД-02). Отмена — пробрасывается (воркер останавливается штатно). Результат индексации —
+/// карточке (ТФ-МЕД-02); вырезки, сохранённые сорвавшимся прогоном, снимаются. Отмена — фиксируется как
+/// «индексация отменена» и пробрасывается (воркер останавливается штатно). Результат индексации —
 /// аудируемое событие (ТО-инф-11, ТБ-030): запись <see cref="AuditAction.Ingest"/> с грифом носителя, без
 /// субъекта (конвейер работает от имени системы).
 /// </remarks>
@@ -49,22 +50,19 @@ public sealed class MediaIndexer(
         }
 
         var progress = new Progress();
+        var subPath = assetId.ToString(CultureInfo.InvariantCulture);
         try
         {
             await store.MarkProcessingAsync(assetId, cancellationToken);
-            var subPath = assetId.ToString(CultureInfo.InvariantCulture);
-
-            // Переиндексация: вырезки прежнего прогона снимаем с диска до записи новых (строки снимет
-            // CompleteIndexingAsync в своей транзакции; файл без строки безвреден, строка без файла — нет).
-            foreach (var crop in info.ExistingCropFileNames)
-            {
-                await fileStorage.DeleteAsync(crop, MediaFileCategories.FaceCrops, subPath, cancellationToken);
-            }
 
             long? durationMs = await ProcessSourceAsync(info, subPath, progress, cancellationToken);
 
+            // Строки лиц/шаблонов заменяются одной транзакцией; ТОЛЬКО после её фиксации снимаем вырезки
+            // прежнего прогона (ТП-005: файл без строки безвреден, строка без файла — нет; при сбое до этой
+            // точки старые лица остаются с файлами, а новые вырезки — сироты — удаляются в catch).
             await store.CompleteIndexingAsync(
                 assetId, progress.Faces, detector.ModelVersion, embedder.ModelVersion, durationMs, cancellationToken);
+            await DeleteCropsAsync(assetId, subPath, info.ExistingCropFileNames);
 
             // ТО-инф-11: факт индексации биометрии — в неизменяемый журнал с грифом/подразделением носителя.
             await auditWriter.WriteAsync(
@@ -84,13 +82,57 @@ public sealed class MediaIndexer(
         }
         catch (OperationCanceledException)
         {
+            // Отмена: носитель не должен зависнуть в «в обработке» — фиксируем «отменено» (повтор — вручную,
+            // ТФ-МЕД-02), снимаем новые вырезки-сироты и пробрасываем, чтобы воркер остановился штатно.
+            MediaIndexerLog.Cancelled(logger, assetId, progress.Frames);
+            await DeleteCropsAsync(assetId, subPath, NewCropNames(progress));
+            await store.FailIndexingAsync(assetId, "индексация отменена", CancellationToken.None);
             throw;
         }
         catch (Exception exception)
         {
             MediaIndexerLog.Failed(logger, exception, assetId, progress.Frames);
+            await DeleteCropsAsync(assetId, subPath, NewCropNames(progress));
             await store.FailIndexingAsync(assetId, exception.Message, cancellationToken);
             return new MediaIndexResult(false, progress.Frames, progress.Faces.Count, progress.Rejected, exception.Message);
+        }
+    }
+
+    /// <summary>Имена вырезок, сохранённых ТЕКУЩИМ прогоном (для компенсации при сбое до фиксации строк).</summary>
+    private static List<string> NewCropNames(Progress progress)
+    {
+        var names = new List<string>(progress.Faces.Count);
+        foreach (var face in progress.Faces)
+        {
+            if (face.CropStoredFileName is { } name)
+            {
+                names.Add(name);
+            }
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// Снимает вырезки с диска без отмены (компенсация должна дойти до конца) и без проброса: файл-сирота
+    /// хуже не делает, а падение здесь скрыло бы исходную ошибку или уже зафиксированный успех.
+    /// </summary>
+    private async Task DeleteCropsAsync(int assetId, string subPath, IReadOnlyList<string> cropFileNames)
+    {
+        foreach (var crop in cropFileNames)
+        {
+            try
+            {
+                await fileStorage.DeleteAsync(crop, MediaFileCategories.FaceCrops, subPath, CancellationToken.None);
+            }
+            catch (IOException exception)
+            {
+                MediaIndexerLog.CropNotDeleted(logger, exception, assetId, crop);
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                MediaIndexerLog.CropNotDeleted(logger, exception, assetId, crop);
+            }
         }
     }
 

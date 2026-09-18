@@ -125,7 +125,7 @@
     private int _closed;
     private int _total;
     private bool _truncated;
-    private bool _busy;
+    private bool _busy = true; // «загрузка…» до первой интерактивной загрузки (предрендер данных не грузит)
     private string? _error;
 
     // 0 — «Дела», 1 — «Документооборот». Начальную вкладку задаёт адрес (?tab=docflow).
@@ -133,12 +133,17 @@
 
     protected override async Task OnInitializedAsync()
     {
-        // Разбор ?tab= без сторонних утилит: значение одно и известно наперечёт.
+        // Разбор ?tab= без сторонних утилит: значение одно и известно наперечёт. Выбор вкладки — и на
+        // предрендере тоже, чтобы страница сразу открылась на нужной.
         var query = new Uri(Navigation.Uri).Query;
         if (query.Contains("tab=docflow", StringComparison.OrdinalIgnoreCase))
         {
             _activeTab = 1;
         }
+
+        // ТБ-030 «одно открытие — одна запись»: на предрендере (статический SSR до подключения circuit'а)
+        // список дел не грузим — иначе аудируемый ListCasesQuery попадал бы в журнал дважды.
+        if (!RendererInfo.IsInteractive) { return; }
 
         await ReloadAsync();
     }

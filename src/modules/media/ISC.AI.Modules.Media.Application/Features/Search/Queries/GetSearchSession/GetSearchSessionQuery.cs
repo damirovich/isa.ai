@@ -32,7 +32,11 @@ public sealed record GetSearchSessionQuery(int SessionId) : IRequest<ResponseDto
     public string? AuditSummary => $"media:search:{SessionId}:view";
 
     /// <inheritdoc cref="GetSearchSessionQuery" />
-    public sealed class Handler(IAccessContextProvider accessProvider, ISubjectProvider subjectProvider, ISearchSessionStore store)
+    public sealed class Handler(
+        IAccessContextProvider accessProvider,
+        ISubjectProvider subjectProvider,
+        ISearchSessionStore store,
+        ICaseScope caseScope)
         : IRequestHandler<GetSearchSessionQuery, ResponseDto<SearchSessionDetails>>
     {
         /// <inheritdoc />
@@ -45,6 +49,14 @@ public sealed record GetSearchSessionQuery(int SessionId) : IRequest<ResponseDto
             var access = await accessProvider.GetCurrentAsync(cancellationToken);
             var session = await store.GetAsync(query.SessionId, access, cancellationToken);
             if (session is null)
+            {
+                return ResponseDto<SearchSessionDetails>.NotFound("Поисковая сессия не найдена или недоступна.");
+            }
+
+            // Сужение по делам субъекта поверх решётки (ТБ-071, ТФ-ПЛ-07 «доступна следователю дела и
+            // руководителю»): сессия чужого дела того же подразделения по перебираемому идентификатору не
+            // читается; субъект без роли не видит ничего (ТБ-012). Отказ неотличим от «не найдена».
+            if (await caseScope.GetCaseAsync(session.CaseId, access, cancellationToken) is null)
             {
                 return ResponseDto<SearchSessionDetails>.NotFound("Поисковая сессия не найдена или недоступна.");
             }

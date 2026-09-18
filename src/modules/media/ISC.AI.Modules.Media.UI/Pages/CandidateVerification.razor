@@ -86,21 +86,32 @@ else
                 <MudRadio T="VerificationVerdict?" Value="VerificationVerdict.Rejected" Color="Color.Error">отклонён</MudRadio>
                 <MudRadio T="VerificationVerdict?" Value="VerificationVerdict.Undetermined" Color="Color.Warning">неопределённо</MudRadio>
             </MudRadioGroup>
-            <MudTextField @bind-Value="_rationale" Label="Обоснование *" Variant="Variant.Outlined" Lines="5" MaxLength="4000" Class="mt-2"
+            <MudTextField @bind-Value="_rationale" Label="Обоснование *" Variant="Variant.Outlined" Lines="5" MaxLength="@RecordVerificationValidator.MaxRationaleLength" Class="mt-2"
                           HelperText="морфологические признаки по методике: форма лица, надбровные дуги, нос, уши, особые приметы; какие признаки сходны, какие различаются" />
             @if (Stage == VerificationStage.Expert)
             {
-                @* Только эксперту (ТФ-ВЕР-03); верификатору фигурант не показывается — слепота (ТФ-ВЕР-02). *@
-                <MudSelect T="int?" @bind-Value="_personRef" Label="Фигурант дела (необязательно)" Variant="Variant.Outlined" Dense="true"
+                @* Только эксперту (ТФ-ВЕР-03); верификатору фигурант не показывается — слепота (ТФ-ВЕР-02).
+                   При исходе «подтверждён» фигурант ОБЯЗАТЕЛЕН (валидатор команды требует то же) — иначе после
+                   второго «подтверждён» статус был бы без «появления». *@
+                <MudSelect T="int?" @bind-Value="_personRef" Label="Фигурант дела (обязателен при «подтверждён»)" Variant="Variant.Outlined" Dense="true"
                            Clearable="true" Class="mt-2" Placeholder="без привязки" Disabled="_busy">
                     @foreach (var person in _persons)
                     {
                         <MudSelectItem T="int?" Value="@person.PersonId">@person.DisplayName</MudSelectItem>
                     }
                 </MudSelect>
+                @if (SuggestedPersonRef is { } suggested)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Info" Class="d-block mt-1">
+                        Кандидат создан ручной привязкой к фигуранту № @suggested (ТФ-МЕД-03) —
+                        @(_persons.Any(p => p.PersonId == suggested) ? "он подставлен в список; проверьте и при «подтверждён» оставьте его." : "в списке фигурантов дела его нет — выберите фигуранта вручную.")
+                    </MudText>
+                }
                 @if (_persons.Count == 0)
                 {
-                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">Фигурантов у дела нет либо они вне вашего допуска — решение можно записать без привязки.</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
+                        Фигурантов у дела нет либо они вне вашего допуска: «подтверждён» записать нельзя (ТФ-ВЕР-03), «отклонён»/«неопределённо» — можно.
+                    </MudText>
                 }
             }
             <div class="d-flex align-center gap-3 mt-3 flex-wrap">
@@ -108,6 +119,10 @@ else
                            Disabled="@(!FormValid || _busy)" OnClick="SubmitAsync">@(_busy ? "Записываю…" : "Записать решение")</MudButton>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">Решение необратимо и записывается в неизменяемый журнал (ТБ-072).</MudText>
             </div>
+            @if (PersonMissingForConfirm)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-1">@RecordVerificationValidator.PersonRequiredMessage</MudText>
+            }
         </MudPaper>
     }
 }
@@ -118,6 +133,9 @@ else
 
     /// <summary>Стадия из адресной строки (<c>Expert</c>/<c>Verifier</c>); по умолчанию — эксперт.</summary>
     [SupplyParameterFromQuery(Name = "stage")] public string? StageQuery { get; set; }
+
+    /// <summary>Фигурант, указанный при ручной привязке лица (ТФ-МЕД-03) — подсказка эксперту; верификатору не показывается (ТФ-ВЕР-02).</summary>
+    [SupplyParameterFromQuery(Name = "person")] public int? SuggestedPersonRef { get; set; }
 
     private VerificationStage Stage =>
         Enum.TryParse<VerificationStage>(StageQuery, ignoreCase: true, out var stage) ? stage : VerificationStage.Expert;
@@ -132,10 +150,18 @@ else
     private string? _error;
     private string? _formError;
 
-    private bool FormValid => _verdict is not null && !string.IsNullOrWhiteSpace(_rationale);
+    /// <summary>ТФ-ВЕР-03: эксперт при «подтверждён» обязан указать фигуранта — проверяем на клиенте и объясняем причину.</summary>
+    private bool PersonMissingForConfirm =>
+        Stage == VerificationStage.Expert && _verdict == VerificationVerdict.Confirmed && _personRef is null;
+
+    private bool FormValid => _verdict is not null && !string.IsNullOrWhiteSpace(_rationale) && !PersonMissingForConfirm;
 
     protected override async Task OnInitializedAsync()
     {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере (статический SSR до подключения circuit'а)
+        // пару не грузим — GetCandidatePairQuery аудируется и попадал бы в журнал дважды.
+        if (!RendererInfo.IsInteractive) { return; }
+
         var response = await Dispatcher.Send(new GetCandidatePairQuery(CandidateId, Stage));
         if (response is not { Status: true, Data: { } item })
         {
@@ -153,12 +179,18 @@ else
             {
                 _persons = list;
             }
+
+            // Подсказка ручной привязки принимается ТОЛЬКО если фигурант есть среди фигурантов дела (ТБ-071).
+            if (SuggestedPersonRef is { } suggested && _persons.Any(p => p.PersonId == suggested))
+            {
+                _personRef = suggested;
+            }
         }
     }
 
     private async Task SubmitAsync()
     {
-        if (_verdict is not { } verdict || string.IsNullOrWhiteSpace(_rationale))
+        if (_verdict is not { } verdict || string.IsNullOrWhiteSpace(_rationale) || PersonMissingForConfirm)
         {
             return;
         }

@@ -55,6 +55,10 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере (статический SSR до подключения circuit'а)
+        // лицо пробы не запрашиваем — GetFaceQuery аудируется и попадал бы в журнал дважды на каждую пару.
+        if (!RendererInfo.IsInteractive) { return; }
+
         if (Item.ProbeFaceId is not { } probeFaceId)
         {
             // Проба — загруженное изображение: вырезка хранится под идентификатором сессии (ТБ-070).

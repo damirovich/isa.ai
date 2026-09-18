@@ -104,6 +104,57 @@ public sealed class InvestigationProfileTests
         policy.ShouldNotBeNull();
         policy.ImplementationType.ShouldBe(typeof(InvestigationAccessPolicy));
         policy.Lifetime.ShouldBe(ServiceLifetime.Singleton);
+
+        // Самопроверка профиля на полной регистрации молчит — это она вызывается в конце RegisterDataContexts.
+        Should.NotThrow(() => InvestigationProfile.EnsureModulePortsRegistered(services));
+    }
+
+    /// <summary>
+    /// «Без порта приложение не стартует» обязано быть правдой в ЛЮБОМ окружении, а не только в Development,
+    /// где контейнер ASP.NET валидирует граф при сборке: профиль сам проверяет контракт пакетов на регистрации.
+    /// </summary>
+    [Fact(DisplayName = "Контракт пакетов: без единой регистрации портов профиль отказывает с перечнем всех портов")]
+    public void Ensure_ports_throws_naming_every_missing_port_when_nothing_is_registered()
+    {
+        var services = new ServiceCollection();
+
+        var error = Should.Throw<InvalidOperationException>(() => InvestigationProfile.EnsureModulePortsRegistered(services));
+
+        foreach (var port in DocFlowModule.RequiredServices.Concat(MediaModule.RequiredServices))
+        {
+            error.Message.ShouldContain(port.Name, Case.Sensitive, $"в сообщении должен быть назван порт {port.Name}");
+        }
+    }
+
+    [Fact(DisplayName = "Контракт пакетов: при отсутствии ОДНОГО порта «Медиа» назван именно он, остальные — нет")]
+    public void Ensure_ports_names_only_the_missing_port()
+    {
+        var services = new ServiceCollection();
+        var missingPort = MediaModule.RequiredServices[0];
+        foreach (var port in DocFlowModule.RequiredServices.Concat(MediaModule.RequiredServices).Where(p => p != missingPort))
+        {
+            // Достаточно факта регистрации: проверка смотрит на ServiceType, экземпляр никогда не создаётся.
+            services.AddSingleton(port, _ => throw new NotSupportedException("экземпляр в тесте не нужен"));
+        }
+
+        var error = Should.Throw<InvalidOperationException>(() => InvestigationProfile.EnsureModulePortsRegistered(services));
+
+        error.Message.ShouldContain(missingPort.Name, Case.Sensitive);
+        foreach (var port in DocFlowModule.RequiredServices.Concat(MediaModule.RequiredServices).Where(p => p != missingPort))
+        {
+            error.Message.ShouldNotContain(port.Name, Case.Sensitive, $"зарегистрированный порт {port.Name} не должен значиться отсутствующим");
+        }
+    }
+
+    [Fact(DisplayName = "Контракт пакетов: RegisterDataContexts на пустой коллекции (без RegisterServices) всё равно закрывает порты — проверка не бросает")]
+    public void RegisterDataContexts_alone_registers_every_port()
+    {
+        var profile = new InvestigationProfile();
+        var services = new ServiceCollection();
+
+        // Порты живут в слое данных профиля: их регистрирует именно RegisterDataContexts, и он же
+        // проверяет результат — исключения быть не должно.
+        Should.NotThrow(() => profile.RegisterDataContexts(services, Configuration()));
     }
 
     [Fact(DisplayName = "Виджеты оболочки: кнопка смены пароля профиля и колокольчик уведомлений docflow")]

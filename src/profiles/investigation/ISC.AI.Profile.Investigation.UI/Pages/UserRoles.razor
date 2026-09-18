@@ -62,10 +62,17 @@
 @code {
     private readonly List<UserRoleRow> _rows = [];
     private bool _isBootstrap;
-    private bool _busy;
+    private bool _busy = true; // «загрузка…» до первой интерактивной загрузки (предрендер данных не грузит)
     private string? _error;
 
-    protected override async Task OnInitializedAsync() => await ReloadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере (статический SSR до подключения circuit'а)
+        // реестр ролей не грузим — иначе аудируемый запрос попадал бы в журнал дважды.
+        if (!RendererInfo.IsInteractive) { return; }
+
+        await ReloadAsync();
+    }
 
     private async Task ReloadAsync()
     {

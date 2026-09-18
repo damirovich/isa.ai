@@ -122,12 +122,19 @@
     private readonly List<ClearanceDivision> _divisions = [];
     private readonly Dictionary<int, ClearanceDraft> _drafts = [];
 
-    private bool _busy;
+    private bool _busy = true; // «загрузка…» до первой интерактивной загрузки (предрендер данных не грузит)
     private string? _error;
     private string? _saved;
     private int _unknownTotal;
 
-    protected override async Task OnInitializedAsync() => await ReloadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере (статический SSR до подключения circuit'а)
+        // допуски не грузим — иначе аудируемые запросы попадали бы в журнал дважды.
+        if (!RendererInfo.IsInteractive) { return; }
+
+        await ReloadAsync();
+    }
 
     private ClearanceDraft Draft(UserClearanceRow row)
     {

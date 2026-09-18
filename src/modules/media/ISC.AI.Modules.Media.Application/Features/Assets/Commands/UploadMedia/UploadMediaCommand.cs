@@ -21,6 +21,8 @@ namespace ISC.AI.Modules.Media.Application.Features.Assets;
 /// ГРИФ И ПОДРАЗДЕЛЕНИЕ НОСИТЕЛЯ БЕРУТСЯ У ДЕЛА (ТБ-070, ТБ-024): пользователь их не выбирает и «по
 /// умолчанию» они не подставляются — недоступное дело означает отказ ещё до приёма байтов. Дубликат
 /// (тот же SHA-256 в том же подразделении) к делу привязывается, но повторно не индексируется.
+/// Семейство файла (изображение/видео) сверяется с СОДЕРЖИМЫМ (<see cref="ContentSniffer"/>), а не с
+/// заявленным типом: подмена типа отклоняется до приёма байтов.
 /// </remarks>
 public sealed record UploadMediaCommand(
     int CaseId,
@@ -70,6 +72,18 @@ public sealed record UploadMediaCommand(
             if (kind is null)
             {
                 return ResponseDto<MediaAssetReceipt>.BadRequest("Формат файла не поддерживается.");
+            }
+
+            // ТС-010: семейство — по сигнатуре байтов, не со слов клиента; расхождение или неизвестная сигнатура — отказ.
+            var sniffed = ContentSniffer.Sniff(command.Content);
+            if (sniffed is null)
+            {
+                return ResponseDto<MediaAssetReceipt>.BadRequest("Содержимое файла не распознано как изображение или видео поддерживаемого формата.");
+            }
+
+            if (sniffed != kind)
+            {
+                return ResponseDto<MediaAssetReceipt>.BadRequest("Содержимое файла не соответствует заявленному типу.");
             }
 
             var draft = new MediaAssetDraft(

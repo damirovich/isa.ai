@@ -28,6 +28,7 @@ public sealed record ReindexMediaCommand(int AssetId) : IRequest<ResponseDto<Gui
         IMediaAdministration administration,
         IAccessContextProvider accessProvider,
         IMediaCatalog catalog,
+        ICaseScope caseScope,
         IBackgroundTaskQueue queue)
         : IRequestHandler<ReindexMediaCommand, ResponseDto<Guid>>
     {
@@ -45,6 +46,13 @@ public sealed record ReindexMediaCommand(int AssetId) : IRequest<ResponseDto<Gui
             var access = await accessProvider.GetCurrentAsync(cancellationToken);
             var asset = await catalog.GetAsync(command.AssetId, access, cancellationToken);
             if (asset is null)
+            {
+                return ResponseDto<Guid>.NotFound("Носитель не найден или недоступен.");
+            }
+
+            // Сужение по делам субъекта поверх решётки (ТБ-071, ТФ-ДЕЛ-03): переиндексацию чужого носителя
+            // по перебираемому идентификатору запустить нельзя; отказ неотличим от «не найден».
+            if (!await caseScope.IsAssetAccessibleAsync(asset.Id, access, cancellationToken))
             {
                 return ResponseDto<Guid>.NotFound("Носитель не найден или недоступен.");
             }

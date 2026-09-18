@@ -27,8 +27,11 @@ public sealed class MediaAssetConfiguration : IEntityTypeConfiguration<MediaAsse
         builder.Property(a => a.DivisionId).IsRequired();
         builder.Property(a => a.IsCurrent).IsRequired().HasDefaultValue(true);
 
-        // Дедупликация: один и тот же файл в одном подразделении хранится один раз (ТБ-074).
-        builder.HasIndex(a => new { a.DivisionId, a.ContentHash }).IsUnique();
+        // Дедупликация: один и тот же файл в одном подразделении ПОД ОДНИМ ГРИФОМ хранится один раз (ТБ-074).
+        // Гриф входит в ключ: гриф носителя = гриф дела (ТБ-070), и дубликат под другим грифом — отдельная
+        // строка/копия, иначе носитель наследовал бы режим первого дела (и «исчезал» для следователя второго
+        // либо оставлял биометрию секретного дела под низким грифом).
+        builder.HasIndex(a => new { a.DivisionId, a.Classification, a.ContentHash }).IsUnique();
         builder.HasIndex(a => a.StoredFileName).IsUnique();
         builder.HasIndex(a => new { a.Classification, a.DivisionId });
         builder.HasIndex(a => a.IndexStatus);

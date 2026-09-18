@@ -5,6 +5,10 @@ using ISC.AI.Modules.Media.Domain.Model;
 namespace ISC.AI.Modules.Media.Application.Features.Assets;
 
 /// <summary>Правила приёма файлов носителей (ТС-010, ТФ-МЕД-01): allowlist форматов и предел размера.</summary>
+/// <remarks>
+/// TIFF и HEIC в allowlist НЕ входят: декодер конвейера (Skia) их не читает — носитель гарантированно уходил бы
+/// в «ошибка обработки». Возврат форматов — только вместе с декодером (ADR-0020).
+/// </remarks>
 public static class MediaFileRules
 {
     /// <summary>
@@ -17,10 +21,10 @@ public static class MediaFileRules
     /// <summary>Максимальная длина исходного имени файла (для отображения; на диске — GUID).</summary>
     public const int MaxFileNameLength = 260;
 
-    /// <summary>Допустимые MIME-типы изображений.</summary>
+    /// <summary>Допустимые MIME-типы изображений (только те, что декодирует конвейер).</summary>
     public static readonly IReadOnlySet<string> AllowedImageContentTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        "image/jpeg", "image/png", "image/bmp", "image/webp", "image/tiff",
+        "image/jpeg", "image/png", "image/bmp", "image/webp",
     };
 
     /// <summary>Допустимые MIME-типы видео (раскадровка — ffmpeg, ТО-мат-06).</summary>

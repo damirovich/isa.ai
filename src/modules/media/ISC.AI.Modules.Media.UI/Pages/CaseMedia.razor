@@ -60,10 +60,12 @@ else
         <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
             Гриф и подразделение носителя наследуются от дела (ТБ-070). Повтор того же файла в том же
             подразделении не создаёт дубля. Обработка (поиск лиц) выполняется фоном после загрузки.
+            Загрузка — роль Следователь; гарантированное удаление — Администратор/Руководитель.
         </MudText>
         <MudGrid Spacing="2">
             <MudItem xs="12" sm="5">
-                <MudTextField @bind-Value="_source" Label="Источник" Variant="Variant.Outlined" MaxLength="4000"
+                @* Пределы длин — из валидатора команды, не дублируются числом (иначе клиент пропускает, сервер отбивает). *@
+                <MudTextField @bind-Value="_source" Label="Источник" Variant="Variant.Outlined" MaxLength="@UploadMediaValidator.MaxSourceLength"
                               HelperText="откуда получена запись — общее для всех выбранных файлов" />
             </MudItem>
             <MudItem xs="6" sm="3">
@@ -74,7 +76,7 @@ else
                 </div>
             </MudItem>
             <MudItem xs="6" sm="4">
-                <MudTextField @bind-Value="_place" Label="Место" Variant="Variant.Outlined" MaxLength="500" />
+                <MudTextField @bind-Value="_place" Label="Место" Variant="Variant.Outlined" MaxLength="@UploadMediaValidator.MaxPlaceLength" />
             </MudItem>
         </MudGrid>
 
@@ -83,7 +85,7 @@ else
                выбранный файл не должен улетать в дело сам. MudBlazor 9.5: своя кнопка — через
                CustomContent + OpenFilePickerAsync. *@
             <MudFileUpload T="IReadOnlyList<IBrowserFile>" FilesChanged="OnFilesSelected"
-                           Accept=".jpg,.jpeg,.png,.bmp,.webp,.tiff,.mp4,.webm,.mkv,.mov,.avi"
+                           Accept=".jpg,.jpeg,.png,.bmp,.webp,.mp4,.webm,.mkv,.mov,.avi"
                            MaximumFileCount="20" Disabled="_busy">
                 <CustomContent Context="upload">
                     <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="_busy"
@@ -94,7 +96,8 @@ else
                 </CustomContent>
             </MudFileUpload>
             <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                Фото: .jpg, .png, .bmp, .webp, .tiff. Видео: .mp4, .webm, .mkv, .mov, .avi.
+                Фото: .jpg, .png, .bmp, .webp (TIFF/HEIC конвейер пока не читает — см. ADR-0020). Видео: .mp4, .webm, .mkv, .mov, .avi
+                (в браузере воспроизводятся только .mp4/.webm; остальные — скачать в проигрыватель).
                 До 20 файлов за раз, каждый не более @MediaLabels.FormatSize(MediaFileRules.MaxFileBytes).
             </MudText>
         </div>
@@ -243,6 +246,10 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере (статический SSR до подключения circuit'а)
+        // медиатеку не грузим — ListCaseMediaQuery аудируется и попадал бы в журнал дважды.
+        if (!RendererInfo.IsInteractive) { return; }
+
         // Подпись дела — из доступных субъекту (ТБ-071): чужое дело в списке не появится.
         var cases = await Dispatcher.Send(new ListAccessibleCasesQuery());
         if (cases is { Status: true, Data: { } list })
@@ -332,7 +339,11 @@ else
         _busy = true;
         _error = null;
         _uploadResults.Clear();
-        var capturedAt = _capturedAt is { } d ? new DateTimeOffset(DateTime.SpecifyKind(d, DateTimeKind.Local)) : (DateTimeOffset?)null;
+        // Столбец captured_at — timestamptz: Npgsql принимает DateTimeOffset ТОЛЬКО со смещением 0. Дата из пикера —
+        // местная полночь; нормализуем в UTC (ToUniversalTime), чтобы при показе ToLocalTime вернул ту же дату.
+        var capturedAt = _capturedAt is { } d
+            ? new DateTimeOffset(DateTime.SpecifyKind(d, DateTimeKind.Local)).ToUniversalTime()
+            : (DateTimeOffset?)null;
         try
         {
             foreach (var file in _pendingFiles.ToList())

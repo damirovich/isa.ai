@@ -18,7 +18,7 @@
 <div class="d-flex align-center justify-space-between flex-wrap gap-2">
     <div>
         <MudText Typo="Typo.h5">Поиск по лицу</MudText>
-        <MudText Typo="Typo.body2" Class="mud-text-secondary">Кандидат-лист по материалам дел в пределах вашего допуска</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">Кандидат-лист по материалам дел в пределах вашего допуска · поиск доступен ролям Следователь/Эксперт по лицам</MudText>
     </div>
 </div>
 
@@ -96,10 +96,17 @@
         {
             @* Проба — лицо уже проиндексированного носителя (ТФ-ПЛ-03): вектор берётся из базы, изображение не грузится. *@
             <FaceCropTile Url="@(probeFace.CropStoredFileName is { } crop ? MediaFileUrl.FaceCrop(probeFace.AssetId, crop) : null)"
-                          Size="128" Caption="@($"лицо № {probeFace.Id} носителя № {probeFace.AssetId}")"
+                          Size="128" Caption="@($"лицо № {probeFace.Id} носителя № {probeFace.AssetId} · качество {probeFace.QualityScore:0.00}")"
                           Unusable="@(!probeFace.QualityAcceptable)" UnusableReason="@probeFace.QualityReason">
-                <MudLink Href="@($"/media/assets/{probeFace.AssetId}")" Typo="Typo.caption">открыть носитель</MudLink>
+                <MudLink Href="@($"/media/assets/{probeFace.AssetId}?face={probeFace.Id}")" Typo="Typo.caption">открыть носитель</MudLink>
             </FaceCropTile>
+            @if (!probeFace.QualityAcceptable)
+            {
+                @* ТО-мат-07: шаблон для непригодного лица не строился — искать по нему нечем; это НЕ отказ по допуску. *@
+                <MudText Typo="Typo.body2" Color="Color.Warning">
+                    Лицо непригодно для поиска (ТО-мат-07)@(string.IsNullOrWhiteSpace(probeFace.QualityReason) ? string.Empty : $": {probeFace.QualityReason}").
+                </MudText>
+            }
             <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="ClearProbe" Disabled="_busy">Сбросить пробу</MudButton>
         }
         else if (_probeFaceId is { } missingFaceId)
@@ -129,8 +136,10 @@
             </MudText>
             @if (_result is { DetectedFaces: > 1 })
             {
+                @* Индекс — порядок выдачи детектора (после NMS — по убыванию уверенности), НЕ по размеру; «самое крупное» — только при пустом поле. *@
                 <MudNumericField T="int?" @bind-Value="_probeFaceIndex" Label="Номер лица на пробе" Variant="Variant.Outlined" Min="0"
-                                 Margin="Margin.Dense" Style="max-width:200px;" Disabled="_busy" Clearable="true" HelperText="0 — самое крупное" />
+                                 Margin="Margin.Dense" Style="max-width:260px;" Disabled="_busy" Clearable="true"
+                                 HelperText="номер лица в порядке выдачи детектора (0 — первое); пусто — самое крупное" />
             }
         }
     </div>
@@ -140,7 +149,9 @@
                    Disabled="@(!CanSearch)" OnClick="SearchAsync">@(_busy ? "Ищу…" : "Искать")</MudButton>
         @if (!CanSearch && !_busy)
         {
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">Для поиска нужны дело, основание и проба.</MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                @(_probeFace is { QualityAcceptable: false } ? "Проба непригодна для поиска — выберите другое лицо или изображение." : "Для поиска нужны дело, основание и пригодная проба.")
+            </MudText>
         }
     </div>
     @if (_busy)
@@ -165,8 +176,9 @@
         @if (result.DetectedFaces > 1)
         {
             <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-3">
-                На пробе несколько лиц (@result.DetectedFaces); для поиска выбрано самое крупное. Если нужно другое —
-                укажите номер лица на пробе и повторите поиск.
+                На пробе несколько лиц (@result.DetectedFaces); для поиска
+                @(_probeFaceIndex is { } chosen ? $"выбрано лицо № {chosen} (в порядке выдачи детектора)" : "выбрано самое крупное").
+                Если нужно другое — укажите номер лица на пробе и повторите поиск.
             </MudAlert>
         }
         @if (result.Candidates.Count == 0)
@@ -183,7 +195,7 @@
                     var current = candidate;
                     <MudPaper Outlined="true" Class="pa-2 d-flex flex-column align-center" Style="width:200px;">
                         <FaceCropTile Url="@(current.CropStoredFileName is { } crop ? MediaFileUrl.FaceCrop(current.AssetId, crop) : null)"
-                                      Size="128" Caption="@($"кандидат № {current.Rank}")" />
+                                      Size="128" Caption="@(current.QualityScore is { } quality ? $"кандидат № {current.Rank} · качество лица {quality:0.00}" : $"кандидат № {current.Rank}")" />
                         <div class="d-flex flex-column align-center gap-1 mt-1">
                             <SimilarityChip Similarity="@current.Similarity" />
                             <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@current.Status.ChipColor()">@current.Status.Label()</MudChip>
@@ -226,7 +238,8 @@
     private bool _busy;
     private string? _error;
 
-    private bool HasProbe => _probeFace is not null || _probeBytes is not null;
+    /// <summary>Проба задана и пригодна: лицо носителя — только с шаблоном (ТО-мат-07), либо загруженное изображение.</summary>
+    private bool HasProbe => _probeFace is { QualityAcceptable: true } || _probeBytes is not null;
 
     private bool CanSearch => !_busy && _caseId is not null && _authorizationId is not null && HasProbe
         && (_scope != SearchScopeKind.SelectedCases || _selectedCaseIds.Count > 0);
@@ -240,6 +253,10 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере (статический SSR до подключения circuit'а)
+        // ничего не грузим — GetFaceQuery (проба ?faceId=) аудируется и попадал бы в журнал дважды.
+        if (!RendererInfo.IsInteractive) { return; }
+
         var cases = await Dispatcher.Send(new ListAccessibleCasesQuery());
         if (cases is { Status: true, Data: { } list })
         {

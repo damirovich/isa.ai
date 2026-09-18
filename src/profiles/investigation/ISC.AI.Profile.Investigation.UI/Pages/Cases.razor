@@ -113,7 +113,7 @@
         }
         <MudGrid Spacing="2">
             <MudItem xs="12" sm="4">
-                <MudTextField @bind-Value="_formNumber" Label="Номер *" Variant="Variant.Outlined" MaxLength="64" />
+                <MudTextField @bind-Value="_formNumber" Label="Номер *" Variant="Variant.Outlined" MaxLength="@CreateCaseValidator.MaxNumberLength" />
             </MudItem>
             <MudItem xs="12" sm="4">
                 <MudSelect T="CaseKind?" @bind-Value="_formKind" Label="Вид *" Variant="Variant.Outlined" Dense="true" Placeholder="Выберите вид">
@@ -130,7 +130,7 @@
                 </div>
             </MudItem>
             <MudItem xs="12">
-                <MudTextField @bind-Value="_formTitle" Label="Название *" Variant="Variant.Outlined" MaxLength="500" />
+                <MudTextField @bind-Value="_formTitle" Label="Название *" Variant="Variant.Outlined" MaxLength="@CreateCaseValidator.MaxTitleLength" />
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudSelect T="int?" @bind-Value="_formDivisionId" Label="Подразделение *" Variant="Variant.Outlined" Dense="true"
@@ -162,7 +162,8 @@
                 </MudSelect>
             </MudItem>
             <MudItem xs="12">
-                <MudTextField @bind-Value="_formBasis" Label="Основание возбуждения / регистрации" Variant="Variant.Outlined" Lines="3" MaxLength="4000" />
+                @* Пределы длин — из валидатора (единственный источник), а не числом в разметке. *@
+                <MudTextField @bind-Value="_formBasis" Label="Основание возбуждения / регистрации" Variant="Variant.Outlined" Lines="3" MaxLength="@CreateCaseValidator.MaxBasisLength" />
             </MudItem>
         </MudGrid>
     </DialogContent>
@@ -189,7 +190,7 @@
     private int? _filterDivisionId;
     private int _page = 1;
     private int _total;
-    private bool _busy;
+    private bool _busy = true; // «загрузка…» до первой интерактивной загрузки (предрендер данных не грузит)
     private string? _error;
 
     // --- Форма заведения дела ---
@@ -217,6 +218,11 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере (статический SSR до подключения circuit'а)
+        // данные не грузим — иначе каждый аудируемый запрос попадал бы в журнал дважды. До интерактива
+        // таблица показывает состояние «загрузка…» (_busy = true с начала).
+        if (!RendererInfo.IsInteractive) { return; }
+
         var divisions = await Dispatcher.Send(new ListDivisionsQuery());
         if (divisions is { Status: true, Data: { } list })
         {

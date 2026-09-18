@@ -7,7 +7,8 @@ namespace ISC.AI.Modules.Media.Data;
 /// <summary>
 /// Разрешение имени файла носителя/вырезки/вырезки пробы в описание с режимными полями (ТБ-073) для
 /// эндпоинта раздачи. Для категории <see cref="MediaFileCategories.Probes"/> параметр «носитель» маршрута —
-/// идентификатор ПОИСКОВОЙ СЕССИИ, режимные поля — сессии (гриф дела, ТБ-070). Файл, принадлежащий ДРУГОМУ носителю, чем указан в маршруте, не разрешается — наружу
+/// идентификатор ПОИСКОВОЙ СЕССИИ, режимные поля — сессии (гриф дела, ТБ-070), а <see cref="MediaFileDescriptor.CaseRef"/> —
+/// дело сессии (для проверки области дел субъекта в эндпоинте, ТБ-071). Файл, принадлежащий ДРУГОМУ носителю, чем указан в маршруте, не разрешается — наружу
 /// единый «не найден» (как у <c>DocumentFileAccessResolver</c> документооборота).
 /// </summary>
 public sealed class MediaFileAccessResolver(IDbContextFactory<MediaDbContext> contextFactory) : IMediaFileAccess
@@ -54,11 +55,13 @@ public sealed class MediaFileAccessResolver(IDbContextFactory<MediaDbContext> co
                     .Where(s => s.Id == assetId && s.ProbeCropStoredFileName == storedFileName)
                     .Select(s => new { s.CaseId, s.Classification, s.DivisionId })
                     .FirstOrDefaultAsync(cancellationToken);
+                // CaseRef — дело сессии: эндпоинт проверит по нему область дел субъекта (ТБ-071) — у вырезки
+                // пробы нет носителя, через который это можно было бы сделать.
                 return session is null
                     ? null
                     : new MediaFileDescriptor(
                         storedFileName, category, ProbeSubPath(session.CaseId), "image/jpeg",
-                        session.Classification, session.DivisionId);
+                        session.Classification, session.DivisionId, CaseRef: session.CaseId);
             }
 
             default:

@@ -243,28 +243,39 @@ public sealed record SearchByFaceQuery(
         }
 
         /// <summary>
-        /// Проба: шаблон лица носителя (ТФ-ПЛ-03; хеш — над байтами вектора, вырезка — уже существующая вырезка
-        /// лица, без копирования) либо изображение (детекция → выбор лица → качество ТО-мат-07 → шаблон;
-        /// вырезка пробы сохраняется в категорию проб под подкаталогом = идентификатор ДЕЛА — та же конвенция,
-        /// что у резолвера раздачи в слое данных: сессии ещё нет, дело известно). Отказ — в failure.
+        /// Проба: шаблон лица носителя (ТФ-ПЛ-03; хеш — над байтами вектора; вырезка НЕ сохраняется и в сессию
+        /// НЕ записывается — вырезка лица принадлежит носителю, интерфейс берёт её по <c>ProbeFaceId</c>, а на
+        /// столбце вырезки пробы стоит уникальный индекс) либо изображение (детекция → выбор лица → качество
+        /// ТО-мат-07 → шаблон; вырезка пробы сохраняется в категорию проб под подкаталогом = идентификатор
+        /// ДЕЛА — та же конвенция, что у резолвера раздачи в слое данных: сессии ещё нет, дело известно).
+        /// Отказ — в failure.
         /// </summary>
         private async Task<(ProbeResolution? Probe, ResponseDto<FaceSearchResult>? Failure)> ResolveProbeAsync(
             SearchByFaceQuery query, AccessContext access, int caseId, CancellationToken cancellationToken)
         {
             if (query.ProbeFaceId is { } probeFaceId)
             {
-                var template = await catalog.GetTemplateAsync(probeFaceId, access, cancellationToken);
-                if (template is null)
+                // Fail-closed (ТБ-020/021): лицо под решёткой; затем — сужение по делам субъекта (ТБ-071, ДОК-13 §248
+                // «сотрудник, ищущий вне своего дела»): биометрия носителя чужого дела пробой быть не может.
+                // Оба отказа наружу неразличимы («не найдено или недоступно»).
+                var face = await catalog.GetFaceAsync(probeFaceId, access, cancellationToken);
+                if (face is null || !await caseScope.IsAssetAccessibleAsync(face.AssetId, access, cancellationToken))
                 {
                     return (null, ResponseDto<FaceSearchResult>.NotFound("Лицо-проба не найдено или недоступно."));
                 }
 
-                var face = await catalog.GetFaceAsync(probeFaceId, access, cancellationToken);
+                // ТО-мат-07: лицо есть, но шаблон не строился (непригодно) — это НЕ отказ по допуску, а отказ по качеству.
+                var template = face.QualityAcceptable ? await catalog.GetTemplateAsync(probeFaceId, access, cancellationToken) : null;
+                if (template is null)
+                {
+                    return (null, ResponseDto<FaceSearchResult>.BadRequest(
+                        $"Лицо-проба непригодно для сравнения: {face.QualityReason ?? "шаблон не построен"} (ТО-мат-07)."));
+                }
+
                 var sha = Convert.ToHexStringLower(SHA256.HashData(MemoryMarshal.AsBytes<float>(template)));
                 return (new ProbeResolution(
-                    template, sha, face?.CropStoredFileName, DetectedFaces: 0,
-                    $"лицо {probeFaceId.ToString(CultureInfo.InvariantCulture)} носителя "
-                    + (face?.AssetId.ToString(CultureInfo.InvariantCulture) ?? "?")), null);
+                    template, sha, CropStoredFileName: null, DetectedFaces: 0,
+                    $"лицо {probeFaceId.ToString(CultureInfo.InvariantCulture)} носителя {face.AssetId.ToString(CultureInfo.InvariantCulture)}"), null);
             }
 
             var image = query.ProbeImage

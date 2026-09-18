@@ -43,6 +43,17 @@ public sealed class SearchSessionStore(
             throw new ArgumentException("Поиск без основания не ведётся (ТБ-071).", nameof(draft));
         }
 
+        // Страховка ТФ-ПЛ-03: у пробы-лица носителя вырезка — вырезка самого лица (категория media-faces,
+        // читается по ProbeFaceId), а ProbeCropStoredFileName — ТОЛЬКО для пробы-изображения (категория
+        // media-probes, уникально по сессии). Запись имени чужой вырезки сюда ломала бы повторный поиск по тому
+        // же лицу (уникальный индекс) и раздачу проб (файл искали бы в подкаталоге дела).
+        if (draft.ProbeFaceId is not null && draft.ProbeCropStoredFileName is not null)
+        {
+            throw new ArgumentException(
+                "Для пробы-лица носителя имя вырезки пробы не задаётся: вырезка берётся у самого лица (ТФ-ПЛ-03).",
+                nameof(draft));
+        }
+
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
 
         // Имя вырезки лица берётся у лица базы на момент поиска: потом носитель могут удалить, а история
@@ -252,15 +263,17 @@ public sealed class SearchSessionStore(
     private sealed record CandidateProjection(
         int Id, int SessionId, int CaseId, int Rank, int FaceId, int AssetId, int? FrameIndex, long? FrameTimestampMs,
         double CosineDistance, string? CropStoredFileName, string ModelVersion, short Classification, int DivisionId,
-        CandidateStatus Status, int? PersonRef);
+        CandidateStatus Status, int? PersonRef, float? QualityScore);
 
     private static async Task<List<SearchCandidateRow>> MaterializeAsync(
         MediaDbContext db, IQueryable<SearchCandidate> candidates, CancellationToken cancellationToken)
     {
         var rows = await candidates
+            // Оценка качества лица (ТЭ-005) — у лица базы на момент чтения; носитель могли удалить (ТБ-075) — тогда null.
             .Select(c => new CandidateProjection(
                 c.Id, c.SessionId, c.Session!.CaseId, c.Rank, c.FaceId, c.AssetId, c.FrameIndex, c.FrameTimestampMs,
-                c.CosineDistance, c.CropStoredFileName, c.ModelVersion, c.Classification, c.DivisionId, c.Status, c.PersonRef))
+                c.CosineDistance, c.CropStoredFileName, c.ModelVersion, c.Classification, c.DivisionId, c.Status, c.PersonRef,
+                db.Faces.Where(f => f.Id == c.FaceId).Select(f => (float?)f.QualityScore).FirstOrDefault()))
             .ToListAsync(cancellationToken);
         if (rows.Count == 0)
         {
@@ -279,7 +292,8 @@ public sealed class SearchSessionStore(
             r.CropStoredFileName, r.ModelVersion, r.Classification, r.DivisionId, r.Status, r.PersonRef,
             byCandidate[r.Id]
                 .Select(d => new VerificationDecision(d.SubjectId, d.Stage, d.Verdict, d.Rationale, d.DecidedAtUtc))
-                .ToList()))
+                .ToList(),
+            r.QualityScore))
             .ToList();
     }
 

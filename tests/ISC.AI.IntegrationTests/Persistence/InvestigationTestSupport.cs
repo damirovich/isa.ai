@@ -57,6 +57,11 @@ internal static class InvestigationTestKit
     public static PersonStore CreatePersonStore(InvestigationContextFactory factory, CoreContextFactory core) =>
         new(factory, new InvestigationAccessPolicy(factory), new UserRoleStore(core, factory));
 
+    /// <summary>Порт «Медиа» <c>ICaseScope</c> поверх настоящих хранилищ, политики и реестра ролей — как в хосте.</summary>
+    public static CaseScope CreateCaseScope(InvestigationContextFactory factory, CoreContextFactory core) =>
+        new(CreateCaseStore(factory, core), CreatePersonStore(factory, core), factory,
+            new InvestigationAccessPolicy(factory), new UserRoleStore(core, factory));
+
     /// <summary>Контекст доступа: числовой субъект (роль ищется по нему), допуск по грифу и подразделениям.</summary>
     public static AccessContext Access(int userId, short maxClassification, params int[] divisions) =>
         new(userId.ToString(System.Globalization.CultureInfo.InvariantCulture), maxClassification, divisions);
