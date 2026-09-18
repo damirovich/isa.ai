@@ -4,7 +4,9 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using ISC.AI.Abstractions.Storage;
 using ISC.AI.Modules.DocFlow.Data;
+using ISC.AI.Modules.Media.Data;
 using ISC.AI.Modules.DocFlow.Domain.Services;
 using ISC.AI.Persistence;
 using ISC.AI.Profile.Inspector.Data;
@@ -170,5 +172,46 @@ internal sealed class FixedEmbeddingGenerator(int dimensions) : IEmbeddingGenera
 
     public void Dispose()
     {
+    }
+}
+
+/// <summary>
+/// Фабрика <see cref="MediaDbContext"/> (схема пакета «Медиа»). С pgvector: шаблоны лиц — векторы.
+/// </summary>
+internal sealed class MediaContextFactory(string connectionString) : IDbContextFactory<MediaDbContext>
+{
+    public MediaDbContext CreateDbContext() =>
+        new(new DbContextOptionsBuilder<MediaDbContext>()
+            .UseNpgsql(connectionString, npg =>
+            {
+                npg.MigrationsHistoryTable("__ef_migrations_history", MediaDbContext.Schema);
+                npg.UseVector();
+            })
+            .UseSnakeCaseNamingConvention()
+            .Options);
+}
+
+/// <summary>
+/// Хранилище файлов ядра (<see cref="IFileStorage"/>), запоминающее удалённые файлы — для проверки,
+/// что гарантированное удаление носителя доходит до диска (GATE-6). Чтение/запись не поддерживаются.
+/// </summary>
+internal sealed class RecordingFileStorage : IFileStorage
+{
+    public List<string> Deleted { get; } = [];
+
+    public Task<string> SaveAsync(
+        Stream content, string extension, string category, string subPath,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(Guid.NewGuid().ToString("N") + extension);
+
+    public Task<Stream> OpenReadAsync(
+        string storedFileName, string category, string subPath, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Этот тест не читает файлы.");
+
+    public Task DeleteAsync(
+        string storedFileName, string category, string subPath, CancellationToken cancellationToken = default)
+    {
+        Deleted.Add($"{category}/{subPath}/{storedFileName}");
+        return Task.CompletedTask;
     }
 }

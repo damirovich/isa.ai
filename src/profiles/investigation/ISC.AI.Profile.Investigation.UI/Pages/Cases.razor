@@ -1,0 +1,352 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@page "/cases"
+@rendermode InteractiveServer
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Abstractions.Security
+@using ISC.AI.Profile.Investigation.Application.Features.Directory
+@using ISC.AI.Profile.Investigation.Application.Features.Cases
+@using ISC.AI.Profile.Investigation.Application.Features.Divisions
+@using ISC.AI.Profile.Investigation.Application.Features.Scope
+@using ISC.AI.Profile.Investigation.Domain.Enums
+@using ISC.AI.Profile.Investigation.Domain.Services
+@inject NavigationManager Navigation
+
+@* Реестр дел (ТФ-ДЕЛ-01/03): список под решёткой доступа и ролью (следователь — свои дела,
+   руководитель — дела подразделения; сужение делает хранилище на стороне БД, ТБ-020) и заведение
+   дела. В форме гриф и подразделение — В ПРЕДЕЛАХ допуска субъекта (GetAccessScopeQuery) и гриф
+   БЕЗ умолчания (ТБ-024): это удобство, серверная проверка в CreateCaseCommand остаётся. Кнопку
+   «Новое дело» видят все — право ведения дел проверяет обработчик (RoleGuard), отказ показывается. *@
+
+<PageHeader Title="Дела" Subtitle="Уголовные дела, материалы и ОРМ · только в пределах допуска и роли"
+            Icon="@Icons.Material.Filled.FolderOpen">
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="OpenCreateAsync">Новое дело</MudButton>
+</PageHeader>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+<MudPaper Outlined="true" Class="pa-3 my-4">
+    <div class="d-flex gap-3 align-end flex-wrap">
+        <MudTextField @bind-Value="_filterText" Label="Номер или название" Variant="Variant.Outlined" Immediate="true"
+                      Style="min-width:260px;" Class="flex-grow-1"
+                      OnKeyDown="@(async e => { if (e.Key == "Enter") { await SearchAsync(); } })" />
+        <MudSelect T="CaseKind?" Value="_filterKind" ValueChanged="@(async (CaseKind? v) => { _filterKind = v; await SearchAsync(); })"
+                   Label="Вид" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:180px;">
+            @foreach (var kind in Enum.GetValues<CaseKind>())
+            {
+                <MudSelectItem T="CaseKind?" Value="@kind">@kind.Label()</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="CaseStatus?" Value="_filterStatus" ValueChanged="@(async (CaseStatus? v) => { _filterStatus = v; await SearchAsync(); })"
+                   Label="Статус" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:180px;">
+            @foreach (var status in Enum.GetValues<CaseStatus>())
+            {
+                <MudSelectItem T="CaseStatus?" Value="@status">@status.Label()</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="int?" Value="_filterDivisionId" ValueChanged="@(async (int? v) => { _filterDivisionId = v; await SearchAsync(); })"
+                   Label="Подразделение" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:220px;">
+            @foreach (var d in _divisions)
+            {
+                <MudSelectItem T="int?" Value="@d.Id">@d.Name</MudSelectItem>
+            }
+        </MudSelect>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Search" OnClick="SearchAsync" Disabled="_busy">Найти</MudButton>
+    </div>
+</MudPaper>
+
+<MudTable T="CaseRow" Items="_rows" Hover="true" Dense="true" Outlined="true" Loading="_busy"
+          LoadingProgressColor="Color.Primary" OnRowClick="@(row => Open(row.Item!))" RowClass="cursor-pointer">
+    <HeaderContent>
+        <MudTh>Номер</MudTh>
+        <MudTh>Название</MudTh>
+        <MudTh>Вид</MudTh>
+        <MudTh>Статус</MudTh>
+        <MudTh>Открыто</MudTh>
+        <MudTh>Подразделение</MudTh>
+        <MudTh>Гриф</MudTh>
+        <MudTh Style="text-align:right;">Носителей</MudTh>
+        <MudTh Style="text-align:right;">Фигурантов</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Номер">@context.Number</MudTd>
+        <MudTd DataLabel="Название">@context.Title</MudTd>
+        <MudTd DataLabel="Вид">@context.Kind.Label()</MudTd>
+        <MudTd DataLabel="Статус">
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@Dashboard.StatusColor(context.Status)">
+                @context.Status.Label()
+            </MudChip>
+        </MudTd>
+        <MudTd DataLabel="Открыто">@context.OpenedAt.ToString("dd.MM.yyyy")</MudTd>
+        <MudTd DataLabel="Подразделение">@DivisionName(context.DivisionId)</MudTd>
+        <MudTd DataLabel="Гриф"><ClassificationChip Value="@context.Classification" /></MudTd>
+        <MudTd DataLabel="Носителей" Style="text-align:right;">@context.MediaCount</MudTd>
+        <MudTd DataLabel="Фигурантов" Style="text-align:right;">@context.PersonCount</MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        @* Текст НЕ утверждает «пусто»: недоступное неотличимо от несуществующего (ТБ-020/021). *@
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+            Здесь пусто: дел нет либо они вне вашего допуска и роли.
+        </MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@if (_total > 0)
+{
+    <div class="d-flex align-center justify-space-between mt-3 flex-wrap gap-2">
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">Всего: @_total · страница @_page из @PageCount</MudText>
+        <MudPagination Count="@PageCount" Selected="_page" SelectedChanged="GoToPageAsync" Color="Color.Primary" Size="Size.Small" />
+    </div>
+}
+
+@* Заведение дела — диалог прямо в разметке (@bind-Visible), как везде в проекте. *@
+<MudDialog @bind-Visible="_formOpen" Options="FormDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Новое дело</MudText></TitleContent>
+    <DialogContent>
+        @if (_formError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_formError</MudAlert>
+        }
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="4">
+                <MudTextField @bind-Value="_formNumber" Label="Номер *" Variant="Variant.Outlined" MaxLength="@CreateCaseValidator.MaxNumberLength" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudSelect T="CaseKind?" @bind-Value="_formKind" Label="Вид *" Variant="Variant.Outlined" Dense="true" Placeholder="Выберите вид">
+                    @foreach (var kind in Enum.GetValues<CaseKind>())
+                    {
+                        <MudSelectItem T="CaseKind?" Value="@kind">@kind.Label()</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                @* Ширина пикера — обёрткой div, не Style (MudBlazor копирует Style на календарь). *@
+                <div>
+                    <MudDatePicker @bind-Date="_formOpenedAt" Label="Дата открытия *" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" />
+                </div>
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_formTitle" Label="Название *" Variant="Variant.Outlined" MaxLength="@CreateCaseValidator.MaxTitleLength" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="int?" @bind-Value="_formDivisionId" Label="Подразделение *" Variant="Variant.Outlined" Dense="true"
+                           Placeholder="Из вашего допуска" Disabled="_scope is null">
+                    @foreach (var d in _ownerDivisions)
+                    {
+                        <MudSelectItem T="int?" Value="@d.Id">@d.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                @* Гриф БЕЗ умолчания и В ПРЕДЕЛАХ допуска (ТБ-024). *@
+                <MudSelect T="short?" @bind-Value="_formClassification" Label="Гриф *" Variant="Variant.Outlined" Dense="true"
+                           Placeholder="Выберите гриф" Disabled="_scope is null">
+                    @for (short level = 0; level <= SelectableClassificationLimit; level++)
+                    {
+                        var value = level;
+                        <MudSelectItem T="short?" Value="@value">@(value == 0 ? "0 — открытый" : value.ToString())</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12">
+                <MudSelect T="int?" @bind-Value="_formInvestigatorId" Label="Следователь" Variant="Variant.Outlined" Dense="true"
+                           Clearable="true" Placeholder="Не назначен">
+                    @foreach (var account in _accounts)
+                    {
+                        <MudSelectItem T="int?" Value="@account.UserId">@AccountLabel(account)</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12">
+                @* Пределы длин — из валидатора (единственный источник), а не числом в разметке. *@
+                <MudTextField @bind-Value="_formBasis" Label="Основание возбуждения / регистрации" Variant="Variant.Outlined" Lines="3" MaxLength="@CreateCaseValidator.MaxBasisLength" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _formOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!FormValid || _busy)" OnClick="SaveAsync">Завести дело</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private const int PageSize = 25;
+    private static readonly DialogOptions FormDialogOptions =
+        new() { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true };
+
+    private readonly List<CaseRow> _rows = [];
+    private readonly List<DivisionNode> _divisions = [];
+    private readonly List<DivisionNode> _ownerDivisions = [];
+    private readonly List<UserAccountRow> _accounts = [];
+    private AccessScope? _scope;
+
+    private string? _filterText;
+    private CaseKind? _filterKind;
+    private CaseStatus? _filterStatus;
+    private int? _filterDivisionId;
+    private int _page = 1;
+    private int _total;
+    private bool _busy = true; // «загрузка…» до первой интерактивной загрузки (предрендер данных не грузит)
+    private string? _error;
+
+    // --- Форма заведения дела ---
+    private bool _formOpen;
+    private string? _formError;
+    private string? _formNumber;
+    private string? _formTitle;
+    private CaseKind? _formKind;
+    private DateTime? _formOpenedAt;
+    private int? _formDivisionId;
+    private short? _formClassification;
+    private int? _formInvestigatorId;
+    private string? _formBasis;
+
+    private int PageCount => Math.Max(1, (int)Math.Ceiling(_total / (double)PageSize));
+
+    // Верхняя граница выбора грифа: допуск субъекта, но не выше шкалы валидатора.
+    private int SelectableClassificationLimit =>
+        _scope is { } s ? Math.Min((int)s.MaxClassification, CreateCaseValidator.MaxClassification) : -1;
+
+    private bool FormValid =>
+        !string.IsNullOrWhiteSpace(_formNumber) && !string.IsNullOrWhiteSpace(_formTitle)
+        && _formKind is not null && _formOpenedAt is not null
+        && _formDivisionId is > 0 && _formClassification is not null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере (статический SSR до подключения circuit'а)
+        // данные не грузим — иначе каждый аудируемый запрос попадал бы в журнал дважды. До интерактива
+        // таблица показывает состояние «загрузка…» (_busy = true с начала).
+        if (!RendererInfo.IsInteractive) { return; }
+
+        var divisions = await Dispatcher.Send(new ListDivisionsQuery());
+        if (divisions is { Status: true, Data: { } list })
+        {
+            _divisions.AddRange(list.Where(d => d.IsActive));
+        }
+
+        await ReloadAsync();
+    }
+
+    private Task SearchAsync()
+    {
+        _page = 1; // фильтр всегда на 1-ю страницу
+        return ReloadAsync();
+    }
+
+    private Task GoToPageAsync(int page)
+    {
+        _page = page;
+        return ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new ListCasesQuery(
+                _filterText, _filterKind, _filterStatus, _filterDivisionId, null, _page, PageSize));
+            _rows.Clear();
+            if (response is { Status: true, Data: { } data })
+            {
+                _rows.AddRange(data.Rows);
+                _total = data.TotalCount;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+                _total = 0;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private string DivisionName(int id) =>
+        _divisions.FirstOrDefault(d => d.Id == id)?.Name ?? $"№ {id}";
+
+    private static string AccountLabel(UserAccountRow account)
+    {
+        var name = string.IsNullOrWhiteSpace(account.DisplayName) ? account.UserName : account.DisplayName;
+        return string.IsNullOrWhiteSpace(account.Position) ? name : $"{name} · {account.Position}";
+    }
+
+    private void Open(CaseRow row) => Navigation.NavigateTo($"/cases/{row.Id}");
+
+    private async Task OpenCreateAsync()
+    {
+        _error = null;
+        _formError = null;
+
+        // Пределы субъекта заново при каждом открытии — допуск могли изменить, пока страница открыта.
+        var scope = await Dispatcher.Send(new GetAccessScopeQuery());
+        _ownerDivisions.Clear();
+        if (scope is { Status: true, Data: { } s })
+        {
+            _scope = s;
+            _ownerDivisions.AddRange(s.OwnerDivisions.Where(d => d.IsActive));
+        }
+        else
+        {
+            _scope = null;
+            _formError = scope.StatusMessage;
+        }
+
+        // Кандидаты в следователи — активные учётные записи ядра; без роли профиля запрос откажет —
+        // тогда следователя назначат позже из карточки, дело заводится и без него.
+        var accounts = await Dispatcher.Send(new ListUserDirectoryQuery());
+        _accounts.Clear();
+        if (accounts is { Status: true, Data: { } rows })
+        {
+            _accounts.AddRange(rows.Where(a => a.IsActive));
+        }
+
+        _formNumber = null;
+        _formTitle = null;
+        _formKind = null;
+        _formOpenedAt = DateTime.Today;
+        _formDivisionId = _ownerDivisions.Count == 1 ? _ownerDivisions[0].Id : null;
+        _formClassification = null; // гриф — только осознанным выбором (ТБ-024)
+        _formInvestigatorId = _scope?.UserId is { } me && _accounts.Any(a => a.UserId == me) ? me : null;
+        _formBasis = null;
+        _formOpen = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_formDivisionId is not { } divisionId || _formClassification is not { } classification
+            || _formKind is not { } kind || _formOpenedAt is not { } openedAt)
+        {
+            return;
+        }
+
+        _busy = true;
+        _formError = null;
+        try
+        {
+            var response = await Dispatcher.Send(new CreateCaseCommand(
+                _formNumber!.Trim(), _formTitle!.Trim(), kind, DateOnly.FromDateTime(openedAt),
+                _formInvestigatorId, divisionId, classification, _formBasis));
+            if (response is not { Status: true, Data: var id })
+            {
+                _formError = response.StatusMessage;
+                return;
+            }
+
+            _formOpen = false;
+            Navigation.NavigateTo($"/cases/{id}");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

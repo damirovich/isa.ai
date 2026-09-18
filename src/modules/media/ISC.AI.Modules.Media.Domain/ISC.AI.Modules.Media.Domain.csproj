@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Домен пакета модулей «Медиа» (ДОК-13 §5, ADR-0017/0018): носители, кадры, лица, шаблоны и
+       ПОРТЫ конвейера (детектор, векторизатор, извлекатель кадров, качество). Зависит только от
+       Abstractions: ни ONNX, ни ffmpeg, ни EF здесь нет — реализации живут в интеграции
+       ISC.AI.Vision.Onnx и в Media.Data. Модуль не знает ни профиль, ни хост (ТС-012). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

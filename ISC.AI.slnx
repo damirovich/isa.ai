@@ -8,6 +8,9 @@
     <Project Path="src/core/ISC.AI.Persistence/ISC.AI.Persistence.csproj" Id="065788bd-f3d2-4fe1-be00-2b9e7033131c" />
     <Project Path="src/core/ISC.AI.Web/ISC.AI.Web.csproj" Id="4e1b5082-ddb3-4d56-a277-a84a52cd5a6f" />
   </Folder>
+  <Folder Name="/src/integrations/">
+    <Project Path="src/integrations/ISC.AI.Vision.Onnx/ISC.AI.Vision.Onnx.csproj" />
+  </Folder>
   <Folder Name="/src/modules/" />
   <Folder Name="/src/modules/docflow/">
     <Project Path="src/modules/docflow/ISC.AI.Modules.DocFlow.Application/ISC.AI.Modules.DocFlow.Application.csproj" />
@@ -16,7 +19,27 @@
     <Project Path="src/modules/docflow/ISC.AI.Modules.DocFlow.UI/ISC.AI.Modules.DocFlow.UI.csproj" />
     <Project Path="src/modules/docflow/ISC.AI.Modules.DocFlow/ISC.AI.Modules.DocFlow.csproj" />
   </Folder>
+  <Folder Name="/src/modules/admin/">
+    <Project Path="src/modules/admin/ISC.AI.Modules.Admin.Application/ISC.AI.Modules.Admin.Application.csproj" />
+    <Project Path="src/modules/admin/ISC.AI.Modules.Admin.Domain/ISC.AI.Modules.Admin.Domain.csproj" />
+    <Project Path="src/modules/admin/ISC.AI.Modules.Admin.UI/ISC.AI.Modules.Admin.UI.csproj" />
+    <Project Path="src/modules/admin/ISC.AI.Modules.Admin/ISC.AI.Modules.Admin.csproj" />
+  </Folder>
+  <Folder Name="/src/modules/media/">
+    <Project Path="src/modules/media/ISC.AI.Modules.Media.Data/ISC.AI.Modules.Media.Data.csproj" />
+    <Project Path="src/modules/media/ISC.AI.Modules.Media.Domain/ISC.AI.Modules.Media.Domain.csproj" />
+    <Project Path="src/modules/media/ISC.AI.Modules.Media/ISC.AI.Modules.Media.csproj" />
+    <Project Path="src/modules/media/ISC.AI.Modules.Media.Application/ISC.AI.Modules.Media.Application.csproj" />
+    <Project Path="src/modules/media/ISC.AI.Modules.Media.UI/ISC.AI.Modules.Media.UI.csproj" />
+  </Folder>
   <Folder Name="/src/profiles/" />
+  <Folder Name="/src/profiles/investigation/">
+    <Project Path="src/profiles/investigation/ISC.AI.Profile.Investigation.Application/ISC.AI.Profile.Investigation.Application.csproj" />
+    <Project Path="src/profiles/investigation/ISC.AI.Profile.Investigation.Data/ISC.AI.Profile.Investigation.Data.csproj" />
+    <Project Path="src/profiles/investigation/ISC.AI.Profile.Investigation.Domain/ISC.AI.Profile.Investigation.Domain.csproj" />
+    <Project Path="src/profiles/investigation/ISC.AI.Profile.Investigation.UI/ISC.AI.Profile.Investigation.UI.csproj" />
+    <Project Path="src/profiles/investigation/ISC.AI.Profile.Investigation/ISC.AI.Profile.Investigation.csproj" />
+  </Folder>
   <Folder Name="/src/profiles/inspector/">
     <Project Path="src/profiles/inspector/ISC.AI.Profile.Inspector.Application/ISC.AI.Profile.Inspector.Application.csproj" Id="bc718037-f85a-434f-82eb-6903528f2700" />
     <Project Path="src/profiles/inspector/ISC.AI.Profile.Inspector.Data/ISC.AI.Profile.Inspector.Data.csproj" Id="1bc4ea50-6fa4-4fdc-bc30-686f284068c2" />

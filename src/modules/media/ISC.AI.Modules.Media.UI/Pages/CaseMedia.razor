@@ -1,0 +1,450 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Медиатека дела (ТФ-МЕД-01..03): носители дела, двухшаговая загрузка (выбор → отдельная кнопка
+   «Загрузить», как в загрузке корпуса Инспектора), переиндексация и гарантированное удаление.
+   Гриф и подразделение носителя наследуются от ДЕЛА (ТБ-070) — оператор их не выбирает.
+   Статусы индексации обновляются опросом раз в 5 с, пока есть незавершённые (ТП-004). *@
+@page "/media/cases/{CaseId:int}"
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@inject NavigationManager Navigation
+@using Microsoft.AspNetCore.Components.Forms
+@using ISC.AI.Modules.Media.Application.Features.Assets
+@using ISC.AI.Modules.Media.Application.Features.Scope
+@using ISC.AI.Modules.Media.Domain.Model
+@using ISC.AI.Modules.Media.Domain.Services
+
+<PageTitle>Медиатека дела</PageTitle>
+
+<div class="d-flex align-center justify-space-between flex-wrap gap-2">
+    <div>
+        <MudText Typo="Typo.h5">Медиатека дела</MudText>
+        @if (_case is { } caseItem)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                Дело № @caseItem.Number · @caseItem.Title
+            </MudText>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Фото и видео дела · только в пределах допуска</MudText>
+        }
+    </div>
+    <div class="d-flex align-center gap-2 flex-wrap">
+        @if (_case is { } c)
+        {
+            <ClassificationChip Classification="@c.Classification" />
+        }
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonSearch"
+                   Href="@($"/media/search?caseId={CaseId}")">Поиск по лицу в этом деле</MudButton>
+    </div>
+</div>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@if (_caseChecked && _case is null)
+{
+    @* Единый текст: недоступное дело неотличимо от несуществующего (ТБ-020/021). *@
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="my-3">
+        Дело недоступно: его нет либо оно вне вашего допуска.
+    </MudAlert>
+}
+else
+{
+    @* ================= Загрузка носителей (два шага, ТФ-МЕД-01) ================= *@
+    <MudPaper Outlined="true" Class="pa-4 my-4">
+        <MudText Typo="Typo.subtitle1" Class="mb-2">Загрузка носителей</MudText>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
+            Доступно ролям Следователь и Администратор. Гриф и подразделение носителя наследуются от дела (ТБ-070). Повтор того же файла в том же
+            подразделении не создаёт дубля. Обработка (поиск лиц) выполняется фоном после загрузки.
+        </MudText>
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="5">
+                @* Пределы длин — из валидатора команды, не дублируются числом (иначе клиент пропускает, сервер отбивает). *@
+                <MudTextField @bind-Value="_source" Label="Источник" Variant="Variant.Outlined" MaxLength="@UploadMediaValidator.MaxSourceLength"
+                              HelperText="откуда получена запись — общее для всех выбранных файлов" />
+            </MudItem>
+            <MudItem xs="6" sm="3">
+                @* Ширина пикера даты — ОБЁРТКОЙ div, не Style (MudBlazor копирует Style на календарь). *@
+                <div style="width:100%;">
+                    <MudDatePicker @bind-Date="_capturedAt" Label="Дата съёмки" Variant="Variant.Outlined"
+                                   DateFormat="dd.MM.yyyy" Clearable="true" />
+                </div>
+            </MudItem>
+            <MudItem xs="6" sm="4">
+                <MudTextField @bind-Value="_place" Label="Место" Variant="Variant.Outlined" MaxLength="@UploadMediaValidator.MaxPlaceLength" />
+            </MudItem>
+        </MudGrid>
+
+        <div class="mt-3 d-flex align-center gap-3 flex-wrap">
+            @* ДВА ШАГА: выбор лишь наполняет список, загрузку запускает отдельная кнопка — случайно
+               выбранный файл не должен улетать в дело сам. MudBlazor 9.5: своя кнопка — через
+               CustomContent + OpenFilePickerAsync. *@
+            <MudFileUpload T="IReadOnlyList<IBrowserFile>" FilesChanged="OnFilesSelected"
+                           Accept=".jpg,.jpeg,.png,.bmp,.webp,.mp4,.webm,.mkv,.mov,.avi"
+                           MaximumFileCount="20" Disabled="_busy">
+                <CustomContent Context="upload">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="_busy"
+                               StartIcon="@Icons.Material.Filled.AttachFile"
+                               OnClick="@(() => upload.OpenFilePickerAsync())">
+                        Выбрать файлы…
+                    </MudButton>
+                </CustomContent>
+            </MudFileUpload>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                Фото: .jpg, .png, .bmp, .webp (TIFF/HEIC конвейер пока не читает — см. ADR-0020). Видео: .mp4, .webm, .mkv, .mov, .avi
+                (в браузере воспроизводятся только .mp4/.webm; остальные — скачать в проигрыватель).
+                До 20 файлов за раз, каждый не более @MediaLabels.FormatSize(MediaFileRules.MaxFileBytes).
+            </MudText>
+        </div>
+
+        @if (_pendingFiles.Count > 0)
+        {
+            <div class="mt-2 d-flex align-center gap-2 flex-wrap">
+                @foreach (var file in _pendingFiles)
+                {
+                    var pending = file; // копия для замыкания OnClose
+                    <MudChip T="string" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Description"
+                             OnClose="@(() => _pendingFiles.Remove(pending))" Disabled="_busy">
+                        @pending.Name · @MediaLabels.FormatSize(pending.Size)
+                    </MudChip>
+                }
+            </div>
+            <div class="mt-2 d-flex align-center gap-3 flex-wrap">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy"
+                           StartIcon="@Icons.Material.Filled.CloudUpload" OnClick="UploadFilesAsync">
+                    @(_busy ? "Загружаю…" : $"Загрузить {FileCountLabel(_pendingFiles.Count)}")
+                </MudButton>
+                <MudButton Variant="Variant.Text" OnClick="@(() => _pendingFiles.Clear())" Disabled="_busy">Очистить список</MudButton>
+            </div>
+        }
+
+        @if (_busy)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-2" />
+        }
+
+        @if (_uploadResults.Count > 0)
+        {
+            <MudDivider Class="my-3" />
+            <MudText Typo="Typo.subtitle2" Class="mb-1">Результаты загрузки</MudText>
+            @foreach (var result in _uploadResults)
+            {
+                <div class="d-flex align-center gap-2 mb-1">
+                    <MudChip T="string" Size="Size.Small" Color="@(result.Ok ? (result.Duplicate ? Color.Info : Color.Success) : Color.Error)">
+                        @(result.Ok ? (result.Duplicate ? "уже есть" : "принят") : "отклонён")
+                    </MudChip>
+                    <MudText Typo="Typo.body2">@result.FileName</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@result.Message</MudText>
+                    @if (result.AssetId is { } assetId)
+                    {
+                        <MudLink Href="@($"/media/assets/{assetId}")" Typo="Typo.caption">открыть</MudLink>
+                    }
+                </div>
+            }
+        }
+    </MudPaper>
+
+    @* ================= Носители дела ================= *@
+    <MudTable T="MediaAssetRow" Items="_rows" Hover="true" Dense="true" Outlined="true" Loading="_loading"
+              LoadingProgressColor="Color.Primary" OnRowClick="@(row => Open(row.Item!))" RowClass="cursor-pointer">
+        <HeaderContent>
+            <MudTh>Дата</MudTh>
+            <MudTh>Файл</MudTh>
+            <MudTh>Вид</MudTh>
+            <MudTh>Обработка</MudTh>
+            <MudTh>Лиц</MudTh>
+            <MudTh>Гриф</MudTh>
+            <MudTh Style="width:1%;"></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Дата">@context.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudTd>
+            <MudTd DataLabel="Файл">
+                @context.OriginalFileName
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                    @MediaLabels.FormatSize(context.ByteSize)@(context.CapturedAt is { } captured ? $" · съёмка {captured.ToLocalTime():dd.MM.yyyy}" : string.Empty)
+                </MudText>
+            </MudTd>
+            <MudTd DataLabel="Вид">@context.Kind.Label()</MudTd>
+            <MudTd DataLabel="Обработка">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@context.IndexStatus.ChipColor()">@context.IndexStatus.Label()</MudChip>
+                @if (context.IndexStatus == MediaIndexStatus.Failed && !string.IsNullOrWhiteSpace(context.IndexError))
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Error" Class="d-block">@context.IndexError</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Лиц">@context.FaceCount</MudTd>
+            <MudTd DataLabel="Гриф"><ClassificationChip Classification="@context.Classification" /></MudTd>
+            <MudTd>
+                <div class="d-flex gap-1" @onclick:stopPropagation="true">
+                    <MudTooltip Text="Открыть карточку">
+                        <MudIconButton Icon="@Icons.Material.Filled.OpenInNew" Size="Size.Small" OnClick="@(() => Open(context))" />
+                    </MudTooltip>
+                    <MudTooltip Text="Переиндексировать (повторно найти лица)">
+                        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" Disabled="_busy"
+                                       OnClick="@(() => ReindexAsync(context.Id))" />
+                    </MudTooltip>
+                    <MudTooltip Text="Удалить носитель и все производные">
+                        <MudIconButton Icon="@Icons.Material.Filled.DeleteForever" Size="Size.Small" Color="Color.Error" Disabled="_busy"
+                                       OnClick="@(() => AskPurge(context))" />
+                    </MudTooltip>
+                </div>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            @* Текст НЕ утверждает «пусто»: недоступное неотличимо от несуществующего (ТБ-020/021). *@
+            <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Здесь пусто: носителей нет либо они вне вашего допуска.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+}
+
+@* --- Подтверждение гарантированного удаления (ТБ-064/075, GATE-6) --- *@
+<MudDialog @bind-Visible="_purgeOpen" Options="PurgeDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Удалить носитель?</MudText></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body1" Class="mb-2">@_purgeTarget?.OriginalFileName</MudText>
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+            Удаление гарантированное и необратимое: будут уничтожены исходный файл, все найденные лица,
+            их вырезки и биометрические шаблоны. Факт удаления записывается в неизменяемый журнал.
+        </MudAlert>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _purgeOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Filled" Disabled="_busy" OnClick="PurgeAsync">Удалить безвозвратно</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    /// <summary>Дело из маршрута.</summary>
+    [Parameter] public int CaseId { get; set; }
+
+    private static readonly DialogOptions PurgeDialogOptions =
+        new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true };
+
+    /// <summary>Итог приёма одного файла для списка результатов.</summary>
+    private sealed record UploadOutcome(string FileName, bool Ok, bool Duplicate, string Message, int? AssetId);
+
+    private readonly List<MediaAssetRow> _rows = [];
+    private readonly List<IBrowserFile> _pendingFiles = [];
+    private readonly List<UploadOutcome> _uploadResults = [];
+    private readonly ComponentPoller _poller = new(TimeSpan.FromSeconds(5));
+
+    private CaseScopeItem? _case;
+    private bool _caseChecked;
+    private bool _busy;
+    private bool _loading;
+    private string? _error;
+    private string? _source;
+    private DateTime? _capturedAt;
+    private string? _place;
+    private bool _purgeOpen;
+    private MediaAssetRow? _purgeTarget;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере (статический SSR до подключения circuit'а)
+        // медиатеку не грузим — ListCaseMediaQuery аудируется и попадал бы в журнал дважды.
+        if (!RendererInfo.IsInteractive) { return; }
+
+        // Подпись дела — из доступных субъекту (ТБ-071): чужое дело в списке не появится.
+        var cases = await Dispatcher.Send(new ListAccessibleCasesQuery());
+        if (cases is { Status: true, Data: { } list })
+        {
+            _case = list.FirstOrDefault(c => c.CaseId == CaseId);
+        }
+        else if (cases is { Status: false })
+        {
+            _error = cases.StatusMessage;
+        }
+
+        _caseChecked = true;
+        if (_case is null)
+        {
+            return;
+        }
+
+        await ReloadAsync();
+
+        // Опрос статусов индексации: тик перезапрашивает список, только пока есть незавершённые.
+        _poller.Start(() => InvokeAsync(async () =>
+        {
+            if (_busy || !_rows.Any(r => r.IndexStatus.IsInProgress()))
+            {
+                return;
+            }
+
+            await ReloadAsync();
+            StateHasChanged();
+        }));
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ListCaseMediaQuery(CaseId));
+            _rows.Clear();
+            if (response is { Status: true, Data: { } data })
+            {
+                _rows.AddRange(data);
+            }
+            else if (response is { Status: false })
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void OnFilesSelected(IReadOnlyList<IBrowserFile>? files)
+    {
+        if (files is null)
+        {
+            return;
+        }
+
+        foreach (var file in files)
+        {
+            if (!_pendingFiles.Any(p => p.Name == file.Name && p.Size == file.Size))
+            {
+                _pendingFiles.Add(file);
+            }
+        }
+    }
+
+    /// <summary>Счётчик с русским склонением: 1 файл, 2 файла, 5 файлов (и 11–14 — «файлов»).</summary>
+    private static string FileCountLabel(int count) => (count % 100 is >= 11 and <= 14 ? 0 : count % 10) switch
+    {
+        1 => $"{count} файл",
+        2 or 3 or 4 => $"{count} файла",
+        _ => $"{count} файлов",
+    };
+
+    /// <summary>Шаг 2: загрузка каждого выбранного файла отдельной командой; результат — по строкам.</summary>
+    private async Task UploadFilesAsync()
+    {
+        if (_pendingFiles.Count == 0)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        _uploadResults.Clear();
+        // Столбец captured_at — timestamptz: Npgsql принимает DateTimeOffset ТОЛЬКО со смещением 0. Дата из пикера —
+        // местная полночь; нормализуем в UTC (ToUniversalTime), чтобы при показе ToLocalTime вернул ту же дату.
+        var capturedAt = _capturedAt is { } d
+            ? new DateTimeOffset(DateTime.SpecifyKind(d, DateTimeKind.Local)).ToUniversalTime()
+            : (DateTimeOffset?)null;
+        try
+        {
+            foreach (var file in _pendingFiles.ToList())
+            {
+                try
+                {
+                    // Предел размера — из правил пакета; OpenReadStream без maxAllowedSize ограничен 512 КБ.
+                    byte[] content;
+                    using (var buffer = new MemoryStream())
+                    {
+                        await using var stream = file.OpenReadStream(MediaFileRules.MaxFileBytes);
+                        await stream.CopyToAsync(buffer);
+                        content = buffer.ToArray();
+                    }
+
+                    var response = await Dispatcher.Send(new UploadMediaCommand(
+                        CaseId, file.Name, file.ContentType, content,
+                        string.IsNullOrWhiteSpace(_source) ? null : _source, capturedAt,
+                        string.IsNullOrWhiteSpace(_place) ? null : _place));
+
+                    if (response is { Status: true, Data: { } receipt })
+                    {
+                        _uploadResults.Add(new UploadOutcome(file.Name, true, receipt.Duplicate,
+                            receipt.Duplicate ? "такой файл уже есть в деле" : "поставлен в обработку", receipt.AssetId));
+                        _pendingFiles.Remove(file);
+                    }
+                    else
+                    {
+                        _uploadResults.Add(new UploadOutcome(file.Name, false, false, response.StatusMessage, null));
+                    }
+                }
+                catch (IOException)
+                {
+                    // Blazor бросает IOException при превышении maxAllowedSize — говорим человеку, а не «поток».
+                    _uploadResults.Add(new UploadOutcome(file.Name, false, false,
+                        $"файл больше допустимых {MediaLabels.FormatSize(MediaFileRules.MaxFileBytes)} или не прочитан", null));
+                }
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task ReindexAsync(int assetId)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new ReindexMediaCommand(assetId));
+            if (!response.Status)
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    private void AskPurge(MediaAssetRow asset)
+    {
+        _purgeTarget = asset;
+        _purgeOpen = true;
+    }
+
+    private async Task PurgeAsync()
+    {
+        if (_purgeTarget is not { } target)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new PurgeMediaCommand(target.Id));
+            if (!response.Status)
+            {
+                _error = response.StatusMessage;
+            }
+
+            _purgeOpen = false;
+            _purgeTarget = null;
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    private void Open(MediaAssetRow asset) => Navigation.NavigateTo($"/media/assets/{asset.Id}");
+
+    public ValueTask DisposeAsync() => _poller.DisposeAsync();
+}

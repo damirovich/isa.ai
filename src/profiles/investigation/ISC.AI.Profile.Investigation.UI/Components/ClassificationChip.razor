@@ -1,0 +1,26 @@
+@namespace ISC.AI.Profile.Investigation.UI
+
+@* Маркировка грифа на карточках и в строках (ТБ-024): единый вид с реестром документов пакета
+   docflow (Documents.razor) — чип Warning для ненулевого грифа, «0 — открытый» подписью. Гриф
+   показывается ВСЕГДА, включая открытый: пользователь должен видеть, с каким материалом работает. *@
+
+@if (Value > 0)
+{
+    <MudTooltip Text="Гриф материала">
+        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text">
+            @(Prefix)@Value
+        </MudChip>
+    </MudTooltip>
+}
+else
+{
+    <MudText Typo="Typo.caption" Class="mud-text-secondary">@(Prefix)0 — открытый</MudText>
+}
+
+@code {
+    /// <summary>Уровень грифа (0 — открытый).</summary>
+    [Parameter, EditorRequired] public short Value { get; set; }
+
+    /// <summary>Подпись перед значением (например, «гриф »); по умолчанию — пусто.</summary>
+    [Parameter] public string Prefix { get; set; } = string.Empty;
+}

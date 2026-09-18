@@ -11,6 +11,10 @@
        Ссылка идёт В ЭТУ сторону — модуль о профиле не знает. -->
   <ItemGroup>
     <ProjectReference Include="..\..\..\modules\docflow\ISC.AI.Modules.DocFlow\ISC.AI.Modules.DocFlow.csproj" />
+    <!-- Администрирование платформы (ADR-0023): учётные записи, допуски, журнал аудита и смена
+         своего пароля. Профиль их больше НЕ держит у себя — подключает пакет и реализует три порта
+         (право администрировать, справочник подразделений, роли), см. Inspector.Data. -->
+    <ProjectReference Include="..\..\..\modules\admin\ISC.AI.Modules.Admin\ISC.AI.Modules.Admin.csproj" />
   </ItemGroup>
 
   <ItemGroup>

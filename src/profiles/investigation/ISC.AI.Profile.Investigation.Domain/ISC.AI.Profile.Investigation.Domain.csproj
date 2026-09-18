@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Домен профиля «Следствие» (ДОК-13 §6): дела, фигуранты, эталоны, появления, основания поисков,
+       роли ТП-004, справочник подразделений и ПОРТЫ хранилищ. Зависит только от Abstractions;
+       ни EF, ни модулей здесь нет (ТС-002/009). -->
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

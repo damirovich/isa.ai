@@ -1,0 +1,6 @@
+@* Общая обвязка страниц профиля «Следствие»: все вызовы — через Mediator (ResponseDto<T>), JS —
+   только из OnAfterRenderAsync (prerender включён хостом). *@
+@using Mediator
+@using Microsoft.JSInterop
+@inject IMediator Dispatcher
+@inject IJSRuntime JS

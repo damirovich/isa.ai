@@ -1,0 +1,467 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@page "/persons/{Id:int}"
+@rendermode InteractiveServer
+@using System.Globalization
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Abstractions.Security
+@using ISC.AI.Profile.Investigation.Application.Features.Directory
+@using ISC.AI.Profile.Investigation.Application.Features.Persons
+@using ISC.AI.Profile.Investigation.Domain.Enums
+@using ISC.AI.Profile.Investigation.Domain.Services
+@inject NavigationManager Navigation
+
+@* Карточка фигуранта (ТФ-ПЕР-01/02): реквизиты, подтверждённые появления и эталоны. Появление —
+   ВСЕГДА «следственная версия» (ТФ-ВЕР-03): система не утверждает тождество личности, а балл схожести
+   показывается с предупреждением о его вероятностной природе (ТЭ-006); слова «идентифицирован» и т.п.
+   в интерфейсе не используются (ТЭ-005). Эталоны при замене не удаляются — прежний помечается заменённым
+   (ТБ-077). Носители и сессии пакета «Медиа» — по URL (/media/...). Гриф и подразделение фигуранта —
+   с дела (решётка ТБ-020: недоступный фигурант неотличим от несуществующего). *@
+
+@if (_person is null)
+{
+    <PageHeader Title="Фигурант" Icon="@Icons.Material.Filled.Person" />
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_error</MudAlert>
+        <MudButton Href="/cases" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack">К списку дел</MudButton>
+    }
+    else
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-4" />
+    }
+}
+else
+{
+    <PageHeader Title="@_person.DisplayName" Subtitle="@(_person.RoleInCase is null ? "Фигурант дела" : $"Фигурант дела · {_person.RoleInCase}")"
+                Icon="@Icons.Material.Filled.Person">
+        @if (_person.IsUnidentified)
+        {
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">личность не установлена</MudChip>
+        }
+        <ClassificationChip Value="@_person.Classification" Prefix="гриф " />
+        <MudButton Href="@($"/cases/{_person.CaseId}")" Variant="Variant.Text" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.ArrowBack">К делу</MudButton>
+    </PageHeader>
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+    }
+
+    <MudPaper Outlined="true" Class="pa-4 mb-3">
+        <div class="d-flex align-center justify-space-between mb-2">
+            <MudText Typo="Typo.subtitle1">Реквизиты</MudText>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit"
+                       OnClick="OpenEdit" Disabled="_busy">Изменить</MudButton>
+        </div>
+        <MudSimpleTable Dense="true" Elevation="0">
+            <tbody>
+                <tr><td class="mud-text-secondary">Имя</td><td>@_person.DisplayName</td></tr>
+                @if (_person.UnidentifiedNumber is { } number)
+                {
+                    <tr><td class="mud-text-secondary">Номер неустановленного лица</td><td>№ @number</td></tr>
+                }
+                <tr><td class="mud-text-secondary">Роль в деле</td><td>@(_person.RoleInCase ?? "—")</td></tr>
+                <tr><td class="mud-text-secondary">Примечания</td><td style="white-space:pre-wrap;">@(string.IsNullOrWhiteSpace(_person.Notes) ? "—" : _person.Notes)</td></tr>
+                <tr><td class="mud-text-secondary">Эталонов / появлений</td><td>@_person.ReferencePhotoCount / @_person.AppearanceCount</td></tr>
+            </tbody>
+        </MudSimpleTable>
+    </MudPaper>
+
+    <MudTabs Elevation="0" Border="true" Rounded="true">
+    @* --- Появления: только подтверждённые двумя лицами (ТБ-073), всегда «следственная версия» --- *@
+    <MudTabPanel Text="Появления" Icon="@Icons.Material.Filled.Visibility" BadgeData="@_appearances.Count" BadgeColor="Color.Default">
+        <div class="pt-3">
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                Балл схожести — вероятностная оценка алгоритма, а не установление личности. Каждое появление —
+                <b>следственная версия</b>, подтверждённая экспертом и верификатором; процессуальная проверка
+                остаётся за следствием.
+            </MudAlert>
+            @if (_appearancesError is not null)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_appearancesError</MudAlert>
+            }
+            <MudTable T="AppearanceRow" Items="_appearances" Hover="true" Dense="true" Outlined="true" Loading="_busy">
+                <HeaderContent>
+                    <MudTh>Носитель</MudTh>
+                    <MudTh>Момент</MudTh>
+                    <MudTh>Схожесть</MudTh>
+                    <MudTh>Статус</MudTh>
+                    <MudTh>Эксперт</MudTh>
+                    <MudTh>Верификатор</MudTh>
+                    <MudTh>Подтверждено</MudTh>
+                    <MudTh>Сессия</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    @* Соглашение навигации пакета «Медиа»: ?face= подсвечивает лицо на карточке носителя (ТФ-ПЕР-02 «переход к кадру»). *@
+                    <MudTd DataLabel="Носитель"><MudLink Href="@($"/media/assets/{context.MediaAssetId}?face={context.MediaFaceId}")">носитель № @context.MediaAssetId · лицо № @context.MediaFaceId</MudLink></MudTd>
+                    <MudTd DataLabel="Момент">@Moment(context)</MudTd>
+                    <MudTd DataLabel="Схожесть">
+                        <MudTooltip Text="Вероятностная оценка алгоритма; не является подтверждением личности (ТЭ-006)">
+                            <span>@Percent(context.Similarity)</span>
+                        </MudTooltip>
+                    </MudTd>
+                    <MudTd DataLabel="Статус">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info">следственная версия</MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="Эксперт">@UserName(context.ExpertUserId)</MudTd>
+                    <MudTd DataLabel="Верификатор">@UserName(context.VerifierUserId)</MudTd>
+                    <MudTd DataLabel="Подтверждено">@context.ConfirmedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudTd>
+                    <MudTd DataLabel="Сессия"><MudLink Href="@($"/media/sessions/{context.SearchSessionId}")">№ @context.SearchSessionId</MudLink></MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                        Здесь пусто: подтверждённых появлений нет либо они вне вашего допуска.
+                    </MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </div>
+    </MudTabPanel>
+
+    @* --- Эталоны (ТБ-077): история хранится, замена — новой записью с указанием заменяемой --- *@
+    <MudTabPanel Text="Эталоны" Icon="@Icons.Material.Filled.PhotoLibrary" BadgeData="@_photos.Count" BadgeColor="Color.Default">
+        <div class="pt-3">
+            <div class="d-flex justify-end mb-2">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.AddPhotoAlternate"
+                           OnClick="OpenAddPhoto" Disabled="_busy">Добавить эталон</MudButton>
+            </div>
+            @if (_photosError is not null)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_photosError</MudAlert>
+            }
+            <MudTable T="ReferencePhotoRow" Items="_photos" Hover="true" Dense="true" Outlined="true" Loading="_busy">
+                <HeaderContent>
+                    <MudTh>№</MudTh>
+                    <MudTh>Носитель</MudTh>
+                    <MudTh>Качество</MudTh>
+                    <MudTh>Источник</MudTh>
+                    <MudTh>Законное основание</MudTh>
+                    <MudTh>Пересмотр до</MudTh>
+                    <MudTh>Добавил</MudTh>
+                    <MudTh>Состояние</MudTh>
+                    <MudTh>Добавлен</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="№">@context.Id</MudTd>
+                    <MudTd DataLabel="Носитель">
+                        <MudLink Href="@(context.MediaFaceId is { } faceId ? $"/media/assets/{context.MediaAssetId}?face={faceId}" : $"/media/assets/{context.MediaAssetId}")">
+                            носитель № @context.MediaAssetId@(context.MediaFaceId is { } face ? $" · лицо № {face}" : string.Empty)
+                        </MudLink>
+                    </MudTd>
+                    <MudTd DataLabel="Качество">@(context.QualityScore is { } q ? q.ToString("0.00", CultureInfo.InvariantCulture) : "—")</MudTd>
+                    <MudTd DataLabel="Источник">@(context.Source ?? "—")</MudTd>
+                    <MudTd DataLabel="Законное основание">@(context.LegalBasis ?? "—")</MudTd>
+                    <MudTd DataLabel="Пересмотр до">
+                        @if (context.ReviewDueAt is { } due)
+                        {
+                            <span class="@(due < DateOnly.FromDateTime(DateTime.Today) ? "mud-error-text" : null)">@due.ToString("dd.MM.yyyy")</span>
+                        }
+                        else
+                        {
+                            <span>—</span>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Добавил">@UserName(context.AddedByUserId)</MudTd>
+                    <MudTd DataLabel="Состояние">
+                        @if (context.SupersededById is { } by)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text">заменён эталоном № @by</MudChip>
+                        }
+                        else
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Success">актуален</MudChip>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Добавлен">@context.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                        Здесь пусто: эталонов нет либо они вне вашего допуска.
+                    </MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </div>
+    </MudTabPanel>
+    </MudTabs>
+}
+
+@* --- Правка реквизитов (UpdatePersonCommand); номер неустановленного лица при установлении личности сохраняется --- *@
+<MudDialog @bind-Visible="_editOpen" Options="FormDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Изменить фигуранта</MudText></TitleContent>
+    <DialogContent>
+        @if (_editError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_editError</MudAlert>
+        }
+        <MudGrid Spacing="2">
+            <MudItem xs="12">
+                <MudCheckBox T="bool" @bind-Value="_editUnidentified" Label="Личность не установлена" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_editName" Label="@(_editUnidentified ? "Имя (необязательно)" : "Имя *")" Variant="Variant.Outlined" MaxLength="300" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_editRole" Label="Роль в деле" Variant="Variant.Outlined" MaxLength="200" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_editNotes" Label="Примечания" Variant="Variant.Outlined" Lines="3" MaxLength="4000" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _editOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!EditValid || _busy)" OnClick="SaveEditAsync">Сохранить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* --- Новый эталон (AddReferencePhotoCommand): носитель и лицо — идентификаторы пакета «Медиа»
+       (берутся со страницы носителя /media/assets/{id}); прежний эталон не удаляется (ТБ-077) --- *@
+<MudDialog @bind-Visible="_photoOpen" Options="FormDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Новый эталон</MudText></TitleContent>
+    <DialogContent>
+        @if (_photoError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_photoError</MudAlert>
+        }
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="6">
+                <MudNumericField T="int?" @bind-Value="_photoAssetId" Label="Носитель № *" Variant="Variant.Outlined" Min="1"
+                                 HelperText="Идентификатор носителя из медиатеки дела" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudNumericField T="int?" @bind-Value="_photoFaceId" Label="Лицо №" Variant="Variant.Outlined" Min="1"
+                                 HelperText="Идентификатор лица на носителе (если выбрано)" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_photoSource" Label="Источник" Variant="Variant.Outlined" MaxLength="300" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_photoLegalBasis" Label="Законное основание" Variant="Variant.Outlined" MaxLength="300" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <div>
+                    <MudDatePicker @bind-Date="_photoReviewDueAt" Label="Дата пересмотра" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" Clearable="true" />
+                </div>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="int?" @bind-Value="_photoSupersedesId" Label="Заменяет эталон №" Variant="Variant.Outlined" Dense="true"
+                           Clearable="true" Placeholder="Не заменяет">
+                    @foreach (var photo in _photos.Where(p => p.SupersededById is null))
+                    {
+                        <MudSelectItem T="int?" Value="@photo.Id">№ @photo.Id · носитель № @photo.MediaAssetId</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _photoOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!PhotoValid || _busy)" OnClick="SavePhotoAsync">Добавить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly DialogOptions FormDialogOptions =
+        new() { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true };
+
+    /// <summary>Идентификатор фигуранта из маршрута.</summary>
+    [Parameter] public int Id { get; set; }
+
+    private PersonRow? _person;
+    private readonly List<AppearanceRow> _appearances = [];
+    private readonly List<ReferencePhotoRow> _photos = [];
+    private readonly List<UserAccountRow> _accounts = [];
+    private bool _busy;
+    private string? _error;
+    private string? _appearancesError;
+    private string? _photosError;
+
+    // --- Правка ---
+    private bool _editOpen;
+    private string? _editError;
+    private string? _editName;
+    private bool _editUnidentified;
+    private string? _editRole;
+    private string? _editNotes;
+    private bool EditValid => _editUnidentified || !string.IsNullOrWhiteSpace(_editName);
+
+    // --- Новый эталон ---
+    private bool _photoOpen;
+    private string? _photoError;
+    private int? _photoAssetId;
+    private int? _photoFaceId;
+    private string? _photoSource;
+    private string? _photoLegalBasis;
+    private DateTime? _photoReviewDueAt;
+    private int? _photoSupersedesId;
+    private bool PhotoValid => _photoAssetId is > 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере (статический SSR до подключения circuit'а)
+        // карточку не грузим — иначе GetPersonQuery/ListAppearancesQuery попадали бы в журнал дважды.
+        // До интерактива страница показывает индикатор загрузки (_person is null && _error is null).
+        if (!RendererInfo.IsInteractive) { return; }
+
+        var accounts = await Dispatcher.Send(new ListUserDirectoryQuery());
+        if (accounts is { Status: true, Data: { } rows })
+        {
+            _accounts.AddRange(rows);
+        }
+
+        await ReloadAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере не грузим (см. OnInitializedAsync).
+        if (!RendererInfo.IsInteractive) { return; }
+
+        if (_person is { } current && current.Id != Id)
+        {
+            await ReloadAsync();
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new GetPersonQuery(Id));
+            if (response is not { Status: true, Data: { } person })
+            {
+                _person = null;
+                _error = response.StatusMessage;
+                return;
+            }
+
+            _person = person;
+
+            _appearancesError = null;
+            var appearances = await Dispatcher.Send(new ListAppearancesQuery(Id));
+            _appearances.Clear();
+            if (appearances is { Status: true, Data: { } a }) { _appearances.AddRange(a); }
+            else { _appearancesError = appearances.StatusMessage; }
+
+            _photosError = null;
+            var photos = await Dispatcher.Send(new ListReferencePhotosQuery(Id));
+            _photos.Clear();
+            if (photos is { Status: true, Data: { } p }) { _photos.AddRange(p); }
+            else { _photosError = photos.StatusMessage; }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void OpenEdit()
+    {
+        if (_person is not { } p) { return; }
+        _editError = null;
+        _editName = p.IsUnidentified ? null : p.DisplayName;
+        _editUnidentified = p.IsUnidentified;
+        _editRole = p.RoleInCase;
+        _editNotes = p.Notes;
+        _editOpen = true;
+    }
+
+    private async Task SaveEditAsync()
+    {
+        _busy = true;
+        _editError = null;
+        try
+        {
+            var response = await Dispatcher.Send(new UpdatePersonCommand(
+                Id, string.IsNullOrWhiteSpace(_editName) ? null : _editName.Trim(), _editUnidentified,
+                string.IsNullOrWhiteSpace(_editRole) ? null : _editRole.Trim(), _editNotes));
+            if (!response.Status)
+            {
+                _editError = response.StatusMessage;
+                return;
+            }
+
+            _editOpen = false;
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    private void OpenAddPhoto()
+    {
+        _photoError = null;
+        _photoAssetId = null;
+        _photoFaceId = null;
+        _photoSource = null;
+        _photoLegalBasis = null;
+        _photoReviewDueAt = null;
+        _photoSupersedesId = null;
+        _photoOpen = true;
+    }
+
+    private async Task SavePhotoAsync()
+    {
+        if (_photoAssetId is not { } assetId) { return; }
+        _busy = true;
+        _photoError = null;
+        try
+        {
+            // Оценка качества (QualityScore) — от пакета «Медиа»; здесь её нет, передаём null.
+            var response = await Dispatcher.Send(new AddReferencePhotoCommand(
+                Id, assetId, _photoFaceId,
+                string.IsNullOrWhiteSpace(_photoSource) ? null : _photoSource.Trim(),
+                string.IsNullOrWhiteSpace(_photoLegalBasis) ? null : _photoLegalBasis.Trim(),
+                _photoReviewDueAt is { } due ? DateOnly.FromDateTime(due) : null,
+                _photoSupersedesId));
+            if (!response.Status)
+            {
+                _photoError = response.StatusMessage;
+                return;
+            }
+
+            _photoOpen = false;
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    // --- Подписи ---
+    private string UserName(int? id)
+    {
+        if (id is not { } userId) { return "—"; }
+        var account = _accounts.FirstOrDefault(a => a.UserId == userId);
+        if (account is null) { return $"пользователь № {userId}"; }
+        return string.IsNullOrWhiteSpace(account.DisplayName) ? account.UserName : account.DisplayName;
+    }
+
+    // Балл схожести — в процентах, с зажимом в 0..100: показ вероятностный (ТЭ-006), не «совпало/нет».
+    private static string Percent(double similarity)
+    {
+        var percent = Math.Clamp(similarity * 100, 0, 100);
+        return percent.ToString("0", CultureInfo.InvariantCulture) + " %";
+    }
+
+    // Момент появления: для видео — таймкод кадра, для фото — «на фото».
+    private static string Moment(AppearanceRow row)
+    {
+        if (row.FrameTimestampMs is { } ms)
+        {
+            var t = TimeSpan.FromMilliseconds(ms);
+            return t.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture)
+                + (row.FrameIndex is { } frame ? $" (кадр {frame})" : string.Empty);
+        }
+
+        return row.FrameIndex is { } f ? $"кадр {f}" : "на фото";
+    }
+}

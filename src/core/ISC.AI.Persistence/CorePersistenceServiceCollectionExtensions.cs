@@ -70,6 +70,12 @@ public static class CorePersistenceServiceCollectionExtensions
         // Хранилище диалогов чата (сохранение истории общения), разграничение по владельцу-субъекту.
         services.AddScoped<IConversationStore, ConversationStore>();
 
+        // Нейтральный файловый порт ядра (ADR-0018): байты носителей и исходников вне БД, корень —
+        // Storage:BasePath (на проде — защищённый том, ТБ-062). Каталог создаётся лениво при первом
+        // сохранении, поэтому регистрация свободна от побочных эффектов на диске.
+        services.AddSingleton<Abstractions.Storage.IFileStorage>(
+            _ => new Storage.LocalFileStorage(configuration["Storage:BasePath"]));
+
         return services;
     }
 }

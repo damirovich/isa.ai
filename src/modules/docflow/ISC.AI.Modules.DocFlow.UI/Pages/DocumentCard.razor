@@ -6,7 +6,8 @@
 @page "/docflow/documents/{Id:int}"
 @rendermode InteractiveServer
 @inject NavigationManager Navigation
-@inject ISC.AI.Abstractions.Security.IAccessContextProvider AccessProvider
+@using ISC.AI.Abstractions.Security
+@inject IAccessContextProvider AccessProvider
 @using ISC.AI.Modules.DocFlow.Application.Features.Documents
 @using ISC.AI.Modules.DocFlow.Application.Features.Assignments
 @using ISC.AI.Modules.DocFlow.Application.Features.Comments
@@ -163,7 +164,16 @@ else
 
         // Свой идентификатор — секция комментариев показывает «Изменить»/«Удалить» только у своих.
         // Право на само действие проверяет СЕРВЕР (ICommentStore) — это лишь удобство UI.
-        _currentUserId = (await AccessProvider.GetCurrentAsync()).NumericSubjectId;
+        // Без записи допуска (ТБ-012) провайдер бросает исключение: тогда «свой» идентификатор
+        // неизвестен, кнопки правки комментариев просто не показываются (право всё равно за сервером).
+        try
+        {
+            _currentUserId = (await AccessProvider.GetCurrentAsync()).NumericSubjectId;
+        }
+        catch (AccessContextRequiredException)
+        {
+            _currentUserId = null;
+        }
 
         await ReloadAsync();
     }

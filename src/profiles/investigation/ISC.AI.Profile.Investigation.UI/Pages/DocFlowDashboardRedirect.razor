@@ -1,0 +1,11 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@* Модульный адрес дашборда документооборота. Своей страницы у пакета docflow нет — сводка живёт
+   вкладкой общего дашборда профиля. Маршрут держит ПРОФИЛЬ: на него ведёт колокольчик уведомлений
+   пакета (DocFlowModule.ShellWidgets), а сам пакет маршрутов профиля не знает (ADR-0017). *@
+@page "/docflow/dashboard"
+@inject NavigationManager Navigation
+
+@code {
+    protected override void OnInitialized() =>
+        Navigation.NavigateTo("/dashboard?tab=docflow", replace: true);
+}

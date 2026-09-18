@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Манифест пакета модулей «Администрирование платформы» (ADR-0017/0023): собирает Domain,
+       Application и UI и отдаёт профилю реестр страниц и виджет шапки. -->
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ISC.AI.Modules.Admin.Domain\ISC.AI.Modules.Admin.Domain.csproj" />
+    <ProjectReference Include="..\ISC.AI.Modules.Admin.Application\ISC.AI.Modules.Admin.Application.csproj" />
+    <ProjectReference Include="..\ISC.AI.Modules.Admin.UI\ISC.AI.Modules.Admin.UI.csproj" />
+  </ItemGroup>
+
+</Project>

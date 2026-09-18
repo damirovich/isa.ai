@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Слой данных пакета «Медиа» (ДОК-13 §5.2): MediaDbContext (схема media), сущности с вектором
+       pgvector, поиск по лицу с решёткой доступа, гарантированное удаление, раздача файлов.
+       Единственное место пакета, ссылающееся на конкретный проект ядра (Persistence) — то же
+       правило, что и у DocFlow.Data и слоя данных профиля (DependencyRulesTests). Сущности живут
+       ЗДЕСЬ, а не в Domain: столбец vector(N) и операторы расстояния требуют типа Pgvector.Vector,
+       а тянуть Pgvector в Domain (где живут порты конвейера) незачем. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+    <ProjectReference Include="..\ISC.AI.Modules.Media.Domain\ISC.AI.Modules.Media.Domain.csproj" />
+    <ProjectReference Include="..\..\..\core\ISC.AI.Persistence\ISC.AI.Persistence.csproj" />
+  </ItemGroup>
+
+  <!-- Раздача файлов носителей и вырезок (ТБ-073) — сырой Minimal-API-эндпоинт, как у DocFlow:
+       типы IEndpointRouteBuilder/IResult есть только в shared framework ASP.NET Core. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Pgvector.EntityFrameworkCore" />
+    <PackageReference Include="EFCore.NamingConventions" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+</Project>

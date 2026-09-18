@@ -1,0 +1,58 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Плитка вырезки лица: изображение КАК ЕСТЬ (ТЭ-007) фиксированного размера, подпись и флаг
+   непригодности с причиной (ТО-мат-07 — оператор видит, почему шаблон не строился). 404 раздачи
+   (нет файла ИЛИ вне допуска) — единый «нет изображения», причины не различаем (ТБ-020/021). *@
+
+<div class="d-flex flex-column align-center" style="@($"width:{Size}px;")">
+    @* Подсветка — рамкой цвета Primary (переход «?face=» с выдачи поиска / верификации). *@
+    <div style="@($"width:{Size}px;height:{Size}px;{(Highlighted ? "outline:3px solid var(--mud-palette-primary);outline-offset:1px;" : string.Empty)}")"
+         class="rounded mud-elevation-1 d-flex align-center justify-center overflow-hidden">
+        @if (Url is { } url)
+        {
+            <img src="@url" alt="@(Alt ?? "вырезка лица")" loading="lazy"
+                 style="@($"width:{Size}px;height:{Size}px;object-fit:cover;display:block;")" />
+        }
+        else
+        {
+            <MudIcon Icon="@Icons.Material.Filled.HideImage" Class="mud-text-secondary" />
+        }
+    </div>
+    @if (!string.IsNullOrWhiteSpace(Caption))
+    {
+        <MudText Typo="Typo.caption" Class="mt-1 text-center" Style="line-height:1.2;">@Caption</MudText>
+    }
+    @if (Unusable)
+    {
+        <MudTooltip Text="@(string.IsNullOrWhiteSpace(UnusableReason) ? "Лицо непригодно для сравнения" : $"Непригодно: {UnusableReason}")">
+            <MudChip T="string" Size="MudBlazor.Size.Small" Color="Color.Warning" Variant="Variant.Text"
+                     Icon="@Icons.Material.Filled.WarningAmber">непригодно</MudChip>
+        </MudTooltip>
+    }
+    @ChildContent
+</div>
+
+@code {
+    /// <summary>Защищённая ссылка на вырезку (<see cref="MediaFileUrl"/>); <see langword="null"/> — вырезки нет.</summary>
+    [Parameter] public string? Url { get; set; }
+
+    /// <summary>Подпись под плиткой (номер лица, таймкод, ранг).</summary>
+    [Parameter] public string? Caption { get; set; }
+
+    /// <summary>Альтернативный текст изображения.</summary>
+    [Parameter] public string? Alt { get; set; }
+
+    /// <summary>Лицо непригодно для сравнения (шаблон не строился).</summary>
+    [Parameter] public bool Unusable { get; set; }
+
+    /// <summary>Причина непригодности (ТО-мат-07).</summary>
+    [Parameter] public string? UnusableReason { get; set; }
+
+    /// <summary>Выделить плитку рамкой (лицо, к которому пришли по ссылке).</summary>
+    [Parameter] public bool Highlighted { get; set; }
+
+    /// <summary>Сторона квадрата в пикселях (по умолчанию 96).</summary>
+    [Parameter] public int Size { get; set; } = 96;
+
+    /// <summary>Дополнительное содержимое под плиткой (кнопки, чипы).</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

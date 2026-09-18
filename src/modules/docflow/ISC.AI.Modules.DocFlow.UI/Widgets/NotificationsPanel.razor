@@ -119,8 +119,19 @@
 
         // Живой сигнал: новое уведомление появляется в ленте сразу, без ожидания опроса. Через
         // шину идёт только «перечитай» — состав ленты берётся запросом через решётку доступа.
-        var access = await AccessProvider.GetCurrentAsync();
-        if (access.NumericSubjectId is { } userId)
+        // Без записи допуска (ТБ-012) провайдер бросает исключение — для ленты это штатное
+        // состояние «нечего показывать», а не сбой страницы.
+        AccessContext? access;
+        try
+        {
+            access = await AccessProvider.GetCurrentAsync();
+        }
+        catch (AccessContextRequiredException)
+        {
+            access = null;
+        }
+
+        if (access?.NumericSubjectId is { } userId)
         {
             _signalSubscription = Signal.Subscribe(userId, () => InvokeAsync(async () =>
             {

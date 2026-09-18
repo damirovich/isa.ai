@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <!-- Страницы пакета «Медиа» (Razor Class Library, ЭС3-02): медиатека дела, карточка носителя, поиск по
+       лицу, сессии поиска и двойная верификация. Монтируются хостом через реестр профиля (MediaModule.Modules).
+       Ссылки ТОЛЬКО на Abstractions, Domain и Application пакета: ни Media.Data, ни профили — арх-тест
+       (Module_does_not_reference_profile_or_host); данные приходят через Mediator. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+    <ProjectReference Include="..\ISC.AI.Modules.Media.Domain\ISC.AI.Modules.Media.Domain.csproj" />
+    <ProjectReference Include="..\ISC.AI.Modules.Media.Application\ISC.AI.Modules.Media.Application.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
+    <PackageReference Include="MudBlazor" />
+  </ItemGroup>
+
+</Project>

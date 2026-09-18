@@ -1,6 +1,7 @@
 using ISC.AI.Abstractions.AI;
 using ISC.AI.Abstractions.Modules;
 using ISC.AI.Abstractions.Profiles;
+using ISC.AI.Modules.Admin;
 using ISC.AI.Modules.DocFlow;
 using ISC.AI.Profile.Inspector.Application;
 using ISC.AI.Profile.Inspector.Data;
@@ -31,7 +32,10 @@ public sealed class InspectorProfile : IProfile
     private const string GroupNpa = "Нормативная база";
     private const string GroupOrg = "Организация работы";
     private const string GroupDivisions = "Подразделения";
-    private const string GroupAdmin = "Администрирование";
+    // Секция администрирования — ОДНА на пакет и профиль: «Роли пользователей» и «Виды нарушений»
+    // остаются профильными (состав ролей и классификатор — его дело), а учётки, допуски и журнал
+    // даёт пакет. Имя берём у пакета, чтобы переименование не развалило секцию на две.
+    private const string GroupAdmin = AdminModule.MenuGroup;
     private const string ReadPolicy = "inspector.read";
 
     /// <inheritdoc />
@@ -119,42 +123,33 @@ public sealed class InspectorProfile : IProfile
         new ModuleDescriptor("admin-roles", "/admin/roles", "Роли пользователей",
             Icons.Material.Filled.AdminPanelSettings, typeof(UserRoles), ReadPolicy, GroupAdmin),
 
-        // Допуски (ТБ-011/020/021) — гриф и подразделения. Раньше правились только SQL'ем по живой
-        // базе, мимо неизменяемого журнала; страница закрывает это и показывает расхождение со
-        // справочником подразделений.
-        new ModuleDescriptor("admin-clearances", "/admin/clearances", "Допуски пользователей",
-            Icons.Material.Filled.Key, typeof(UserClearances), ReadPolicy, GroupAdmin),
-
-        // Учётные записи (Э4-35 §6.5): после перехода на локальную идентичность — единственное
-        // место, где заводят доступ и восстанавливают забытый пароль.
-        new ModuleDescriptor("admin-users", "/admin/users", "Учётные записи",
-            Icons.Material.Filled.ManageAccounts, typeof(UserAccounts), ReadPolicy, GroupAdmin),
-
-        // Журнал аудита (ТБ-030/032): писался с самого начала, но смотреть его из интерфейса было
-        // нельзя — только запросом к БД.
-        new ModuleDescriptor("admin-audit", "/admin/audit", "Журнал аудита",
-            Icons.Material.Filled.History, typeof(AuditJournal), ReadPolicy, GroupAdmin),
+        // Учётные записи (Э4-35 §6.5), допуски (ТБ-011/020/021) и журнал аудита (ТБ-030/032) —
+        // подключаемый пакет модулей admin (ADR-0023). Раньше эти три экрана лежали в профиле, и
+        // второму профилю пришлось бы скопировать их целиком; теперь профиль лишь включает их в свой
+        // реестр и отвечает на три вопроса пакета (см. AddInspectorPersistence).
+        // Секция у страниц пакета та же — AdminModule.MenuGroup, значение GroupAdmin.
+        .. AdminModule.Modules,
 
         // Классификатор видов нарушений (Э5-01): справочник «сфера → вид», ведёт Администратор.
         new ModuleDescriptor("admin-violation-categories", "/admin/violation-categories", "Виды нарушений",
             Icons.Material.Filled.Category, typeof(ViolationCategories), ReadPolicy, GroupAdmin),
 
         // Смена пароля из меню убрана (решение заказчика 2026-08-25): она — диалог из шапки
-        // (AccountWidget в ShellWidgets). Маршрут /account/password при этом ЖИВ без записи в
-        // реестре (@page на самой странице): он нужен принудительной смене временного пароля
-        // (RequirePasswordChange хоста запирает туда MustChangePassword-пользователя).
+        // (виджет account-password пакета, см. ShellWidgets). Маршрут /account/password при этом ЖИВ
+        // без записи в реестре (@page на странице пакета): он нужен принудительной смене временного
+        // пароля (RequirePasswordChange хоста запирает туда MustChangePassword-пользователя).
+        // Страница подхватывается роутером, потому что её сборка уже смонтирована страницами выше.
     ];
 
     /// <inheritdoc />
     /// <remarks>
     /// Колокольчик уведомлений даёт пакет docflow; кнопку «Сменить пароль» (диалог с любого
-    /// экрана) — сам профиль. Порядок: колокольчик (10), затем пароль (20).
+    /// экрана) — пакет администрирования. Порядок задают сами пакеты: колокольчик (10), пароль (20).
     /// </remarks>
     public IReadOnlyList<IShellWidget> ShellWidgets { get; } =
     [
         .. DocFlowModule.ShellWidgets,
-        new ShellWidgetDescriptor("account-password", ShellWidgetSlot.AppBarRight, Order: 20,
-            typeof(AccountWidget)),
+        .. AdminModule.ShellWidgets,
     ];
 
     /// <inheritdoc />
@@ -171,6 +166,11 @@ public sealed class InspectorProfile : IProfile
 
         // Прикладные сервисы подключённых пакетов модулей (ADR-0017).
         DocFlowModule.RegisterServices(services);
+
+        // Пакет администрирования (ADR-0023): валидаторы его сценариев и стартовая сверка допусков
+        // со справочником подразделений. Сами ПОРТЫ пакета регистрирует слой данных профиля —
+        // там же, где живут роли и справочник подразделений (см. AddInspectorPersistence).
+        AdminModule.RegisterServices(services);
     }
 
     /// <inheritdoc />

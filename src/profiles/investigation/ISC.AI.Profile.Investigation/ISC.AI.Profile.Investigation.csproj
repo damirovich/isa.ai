@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <!-- Манифест профиля «Следствие» (ADR-0021): собирает Application, Data, UI в единый профиль (IProfile).
+       Хост подключает его при IscProfile=investigation (ТС-004, трек A). -->
+  <ItemGroup>
+    <ProjectReference Include="..\ISC.AI.Profile.Investigation.Application\ISC.AI.Profile.Investigation.Application.csproj" />
+    <ProjectReference Include="..\ISC.AI.Profile.Investigation.Data\ISC.AI.Profile.Investigation.Data.csproj" />
+    <ProjectReference Include="..\ISC.AI.Profile.Investigation.UI\ISC.AI.Profile.Investigation.UI.csproj" />
+  </ItemGroup>
+
+  <!-- Подключаемые пакеты модулей (ADR-0017): документооборот («Документы дела») и «Медиа» (носители,
+       поиск по лицу, верификация — ADR-0022). Ссылка идёт В ЭТУ сторону — пакеты о профиле не знают. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\modules\docflow\ISC.AI.Modules.DocFlow\ISC.AI.Modules.DocFlow.csproj" />
+    <ProjectReference Include="..\..\..\modules\media\ISC.AI.Modules.Media\ISC.AI.Modules.Media.csproj" />
+    <!-- Администрирование платформы (ADR-0023): учётные записи, допуски, журнал аудита и смена
+         своего пароля приходят ПАКЕТОМ — одни и те же экраны у обоих профилей, а не две копии. -->
+    <ProjectReference Include="..\..\..\modules\admin\ISC.AI.Modules.Admin\ISC.AI.Modules.Admin.csproj" />
+  </ItemGroup>
+
+  <!-- MapEndpoints делегирует пакетам (файлы docflow и медиа) — сигнатура несёт IEndpointRouteBuilder.
+       IProfile/Abstractions НЕ трогаем: хост знает конкретный тип InvestigationProfile (ADR-0002). -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>

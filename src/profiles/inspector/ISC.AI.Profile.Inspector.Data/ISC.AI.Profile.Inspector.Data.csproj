@@ -9,6 +9,10 @@
     <!-- Профиль реализует порт справочника подразделений модуля документооборота (вопрос 3 Э4-35):
          направление «профиль → модуль» разрешено (ADR-0017), обратное запрещает арх-тест. -->
     <ProjectReference Include="..\..\..\modules\docflow\ISC.AI.Modules.DocFlow.Domain\ISC.AI.Modules.DocFlow.Domain.csproj" />
+    <!-- Порты пакета «Администрирование платформы» (ADR-0023): право администрировать, справочник
+         подразделений и роли — их знает только профиль, пакет их спрашивает (та же инверсия, что у
+         документооборота). Ссылка на ДОМЕН пакета, не на его сценарии. -->
+    <ProjectReference Include="..\..\..\modules\admin\ISC.AI.Modules.Admin.Domain\ISC.AI.Modules.Admin.Domain.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -16,7 +20,8 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="Pgvector.EntityFrameworkCore" />
     <PackageReference Include="EFCore.NamingConventions" />
-    <!-- BackgroundService для стартовой сверки допусков со справочником подразделений. -->
+    <!-- BackgroundService для автопросрочки устранения (RemediationDeadlineJob). Сверка допусков со
+         справочником подразделений уехала в пакет администрирования (ADR-0023). -->
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
       <PrivateAssets>all</PrivateAssets>
