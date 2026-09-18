@@ -99,3 +99,23 @@ public class UserRoleAssignmentConfiguration : IEntityTypeConfiguration<UserRole
         builder.HasIndex(e => e.UserId).IsUnique();
     }
 }
+
+/// <summary>
+/// Конфигурация акта об удалении шаблонов (<c>investigation.case_closure_act</c>, ТФ-ДЕЛ-04, ТБ-074).
+/// </summary>
+public class CaseClosureActConfiguration : IEntityTypeConfiguration<CaseClosureAct>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<CaseClosureAct> builder)
+    {
+        builder.ToTable("case_closure_act", InvestigationDbContext.Schema);
+        builder.HasKey(e => e.Id);
+
+        // Акт на дело один: повторное закрытие перезаписывает его (действителен последний регламент).
+        builder.HasIndex(e => e.CaseId).IsUnique();
+
+        // Дело удаляется вместе с актом: акт — часть дела, а не самостоятельный документ хранения.
+        builder.HasOne(e => e.Case).WithMany()
+               .HasForeignKey(e => e.CaseId).OnDelete(DeleteBehavior.Cascade);
+    }
+}

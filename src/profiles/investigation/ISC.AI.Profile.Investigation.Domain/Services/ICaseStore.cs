@@ -122,4 +122,53 @@ public interface ICaseStore
 
     /// <summary>Идентификаторы всех доступных субъекту дел (область «все доступные дела», ТФ-ПЛ-05).</summary>
     Task<IReadOnlyList<int>> ListAccessibleIdsAsync(AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Записать акт об удалении шаблонов по закрытию дела (ТФ-ДЕЛ-04, ТБ-074). Повторное закрытие
+    /// перезаписывает акт: действителен последний исполненный регламент.
+    /// </summary>
+    /// <remarks>
+    /// Решётка здесь НЕ применяется намеренно: акт пишется сразу после успешной смены статуса, доступ
+    /// к делу уже проверен <see cref="SetStatusAsync"/>, а повторная проверка на этом шаге означала бы,
+    /// что при её отказе шаблоны уже удалены, а подтверждающего документа нет.
+    /// </remarks>
+    Task SaveClosureActAsync(CaseClosureActDraft draft, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Акт об удалении шаблонов дела; <see langword="null"/> — регламент не исполнен (для закрытого
+    /// дела это предупреждение, а не норма).
+    /// </summary>
+    Task<CaseClosureActRow?> GetClosureActAsync(int caseId, AccessContext access, CancellationToken cancellationToken = default);
 }
+
+/// <summary>Данные исполненного регламента для записи акта (ТФ-ДЕЛ-04).</summary>
+/// <param name="CaseId">Дело.</param>
+/// <param name="ExecutedByUserId">Кто закрыл дело.</param>
+/// <param name="MediaAssetsTotal">Сколько носителей в деле — они сохраняются.</param>
+/// <param name="AssetsAffected">По скольким носителям снята биометрия.</param>
+/// <param name="TemplatesRemoved">Сколько шаблонов удалено.</param>
+/// <param name="CropsRemoved">Сколько вырезок удалено.</param>
+public sealed record CaseClosureActDraft(
+    int CaseId,
+    int? ExecutedByUserId,
+    int MediaAssetsTotal,
+    int AssetsAffected,
+    int TemplatesRemoved,
+    int CropsRemoved);
+
+/// <summary>Акт об удалении шаблонов для карточки дела (ТФ-ДЕЛ-04).</summary>
+/// <param name="CaseId">Дело.</param>
+/// <param name="ExecutedAt">Когда регламент исполнен (UTC).</param>
+/// <param name="ExecutedByUserId">Кто закрыл дело.</param>
+/// <param name="MediaAssetsTotal">Носителей в деле на момент закрытия — сохранены.</param>
+/// <param name="AssetsAffected">Носителей, с которых снята биометрия.</param>
+/// <param name="TemplatesRemoved">Удалено шаблонов лиц.</param>
+/// <param name="CropsRemoved">Удалено файлов вырезок.</param>
+public sealed record CaseClosureActRow(
+    int CaseId,
+    DateTime ExecutedAt,
+    int? ExecutedByUserId,
+    int MediaAssetsTotal,
+    int AssetsAffected,
+    int TemplatesRemoved,
+    int CropsRemoved);

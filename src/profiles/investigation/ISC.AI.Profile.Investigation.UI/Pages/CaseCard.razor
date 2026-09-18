@@ -81,6 +81,33 @@ else
                         }
                     </tbody>
                 </MudSimpleTable>
+
+                @* Акт об удалении шаблонов (ТФ-ДЕЛ-04, ТБ-074) — часть дела: им подтверждается, что
+                   биометрия по закрытому делу уничтожена. Отсутствие акта у закрытого дела — не пустое
+                   место, а предупреждение: регламент не исполнен. *@
+                @if (_case.Status == CaseStatus.Closed)
+                {
+                    @if (_closureAct is { } act)
+                    {
+                        <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mt-4">
+                            <MudText Typo="Typo.subtitle2">Акт об удалении биометрических шаблонов</MudText>
+                            <MudText Typo="Typo.body2">
+                                Исполнено @act.ExecutedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm"),
+                                @UserName(act.ExecutedByUserId). Носителей в деле: @act.MediaAssetsTotal (сохранены);
+                                биометрия снята с @act.AssetsAffected; удалено шаблонов лиц: @act.TemplatesRemoved,
+                                вырезок: @act.CropsRemoved. Поиск по лицу материалы этого дела больше не находит
+                                (ТБ-074, GATE-6).
+                            </MudText>
+                        </MudAlert>
+                    }
+                    else
+                    {
+                        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-4">
+                            Дело закрыто, но акта об удалении шаблонов нет: регламент не исполнен, шаблоны лиц
+                            остались в базе. Закройте дело повторно — регламент выполнится заново.
+                        </MudAlert>
+                    }
+                }
             </MudPaper>
         </MudItem>
         <MudItem xs="12" md="4">
@@ -333,9 +360,10 @@ else
             Дело будет переведено в статус «Закрыто» с фиксацией даты закрытия.
         </MudText>
         <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
-            Закрытие запускает регламент удаления биометрических шаблонов (ТФ-ДЕЛ-04, ТБ-074): по истечении
-            установленного срока хранения шаблоны лиц с носителей дела удаляются гарантированно и не
-            восстанавливаются. Сейчас фиксируется только факт закрытия; сам регламент выполняется отдельным шагом.
+            Закрытие СРАЗУ исполняет регламент удаления биометрии (ТФ-ДЕЛ-04, ТБ-074): шаблоны лиц и вырезки
+            с носителей дела удаляются гарантированно и не восстанавливаются — поиск по лицу этих материалов
+            больше не найдёт. Сами носители, кадры, найденные лица с таймкодами, привязки к фигурантам и
+            документы дела сохраняются. По итогу составляется акт, он останется в карточке дела.
         </MudAlert>
     </DialogContent>
     <DialogActions>
@@ -454,6 +482,9 @@ else
     // --- Закрытие ---
     private bool _closeConfirmOpen;
 
+    // Акт об удалении шаблонов закрытого дела (ТФ-ДЕЛ-04); null у закрытого дела = регламент не исполнен.
+    private CaseClosureActRow? _closureAct;
+
     // --- Новый фигурант ---
     private bool _personOpen;
     private string? _personError;
@@ -529,6 +560,12 @@ else
                 _error = response.StatusMessage;
                 return;
             }
+
+            // Акт запрашивается только у закрытого дела: у открытого его и не должно быть, а лишний
+            // запрос на каждое открытие карточки — лишняя нагрузка без единого нового факта.
+            _closureAct = _case.Status == CaseStatus.Closed
+                ? (await Dispatcher.Send(new GetClosureActQuery(Id))).Data
+                : null;
 
             await LoadPersonsAsync();
             if (_activeTab == 1) { await LoadMediaAsync(); }

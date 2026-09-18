@@ -109,6 +109,76 @@ public sealed class MediaPurgeTests : IAsyncLifetime
         }
     }
 
+    [Fact(DisplayName = "ТФ-ДЕЛ-04/ТБ-074: снятие биометрии удаляет шаблоны и вырезки, но оставляет носитель, кадры и лица; повтор идемпотентен")]
+    public async Task Purge_templates_removes_biometrics_and_keeps_case_materials()
+    {
+        var media = new MediaContextFactory(_postgres.GetConnectionString());
+        var core = new CoreContextFactory(_postgres.GetConnectionString());
+        int closedCaseAsset, otherCaseAsset;
+        await using (var db = media.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+            closedCaseAsset = await SeedVideoAsync(db, "closed-case");
+            otherCaseAsset = await SeedVideoAsync(db, "other-case");
+        }
+
+        await using (var db = core.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+        }
+
+        var storage = new RecordingFileStorage();
+        var purger = new MediaPurger(media, new AuditWriter(core), storage);
+
+        var result = await purger.PurgeTemplatesAsync([closedCaseAsset], "закрытие дела №1", subjectId: 42);
+
+        result.AssetsAffected.ShouldBe(1);
+        result.TemplatesRemoved.ShouldBe(2);
+        result.CropsRemoved.ShouldBe(2);
+
+        await using (var db = media.CreateDbContext())
+        {
+            // Ушло ровно то, чем ведётся поиск: векторов этого носителя в базе не осталось.
+            (await db.Templates.AnyAsync(t => t.AssetId == closedCaseAsset)).ShouldBeFalse();
+
+            // Материалы дела на месте: носитель, кадры и сами лица с координатами и привязками —
+            // это результат расследования, он хранится по правилам дела (ТФ-ДЕЛ-04).
+            (await db.Assets.AnyAsync(a => a.Id == closedCaseAsset)).ShouldBeTrue();
+            (await db.Frames.CountAsync(f => f.AssetId == closedCaseAsset)).ShouldBe(2);
+            (await db.Faces.CountAsync(f => f.AssetId == closedCaseAsset)).ShouldBe(2);
+
+            // Ссылка на вырезку обнулена — файла больше нет, и страница не должна его запрашивать.
+            (await db.Faces.AnyAsync(f => f.AssetId == closedCaseAsset && f.CropStoredFileName != null)).ShouldBeFalse();
+
+            // Носитель другого (открытого) дела не затронут ничем.
+            (await db.Templates.CountAsync(t => t.AssetId == otherCaseAsset)).ShouldBe(2);
+            (await db.Faces.CountAsync(f => f.AssetId == otherCaseAsset && f.CropStoredFileName != null)).ShouldBe(2);
+        }
+
+        // Удалены только вырезки; исходник носителя остался в хранилище.
+        storage.Deleted.Count.ShouldBe(2);
+        storage.Deleted.ShouldAllBe(f => f.StartsWith($"{MediaFileCategories.FaceCrops}/{closedCaseAsset}/"));
+
+        await using (var db = core.CreateDbContext())
+        {
+            var audit = await db.AuditRecords.SingleAsync(r => r.Action == AuditAction.Purge);
+            audit.ObjectRef.ShouldBe($"media:asset:{closedCaseAsset}");
+            audit.SubjectId.ShouldBe(42);
+            audit.Classification.ShouldBe<short>(2); // гриф носителя, не усреднённый по делу
+            audit.DivisionId.ShouldBe(7);
+        }
+
+        // Повтор (например, повторное закрытие дела): удалять нечего — ни изменений, ни новых записей.
+        var again = await purger.PurgeTemplatesAsync([closedCaseAsset], "закрытие дела №1", subjectId: 42);
+
+        again.ShouldBe(TemplatePurgeResult.Empty);
+        storage.Deleted.Count.ShouldBe(2);
+        await using (var db = core.CreateDbContext())
+        {
+            (await db.AuditRecords.CountAsync(r => r.Action == AuditAction.Purge)).ShouldBe(1);
+        }
+    }
+
     // Видео с двумя кадрами, на каждом — лицо с вырезкой и шаблоном. Гриф 2, подразделение 7.
     private static async Task<int> SeedVideoAsync(MediaDbContext db, string name)
     {
