@@ -399,3 +399,6 @@ deploy/offline/tessdata/
 # Модели распознавания лиц (ADR-0020, ТИ-004): ONNX-файлы YuNet/SFace, скачиваются
 # export-vision-models.ps1 с пинами SHA-256 — в git не хранятся
 deploy/offline/models/
+# Бинарники ffmpeg (LGPL-сборка, ~148 МБ) — поставляются офлайн скриптом export-ffmpeg.ps1 с пином
+# SHA-256; в git не хранятся (размер и лицензионная чистота проверяются при переносе, ADR-0020).
+deploy/offline/ffmpeg/
