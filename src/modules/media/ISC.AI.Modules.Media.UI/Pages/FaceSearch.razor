@@ -126,9 +126,29 @@
             </MudFileUpload>
             @if (_probeBytes is { } bytes)
             {
-                <MudChip T="string" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Image" OnClose="ClearProbe" Disabled="_busy">
-                    @_probeFileName · @MediaLabels.FormatSize(bytes.LongLength)
-                </MudChip>
+                <div class="d-flex align-center gap-3 my-2">
+                    @* Оператор обязан видеть, ПО КАКОМУ снимку идёт поиск (ТЭ-005/007): миниатюру делает сам
+                       браузер (RequestImageFileAsync), поиск при этом идёт по ИСХОДНОМУ файлу — уменьшенная
+                       копия только для показа, её размеры подписаны рядом. *@
+                    @if (_probePreview is { } preview)
+                    {
+                        <MudPaper Outlined="true" Class="pa-1" Style="line-height:0;">
+                            <img src="@preview" alt="пробное изображение" title="@_probeFileName"
+                                 style="width:120px;height:120px;object-fit:contain;display:block;background:#0b1220;" />
+                        </MudPaper>
+                    }
+                    <div>
+                        <MudChip T="string" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Image" OnClose="ClearProbe" Disabled="_busy">
+                            @_probeFileName · @MediaLabels.FormatSize(bytes.LongLength)
+                        </MudChip>
+                        @if (_probePreview is not null)
+                        {
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                                показан уменьшенный вид; поиск идёт по исходному файлу без обработки (ТЭ-007)
+                            </MudText>
+                        }
+                    </div>
+                </div>
             }
             <MudText Typo="Typo.caption" Class="mud-text-secondary">
                 Изображение с лицом, не более @MediaLabels.FormatSize(SearchByFaceValidator.MaxProbeBytes). Проба в базу шаблонов не попадает;
@@ -181,6 +201,30 @@
                 Если нужно другое — укажите номер лица на пробе и повторите поиск.
             </MudAlert>
         }
+        @* ПО ЧЕМУ искали — рядом с выдачей (ТЭ-005): проба-изображение показывается миниатюрой, которую
+           сделал браузер, проба-лицо носителя — своей вырезкой; хеш пробы даёт сверку с журналом (ТБ-072). *@
+        <MudPaper Outlined="true" Class="pa-2 mb-3 d-flex align-center gap-3">
+            @if (_probeFace is { } probeFace)
+            {
+                <FaceCropTile Url="@(probeFace.CropStoredFileName is { } probeCrop ? MediaFileUrl.FaceCrop(probeFace.AssetId, probeCrop) : null)"
+                              Size="96" Caption="@($"проба — лицо № {probeFace.Id}")" />
+            }
+            else if (_probePreview is { } searchedPreview)
+            {
+                <img src="@searchedPreview" alt="пробное изображение" title="@_probeFileName"
+                     style="width:96px;height:96px;object-fit:contain;background:#0b1220;" />
+            }
+            <div>
+                <MudText Typo="Typo.body2">Искали по этой пробе</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                    @(_probeFileName ?? (_probeFace is { } row ? $"лицо № {row.Id} из носителя № {row.AssetId}" : "проба"))
+                    · отпечаток @result.ProbeSha256[..12].ToLowerInvariant()… (по нему проба сверяется с записью в журнале, ТБ-072)
+                </MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                    Сама проба в базу шаблонов не попадает (ТБ-074); копия — только в журнале поиска под грифом дела.
+                </MudText>
+            </div>
+        </MudPaper>
         @if (result.Candidates.Count == 0)
         {
             <MudText Typo="Typo.body2" Class="mud-text-secondary">
@@ -227,10 +271,17 @@
     private int? _authorizationId;
     private SearchScopeKind _scope = SearchScopeKind.CurrentCase;
     private IReadOnlyCollection<int> _selectedCaseIds = [];
+    /// <summary>Сторона миниатюры пробы, пикселей: показать лицо оператору достаточно, в разметку идёт мало.</summary>
+    private const int PreviewSide = 320;
+
+    /// <summary>Предел на миниатюру (после уменьшения браузером она десятки килобайт; предел — страховка).</summary>
+    private const long PreviewMaxBytes = 2L * 1024 * 1024;
+
     private FaceRow? _probeFace;
     private int? _probeFaceId;
     private byte[]? _probeBytes;
     private string? _probeFileName;
+    private string? _probePreview;
     private int? _probeFaceIndex;
     private int _topK = 20;
     private double? _threshold;
@@ -327,6 +378,7 @@
 
             _probeBytes = buffer.ToArray();
             _probeFileName = file.Name;
+            _probePreview = await BuildPreviewAsync(file);
             _probeFace = null;
             _probeFaceId = null;
             _probeFaceIndex = null;
@@ -338,10 +390,37 @@
         }
     }
 
+    /// <summary>
+    /// Миниатюра пробы для показа оператору (ТЭ-005: человек должен видеть, ПО КАКОМУ снимку идёт поиск).
+    /// Уменьшение делает БРАУЗЕР (<see cref="BrowserFileExtensions.RequestImageFileAsync"/>): оригинал в
+    /// 25 МБ нельзя вставить в разметку как data-URL — это утроило бы его в base64 и в памяти circuit'а.
+    /// На поиск уходит ИСХОДНЫЙ файл (<c>_probeBytes</c>), миниатюра — только для глаз (ТЭ-007).
+    /// Неудача (формат, который браузер не перерисовывает) — не ошибка: показываем без миниатюры.
+    /// </summary>
+    private static async Task<string?> BuildPreviewAsync(IBrowserFile file)
+    {
+        try
+        {
+            var resized = await file.RequestImageFileAsync("image/jpeg", PreviewSide, PreviewSide);
+            using var buffer = new MemoryStream();
+            await using (var stream = resized.OpenReadStream(PreviewMaxBytes))
+            {
+                await stream.CopyToAsync(buffer);
+            }
+
+            return "data:image/jpeg;base64," + Convert.ToBase64String(buffer.ToArray());
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or JSException)
+        {
+            return null;
+        }
+    }
+
     private void ClearProbe()
     {
         _probeBytes = null;
         _probeFileName = null;
+        _probePreview = null;
         _probeFace = null;
         _probeFaceId = null;
         _probeFaceIndex = null;
