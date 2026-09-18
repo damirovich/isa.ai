@@ -51,10 +51,10 @@ public interface ICaseScope
     /// <summary>Дело, если оно доступно субъекту; иначе <see langword="null"/>.</summary>
     Task<CaseScopeItem?> GetCaseAsync(int caseId, AccessContext access, CancellationToken cancellationToken = default);
 
-    /// <summary>Идентификаторы носителей, привязанных к делам (область поиска для <c>FaceSearchQuery.AssetIds</c>).</summary>
     /// <summary>Основания поиска дела (поручения, постановления, ОРМ), если дело доступно; иначе пусто.</summary>
     Task<IReadOnlyList<CaseAuthorizationItem>> ListAuthorizationsAsync(int caseId, AccessContext access, CancellationToken cancellationToken = default);
 
+    /// <summary>Идентификаторы носителей, привязанных к делам (область поиска для <c>FaceSearchQuery.AssetIds</c>).</summary>
     Task<IReadOnlyCollection<int>> GetAssetIdsAsync(IReadOnlyCollection<int> caseIds, CancellationToken cancellationToken = default);
 
     /// <summary>
