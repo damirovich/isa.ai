@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Домен пакета модулей «Администрирование платформы» (ADR-0017, ADR-0023): ПОРТЫ, которые пакет
+       объявляет, но реализовать не может — право администрировать, справочник подразделений и роли
+       знает только профиль-эксплуатант. Данные (учётные записи, допуски, журнал) живут в схеме core
+       и берутся портами ядра, поэтому своего слоя данных у пакета НЕТ. Зависит только от Abstractions. -->
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

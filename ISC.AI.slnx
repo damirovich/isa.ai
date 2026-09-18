@@ -19,6 +19,12 @@
     <Project Path="src/modules/docflow/ISC.AI.Modules.DocFlow.UI/ISC.AI.Modules.DocFlow.UI.csproj" />
     <Project Path="src/modules/docflow/ISC.AI.Modules.DocFlow/ISC.AI.Modules.DocFlow.csproj" />
   </Folder>
+  <Folder Name="/src/modules/admin/">
+    <Project Path="src/modules/admin/ISC.AI.Modules.Admin.Application/ISC.AI.Modules.Admin.Application.csproj" />
+    <Project Path="src/modules/admin/ISC.AI.Modules.Admin.Domain/ISC.AI.Modules.Admin.Domain.csproj" />
+    <Project Path="src/modules/admin/ISC.AI.Modules.Admin.UI/ISC.AI.Modules.Admin.UI.csproj" />
+    <Project Path="src/modules/admin/ISC.AI.Modules.Admin/ISC.AI.Modules.Admin.csproj" />
+  </Folder>
   <Folder Name="/src/modules/media/">
     <Project Path="src/modules/media/ISC.AI.Modules.Media.Data/ISC.AI.Modules.Media.Data.csproj" />
     <Project Path="src/modules/media/ISC.AI.Modules.Media.Domain/ISC.AI.Modules.Media.Domain.csproj" />

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using ISC.AI.Abstractions.Security;
+using ISC.AI.Modules.Admin;
 using ISC.AI.Modules.DocFlow;
 using ISC.AI.Modules.Media;
 using ISC.AI.Profile.Investigation;
@@ -28,6 +29,15 @@ public sealed class InvestigationProfileTests
         "ISC.AI.Profile.Investigation.UI",
         "ISC.AI.Modules.Media.UI",
         "ISC.AI.Modules.DocFlow.UI",
+        "ISC.AI.Modules.Admin.UI",
+    ];
+
+    // Порты ВСЕХ подключённых пакетов: профиль обязан закрыть каждый, иначе приложение не стартует (ТС-013).
+    private static readonly IReadOnlyList<Type> AllRequiredPorts =
+    [
+        .. DocFlowModule.RequiredServices,
+        .. MediaModule.RequiredServices,
+        .. AdminModule.RequiredServices,
     ];
 
     [Fact(DisplayName = "Манифест: Id/DisplayName заданы, реестр непуст, политики заполнены, маршруты уникальны, страницы — из сборок UI профиля и пакетов")]
@@ -68,10 +78,17 @@ public sealed class InvestigationProfileTests
         profile.Modules.ShouldContain(m => m.Route == "/admin/clearances");
         profile.Modules.ShouldContain(m => m.Route == "/admin/divisions");
 
-        // Страницы пакета docflow подмешаны как есть.
-        foreach (var module in DocFlowModule.Modules)
+        // Страницы пакетов подмешаны как есть — ни маршрут, ни компонент профиль не переопределяет.
+        foreach (var module in DocFlowModule.Modules.Concat(AdminModule.Modules))
         {
             profile.Modules.ShouldContain(m => m.Route == module.Route && m.ComponentType == module.ComponentType);
+        }
+
+        // Учётные записи, допуски и журнал аудита пришли ИЗ ПАКЕТА (ADR-0023), а не из UI профиля.
+        foreach (var route in new[] { "/admin/users", "/admin/clearances", "/admin/audit" })
+        {
+            profile.Modules.First(m => m.Route == route).ComponentType.Assembly.GetName().Name
+                .ShouldBe("ISC.AI.Modules.Admin.UI");
         }
 
         // Порядок секций — порядок первого появления: «Дела» первой, «Администрирование» последней.
@@ -81,7 +98,7 @@ public sealed class InvestigationProfileTests
         groups.ShouldContain(DocFlowModule.MenuGroup);
     }
 
-    [Fact(DisplayName = "Контракт пакетов: после RegisterServices + RegisterDataContexts зарегистрированы все порты docflow и «Медиа» и IAccessPolicy профиля")]
+    [Fact(DisplayName = "Контракт пакетов: после RegisterServices + RegisterDataContexts зарегистрированы все порты docflow, «Медиа» и «Администрирования» и IAccessPolicy профиля")]
     public void Profile_registers_every_required_port_of_attached_modules()
     {
         var profile = new InvestigationProfile();
@@ -93,7 +110,7 @@ public sealed class InvestigationProfileTests
 
         var registered = services.Select(d => d.ServiceType).ToHashSet();
 
-        var missing = DocFlowModule.RequiredServices.Concat(MediaModule.RequiredServices)
+        var missing = AllRequiredPorts
             .Where(port => !registered.Contains(port))
             .Select(port => port.Name)
             .ToList();
@@ -120,7 +137,7 @@ public sealed class InvestigationProfileTests
 
         var error = Should.Throw<InvalidOperationException>(() => InvestigationProfile.EnsureModulePortsRegistered(services));
 
-        foreach (var port in DocFlowModule.RequiredServices.Concat(MediaModule.RequiredServices))
+        foreach (var port in AllRequiredPorts)
         {
             error.Message.ShouldContain(port.Name, Case.Sensitive, $"в сообщении должен быть назван порт {port.Name}");
         }
@@ -131,7 +148,7 @@ public sealed class InvestigationProfileTests
     {
         var services = new ServiceCollection();
         var missingPort = MediaModule.RequiredServices[0];
-        foreach (var port in DocFlowModule.RequiredServices.Concat(MediaModule.RequiredServices).Where(p => p != missingPort))
+        foreach (var port in AllRequiredPorts.Where(p => p != missingPort))
         {
             // Достаточно факта регистрации: проверка смотрит на ServiceType, экземпляр никогда не создаётся.
             services.AddSingleton(port, _ => throw new NotSupportedException("экземпляр в тесте не нужен"));
@@ -140,7 +157,7 @@ public sealed class InvestigationProfileTests
         var error = Should.Throw<InvalidOperationException>(() => InvestigationProfile.EnsureModulePortsRegistered(services));
 
         error.Message.ShouldContain(missingPort.Name, Case.Sensitive);
-        foreach (var port in DocFlowModule.RequiredServices.Concat(MediaModule.RequiredServices).Where(p => p != missingPort))
+        foreach (var port in AllRequiredPorts.Where(p => p != missingPort))
         {
             error.Message.ShouldNotContain(port.Name, Case.Sensitive, $"зарегистрированный порт {port.Name} не должен значиться отсутствующим");
         }
@@ -157,35 +174,42 @@ public sealed class InvestigationProfileTests
         Should.NotThrow(() => profile.RegisterDataContexts(services, Configuration()));
     }
 
-    [Fact(DisplayName = "Виджеты оболочки: кнопка смены пароля профиля и колокольчик уведомлений docflow")]
+    [Fact(DisplayName = "Виджеты оболочки: кнопка смены пароля — из пакета администрирования, колокольчик уведомлений — из docflow")]
     public void Shell_widgets_include_password_and_docflow_bell()
     {
         var profile = new InvestigationProfile();
 
         profile.ShellWidgets.ShouldContain(w => w.Id == "account-password");
         profile.ShellWidgets.ShouldContain(w => w.Id == "docflow-notifications");
-        foreach (var widget in DocFlowModule.ShellWidgets)
+        foreach (var widget in DocFlowModule.ShellWidgets.Concat(AdminModule.ShellWidgets))
         {
             profile.ShellWidgets.ShouldContain(w => w.Id == widget.Id && w.ComponentType == widget.ComponentType);
         }
 
         profile.ShellWidgets.Select(w => w.Id).Distinct(StringComparer.Ordinal).Count().ShouldBe(profile.ShellWidgets.Count);
+
+        // Своей копии виджета профиль больше не держит: кнопку даёт ПАКЕТ (ADR-0023) — оба профиля
+        // получают один и тот же диалог смены пароля, а не две расходящиеся формы.
         profile.ShellWidgets.First(w => w.Id == "account-password").ComponentType.Assembly.GetName().Name
-            .ShouldBe("ISC.AI.Profile.Investigation.UI");
+            .ShouldBe("ISC.AI.Modules.Admin.UI");
     }
 
-    [Theory(DisplayName = "Обязательные маршруты оболочки существуют в сборке UI профиля (страницы с RouteAttribute)")]
+    [Theory(DisplayName = "Обязательные маршруты оболочки существуют в сборках UI реестра (страницы с RouteAttribute)")]
     [InlineData("/account/password")]
     [InlineData("/docflow/dashboard")]
     public void Shell_required_routes_exist_as_pages(string route)
     {
-        // Маршруты без пункта меню: принудительная смена временного пароля (RequirePasswordChange хоста)
-        // и адрес колокольчика docflow. Сборка попадает в маршрутизацию через записи реестра (Routes.razor).
-        var uiAssembly = new InvestigationProfile().Modules
+        // Маршруты без пункта меню: принудительная смена временного пароля (RequirePasswordChange хоста —
+        // страница ПАКЕТА администрирования, ADR-0023) и адрес колокольчика docflow (страница профиля).
+        // Ищем по всем сборкам реестра: именно они попадают в маршрутизацию (Routes.razor), а в какой из
+        // них лежит страница — вопрос раскладки по пакетам, а не обязательства перед оболочкой.
+        var assemblies = new InvestigationProfile().Modules
             .Select(m => m.ComponentType.Assembly)
-            .First(a => a.GetName().Name == "ISC.AI.Profile.Investigation.UI");
+            .Distinct()
+            .ToList();
 
-        var templates = uiAssembly.GetTypes()
+        var templates = assemblies
+            .SelectMany(assembly => assembly.GetTypes())
             .SelectMany(type => type.GetCustomAttributes<RouteAttribute>(inherit: false))
             .Select(attribute => attribute.Template)
             .ToList();

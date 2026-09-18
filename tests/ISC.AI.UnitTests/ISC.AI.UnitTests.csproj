@@ -29,6 +29,8 @@
     <ProjectReference Include="..\..\src\modules\media\ISC.AI.Modules.Media.Domain\ISC.AI.Modules.Media.Domain.csproj" />
     <!-- Манифест пакета «Медиа» (ЭС2-03): контракт RequiredServices/ConfigurationKeys (MediaContractTests). -->
     <ProjectReference Include="..\..\src\modules\media\ISC.AI.Modules.Media\ISC.AI.Modules.Media.csproj" />
+    <!-- Пакет «Администрирование платформы» (ADR-0023): контракт AdminContractTests. -->
+    <ProjectReference Include="..\..\src\modules\admin\ISC.AI.Modules.Admin\ISC.AI.Modules.Admin.csproj" />
     <ProjectReference Include="..\..\src\modules\media\ISC.AI.Modules.Media.Application\ISC.AI.Modules.Media.Application.csproj" />
     <!-- Профиль «Следствие» (ЭС3): сценарии и домен — гварды, валидаторы, правило двух лиц. -->
     <ProjectReference Include="..\..\src\profiles\investigation\ISC.AI.Profile.Investigation.Application\ISC.AI.Profile.Investigation.Application.csproj" />

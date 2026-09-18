@@ -14,6 +14,7 @@
     <!-- Профиль реализует порты пакетов (направление профиль → модуль, ADR-0017). -->
     <ProjectReference Include="..\..\..\modules\docflow\ISC.AI.Modules.DocFlow.Domain\ISC.AI.Modules.DocFlow.Domain.csproj" />
     <ProjectReference Include="..\..\..\modules\media\ISC.AI.Modules.Media.Domain\ISC.AI.Modules.Media.Domain.csproj" />
+    <ProjectReference Include="..\..\..\modules\admin\ISC.AI.Modules.Admin.Domain\ISC.AI.Modules.Admin.Domain.csproj" />
   </ItemGroup>
 
   <ItemGroup>

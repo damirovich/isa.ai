@@ -49,6 +49,7 @@
 | ADR-0020 | Стек распознавания лиц: YuNet + SFace через ONNX Runtime, ffmpeg (LGPL) | Принято | ТСТ-001/004, ТИ-004, ТО-мат-05..07, ТБ-075, ТН-007 (также ADR-0011) | [ADR-0020-stek-raspoznavaniya-lits-i-litsenzii.md](ADR-0020-stek-raspoznavaniya-lits-i-litsenzii.md) |
 | ADR-0021 | Второй профиль в одном репозитории: выбор профиля хоста при сборке поставки | Принято | ТС-004/006/009 (также ADR-0002/0006/0017) | [ADR-0021-vybor-profilya-hosta-pri-sborke.md](ADR-0021-vybor-profilya-hosta-pri-sborke.md) |
 | ADR-0022 | Поисковые сессии и двойная верификация — в пакете «Медиа»; правило двух лиц не переопределяется профилем | Принято | ТБ-071..074, ТО-инф-08/12, ТФ-ПЛ/ТФ-ВЕР, ТП-004, GATE-5 (также ADR-0014/0017/0019) | [ADR-0022-sessii-poiska-i-pravilo-dvuh-lits-v-module.md](ADR-0022-sessii-poiska-i-pravilo-dvuh-lits-v-module.md) |
+| ADR-0023 | Администрирование платформы — пакет модулей, а не копия в каждом профиле | Принято | ТС-002/003/007/009, ТБ-010..016/030/032, ТФ-АДМ-01, ТП-004 (также ADR-0002/0014/0017/0021) | [ADR-0023-administrirovanie-platformy-paket-modulei.md](ADR-0023-administrirovanie-platformy-paket-modulei.md) |
 
 ### Предложенные (требуют решения на Э1)
 

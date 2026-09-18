@@ -80,9 +80,23 @@ public static class InspectorPersistenceServiceCollectionExtensions
         // Роли пользователей (§2.1 ТЗ СКИД, этап 6 Э4-35) — построчный доступ к докфлоу-документам.
         services.AddScoped<IUserRoleStore, UserRoleStore>();
 
-        // Сверка допусков со справочником подразделений на старте: словарь номеров обязан быть общим
-        // у решётки ядра и справочника профиля, но ничем не проверяется (см. сам класс).
-        services.AddHostedService<ClearanceDivisionConsistencyCheck>();
+        // ПОРТЫ ПАКЕТА «Администрирование платформы» (ADR-0023). Экраны учётных записей, допусков и
+        // журнала аудита живут в пакете и профиля не знают — три вопроса, на которые ответить может
+        // только он, профиль отдаёт реализациями. Без них контейнер не соберёт обработчики и
+        // приложение не запустится: осознанный fail-closed (ТС-013) — молчаливая заглушка вместо
+        // правила о доступе опаснее остановки.
+        //
+        // Кто вправе вести учётки/допуски и читать журнал (ТБ-012/030/032) — правило то же, что у
+        // справочников профиля (AdministrationRule).
+        services.AddScoped<ISC.AI.Modules.Admin.Domain.Services.IPlatformAdministration,
+            InspectorPlatformAdministration>();
+
+        // Наименования подразделений для экрана допусков — ВСЕ, включая недействующие (в допусках
+        // остаются номера закрытых подразделений, и их надо показать именем, а не номером).
+        services.AddScoped<ISC.AI.Modules.Admin.Domain.Services.IDivisionCatalog, InspectorDivisionCatalog>();
+
+        // Роли для колонки и фильтра на экране учётных записей. Назначает роли страница профиля.
+        services.AddScoped<ISC.AI.Modules.Admin.Domain.Services.IUserRoleCatalog, InspectorUserRoleCatalog>();
 
         // Переопределяет AllowAllAccessPolicy ядра (AddCoreRetrieval регистрируется РАНЬШЕ — Program.cs)
         // тем же приёмом, что и ICitationExtractor/ICitationNormalizer: явная замена дефолта повторной

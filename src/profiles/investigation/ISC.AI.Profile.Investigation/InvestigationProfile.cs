@@ -1,6 +1,7 @@
 using ISC.AI.Abstractions.AI;
 using ISC.AI.Abstractions.Modules;
 using ISC.AI.Abstractions.Profiles;
+using ISC.AI.Modules.Admin;
 using ISC.AI.Modules.DocFlow;
 using ISC.AI.Modules.Media;
 using ISC.AI.Profile.Investigation.Application;
@@ -16,15 +17,18 @@ namespace ISC.AI.Profile.Investigation;
 /// <summary>
 /// Манифест профиля «СледствиеAI» (ADR-0021, ДОК-13 §6) — декларативное описание вертикали
 /// следственного подразделения: дела и фигуранты (свои страницы), пакет «Медиа» (носители, поиск по
-/// лицу, верификация — ADR-0022) и пакет «Документооборот» («Документы дела»).
+/// лицу, верификация — ADR-0022), пакет «Документооборот» («Документы дела») и пакет
+/// «Администрирование платформы» (учётные записи, допуски, журнал аудита — ADR-0023).
 /// Подключается единственным профилем в хосте <c>ISC.AI.Web</c> при <c>IscProfile=investigation</c>
 /// (ТС-004, ТС-006).
 /// </summary>
 /// <remarks>
 /// <para>
 /// ПОРТЫ ПАКЕТОВ, которые профиль обязан закрыть: <see cref="DocFlowModule.RequiredServices"/> (справочник
-/// подразделений, право настройки, кандидаты в исполнители) и <see cref="MediaModule.RequiredServices"/>
-/// (область дел субъекта, права по ролям, роли стадий верификации). Все реализации — в
+/// подразделений, право настройки, кандидаты в исполнители), <see cref="MediaModule.RequiredServices"/>
+/// (область дел субъекта, права по ролям, роли стадий верификации) и <see cref="AdminModule.RequiredServices"/>
+/// (право вести учётные записи и допуски, право читать журнал, справочник подразделений, роли для
+/// показа). Все реализации — в
 /// <c>Investigation.Data</c> (<c>AddInvestigationPersistence</c>). Отсутствие любого порта профиль
 /// обнаруживает САМ в конце <see cref="RegisterDataContexts"/> (<see cref="EnsureModulePortsRegistered"/>)
 /// и бросает <see cref="InvalidOperationException"/> с именем порта — приложение не стартует в ЛЮБОМ
@@ -33,16 +37,20 @@ namespace ISC.AI.Profile.Investigation;
 /// </para>
 /// <para>
 /// Секции меню (порядок первого появления): «Дела» → «Медиа» (страницы пакета) → «Документооборот»
-/// (страницы пакета) → «Администрирование». Страницы <c>/account/password</c> (принудительная смена
-/// временного пароля — <c>RequirePasswordChange</c> хоста) и <c>/docflow/dashboard</c> (адрес
-/// колокольчика уведомлений пакета docflow) в реестре не значатся, но существуют в сборке UI,
-/// которая попадает в маршрутизацию через записи реестра ниже.
+/// (страницы пакета) → «Администрирование» (страницы пакета «Администрирование» и две страницы
+/// профиля — роли и подразделения). Страницы <c>/account/password</c> (принудительная смена временного
+/// пароля — <c>RequirePasswordChange</c> хоста, сборка <c>Modules.Admin.UI</c>) и <c>/docflow/dashboard</c>
+/// (адрес колокольчика уведомлений пакета docflow) в реестре не значатся, но существуют в сборках UI,
+/// которые попадают в маршрутизацию через записи реестра ниже.
 /// </para>
 /// </remarks>
 public sealed class InvestigationProfile : IProfile
 {
     private const string GroupCases = "Дела";
-    private const string GroupAdmin = "Администрирование";
+
+    // Секция меню администрирования — ОБЩАЯ с пакетом: страницы пакета и страницы профиля стоят в
+    // одном разделе, иначе в меню было бы два «Администрирования» подряд.
+    private const string GroupAdmin = AdminModule.MenuGroup;
 
     /// <summary>Политика доступа страниц профиля («аутентифицирован» — регистрируется хостом из реестра).</summary>
     public const string ReadPolicy = "investigation.read";
@@ -76,12 +84,13 @@ public sealed class InvestigationProfile : IProfile
         // --- Секция «Документооборот»: «Документы дела» и остальные страницы пакета docflow.
         .. DocFlowModule.Modules,
 
-        // --- Секция «Администрирование» (ТФ-АДМ-01..03): страницы видны всем (в claim'ах сессии роли
-        // нет), обработчики отклоняют вызывающего, который не Администратор (RoleGuard).
+        // --- Секция «Администрирование» (ТФ-АДМ-01..03). Учётные записи, допуски и журнал аудита даёт
+        // ПАКЕТ (ADR-0023) — те же экраны, что у «ИнспекторAI»; роли и подразделения остаются за
+        // профилем: состав ролей и иерархия подразделений у каждого эксплуатанта свои. Страницы видны
+        // всем (в claim'ах сессии роли нет), обработчики отклоняют вызывающего без права (ТБ-012).
+        .. AdminModule.Modules,
         new ModuleDescriptor("admin-roles", "/admin/roles", "Роли пользователей",
             Icons.Material.Filled.AdminPanelSettings, typeof(UserRoles), ReadPolicy, GroupAdmin),
-        new ModuleDescriptor("admin-clearances", "/admin/clearances", "Допуски пользователей",
-            Icons.Material.Filled.Key, typeof(UserClearances), ReadPolicy, GroupAdmin),
         new ModuleDescriptor("admin-divisions", "/admin/divisions", "Подразделения",
             Icons.Material.Filled.AccountTree, typeof(Divisions), ReadPolicy, GroupAdmin),
     ];
@@ -89,14 +98,14 @@ public sealed class InvestigationProfile : IProfile
     /// <inheritdoc />
     /// <remarks>
     /// Колокольчик уведомлений даёт пакет docflow (порядок 10), виджеты пакета «Медиа» — сам пакет,
-    /// кнопку «Сменить пароль» (диалог с любого экрана) — профиль (порядок 20).
+    /// кнопку «Сменить пароль» (диалог с любого экрана) — пакет «Администрирование» (порядок 20):
+    /// своей копии профиль больше не держит (ADR-0023).
     /// </remarks>
     public IReadOnlyList<IShellWidget> ShellWidgets { get; } =
     [
         .. DocFlowModule.ShellWidgets,
         .. MediaModule.ShellWidgets,
-        new ShellWidgetDescriptor("account-password", ShellWidgetSlot.AppBarRight, Order: 20,
-            typeof(AccountWidget)),
+        .. AdminModule.ShellWidgets,
     ];
 
     /// <inheritdoc />
@@ -109,9 +118,11 @@ public sealed class InvestigationProfile : IProfile
         // Сценарии профиля: валидаторы (обработчики Mediator регистрирует source-генератор хоста).
         services.AddInvestigationApplication();
 
-        // Прикладные сервисы подключённых пакетов (ADR-0017): у «Медиа» — с конфигурацией (модели, пороги).
+        // Прикладные сервисы подключённых пакетов (ADR-0017): у «Медиа» — с конфигурацией (модели, пороги),
+        // у «Администрирования» — валидаторы сценариев и стартовая сверка допусков со справочником.
         DocFlowModule.RegisterServices(services);
         MediaModule.RegisterServices(services, configuration);
+        AdminModule.RegisterServices(services);
     }
 
     /// <inheritdoc />
@@ -133,7 +144,8 @@ public sealed class InvestigationProfile : IProfile
 
     /// <summary>
     /// Проверить, что профиль закрыл КАЖДЫЙ порт подключённых пакетов (<see cref="DocFlowModule.RequiredServices"/>,
-    /// <see cref="MediaModule.RequiredServices"/>): отсутствие любого — <see cref="InvalidOperationException"/>
+    /// <see cref="MediaModule.RequiredServices"/>, <see cref="AdminModule.RequiredServices"/>): отсутствие
+    /// любого — <see cref="InvalidOperationException"/>
     /// с именем порта ещё на регистрации сервисов, то есть до старта хоста, в любом окружении (ТС-013).
     /// </summary>
     /// <param name="services">Коллекция сервисов после регистраций профиля и пакетов.</param>
@@ -142,7 +154,9 @@ public sealed class InvestigationProfile : IProfile
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        var missing = DocFlowModule.RequiredServices.Concat(MediaModule.RequiredServices)
+        var missing = DocFlowModule.RequiredServices
+            .Concat(MediaModule.RequiredServices)
+            .Concat(AdminModule.RequiredServices)
             .Where(port => !services.Any(d => d.ServiceType == port))
             .Select(port => port.FullName ?? port.Name)
             .ToList();

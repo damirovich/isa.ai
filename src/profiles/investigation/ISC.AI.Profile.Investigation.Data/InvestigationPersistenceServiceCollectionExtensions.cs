@@ -52,8 +52,13 @@ public static class InvestigationPersistenceServiceCollectionExtensions
         services.AddScoped<ISC.AI.Modules.Media.Domain.Services.IMediaAdministration, MediaAdministration>();
         services.AddScoped<ISC.AI.Modules.Media.Domain.Services.IVerificationPolicy, VerificationPolicy>();
 
-        // Сверка допусков со справочником подразделений на старте (только лог).
-        services.AddHostedService<ClearanceDivisionConsistencyCheck>();
+        // Порты пакета «Администрирование платформы» (ADR-0023): право вести учётные записи и допуски
+        // и право читать журнал (ТП-004: Администратор и Офицер ИБ), наименования подразделений для
+        // экрана допусков, роли для колонки и фильтра учётных записей. Без них модуль fail-closed.
+        // Стартовую сверку допусков со справочником подразделений ведёт сам пакет (AddAdminApplication).
+        services.AddScoped<ISC.AI.Modules.Admin.Domain.Services.IPlatformAdministration, InvestigationPlatformAdministration>();
+        services.AddScoped<ISC.AI.Modules.Admin.Domain.Services.IDivisionCatalog, InvestigationDivisionCatalog>();
+        services.AddScoped<ISC.AI.Modules.Admin.Domain.Services.IUserRoleCatalog, InvestigationUserRoleCatalog>();
 
         // Переопределяет AllowAllAccessPolicy ядра (ядро регистрируется РАНЬШЕ — Program.cs) явной
         // повторной регистрацией. Singleton — как у дефолта; IDbContextFactory потокобезопасен,

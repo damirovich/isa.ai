@@ -7,7 +7,7 @@
 @using ISC.AI.Modules.Media.Application.Features.Search
 @using ISC.AI.Modules.Media.Domain.Model
 @using ISC.AI.Modules.Media.Domain.Services
-@using ISC.AI.Profile.Investigation.Application.Features.Accounts
+@using ISC.AI.Profile.Investigation.Application.Features.Directory
 @using ISC.AI.Profile.Investigation.Application.Features.Cases
 @using ISC.AI.Profile.Investigation.Application.Features.Divisions
 @using ISC.AI.Profile.Investigation.Application.Features.Persons
@@ -487,7 +487,7 @@ else
             _divisions.AddRange(list);
         }
 
-        var accounts = await Dispatcher.Send(new ListUserAccountsQuery());
+        var accounts = await Dispatcher.Send(new ListUserDirectoryQuery());
         if (accounts is { Status: true, Data: { } rows })
         {
             _accounts.AddRange(rows);

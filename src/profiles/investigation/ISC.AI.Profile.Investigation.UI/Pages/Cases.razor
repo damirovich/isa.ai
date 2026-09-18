@@ -3,7 +3,7 @@
 @rendermode InteractiveServer
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Abstractions.Security
-@using ISC.AI.Profile.Investigation.Application.Features.Accounts
+@using ISC.AI.Profile.Investigation.Application.Features.Directory
 @using ISC.AI.Profile.Investigation.Application.Features.Cases
 @using ISC.AI.Profile.Investigation.Application.Features.Divisions
 @using ISC.AI.Profile.Investigation.Application.Features.Scope
@@ -302,7 +302,7 @@
 
         // Кандидаты в следователи — активные учётные записи ядра; без роли профиля запрос откажет —
         // тогда следователя назначат позже из карточки, дело заводится и без него.
-        var accounts = await Dispatcher.Send(new ListUserAccountsQuery());
+        var accounts = await Dispatcher.Send(new ListUserDirectoryQuery());
         _accounts.Clear();
         if (accounts is { Status: true, Data: { } rows })
         {

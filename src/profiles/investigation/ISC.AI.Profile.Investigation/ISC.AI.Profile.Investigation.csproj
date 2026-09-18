@@ -17,6 +17,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\modules\docflow\ISC.AI.Modules.DocFlow\ISC.AI.Modules.DocFlow.csproj" />
     <ProjectReference Include="..\..\..\modules\media\ISC.AI.Modules.Media\ISC.AI.Modules.Media.csproj" />
+    <!-- Администрирование платформы (ADR-0023): учётные записи, допуски, журнал аудита и смена
+         своего пароля приходят ПАКЕТОМ — одни и те же экраны у обоих профилей, а не две копии. -->
+    <ProjectReference Include="..\..\..\modules\admin\ISC.AI.Modules.Admin\ISC.AI.Modules.Admin.csproj" />
   </ItemGroup>
 
   <!-- MapEndpoints делегирует пакетам (файлы docflow и медиа) — сигнатура несёт IEndpointRouteBuilder.

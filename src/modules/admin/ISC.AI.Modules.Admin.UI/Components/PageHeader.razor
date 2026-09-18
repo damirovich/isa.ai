@@ -1,0 +1,39 @@
+@namespace ISC.AI.Modules.Admin.UI
+@inject ISC.AI.Abstractions.Profiles.IProfile Profile
+
+@* Единая шапка страниц пакета: значок, заголовок, подзаголовок и произвольный «хвост» (чипы и т.п.).
+   Также задаёт заголовок вкладки браузера «<Title> — <наименование профиля>».
+   Имя профиля берётся из IProfile.DisplayName, а НЕ зашито строкой: пакет подключают оба профиля
+   («ИнспекторAI» и «Следствие»), и жёсткое «ИнспекторAI» в шапке — ровно та зависимость от профиля,
+   ради устранения которой администрирование вынесено в пакет (ADR-0017, ТС-003/ТС-009). *@
+
+<PageTitle>@Title — @Profile.DisplayName</PageTitle>
+
+<div class="@($"d-flex align-center gap-3 {Class}")">
+    <MudIcon Icon="@Icon" Color="Color.Primary" Size="Size.Large" />
+    <div class="flex-grow-1">
+        <MudText Typo="Typo.h4">@Title</MudText>
+        @if (!string.IsNullOrWhiteSpace(Subtitle))
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">@Subtitle</MudText>
+        }
+    </div>
+    @ChildContent
+</div>
+
+@code {
+    /// <summary>Заголовок страницы (он же — заголовок вкладки браузера).</summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+
+    /// <summary>Подзаголовок — кратко о назначении экрана; <c>null</c> — не показывать.</summary>
+    [Parameter] public string? Subtitle { get; set; }
+
+    /// <summary>Значок модуля (константа MudBlazor).</summary>
+    [Parameter, EditorRequired] public string Icon { get; set; } = string.Empty;
+
+    /// <summary>CSS-классы контейнера шапки (по умолчанию отступ снизу).</summary>
+    [Parameter] public string Class { get; set; } = "mb-4";
+
+    /// <summary>Необязательный «хвост» шапки справа (чипы состояния и т.п.).</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}
