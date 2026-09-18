@@ -109,6 +109,24 @@ public sealed class CaseScope(
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// БЕЗ решётки — и это правильно: вопрос задаёт фоновый конвейер от имени системы, ответ пользователю
+    /// не показывается. Носитель без привязок индексируется (запрета нет); привязанный — пока ОТКРЫТО хотя
+    /// бы одно из его дел: пока есть действующее основание, шаблоны правомерны (ТБ-074, ADR-0024).
+    /// </remarks>
+    public async Task<bool> IsBiometricIndexingAllowedAsync(int assetId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var statuses = await db.CaseMediaLinks.AsNoTracking()
+            .Where(l => l.MediaAssetId == assetId)
+            .Join(db.Cases.AsNoTracking(), l => l.CaseId, c => c.Id, (_, c) => c.Status)
+            .ToListAsync(cancellationToken);
+
+        return statuses.Count == 0 || statuses.Exists(status => status != CaseStatus.Closed);
+    }
+
+    /// <inheritdoc />
     public async Task LinkAssetAsync(int caseId, int assetId, string? place, int? linkedByUserId, CancellationToken cancellationToken = default)
     {
         var result = await cases.LinkMediaAsync(caseId, assetId, place, linkedByUserId, cancellationToken);

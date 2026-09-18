@@ -268,8 +268,18 @@ public sealed record SearchByFaceQuery(
                 var template = face.QualityAcceptable ? await catalog.GetTemplateAsync(probeFaceId, access, cancellationToken) : null;
                 if (template is null)
                 {
+                    // «Шаблона нет» — внешне один признак, а причин две: лицо непригодно по качеству (шаблон
+                    // не строился, ТО-мат-07) ЛИБО шаблон был и удалён регламентом по закрытию дела (ТБ-074,
+                    // ADR-0024). Различаем по делу носителя, а не по догадке: объяснять регламент «плохим
+                    // качеством» значит отправить оператора искать дефект распознавания там, где сработало
+                    // правило хранения.
+                    var closedByRegulation = face.QualityAcceptable
+                        && !await caseScope.IsBiometricIndexingAllowedAsync(face.AssetId, cancellationToken);
+
                     return (null, ResponseDto<FaceSearchResult>.BadRequest(
-                        $"Лицо-проба непригодно для сравнения: {face.QualityReason ?? "шаблон не построен"} (ТО-мат-07)."));
+                        closedByRegulation
+                            ? "Поиск по этому лицу невозможен: дело закрыто, шаблон удалён регламентом (ТБ-074)."
+                            : $"Лицо-проба непригодно для сравнения: {face.QualityReason ?? "шаблон не построен"} (ТО-мат-07)."));
                 }
 
                 var sha = Convert.ToHexStringLower(SHA256.HashData(MemoryMarshal.AsBytes<float>(template)));

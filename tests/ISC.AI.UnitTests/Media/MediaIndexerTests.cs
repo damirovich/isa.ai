@@ -38,11 +38,15 @@ public sealed class MediaIndexerTests
     private readonly IImageTools _imageTools = Substitute.For<IImageTools>();
     private readonly IFrameExtractor _frames = Substitute.For<IFrameExtractor>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
+    private readonly ICaseScope _caseScope = Substitute.For<ICaseScope>();
     private readonly List<string> _calls = [];
     private int _saved;
 
     public MediaIndexerTests()
     {
+        // По умолчанию дело носителя открыто: запрет индексации — отдельный случай (закрытое дело, ТБ-074).
+        _caseScope.IsBiometricIndexingAllowedAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(true);
+
         _store.GetForIndexingAsync(AssetId, Arg.Any<CancellationToken>())
             .Returns(new MediaAssetIndexingInfo(AssetId, MediaKind.Video, "src.mp4", "video/mp4", Classification: 2, DivisionId: 7, ["old.jpg"]));
         _store.When(s => s.CompleteIndexingAsync(Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<long?>(), Arg.Any<CancellationToken>()))
@@ -186,8 +190,30 @@ public sealed class MediaIndexerTests
         await _store.DidNotReceive().FailIndexingAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact(DisplayName = "ТБ-074/ADR-0024: у закрытого дела конвейер не строит шаблоны заново — носитель даже не читается на обработку")]
+    public async Task Closed_case_asset_is_not_indexed()
+    {
+        // Регламент по закрытию дела удалил шаблоны; повторная индексация вернула бы биометрию в поиск.
+        // Проверяем последний рубеж: конвейер отказывается независимо от того, кто и откуда его позвал.
+        _caseScope.IsBiometricIndexingAllowedAsync(AssetId, Arg.Any<CancellationToken>()).Returns(false);
+
+        var result = await Indexer().IndexAsync(AssetId);
+
+        result.Success.ShouldBeFalse();
+        result.Error.ShouldNotBeNull().ShouldContain("закрыто");
+        result.Faces.ShouldBe(0);
+
+        // Ни статуса «в обработке», ни новых лиц, ни записи «проиндексирован» — ничего не произошло.
+        await _store.DidNotReceive().MarkProcessingAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _store.DidNotReceive().CompleteIndexingAsync(
+            Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<long?>(), Arg.Any<CancellationToken>());
+        await _audit.DidNotReceive().WriteAsync(Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>());
+    }
+
     private MediaIndexer Indexer() =>
-        new(_store, _files, _detector, _embedder, _quality, _imageTools, _frames, _audit, new MediaSearchOptions(), NullLogger<MediaIndexer>.Instance);
+        new(_store, _files, _detector, _embedder, _quality, _imageTools, _frames, _audit, _caseScope,
+            new MediaSearchOptions(), NullLogger<MediaIndexer>.Instance);
 
     private static async IAsyncEnumerable<VideoFrame> Frames(params VideoFrame[] frames)
     {

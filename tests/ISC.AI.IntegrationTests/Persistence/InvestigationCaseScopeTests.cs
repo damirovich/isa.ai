@@ -168,4 +168,42 @@ public sealed class InvestigationCaseScopeTests : IAsyncLifetime
         (await scope.IsAssetAccessibleAsync(999, head)).ShouldBeFalse();
         (await scope.GetCaseIdForAssetAsync(999, head)).ShouldBeNull();
     }
+
+    [Fact(DisplayName = "ТБ-074/ADR-0024: у закрытого дела биометрию строить нельзя; пока открыто хотя бы одно дело носителя — можно")]
+    public async Task Biometric_indexing_is_forbidden_for_closed_cases()
+    {
+        var factory = new InvestigationContextFactory(_postgres.GetConnectionString());
+        var core = new CoreContextFactory(_postgres.GetConnectionString());
+        await InvestigationTestKit.MigrateAsync(factory);
+        await InvestigationTestKit.AssignRolesAsync(factory, (10, InvestigationRole.Investigator));
+
+        var cases = InvestigationTestKit.CreateCaseStore(factory, core);
+        var scope = InvestigationTestKit.CreateCaseScope(factory, core);
+        var owner = InvestigationTestKit.Access(10, 9, 5);
+
+        var open = await cases.CreateAsync(InvestigationTestKit.Draft("OPEN-1", 5, 2, 10), owner);
+        var closing = await cases.CreateAsync(InvestigationTestKit.Draft("CLOSE-1", 5, 2, 10), owner);
+
+        // Носитель 100 — только в закрываемом деле; носитель 200 — в обоих (дедупликация по хешу, ТФ-МЕД-04).
+        await scope.LinkAssetAsync(closing.CaseId, 100, null, 10);
+        await scope.LinkAssetAsync(closing.CaseId, 200, null, 10);
+        await scope.LinkAssetAsync(open.CaseId, 200, null, 10);
+
+        // Пока дела открыты — индексация разрешена обоим, и непривязанному носителю тоже (запрета нет).
+        (await scope.IsBiometricIndexingAllowedAsync(100)).ShouldBeTrue();
+        (await scope.IsBiometricIndexingAllowedAsync(200)).ShouldBeTrue();
+        (await scope.IsBiometricIndexingAllowedAsync(999)).ShouldBeTrue();
+
+        (await cases.SetStatusAsync(closing.CaseId, CaseStatus.Closed, owner)).ShouldBe(CaseWriteResult.Ok);
+
+        // Носитель закрытого дела — шаблоны сняты регламентом, заново строить нельзя.
+        (await scope.IsBiometricIndexingAllowedAsync(100)).ShouldBeFalse();
+
+        // А носитель, который есть и в ОТКРЫТОМ деле, индексируется: там основание ещё действует.
+        (await scope.IsBiometricIndexingAllowedAsync(200)).ShouldBeTrue();
+
+        // Возврат дела в производство снимает запрет (регламент исполнялся по факту закрытия).
+        (await cases.SetStatusAsync(closing.CaseId, CaseStatus.InProgress, owner)).ShouldBe(CaseWriteResult.Ok);
+        (await scope.IsBiometricIndexingAllowedAsync(100)).ShouldBeTrue();
+    }
 }

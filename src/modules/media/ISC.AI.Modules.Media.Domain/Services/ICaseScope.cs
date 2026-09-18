@@ -72,6 +72,24 @@ public interface ICaseScope
     /// </summary>
     Task<bool> IsAssetAccessibleAsync(int assetId, AccessContext access, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Можно ли СТРОИТЬ биометрию по этому носителю: <see langword="false"/>, если дело носителя закрыто
+    /// и его шаблоны уже удалены регламентом (ТБ-074, ТФ-ДЕЛ-04, ADR-0024).
+    /// </summary>
+    /// <remarks>
+    /// БЕЗ ЭТОЙ ПРОВЕРКИ РЕГЛАМЕНТ ОБХОДИТСЯ В ОДИН КЛИК: индексация носителя строит шаблоны заново, и
+    /// биометрия закрытого дела возвращается в поиск — то есть снова обрабатывается без основания. Поэтому
+    /// вопрос задаётся и вручную (повторная индексация оператором), и в фоновом конвейере (загрузка нового
+    /// файла в закрытое дело).
+    ///
+    /// БЕЗ <see cref="AccessContext"/> намеренно: фоновый конвейер работает от имени системы, субъекта у него
+    /// нет. Утечки сведений здесь тоже нет — ответ не выдаётся пользователю, он решает единственный вопрос
+    /// «строить ли шаблоны». Носитель без дела (ещё не привязан) — <see langword="true"/>: запрета нет.
+    /// Носитель, привязанный к нескольким делам, индексируется, пока ОТКРЫТО хотя бы одно: пока есть
+    /// действующее основание, шаблоны правомерны.
+    /// </remarks>
+    Task<bool> IsBiometricIndexingAllowedAsync(int assetId, CancellationToken cancellationToken = default);
+
     /// <summary>Привязать носитель к делу (слабая ссылка по значению в схеме профиля, ТО-инф-08).</summary>
     Task LinkAssetAsync(int caseId, int assetId, string? place, int? linkedByUserId, CancellationToken cancellationToken = default);
 

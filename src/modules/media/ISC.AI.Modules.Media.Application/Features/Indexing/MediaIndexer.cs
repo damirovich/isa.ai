@@ -36,6 +36,7 @@ public sealed class MediaIndexer(
     IImageTools imageTools,
     IFrameExtractor frameExtractor,
     IAuditWriter auditWriter,
+    ICaseScope caseScope,
     MediaSearchOptions options,
     ILogger<MediaIndexer> logger) : IMediaIndexer
 {
@@ -47,6 +48,18 @@ public sealed class MediaIndexer(
         {
             MediaIndexerLog.AssetNotFound(logger, assetId);
             return new MediaIndexResult(false, 0, 0, 0, "Носитель не найден.");
+        }
+
+        // ПОСЛЕДНИЙ РУБЕЖ регламента ТБ-074 (ADR-0024): закрытое дело лишилось шаблонов, и строить их
+        // заново нельзя — иначе биометрия возвращается в поиск без основания. Проверка стоит ЗДЕСЬ, а не
+        // только в сценариях: в конвейер задача попадает и из загрузки, и из переиндексации, и из
+        // восстановления осиротевших задач после рестарта, а обойти регламент не должен ни один путь.
+        if (!await caseScope.IsBiometricIndexingAllowedAsync(assetId, cancellationToken))
+        {
+            MediaIndexerLog.IndexingForbiddenByClosedCase(logger, assetId);
+            return new MediaIndexResult(
+                false, 0, 0, 0,
+                "Дело носителя закрыто: шаблоны удалены регламентом (ТБ-074) и заново не строятся.");
         }
 
         var progress = new Progress();

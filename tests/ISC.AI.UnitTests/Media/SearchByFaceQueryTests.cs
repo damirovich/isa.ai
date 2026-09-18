@@ -46,6 +46,9 @@ public sealed class SearchByFaceQueryTests
     {
         _administration.CanSearchAsync(Arg.Any<CancellationToken>()).Returns(true);
         _accessProvider.GetCurrentAsync(Arg.Any<CancellationToken>()).Returns(new AccessContext("7", 2, [1]));
+
+        // По умолчанию дело открыто: закрытое дело (шаблоны сняты регламентом ТБ-074) — отдельный случай.
+        _caseScope.IsBiometricIndexingAllowedAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(true);
         _caseScope.GetCaseAsync(3, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
             .Returns(new CaseScopeItem(3, "№ 1", "Дело", Classification: 2, DivisionId: 1));
         _caseScope.ListAuthorizationsAsync(3, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
@@ -254,6 +257,24 @@ public sealed class SearchByFaceQueryTests
         var noTemplate = await HandleAsync(new SearchByFaceQuery(3, 9, ProbeFaceId: 5));
         noTemplate.StatusCode.ShouldBe(ResponseStatusCode.BadRequest);
         noTemplate.StatusMessage.ShouldContain("ТО-мат-07");
+    }
+
+    [Fact(DisplayName = "ТБ-074: у закрытого дела шаблон снят регламентом — отказ объясняет это, а не «плохое качество»")]
+    public async Task Probe_face_of_closed_case_reports_regulation()
+    {
+        // Тот же внешний признак, что и у непригодного лица (шаблона нет), но причина другая, и оператор
+        // должен её понять: иначе он будет искать дефект распознавания там, где сработало правило хранения.
+        _catalog.GetFaceAsync(5, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
+            .Returns(ProbeFace(acceptable: true, reason: null));
+        _catalog.GetTemplateAsync(5, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>()).Returns((float[]?)null);
+        _caseScope.IsBiometricIndexingAllowedAsync(50, Arg.Any<CancellationToken>()).Returns(false);
+
+        var response = await HandleAsync(new SearchByFaceQuery(3, 9, ProbeFaceId: 5));
+
+        response.StatusCode.ShouldBe(ResponseStatusCode.BadRequest);
+        response.StatusMessage.ShouldContain("ТБ-074");
+        response.StatusMessage.ShouldContain("дело закрыто");
+        await AssertNotSearchedAndDeniedAsync();
     }
 
     [Fact(DisplayName = "На пробном изображении лицо не найдено → BadRequest, поиск не выполняется, отказ аудируется")]
