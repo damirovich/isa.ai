@@ -339,6 +339,48 @@ public sealed class SearchByFaceQueryTests
             Arg.Any<CancellationToken>());
     }
 
+    [Fact(DisplayName = "ТФ-ПЛ-05: закрытые дела в область НЕ входят, пока оператор их не включил; включение — в журнал (ТБ-072)")]
+    public async Task Closed_cases_join_scope_only_when_operator_includes_them()
+    {
+        // Дело 3 — текущее (открытое), 4 — открытое, 5 — закрытое (оконченное много лет назад).
+        _caseScope.ListAccessibleCasesAsync(Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
+            .Returns([
+                new CaseScopeItem(3, "№ 1", "Дело", 2, 1),
+                new CaseScopeItem(4, "№ 2", "Дело 2", 2, 1),
+                new CaseScopeItem(5, "№ 3", "Старое дело", 2, 1, IsClosed: true)]);
+
+        var withoutClosed = await HandleAsync(new SearchByFaceQuery(3, 9, SearchScopeKind.AllAccessibleCases, ProbeImage: Probe));
+
+        withoutClosed.Status.ShouldBeTrue();
+        withoutClosed.Data!.CaseIds.ShouldBe([3, 4]);
+        await _audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.PayloadSensitive!.Contains("закрытые дела: не включены")), Arg.Any<CancellationToken>());
+
+        // Тот же поиск с галочкой: прежние дела входят в область — именно ради случая «попался снова».
+        var withClosed = await HandleAsync(
+            new SearchByFaceQuery(3, 9, SearchScopeKind.AllAccessibleCases, ProbeImage: Probe, IncludeClosedCases: true));
+
+        withClosed.Status.ShouldBeTrue();
+        withClosed.Data!.CaseIds.ShouldBe([3, 4, 5]);
+        await _audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.PayloadSensitive!.Contains("закрытые дела: включены оператором")), Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "ТФ-ПЛ-05: текущее дело в области всегда, даже закрытое — субъект работает именно в нём")]
+    public async Task Current_case_stays_in_scope_even_when_closed()
+    {
+        _caseScope.GetCaseAsync(3, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
+            .Returns(new CaseScopeItem(3, "№ 1", "Дело", 2, 1, IsClosed: true));
+        _caseScope.ListAccessibleCasesAsync(Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
+            .Returns([new CaseScopeItem(3, "№ 1", "Дело", 2, 1, IsClosed: true), new CaseScopeItem(4, "№ 2", "Дело 2", 2, 1)]);
+
+        // Область «все доступные» без галочки: чужие закрытые дела отсеклись, своё текущее осталось.
+        var response = await HandleAsync(new SearchByFaceQuery(3, 9, SearchScopeKind.AllAccessibleCases, ProbeImage: Probe));
+
+        response.Status.ShouldBeTrue();
+        response.Data!.CaseIds.ShouldBe([3, 4]);
+    }
+
     private static FaceRow ProbeFace(bool acceptable, string? reason) =>
         new(5, 50, null, null, 0, 0, 10, 10, 0.9f, acceptable ? 0.8f : 0.1f, acceptable, reason, "c.jpg", null, 2, 1);
 

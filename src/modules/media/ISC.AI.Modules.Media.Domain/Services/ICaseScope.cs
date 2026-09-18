@@ -8,7 +8,13 @@ namespace ISC.AI.Modules.Media.Domain.Services;
 /// <param name="Title">Краткое название (для подписи).</param>
 /// <param name="Classification">Гриф дела — наследуется носителями и шаблонами (ТБ-070).</param>
 /// <param name="DivisionId">Подразделение дела.</param>
-public sealed record CaseScopeItem(int CaseId, string Number, string Title, short Classification, int DivisionId);
+/// <param name="IsClosed">
+/// Дело закрыто. Модуль по умолчанию НЕ берёт закрытые дела в область поиска: следователь ищет по
+/// текущей работе, и попадание в кандидат-лист лиц из давно оконченных дел — шум. Включаются они
+/// осознанно, отдельным признаком запроса (ТФ-ПЛ-05), и факт включения идёт в журнал (ТБ-072).
+/// </param>
+public sealed record CaseScopeItem(
+    int CaseId, string Number, string Title, short Classification, int DivisionId, bool IsClosed = false);
 
 /// <summary>Фигурант дела для привязки кандидата (ТФ-ВЕР-03); модуль знает только идентификатор и подпись.</summary>
 public sealed record CasePersonItem(int PersonId, string DisplayName);

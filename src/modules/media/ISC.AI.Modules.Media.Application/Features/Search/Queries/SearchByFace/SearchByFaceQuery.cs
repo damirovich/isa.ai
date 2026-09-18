@@ -40,7 +40,8 @@ public sealed record SearchByFaceQuery(
     int? ProbeFaceId = null,
     int? ProbeFaceIndex = null,
     int? TopK = null,
-    double? MaxCosineDistance = null)
+    double? MaxCosineDistance = null,
+    bool IncludeClosedCases = false)
     : IRequest<ResponseDto<FaceSearchResult>>
 {
     /// <inheritdoc cref="SearchByFaceQuery" />
@@ -218,6 +219,21 @@ public sealed record SearchByFaceQuery(
         }
 
         /// <summary>Дела области поиска: только доступные субъекту; пусто — область не содержит доступных дел.</summary>
+        /// <summary>
+        /// Область поиска (ТФ-ПЛ-05): текущее дело / выбранные / все доступные — и всегда только дела,
+        /// доступные субъекту по решётке и роли.
+        /// </summary>
+        /// <remarks>
+        /// ЗАКРЫТЫЕ ДЕЛА по умолчанию в область НЕ входят: в работе следователя они — шум, а материалов в
+        /// них за годы больше, чем в текущих. Но исключать их совсем нельзя: тот же человек попадается по
+        /// новому делу, и его прежние материалы — самое ценное, что может дать поиск. Поэтому включение
+        /// закрытых дел — ОСОЗНАННОЕ действие оператора (<see cref="IncludeClosedCases"/>), и оно попадает
+        /// в журнал вместе с областью (ТБ-072): «расширение области фиксируется в аудите».
+        ///
+        /// ТЕКУЩЕЕ ДЕЛО в область входит всегда, даже закрытое: субъект работает именно в нём, основание
+        /// поиска — его, и прятать от него материалы дела, которое он сам открыл, значит сделать поиск
+        /// непредсказуемым.
+        /// </remarks>
         private async Task<IReadOnlyList<int>> ResolveScopeAsync(
             SearchByFaceQuery query, AccessContext access, CaseScopeItem caseItem, CancellationToken cancellationToken)
         {
@@ -229,18 +245,27 @@ public sealed record SearchByFaceQuery(
                 case SearchScopeKind.SelectedCases:
                 {
                     var accessible = (await caseScope.ListAccessibleCasesAsync(access, cancellationToken))
-                        .Select(c => c.CaseId).ToHashSet();
+                        .Where(c => Included(c, query, caseItem))
+                        .Select(c => c.CaseId)
+                        .ToHashSet();
                     return (query.SelectedCaseIds ?? []).Distinct().Where(accessible.Contains).ToList();
                 }
 
                 case SearchScopeKind.AllAccessibleCases:
                     return (await caseScope.ListAccessibleCasesAsync(access, cancellationToken))
-                        .Select(c => c.CaseId).Distinct().ToList();
+                        .Where(c => Included(c, query, caseItem))
+                        .Select(c => c.CaseId)
+                        .Distinct()
+                        .ToList();
 
                 default:
                     return [];
             }
         }
+
+        // Закрытое дело берётся в область, только если оператор его включил — либо это само текущее дело.
+        private static bool Included(CaseScopeItem item, SearchByFaceQuery query, CaseScopeItem currentCase) =>
+            !item.IsClosed || query.IncludeClosedCases || item.CaseId == currentCase.CaseId;
 
         /// <summary>
         /// Проба: шаблон лица носителя (ТФ-ПЛ-03; хеш — над байтами вектора; вырезка НЕ сохраняется и в сессию
@@ -365,7 +390,10 @@ public sealed record SearchByFaceQuery(
               .Append(" (id ").Append(authorization.AuthorizationId.ToString(inv)).AppendLine(")");
             sb.Append("область: ").Append(query.Scope)
               .Append("; дела: ").Append(string.Join(",", caseIds.Select(id => id.ToString(inv))))
-              .Append("; расширение сверх текущего дела: ").AppendLine(expanded ? "да" : "нет");
+              .Append("; расширение сверх текущего дела: ").Append(expanded ? "да" : "нет")
+              // ТБ-072: включение ЗАКРЫТЫХ дел — расширение области, и оно должно быть видно в журнале
+              // отдельно: по закрытым делам ищут по иному поводу, чем по своей текущей работе.
+              .Append("; закрытые дела: ").AppendLine(query.IncludeClosedCases ? "включены оператором" : "не включены");
             sb.Append("проба: sha256=").Append(probe.Sha256).Append("; ").AppendLine(probe.Description);
 
             if (query.ProbeImage is { } image)

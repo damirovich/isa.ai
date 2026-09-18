@@ -24,7 +24,8 @@ public sealed class CaseScope(
     IPersonStore persons,
     IDbContextFactory<InvestigationDbContext> contextFactory,
     IAccessPolicy policy,
-    IUserRoleStore roles) : ICaseScope
+    IUserRoleStore roles,
+    InvestigationRetentionOptions retention) : ICaseScope
 {
     // Область «все доступные дела» для выбора: страница заведомо больше любого реального числа дел
     // одного субъекта; постранично модулю не нужно — он строит список выбора целиком.
@@ -37,7 +38,8 @@ public sealed class CaseScope(
 
         var page = await cases.ListAsync(new CaseFilter(PageSize: AllCasesPageSize), access, cancellationToken);
         return page.Rows
-            .Select(r => new CaseScopeItem(r.Id, r.Number, r.Title, r.Classification, r.DivisionId))
+            .Select(r => new CaseScopeItem(
+                r.Id, r.Number, r.Title, r.Classification, r.DivisionId, r.Status == CaseStatus.Closed))
             .ToList();
     }
 
@@ -50,7 +52,9 @@ public sealed class CaseScope(
         var details = await cases.GetAsync(caseId, access, cancellationToken);
         return details is null
             ? null
-            : new CaseScopeItem(details.Id, details.Number, details.Title, details.Classification, details.DivisionId);
+            : new CaseScopeItem(
+                details.Id, details.Number, details.Title, details.Classification, details.DivisionId,
+                details.Status == CaseStatus.Closed);
     }
 
     /// <inheritdoc />
@@ -116,6 +120,14 @@ public sealed class CaseScope(
     /// </remarks>
     public async Task<bool> IsBiometricIndexingAllowedAsync(int assetId, CancellationToken cancellationToken = default)
     {
+        // Запрет имеет смысл ТОЛЬКО там, где регламент действительно удаляет шаблоны по закрытию: иначе
+        // запрещать нечего — шаблоны закрытого дела и так на месте, и переиндексация ничего не возвращает
+        // из небытия (ADR-0024, решение эксплуатанта в ведомственном акте).
+        if (!retention.PurgeTemplatesOnCaseClosure)
+        {
+            return true;
+        }
+
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
 
         var statuses = await db.CaseMediaLinks.AsNoTracking()

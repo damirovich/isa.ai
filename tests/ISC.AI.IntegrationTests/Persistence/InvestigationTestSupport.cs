@@ -57,10 +57,16 @@ internal static class InvestigationTestKit
     public static PersonStore CreatePersonStore(InvestigationContextFactory factory, CoreContextFactory core) =>
         new(factory, new InvestigationAccessPolicy(factory), new UserRoleStore(core, factory));
 
-    /// <summary>Порт «Медиа» <c>ICaseScope</c> поверх настоящих хранилищ, политики и реестра ролей — как в хосте.</summary>
-    public static CaseScope CreateCaseScope(InvestigationContextFactory factory, CoreContextFactory core) =>
+    /// <summary>
+    /// Порт «Медиа» <c>ICaseScope</c> поверх настоящих хранилищ, политики и реестра ролей — как в хосте.
+    /// <paramref name="purgeTemplatesOnCaseClosure"/> — правило хранения биометрии эксплуатанта (ADR-0024):
+    /// по умолчанию шаблоны закрытых дел ХРАНЯТСЯ, как и в поставке.
+    /// </summary>
+    public static CaseScope CreateCaseScope(
+        InvestigationContextFactory factory, CoreContextFactory core, bool purgeTemplatesOnCaseClosure = false) =>
         new(CreateCaseStore(factory, core), CreatePersonStore(factory, core), factory,
-            new InvestigationAccessPolicy(factory), new UserRoleStore(core, factory));
+            new InvestigationAccessPolicy(factory), new UserRoleStore(core, factory),
+            new InvestigationRetentionOptions(purgeTemplatesOnCaseClosure));
 
     /// <summary>Контекст доступа: числовой субъект (роль ищется по нему), допуск по грифу и подразделениям.</summary>
     public static AccessContext Access(int userId, short maxClassification, params int[] divisions) =>

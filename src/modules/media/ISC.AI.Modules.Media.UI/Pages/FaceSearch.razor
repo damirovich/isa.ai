@@ -73,9 +73,24 @@
                            Dense="true" Disabled="_busy" MultiSelectionTextFunc="@SelectedCasesSummary">
                     @foreach (var c in _cases)
                     {
-                        <MudSelectItem T="int" Value="@c.CaseId">№ @c.Number · @c.Title</MudSelectItem>
+                        <MudSelectItem T="int" Value="@c.CaseId">
+                            № @c.Number · @c.Title@(c.IsClosed ? " (закрыто)" : string.Empty)
+                        </MudSelectItem>
                     }
                 </MudSelect>
+            }
+
+            @* Закрытые дела — расширение области, и включает его человек (ТФ-ПЛ-05, ТБ-072). Своё текущее
+               дело искать можно всегда, даже закрытое, поэтому галочка нужна только для остальных. *@
+            @if (_scope != SearchScopeKind.CurrentCase)
+            {
+                <MudCheckBox T="bool" @bind-Value="_includeClosedCases" Dense="true" Disabled="_busy">
+                    искать и по закрытым делам
+                </MudCheckBox>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                    По умолчанию оконченные дела в поиск не попадают. Включите, если проверяете, не проходил
+                    ли человек по прежним делам: включение попадёт в журнал вместе с областью поиска.
+                </MudText>
             }
         </MudItem>
         <MudItem xs="12" sm="6">
@@ -188,7 +203,7 @@
             <MudText Typo="Typo.subtitle1">Кандидаты: @result.Candidates.Count</MudText>
             <MudText Typo="Typo.caption" Class="mud-text-secondary">
                 сессия <MudLink Href="@($"/media/sessions/{result.SessionId}")" Typo="Typo.caption">№ @result.SessionId</MudLink>
-                · область: @_scope.Label() (@result.CaseIds.Count дел)
+                · область: @_scope.Label() (@result.CaseIds.Count дел@(_includeClosedCases && _scope != SearchScopeKind.CurrentCase ? ", включая закрытые" : string.Empty))
                 · детектор @result.DetectorVersion · векторизатор @result.EmbedderVersion
                 · до @result.TopK кандидатов@(result.MaxCosineDistance is { } threshold ? $" · порог {threshold:0.00}" : string.Empty)
             </MudText>
@@ -270,6 +285,9 @@
     private int? _caseId;
     private int? _authorizationId;
     private SearchScopeKind _scope = SearchScopeKind.CurrentCase;
+
+    // Закрытые дела в область поиска по умолчанию не входят: включает их оператор (ТФ-ПЛ-05, аудит ТБ-072).
+    private bool _includeClosedCases;
     private IReadOnlyCollection<int> _selectedCaseIds = [];
     /// <summary>Сторона миниатюры пробы, пикселей: показать лицо оператору достаточно, в разметку идёт мало.</summary>
     private const int PreviewSide = 320;
@@ -447,7 +465,8 @@
                 _probeFace?.Id,
                 _probeFace is null ? _probeFaceIndex : null,
                 _topK,
-                _threshold));
+                _threshold,
+                _includeClosedCases));
 
             if (response is { Status: true, Data: { } result })
             {
