@@ -57,6 +57,16 @@ public sealed record ReindexMediaCommand(int AssetId) : IRequest<ResponseDto<Gui
                 return ResponseDto<Guid>.NotFound("Носитель не найден или недоступен.");
             }
 
+            // ТБ-074/ADR-0024: у закрытого дела шаблоны удалены регламентом, и переиндексация вернула бы их
+            // в поиск — то есть возобновила бы обработку биометрии без основания. Отказ явный: оператор
+            // должен понять, что это не сбой, а регламент.
+            if (!await caseScope.IsBiometricIndexingAllowedAsync(asset.Id, cancellationToken))
+            {
+                return ResponseDto<Guid>.BadRequest(
+                    "Дело носителя закрыто: биометрические шаблоны удалены регламентом (ТБ-074) и заново не строятся. "
+                    + "Чтобы работать с материалом, переведите дело в производство.");
+            }
+
             var assetId = asset.Id; // захватываем только примитив — scope запроса к моменту выполнения уже закрыт
             var taskId = await queue.EnqueueAsync(
                 "Переиндексация носителя (распознавание лиц)",

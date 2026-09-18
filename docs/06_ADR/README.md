@@ -50,7 +50,7 @@
 | ADR-0021 | Второй профиль в одном репозитории: выбор профиля хоста при сборке поставки | Принято | ТС-004/006/009 (также ADR-0002/0006/0017) | [ADR-0021-vybor-profilya-hosta-pri-sborke.md](ADR-0021-vybor-profilya-hosta-pri-sborke.md) |
 | ADR-0022 | Поисковые сессии и двойная верификация — в пакете «Медиа»; правило двух лиц не переопределяется профилем | Принято | ТБ-071..074, ТО-инф-08/12, ТФ-ПЛ/ТФ-ВЕР, ТП-004, GATE-5 (также ADR-0014/0017/0019) | [ADR-0022-sessii-poiska-i-pravilo-dvuh-lits-v-module.md](ADR-0022-sessii-poiska-i-pravilo-dvuh-lits-v-module.md) |
 | ADR-0023 | Администрирование платформы — пакет модулей, а не копия в каждом профиле | Принято | ТС-002/003/007/009, ТБ-010..016/030/032, ТФ-АДМ-01, ТП-004 (также ADR-0002/0014/0017/0021) | [ADR-0023-administrirovanie-platformy-paket-modulei.md](ADR-0023-administrirovanie-platformy-paket-modulei.md) |
-| ADR-0024 | Закрытие дела снимает биометрию, но сохраняет материалы дела | Принято | ТФ-ДЕЛ-04, ТБ-070/074, ТБ-064, GATE-6 (также ADR-0019/0020/0022) | [ADR-0024-udalenie-biometrii-po-zakrytiyu-dela.md](ADR-0024-udalenie-biometrii-po-zakrytiyu-dela.md) |
+| ADR-0024 | Закрытие дела снимает биометрию, но сохраняет материалы дела (с 18.09.2026 — настройка эксплуатанта, по умолчанию шаблоны хранятся) | Принято | ТФ-ДЕЛ-04, ТБ-070/074, ТБ-064, GATE-6 (также ADR-0019/0020/0022) | [ADR-0024-udalenie-biometrii-po-zakrytiyu-dela.md](ADR-0024-udalenie-biometrii-po-zakrytiyu-dela.md) |
 
 ### Предложенные (требуют решения на Э1)
 

@@ -46,7 +46,8 @@ public sealed record SetCaseStatusCommand(int CaseId, CaseStatus Status)
         IUserRoleStore roles,
         ISubjectProvider subjectProvider,
         IAccessContextProvider accessProvider,
-        IMediaPurger purger)
+        IMediaPurger purger,
+        InvestigationRetentionOptions retention)
         : IRequestHandler<SetCaseStatusCommand, ResponseDto<bool>>
     {
         /// <summary>Отказ, когда дело закрыто, а биометрия осталась: оператор обязан узнать об этом сразу.</summary>
@@ -69,6 +70,15 @@ public sealed record SetCaseStatusCommand(int CaseId, CaseStatus Status)
             if (result != CaseWriteResult.Ok || command.Status != CaseStatus.Closed)
             {
                 return CaseGuard.ToResponse(result);
+            }
+
+            // Удалять ли биометрию по закрытию — решение эксплуатанта из ведомственного акта (ТБ-078,
+            // ADR-0024), а не константа кода. По умолчанию шаблоны ХРАНЯТСЯ: тот же человек попадается по
+            // новому делу, и материалы прежнего — самое ценное, что поиск может дать. Закрытые дела при этом
+            // в поиск сами не попадают — оператор включает их осознанно (ТФ-ПЛ-05, аудит по ТБ-072).
+            if (!retention.PurgeTemplatesOnCaseClosure)
+            {
+                return ResponseDto<bool>.Ok(true);
             }
 
             // Регламент ТБ-074 исполняется здесь же, а не фоном: «удалим потом» на режимных данных

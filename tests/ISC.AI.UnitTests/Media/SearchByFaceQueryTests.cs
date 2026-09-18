@@ -46,6 +46,9 @@ public sealed class SearchByFaceQueryTests
     {
         _administration.CanSearchAsync(Arg.Any<CancellationToken>()).Returns(true);
         _accessProvider.GetCurrentAsync(Arg.Any<CancellationToken>()).Returns(new AccessContext("7", 2, [1]));
+
+        // По умолчанию дело открыто: закрытое дело (шаблоны сняты регламентом ТБ-074) — отдельный случай.
+        _caseScope.IsBiometricIndexingAllowedAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(true);
         _caseScope.GetCaseAsync(3, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
             .Returns(new CaseScopeItem(3, "№ 1", "Дело", Classification: 2, DivisionId: 1));
         _caseScope.ListAuthorizationsAsync(3, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
@@ -256,6 +259,24 @@ public sealed class SearchByFaceQueryTests
         noTemplate.StatusMessage.ShouldContain("ТО-мат-07");
     }
 
+    [Fact(DisplayName = "ТБ-074: у закрытого дела шаблон снят регламентом — отказ объясняет это, а не «плохое качество»")]
+    public async Task Probe_face_of_closed_case_reports_regulation()
+    {
+        // Тот же внешний признак, что и у непригодного лица (шаблона нет), но причина другая, и оператор
+        // должен её понять: иначе он будет искать дефект распознавания там, где сработало правило хранения.
+        _catalog.GetFaceAsync(5, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
+            .Returns(ProbeFace(acceptable: true, reason: null));
+        _catalog.GetTemplateAsync(5, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>()).Returns((float[]?)null);
+        _caseScope.IsBiometricIndexingAllowedAsync(50, Arg.Any<CancellationToken>()).Returns(false);
+
+        var response = await HandleAsync(new SearchByFaceQuery(3, 9, ProbeFaceId: 5));
+
+        response.StatusCode.ShouldBe(ResponseStatusCode.BadRequest);
+        response.StatusMessage.ShouldContain("ТБ-074");
+        response.StatusMessage.ShouldContain("дело закрыто");
+        await AssertNotSearchedAndDeniedAsync();
+    }
+
     [Fact(DisplayName = "На пробном изображении лицо не найдено → BadRequest, поиск не выполняется, отказ аудируется")]
     public async Task No_face_detected_is_bad_request()
     {
@@ -316,6 +337,48 @@ public sealed class SearchByFaceQueryTests
         await _audit.Received(1).WriteAsync(
             Arg.Is<AuditEntry>(e => e.ObjectRef == "media:search:42;case:3;auth:9" && e.PayloadSensitive!.Contains("расширение сверх текущего дела: да")),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "ТФ-ПЛ-05: закрытые дела в область НЕ входят, пока оператор их не включил; включение — в журнал (ТБ-072)")]
+    public async Task Closed_cases_join_scope_only_when_operator_includes_them()
+    {
+        // Дело 3 — текущее (открытое), 4 — открытое, 5 — закрытое (оконченное много лет назад).
+        _caseScope.ListAccessibleCasesAsync(Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
+            .Returns([
+                new CaseScopeItem(3, "№ 1", "Дело", 2, 1),
+                new CaseScopeItem(4, "№ 2", "Дело 2", 2, 1),
+                new CaseScopeItem(5, "№ 3", "Старое дело", 2, 1, IsClosed: true)]);
+
+        var withoutClosed = await HandleAsync(new SearchByFaceQuery(3, 9, SearchScopeKind.AllAccessibleCases, ProbeImage: Probe));
+
+        withoutClosed.Status.ShouldBeTrue();
+        withoutClosed.Data!.CaseIds.ShouldBe([3, 4]);
+        await _audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.PayloadSensitive!.Contains("закрытые дела: не включены")), Arg.Any<CancellationToken>());
+
+        // Тот же поиск с галочкой: прежние дела входят в область — именно ради случая «попался снова».
+        var withClosed = await HandleAsync(
+            new SearchByFaceQuery(3, 9, SearchScopeKind.AllAccessibleCases, ProbeImage: Probe, IncludeClosedCases: true));
+
+        withClosed.Status.ShouldBeTrue();
+        withClosed.Data!.CaseIds.ShouldBe([3, 4, 5]);
+        await _audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.PayloadSensitive!.Contains("закрытые дела: включены оператором")), Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "ТФ-ПЛ-05: текущее дело в области всегда, даже закрытое — субъект работает именно в нём")]
+    public async Task Current_case_stays_in_scope_even_when_closed()
+    {
+        _caseScope.GetCaseAsync(3, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
+            .Returns(new CaseScopeItem(3, "№ 1", "Дело", 2, 1, IsClosed: true));
+        _caseScope.ListAccessibleCasesAsync(Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
+            .Returns([new CaseScopeItem(3, "№ 1", "Дело", 2, 1, IsClosed: true), new CaseScopeItem(4, "№ 2", "Дело 2", 2, 1)]);
+
+        // Область «все доступные» без галочки: чужие закрытые дела отсеклись, своё текущее осталось.
+        var response = await HandleAsync(new SearchByFaceQuery(3, 9, SearchScopeKind.AllAccessibleCases, ProbeImage: Probe));
+
+        response.Status.ShouldBeTrue();
+        response.Data!.CaseIds.ShouldBe([3, 4]);
     }
 
     private static FaceRow ProbeFace(bool acceptable, string? reason) =>

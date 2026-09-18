@@ -116,9 +116,25 @@ public sealed class CaseClosureScenarioTests
         await _cases.DidNotReceive().SaveClosureActAsync(Arg.Any<CaseClosureActDraft>(), Arg.Any<CancellationToken>());
     }
 
-    private async Task<ISC.AI.Abstractions.Application.ResponseDto<bool>> SendAsync(CaseStatus status)
+    [Fact(DisplayName = "ADR-0024 (поставка по умолчанию): шаблоны ХРАНЯТСЯ — закрытие ничего не удаляет и акта не пишет")]
+    public async Task Closing_keeps_templates_when_regulation_is_off()
     {
-        var handler = new SetCaseStatusCommand.Handler(_cases, _roles, _subject, _access, _purger);
+        // Решение заказчика: человек из оконченного дела должен находиться по новому делу, поэтому
+        // биометрия живёт, пока живёт дело. Закрытые дела в поиск при этом сами не попадают — область
+        // расширяет оператор (ТФ-ПЛ-05).
+        var response = await SendAsync(CaseStatus.Closed, purgeOnClosure: false);
+
+        response.Status.ShouldBeTrue();
+        await _purger.DidNotReceive().PurgeTemplatesAsync(
+            Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>());
+        await _cases.DidNotReceive().SaveClosureActAsync(Arg.Any<CaseClosureActDraft>(), Arg.Any<CancellationToken>());
+    }
+
+    private async Task<ISC.AI.Abstractions.Application.ResponseDto<bool>> SendAsync(
+        CaseStatus status, bool purgeOnClosure = true)
+    {
+        var handler = new SetCaseStatusCommand.Handler(
+            _cases, _roles, _subject, _access, _purger, new InvestigationRetentionOptions(purgeOnClosure));
         return await handler.Handle(new SetCaseStatusCommand(CaseId, status), CancellationToken.None);
     }
 }

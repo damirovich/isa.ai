@@ -8,7 +8,13 @@ namespace ISC.AI.Modules.Media.Domain.Services;
 /// <param name="Title">Краткое название (для подписи).</param>
 /// <param name="Classification">Гриф дела — наследуется носителями и шаблонами (ТБ-070).</param>
 /// <param name="DivisionId">Подразделение дела.</param>
-public sealed record CaseScopeItem(int CaseId, string Number, string Title, short Classification, int DivisionId);
+/// <param name="IsClosed">
+/// Дело закрыто. Модуль по умолчанию НЕ берёт закрытые дела в область поиска: следователь ищет по
+/// текущей работе, и попадание в кандидат-лист лиц из давно оконченных дел — шум. Включаются они
+/// осознанно, отдельным признаком запроса (ТФ-ПЛ-05), и факт включения идёт в журнал (ТБ-072).
+/// </param>
+public sealed record CaseScopeItem(
+    int CaseId, string Number, string Title, short Classification, int DivisionId, bool IsClosed = false);
 
 /// <summary>Фигурант дела для привязки кандидата (ТФ-ВЕР-03); модуль знает только идентификатор и подпись.</summary>
 public sealed record CasePersonItem(int PersonId, string DisplayName);
@@ -71,6 +77,24 @@ public interface ICaseScope
     /// в допуске. Без роли — всегда <see langword="false"/> (default-deny, ТБ-012).
     /// </summary>
     Task<bool> IsAssetAccessibleAsync(int assetId, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Можно ли СТРОИТЬ биометрию по этому носителю: <see langword="false"/>, если дело носителя закрыто
+    /// и его шаблоны уже удалены регламентом (ТБ-074, ТФ-ДЕЛ-04, ADR-0024).
+    /// </summary>
+    /// <remarks>
+    /// БЕЗ ЭТОЙ ПРОВЕРКИ РЕГЛАМЕНТ ОБХОДИТСЯ В ОДИН КЛИК: индексация носителя строит шаблоны заново, и
+    /// биометрия закрытого дела возвращается в поиск — то есть снова обрабатывается без основания. Поэтому
+    /// вопрос задаётся и вручную (повторная индексация оператором), и в фоновом конвейере (загрузка нового
+    /// файла в закрытое дело).
+    ///
+    /// БЕЗ <see cref="AccessContext"/> намеренно: фоновый конвейер работает от имени системы, субъекта у него
+    /// нет. Утечки сведений здесь тоже нет — ответ не выдаётся пользователю, он решает единственный вопрос
+    /// «строить ли шаблоны». Носитель без дела (ещё не привязан) — <see langword="true"/>: запрета нет.
+    /// Носитель, привязанный к нескольким делам, индексируется, пока ОТКРЫТО хотя бы одно: пока есть
+    /// действующее основание, шаблоны правомерны.
+    /// </remarks>
+    Task<bool> IsBiometricIndexingAllowedAsync(int assetId, CancellationToken cancellationToken = default);
 
     /// <summary>Привязать носитель к делу (слабая ссылка по значению в схеме профиля, ТО-инф-08).</summary>
     Task LinkAssetAsync(int caseId, int assetId, string? place, int? linkedByUserId, CancellationToken cancellationToken = default);

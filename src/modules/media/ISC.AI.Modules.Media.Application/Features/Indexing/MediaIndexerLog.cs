@@ -14,6 +14,10 @@ internal static partial class MediaIndexerLog
         Message = "Индексация носителя {AssetId}: носитель не найден — конвейер не запущен.")]
     public static partial void AssetNotFound(ILogger logger, int assetId);
 
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Индексация носителя {AssetId} не выполнена: дело закрыто, шаблоны удалены регламентом (ТБ-074).")]
+    public static partial void IndexingForbiddenByClosedCase(ILogger logger, int assetId);
+
     [LoggerMessage(Level = LogLevel.Error,
         Message = "Индексация носителя {AssetId} не удалась (кадров обработано {Frames}); статус носителя переведён в «ошибка».")]
     public static partial void Failed(ILogger logger, Exception exception, int assetId, int frames);

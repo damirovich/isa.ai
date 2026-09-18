@@ -116,7 +116,7 @@ public sealed class InvestigationProfile : IProfile
     public void RegisterServices(IServiceCollection services, IConfiguration configuration)
     {
         // Сценарии профиля: валидаторы (обработчики Mediator регистрирует source-генератор хоста).
-        services.AddInvestigationApplication();
+        services.AddInvestigationApplication(configuration);
 
         // Прикладные сервисы подключённых пакетов (ADR-0017): у «Медиа» — с конфигурацией (модели, пороги),
         // у «Администрирования» — валидаторы сценариев и стартовая сверка допусков со справочником.

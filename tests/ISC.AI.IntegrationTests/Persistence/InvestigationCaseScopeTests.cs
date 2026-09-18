@@ -168,4 +168,76 @@ public sealed class InvestigationCaseScopeTests : IAsyncLifetime
         (await scope.IsAssetAccessibleAsync(999, head)).ShouldBeFalse();
         (await scope.GetCaseIdForAssetAsync(999, head)).ShouldBeNull();
     }
+
+    [Fact(DisplayName = "ТБ-074/ADR-0024: при регламенте удаления по закрытию биометрию закрытого дела строить нельзя; пока открыто хотя бы одно дело носителя — можно; при хранении шаблонов запрета нет вовсе")]
+    public async Task Biometric_indexing_is_forbidden_for_closed_cases()
+    {
+        var factory = new InvestigationContextFactory(_postgres.GetConnectionString());
+        var core = new CoreContextFactory(_postgres.GetConnectionString());
+        await InvestigationTestKit.MigrateAsync(factory);
+        await InvestigationTestKit.AssignRolesAsync(factory, (10, InvestigationRole.Investigator));
+
+        var cases = InvestigationTestKit.CreateCaseStore(factory, core);
+
+        // Регламент включён: шаблоны удаляются по закрытию, значит их нельзя построить заново.
+        var scope = InvestigationTestKit.CreateCaseScope(factory, core, purgeTemplatesOnCaseClosure: true);
+        var owner = InvestigationTestKit.Access(10, 9, 5);
+
+        var open = await cases.CreateAsync(InvestigationTestKit.Draft("OPEN-1", 5, 2, 10), owner);
+        var closing = await cases.CreateAsync(InvestigationTestKit.Draft("CLOSE-1", 5, 2, 10), owner);
+
+        // Носитель 100 — только в закрываемом деле; носитель 200 — в обоих (дедупликация по хешу, ТФ-МЕД-04).
+        await scope.LinkAssetAsync(closing.CaseId, 100, null, 10);
+        await scope.LinkAssetAsync(closing.CaseId, 200, null, 10);
+        await scope.LinkAssetAsync(open.CaseId, 200, null, 10);
+
+        // Пока дела открыты — индексация разрешена обоим, и непривязанному носителю тоже (запрета нет).
+        (await scope.IsBiometricIndexingAllowedAsync(100)).ShouldBeTrue();
+        (await scope.IsBiometricIndexingAllowedAsync(200)).ShouldBeTrue();
+        (await scope.IsBiometricIndexingAllowedAsync(999)).ShouldBeTrue();
+
+        (await cases.SetStatusAsync(closing.CaseId, CaseStatus.Closed, owner)).ShouldBe(CaseWriteResult.Ok);
+
+        // Носитель закрытого дела — шаблоны сняты регламентом, заново строить нельзя.
+        (await scope.IsBiometricIndexingAllowedAsync(100)).ShouldBeFalse();
+
+        // А носитель, который есть и в ОТКРЫТОМ деле, индексируется: там основание ещё действует.
+        (await scope.IsBiometricIndexingAllowedAsync(200)).ShouldBeTrue();
+
+        // Возврат дела в производство снимает запрет (регламент исполнялся по факту закрытия).
+        (await cases.SetStatusAsync(closing.CaseId, CaseStatus.InProgress, owner)).ShouldBe(CaseWriteResult.Ok);
+        (await scope.IsBiometricIndexingAllowedAsync(100)).ShouldBeTrue();
+
+        // А в поставке по умолчанию (шаблоны ХРАНЯТСЯ, ADR-0024) запрещать нечего: закрытие дела ничего
+        // не удаляет, и переиндексация не возвращает биометрию из небытия.
+        var keeping = InvestigationTestKit.CreateCaseScope(factory, core);
+        (await cases.SetStatusAsync(closing.CaseId, CaseStatus.Closed, owner)).ShouldBe(CaseWriteResult.Ok);
+        (await keeping.IsBiometricIndexingAllowedAsync(100)).ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "ТФ-ПЛ-05: закрытые дела помечены в области поиска — модуль сам решает, брать ли их")]
+    public async Task Closed_cases_are_flagged_for_scope()
+    {
+        var factory = new InvestigationContextFactory(_postgres.GetConnectionString());
+        var core = new CoreContextFactory(_postgres.GetConnectionString());
+        await InvestigationTestKit.MigrateAsync(factory);
+        await InvestigationTestKit.AssignRolesAsync(factory, (10, InvestigationRole.Investigator));
+
+        var cases = InvestigationTestKit.CreateCaseStore(factory, core);
+        var scope = InvestigationTestKit.CreateCaseScope(factory, core);
+        var owner = InvestigationTestKit.Access(10, 9, 5);
+
+        var open = await cases.CreateAsync(InvestigationTestKit.Draft("OPEN-2", 5, 2, 10), owner);
+        var closed = await cases.CreateAsync(InvestigationTestKit.Draft("CLOSED-2", 5, 2, 10), owner);
+        (await cases.SetStatusAsync(closed.CaseId, CaseStatus.Closed, owner)).ShouldBe(CaseWriteResult.Ok);
+
+        // Признак нужен модулю, чтобы не тащить оконченные дела в область поиска без ведома оператора:
+        // само решение принимает модуль (ТФ-ПЛ-05), профиль лишь сообщает состояние дела.
+        var items = await scope.ListAccessibleCasesAsync(owner);
+        items.Single(c => c.CaseId == open.CaseId).IsClosed.ShouldBeFalse();
+        items.Single(c => c.CaseId == closed.CaseId).IsClosed.ShouldBeTrue();
+
+        (await scope.GetCaseAsync(closed.CaseId, owner)).ShouldNotBeNull().IsClosed.ShouldBeTrue();
+        (await scope.GetCaseAsync(open.CaseId, owner)).ShouldNotBeNull().IsClosed.ShouldBeFalse();
+    }
 }
