@@ -24,6 +24,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Configuration.Json;
 using MudBlazor.Services;
 using Serilog;
 using Serilog.Events;
@@ -36,6 +37,40 @@ Log.Logger = new LoggerConfiguration()
 try
 {
     var builder = WebApplication.CreateBuilder(args);
+
+    // Профиль поставки выбран при СБОРКЕ (свойство IscProfile, ADR-0021). Здесь он только СОЗДАЁТСЯ —
+    // чтобы подхватить его собственный файл настроек ДО регистраций, читающих конфигурацию (строки
+    // подключения читаются в AddCorePersistence и далее). Композиция профиля — ниже, в своей точке
+    // (ТО-прог-05/06): порядок «обнаружение → регистрация сервисов → контексты данных» не меняется.
+    var profile = HostProfile.Create();
+
+    // appsettings.<Окружение>.<профиль>.json — необязательные настройки ОДНОГО профиля поверх общих.
+    // ЗАЧЕМ: у профилей РАЗНЫЕ базы (ADR-0006: словари подразделений и режимные данные не смешиваются),
+    // поэтому общий appsettings.Development.json не может держать строки подключения сразу обоих —
+    // прописанные для одного профиля, они молча уводят второй в чужую базу, и он падает на отсутствующей
+    // схеме. Файл кладётся СРАЗУ ПОСЛЕ appsettings.<Окружение>.json, а не в конец цепочки: иначе он
+    // перекрыл бы пользовательские секреты, переменные окружения и аргументы командной строки, которыми
+    // настройки положено переопределять на месте (Э4-10).
+    var sources = builder.Configuration.Sources;
+    var afterAppSettings = 0;
+    for (var i = 0; i < sources.Count; i++)
+    {
+        // Последний из файлов appsettings*.json — за ним идут секреты, переменные окружения и аргументы.
+        if (sources[i] is JsonConfigurationSource { Path: { } path }
+            && path.StartsWith("appsettings", StringComparison.OrdinalIgnoreCase))
+        {
+            afterAppSettings = i + 1;
+        }
+    }
+
+    sources.Insert(
+        afterAppSettings,
+        new JsonConfigurationSource
+        {
+            Path = $"appsettings.{builder.Environment.EnvironmentName}.{profile.Id}.json",
+            Optional = true,
+            ReloadOnChange = true,
+        });
 
     // Логирование — Serilog (в изолированном контуре пишем в консоль/журнал, без внешних приёмников).
     builder.Services.AddSerilog((_, cfg) => cfg
@@ -97,7 +132,7 @@ try
     builder.Services.AddCoreBackgroundTasks();
 
     // --- Точка композиции профиля (ТО-прог-05/06). Только хост знает о конкретном профиле. ---
-    var profile = HostProfile.Create();
+    // Сам объект профиля создан выше, при настройке конфигурации; здесь — регистрация и порядок ТО-прог-05.
     builder.Services.AddSingleton<IProfile>(profile);
     profile.RegisterServices(builder.Services, builder.Configuration);
     profile.RegisterDataContexts(builder.Services, builder.Configuration);
