@@ -161,11 +161,13 @@ public sealed class MediaSearchSessionStoreTests : IAsyncLifetime
         confirmed.Decisions.Select(d => d.Stage).ShouldBe([VerificationStage.Expert, VerificationStage.Verifier]);
         (await store.ListQueueAsync(VerificationStage.Verifier, [100], Insider)).ShouldBeEmpty();
 
-        // Повторное решение той же стадии — отклонено базой (уникальный индекс), и статус НЕ изменился:
+        // Повторное решение той же стадии — отклонено базой (уникальный индекс, наружу — понятная причина
+        // ТБ-073), и статус НЕ изменился:
         // обновление статуса и вставка решения — одна транзакция, откатывается целиком.
         var duplicate = verifier with { SubjectId = 12, Verdict = VerificationVerdict.Rejected };
-        await Should.ThrowAsync<DbUpdateException>(
+        var conflict = await Should.ThrowAsync<InvalidOperationException>(
             () => store.RecordDecisionAsync(candidateId, duplicate, CandidateStatus.Rejected, personRef: null));
+        conflict.Message.ShouldContain("ТБ-073");
 
         var after = await store.GetCandidateAsync(candidateId, Insider);
         after.ShouldNotBeNull();

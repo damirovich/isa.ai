@@ -51,6 +51,7 @@ public static class MediaFileEndpoints
         [FromServices] IFileStorage storage,
         [FromServices] IAccessContextProvider accessProvider,
         [FromServices] IAuditWriter auditWriter,
+        [FromServices] MediaViewAuditThrottle viewAudit,
         [FromServices] ILogger<MediaFileEndpointsCategory> logger,
         CancellationToken cancellationToken)
     {
@@ -102,12 +103,19 @@ public static class MediaFileEndpoints
         }
 
         // Просмотр биометрического материала — аудируемое событие (ТБ-030/072); гриф записи — гриф носителя.
-        await auditWriter.WriteAsync(
-            new AuditEntry(
-                AuditAction.View, file.Classification, access.NumericSubjectId,
-                ObjectRef: $"media:file:{category}:{assetId}:{storedFileName}",
-                DivisionId: file.DivisionId),
-            cancellationToken);
+        // Одна выдача субъекту — одна запись: продолжения Range-запросов (воспроизведение/перемотка видео)
+        // и повторные загрузки той же вырезки в окне не множат журнал (MediaViewAuditThrottle); проверка
+        // допуска выше выполнена для каждого запроса.
+        var objectRef = $"media:file:{category}:{assetId}:{storedFileName}";
+        if (viewAudit.ShouldAudit(access.NumericSubjectId, objectRef))
+        {
+            await auditWriter.WriteAsync(
+                new AuditEntry(
+                    AuditAction.View, file.Classification, access.NumericSubjectId,
+                    ObjectRef: objectRef,
+                    DivisionId: file.DivisionId),
+                cancellationToken);
+        }
 
         var attach = !SafeInlineContentTypes.Contains(file.ContentType);
         return Results.File(

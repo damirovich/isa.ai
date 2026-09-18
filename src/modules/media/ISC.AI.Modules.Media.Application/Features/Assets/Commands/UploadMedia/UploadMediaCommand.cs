@@ -55,7 +55,7 @@ public sealed record UploadMediaCommand(
 
             if (!await administration.CanUploadAsync(cancellationToken))
             {
-                return ResponseDto<MediaAssetReceipt>.BadRequest("Загрузка носителей доступна ролям Следователь/Администратор.");
+                return ResponseDto<MediaAssetReceipt>.BadRequest("Загрузка носителей доступна ролям Следователь, Руководитель, Администратор.");
             }
 
             // Fail-closed (ТБ-020/021): дело вне допуска/роли неотличимо от несуществующего.

@@ -133,58 +133,88 @@ public sealed record SearchByFaceQuery(
                 return failure;
             }
 
-            // (е) Параметры в границах эксплуатанта: ТН-008 (ширина) и ТФ-ПЛ-06 (порог не ослабляется сверх предела).
-            var topK = options.ClampTopK(query.TopK);
-            var maxDistance = options.EffectiveMaxCosineDistance(query.MaxCosineDistance);
+            try
+            {
+                // (е) Параметры в границах эксплуатанта: ТН-008 (ширина) и ТФ-ПЛ-06 (порог не ослабляется сверх предела).
+                var topK = options.ClampTopK(query.TopK);
+                var maxDistance = options.EffectiveMaxCosineDistance(query.MaxCosineDistance);
 
-            // (ж) Поиск: решётка — на стороне БД (ТБ-020/021), область — поверх неё, не вместо.
-            var candidates = await faceSearch.SearchAsync(
-                new FaceSearchQuery(probe.Template, topK, maxDistance, IncludeStale: false, assetIds),
-                access, cancellationToken);
+                // (ж) Поиск: решётка — на стороне БД (ТБ-020/021), область — поверх неё, не вместо.
+                var candidates = await faceSearch.SearchAsync(
+                    new FaceSearchQuery(probe.Template, topK, maxDistance, IncludeStale: false, assetIds),
+                    access, cancellationToken);
 
-            // (з) Сессия (ТО-инф-12): хеш пробы, параметры, версии моделей, кандидат-лист. Вектор — нет (ТБ-074).
-            var draft = new SearchSessionDraft(
-                caseItem.CaseId,
-                authorization.Reference,
-                query.Scope,
-                caseIds,
-                probe.Sha256,
-                query.ProbeFaceId,
-                probe.CropStoredFileName,
-                topK,
-                maxDistance,
-                detector.ModelVersion,
-                embedder.ModelVersion,
-                options.HnswEfSearch,
-                caseItem.Classification,
-                caseItem.DivisionId,
-                access.NumericSubjectId);
-            var sessionId = await sessionStore.CreateAsync(draft, candidates, cancellationToken);
-
-            // (и) АУДИТ ТБ-072 — полный состав; сбой записи пробрасывается (fail-closed: нет записи — нет выдачи).
-            await auditWriter.WriteAsync(
-                new AuditEntry(
-                    AuditAction.Search,
+                // (з) Сессия (ТО-инф-12): хеш пробы, параметры, версии моделей, кандидат-лист. Вектор — нет (ТБ-074).
+                var draft = new SearchSessionDraft(
+                    caseItem.CaseId,
+                    authorization.Reference,
+                    query.Scope,
+                    caseIds,
+                    probe.Sha256,
+                    query.ProbeFaceId,
+                    probe.CropStoredFileName,
+                    topK,
+                    maxDistance,
+                    detector.ModelVersion,
+                    embedder.ModelVersion,
+                    options.HnswEfSearch,
                     caseItem.Classification,
-                    access.NumericSubjectId,
-                    ObjectRef: $"media:search:{sessionId};case:{caseItem.CaseId};auth:{authorization.AuthorizationId}",
-                    DivisionId: caseItem.DivisionId,
-                    PayloadSensitive: BuildAuditPayload(query, authorization, caseIds, probe, topK, maxDistance, candidates)),
-                cancellationToken);
+                    caseItem.DivisionId,
+                    access.NumericSubjectId);
+                var sessionId = await sessionStore.CreateAsync(draft, candidates, cancellationToken);
 
-            // (к) Кандидаты — как записаны (с идентификаторами для верификации).
-            var rows = await sessionStore.ListCandidatesAsync(sessionId, access, cancellationToken);
-            return ResponseDto<FaceSearchResult>.Ok(new FaceSearchResult(
-                sessionId,
-                probe.Sha256,
-                probe.CropStoredFileName,
-                probe.DetectedFaces,
-                rows,
-                detector.ModelVersion,
-                embedder.ModelVersion,
-                topK,
-                maxDistance,
-                caseIds));
+                // (и) АУДИТ ТБ-072 — полный состав; сбой записи пробрасывается (fail-closed: нет записи — нет выдачи).
+                await auditWriter.WriteAsync(
+                    new AuditEntry(
+                        AuditAction.Search,
+                        caseItem.Classification,
+                        access.NumericSubjectId,
+                        ObjectRef: $"media:search:{sessionId};case:{caseItem.CaseId};auth:{authorization.AuthorizationId}",
+                        DivisionId: caseItem.DivisionId,
+                        PayloadSensitive: BuildAuditPayload(query, authorization, caseIds, probe, topK, maxDistance, candidates)),
+                    cancellationToken);
+
+                // (к) Кандидаты — как записаны (с идентификаторами для верификации).
+                var rows = await sessionStore.ListCandidatesAsync(sessionId, access, cancellationToken);
+                return ResponseDto<FaceSearchResult>.Ok(new FaceSearchResult(
+                    sessionId,
+                    probe.Sha256,
+                    probe.CropStoredFileName,
+                    probe.DetectedFaces,
+                    rows,
+                    detector.ModelVersion,
+                    embedder.ModelVersion,
+                    topK,
+                    maxDistance,
+                    caseIds));
+            }
+            catch (Exception)
+            {
+                // Сбой после сохранения вырезки пробы: сессии нет — файл стал бы сиротой. Снимаем его
+                // (только свою вырезку изображения; вырезка лица-пробы принадлежит носителю и не трогается).
+                await DeleteOwnProbeCropAsync(query, probe, caseItem.CaseId);
+                throw;
+            }
+        }
+
+        /// <summary>Снять вырезку пробы-изображения, если сессия так и не была создана (иначе файл-сирота под грифом дела).</summary>
+        private async Task DeleteOwnProbeCropAsync(
+            SearchByFaceQuery query, ProbeResolution probe, int caseId)
+        {
+            if (query.ProbeImage is null || probe.CropStoredFileName is null)
+            {
+                return;
+            }
+
+            try
+            {
+                await fileStorage.DeleteAsync(
+                    probe.CropStoredFileName, MediaFileCategories.Probes, caseId.ToString(CultureInfo.InvariantCulture), CancellationToken.None);
+            }
+            catch (IOException exception)
+            {
+                SearchByFaceLog.ProbeCropNotDeleted(logger, exception, caseId, probe.CropStoredFileName);
+            }
         }
 
         /// <summary>Дела области поиска: только доступные субъекту; пусто — область не содержит доступных дел.</summary>

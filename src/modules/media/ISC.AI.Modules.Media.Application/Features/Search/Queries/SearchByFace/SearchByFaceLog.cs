@@ -17,4 +17,8 @@ internal static partial class SearchByFaceLog
     [LoggerMessage(Level = LogLevel.Information,
         Message = "Поиск по лицу отклонён (дело {CaseId}, основание {AuthorizationId}): {Reason}")]
     public static partial void Denied(ILogger logger, int caseId, int authorizationId, string reason);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Поиск по лицу (дело {CaseId}): вырезка пробы {CropStoredFileName} после сбоя не удалена — остаётся сиротой в хранилище.")]
+    public static partial void ProbeCropNotDeleted(ILogger logger, Exception exception, int caseId, string cropStoredFileName);
 }

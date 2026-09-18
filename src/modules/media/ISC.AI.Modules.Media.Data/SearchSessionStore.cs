@@ -204,7 +204,17 @@ public sealed class SearchSessionStore(
             Rationale = decision.Rationale,
             DecidedAtUtc = AsUtc(decision.DecidedAtUtc),
         });
-        await db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (exception.InnerException is Npgsql.PostgresException { SqlState: "23505" })
+        {
+            // Гонка двух одновременных решений одной стадии: уникальный индекс (candidate_id, stage) — последний
+            // рубеж ТБ-073; транзакция откатывается вместе с обновлением статуса. Наружу — понятная причина.
+            throw new InvalidOperationException(
+                "Решение этой стадии по кандидату уже записано другим сотрудником (ТБ-073).", exception);
+        }
         await transaction.CommitAsync(cancellationToken);
     }
 

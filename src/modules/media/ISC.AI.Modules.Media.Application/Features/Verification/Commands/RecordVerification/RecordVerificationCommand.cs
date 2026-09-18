@@ -93,7 +93,18 @@ public sealed record RecordVerificationCommand(
             var newStatus = TwoPersonRule.Resolve(decisions);
             var personRef = command.Stage == VerificationStage.Expert ? command.PersonRef : null;
 
-            await store.RecordDecisionAsync(candidate.Id, decision, newStatus, personRef, cancellationToken);
+            try
+            {
+                await store.RecordDecisionAsync(candidate.Id, decision, newStatus, personRef, cancellationToken);
+            }
+            catch (InvalidOperationException exception)
+            {
+                // Гонка: решение этой стадии уже записал другой сотрудник (уникальный индекс хранилища) —
+                // попытка фиксируется как отклонённая, статус не трогаем (ТБ-073).
+                await AuditDeniedAsync(command, subjectId, candidate.Classification, candidate.DivisionId,
+                    exception.Message, cancellationToken);
+                return ResponseDto<CandidateStatus>.Conflict(exception.Message);
+            }
 
             var expert = decisions.LastOrDefault(d => d.Stage == VerificationStage.Expert);
             await auditWriter.WriteAsync(
