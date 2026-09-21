@@ -125,6 +125,16 @@ public sealed record TemplatePurgeResult(int AssetsAffected, int TemplatesRemove
     public static TemplatePurgeResult Empty { get; } = new(0, 0, 0);
 }
 
+/// <summary>Результат удаления истории поисков дела (ADR-0025): что именно снято.</summary>
+/// <param name="SessionsRemoved">Сколько поисковых сессий дела удалено.</param>
+/// <param name="CandidatesRemoved">Сколько строк кандидат-листов ушло вместе с ними (решения верификации — каскадом).</param>
+/// <param name="ProbeFilesRemoved">Сколько файлов вырезок проб удалено из хранилища.</param>
+public sealed record CaseSearchPurgeResult(int SessionsRemoved, int CandidatesRemoved, int ProbeFilesRemoved)
+{
+    /// <summary>Сессий у дела не было — аудит не пишется.</summary>
+    public static CaseSearchPurgeResult Empty { get; } = new(0, 0, 0);
+}
+
 /// <summary>Метаданные носителя для конвейера индексации (фон, без субъекта — решётка здесь не применяется).</summary>
 /// <param name="AssetId">Носитель.</param>
 /// <param name="Kind">Вид.</param>

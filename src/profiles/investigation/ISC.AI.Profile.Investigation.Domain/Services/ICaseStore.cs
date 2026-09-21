@@ -139,7 +139,51 @@ public interface ICaseStore
     /// дела это предупреждение, а не норма).
     /// </summary>
     Task<CaseClosureActRow?> GetClosureActAsync(int caseId, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Состав дела для уничтожения (ADR-0025): что будет удалено и что останется. <see langword="null"/> —
+    /// дела нет или оно недоступно (неразличимо, ТБ-020/021).
+    /// </summary>
+    /// <remarks>
+    /// Носители разделены на ИСКЛЮЧИТЕЛЬНЫЕ (привязаны только к этому делу — уничтожаются) и ОБЩИЕ
+    /// (после дедупликации по хешу, ТФ-МЕД-04, привязаны ещё и к другим делам — у них снимается только
+    /// привязка). Без этого деления уничтожение одного дела стирало бы материалы соседнего.
+    /// </remarks>
+    Task<CaseComposition?> GetCompositionAsync(int caseId, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Физически удалить дело со всем, что есть в схеме профиля: фигуранты, эталоны, появления, привязки
+    /// носителей и документов, основания поиска, акт закрытия (ADR-0025). Доступ — как у
+    /// <see cref="SetStatusAsync"/>: дело вне допуска неотличимо от несуществующего.
+    /// </summary>
+    /// <remarks>Носители и история поисков — в схеме «Медиа» и удаляются ДО этого вызова пакетом «Медиа».</remarks>
+    Task<CaseWriteResult> PurgeAsync(int caseId, AccessContext access, CancellationToken cancellationToken = default);
 }
+
+/// <summary>Состав дела перед уничтожением (ADR-0025) — основа записи-акта в журнале.</summary>
+/// <param name="CaseId">Дело.</param>
+/// <param name="Number">Номер дела — оператор вводит его вручную для подтверждения.</param>
+/// <param name="Classification">Гриф дела — гриф записи-акта в журнале.</param>
+/// <param name="DivisionId">Подразделение дела.</param>
+/// <param name="ExclusiveAssetIds">Носители только этого дела — уничтожаются со всеми производными.</param>
+/// <param name="SharedAssetIds">Носители, привязанные и к другим делам, — остаются, снимается лишь привязка.</param>
+/// <param name="Persons">Фигуранты дела.</param>
+/// <param name="ReferencePhotos">Эталонные изображения фигурантов (записи; сами носители — выше).</param>
+/// <param name="Appearances">Подтверждённые появления фигурантов.</param>
+/// <param name="Authorizations">Основания поиска.</param>
+/// <param name="DocumentLinks">Привязанные документы документооборота — САМИ ДОКУМЕНТЫ СОХРАНЯЮТСЯ.</param>
+public sealed record CaseComposition(
+    int CaseId,
+    string Number,
+    short Classification,
+    int DivisionId,
+    IReadOnlyList<int> ExclusiveAssetIds,
+    IReadOnlyList<int> SharedAssetIds,
+    int Persons,
+    int ReferencePhotos,
+    int Appearances,
+    int Authorizations,
+    int DocumentLinks);
 
 /// <summary>Данные исполненного регламента для записи акта (ТФ-ДЕЛ-04).</summary>
 /// <param name="CaseId">Дело.</param>

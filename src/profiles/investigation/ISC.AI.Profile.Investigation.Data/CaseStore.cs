@@ -371,6 +371,80 @@ public sealed class CaseStore(
             .FirstOrDefaultAsync(cancellationToken);
     }
 
+    /// <inheritdoc />
+    public async Task<CaseComposition?> GetCompositionAsync(
+        int caseId, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+
+        var role = await ResolveRoleAsync(access, cancellationToken);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var head = await CaseAccessRule.Apply(db.Cases.AsNoTracking(), access, policy, role)
+            .Where(c => c.Id == caseId)
+            .Select(c => new { c.Number, c.Classification, c.DivisionId })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (head is null)
+        {
+            return null;
+        }
+
+        // Носитель ОБЩИЙ, если после дедупликации по хешу (ТФ-МЕД-04) он привязан и к другому делу: такой
+        // уничтожать нельзя — он материал соседнего дела. Считается по ВСЕМ привязкам, без решётки: иначе
+        // носитель чужого (недоступного субъекту) дела сошёл бы за «исключительный» и был бы стёрт.
+        var assets = await db.CaseMediaLinks.AsNoTracking()
+            .Where(l => l.CaseId == caseId)
+            .Select(l => new
+            {
+                l.MediaAssetId,
+                Shared = db.CaseMediaLinks.Any(other => other.MediaAssetId == l.MediaAssetId && other.CaseId != caseId),
+            })
+            .ToListAsync(cancellationToken);
+
+        var personIds = db.Persons.Where(p => p.CaseId == caseId).Select(p => p.Id);
+
+        return new CaseComposition(
+            caseId,
+            head.Number,
+            head.Classification,
+            head.DivisionId,
+            ExclusiveAssetIds: [.. assets.Where(a => !a.Shared).Select(a => a.MediaAssetId).Distinct().Order()],
+            SharedAssetIds: [.. assets.Where(a => a.Shared).Select(a => a.MediaAssetId).Distinct().Order()],
+            Persons: await personIds.CountAsync(cancellationToken),
+            ReferencePhotos: await db.ReferencePhotos.CountAsync(r => personIds.Contains(r.PersonId), cancellationToken),
+            Appearances: await db.Appearances.CountAsync(a => a.CaseId == caseId, cancellationToken),
+            Authorizations: await db.SearchAuthorizations.CountAsync(a => a.CaseId == caseId, cancellationToken),
+            DocumentLinks: await db.CaseDocumentLinks.CountAsync(l => l.CaseId == caseId, cancellationToken));
+    }
+
+    /// <inheritdoc />
+    public async Task<CaseWriteResult> PurgeAsync(int caseId, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+
+        var role = await ResolveRoleAsync(access, cancellationToken);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var accessible = await CaseAccessRule.Apply(db.Cases, access, policy, role)
+            .AnyAsync(c => c.Id == caseId, cancellationToken);
+        if (!accessible)
+        {
+            return CaseWriteResult.NotFound;
+        }
+
+        // Одна транзакция: либо дело ушло целиком, либо не ушло ничего. Появления удаляются явно по делу —
+        // внешний ключ у них на фигуранта, и каскад от дела их тоже снял бы, но только через фигурантов;
+        // явное удаление не оставляет шанса «появлению» с фигурантом из другого дела. Остальное —
+        // фигуранты (→ эталоны, появления), привязки носителей и документов, основания поиска, акт
+        // закрытия — уходит каскадом внешних ключей от дела.
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.Appearances.Where(a => a.CaseId == caseId).ExecuteDeleteAsync(cancellationToken);
+        await db.Cases.Where(c => c.Id == caseId).ExecuteDeleteAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return CaseWriteResult.Ok;
+    }
+
     private async Task<InvestigationRole?> ResolveRoleAsync(AccessContext access, CancellationToken cancellationToken) =>
         access.NumericSubjectId is { } userId
             ? await roles.GetRoleAsync(userId, cancellationToken)
