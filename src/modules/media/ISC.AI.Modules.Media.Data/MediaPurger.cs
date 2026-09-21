@@ -166,4 +166,63 @@ public sealed class MediaPurger(
 
         return new TemplatePurgeResult(targets.Count, templatesRemoved, cropsRemoved);
     }
+
+    /// <inheritdoc />
+    public async Task<CaseSearchPurgeResult> PurgeCaseSearchesAsync(
+        int caseRef,
+        string reason,
+        int? subjectId = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Состав — ДО удаления: после каскада ни чисел, ни имён файлов проб уже не взять.
+        var sessions = await db.SearchSessions
+            .Where(s => s.CaseId == caseRef)
+            .Select(s => new { s.Id, s.Classification, s.DivisionId, s.ProbeCropStoredFileName })
+            .ToListAsync(cancellationToken);
+
+        if (sessions.Count == 0)
+        {
+            return CaseSearchPurgeResult.Empty; // идемпотентно: истории нет — ни удаления, ни записи
+        }
+
+        var sessionIds = sessions.Select(s => s.Id).ToList();
+        var candidates = await db.SearchCandidates.CountAsync(c => sessionIds.Contains(c.SessionId), cancellationToken);
+        var probeFiles = sessions
+            .Where(s => s.ProbeCropStoredFileName is not null)
+            .Select(s => s.ProbeCropStoredFileName!)
+            .ToList();
+
+        // FAIL-CLOSED (ТБ-064): аудит ДО уничтожения. Гриф записи — наивысший среди сессий дела: журнал
+        // не усредняет гриф, а запись о сессиях не должна стать доступнее самих сессий (ТБ-032).
+        var top = sessions.MaxBy(s => s.Classification)!;
+        await auditWriter.WriteAsync(
+            new AuditEntry(
+                AuditAction.Purge,
+                top.Classification,
+                SubjectId: subjectId,
+                ObjectRef: "media:case:" + caseRef.ToString(CultureInfo.InvariantCulture) + ":searches",
+                DivisionId: top.DivisionId,
+                PayloadSensitive:
+                    $"Удаление истории поисков дела ({reason}): сессий {sessions.Count}, кандидатов {candidates}, "
+                    + $"вырезок проб {probeFiles.Count}. Кандидаты в сессиях ДРУГИХ дел сохранены (ТБ-072, ADR-0025)."),
+            cancellationToken);
+
+        // Атомарно: сессии → кандидаты → решения верификации каскадом БД (см. конфигурации).
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.SearchSessions.Where(s => s.CaseId == caseRef).ExecuteDeleteAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        // Файлы проб — после фиксации; подкаталог = идентификатор дела (конвенция резолвера раздачи).
+        var subPath = caseRef.ToString(CultureInfo.InvariantCulture);
+        foreach (var file in probeFiles)
+        {
+            await fileStorage.DeleteAsync(file, MediaFileCategories.Probes, subPath, cancellationToken);
+        }
+
+        return new CaseSearchPurgeResult(sessions.Count, candidates, probeFiles.Count);
+    }
 }

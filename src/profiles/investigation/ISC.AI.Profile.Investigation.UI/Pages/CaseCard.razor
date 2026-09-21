@@ -23,7 +23,26 @@
    несуществующего (ТБ-020) — ответ NotFound показывается как есть. Закрытие дела — с подтверждением
    и напоминанием о регламенте удаления шаблонов (ТФ-ДЕЛ-04, ТБ-074). *@
 
-@if (_case is null)
+@if (_purged is { } purged)
+{
+    @* Итог уничтожения (ADR-0025). Карточку НЕ перезагружаем: дела больше нет, и повторный запрос
+       показал бы «не найдено» вместо того, что оператору важно увидеть, — что именно уничтожено. *@
+    <PageHeader Title="@($"Дело {purged.Number} уничтожено")" Icon="@Icons.Material.Filled.DeleteForever" />
+    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Class="mb-3">
+        <MudText Typo="Typo.body2">
+            Уничтожено: носителей @purged.AssetsRemoved, лиц с шаблонами @purged.FacesRemoved, файлов @purged.FilesRemoved,
+            поисковых сессий @purged.SessionsRemoved (кандидатов @purged.CandidatesRemoved), фигурантов @purged.PersonsRemoved,
+            появлений @purged.AppearancesRemoved.
+        </MudText>
+        <MudText Typo="Typo.body2" Class="mt-1">
+            Сохранено: документов документооборота @purged.DocumentsKept (снята только привязка к делу);
+            носителей других дел @purged.AssetsKeptShared (снята только привязка).
+            Акт с полным составом и основанием записан в неизменяемый журнал аудита.
+        </MudText>
+    </MudAlert>
+    <MudButton Href="/cases" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack">К списку дел</MudButton>
+}
+else if (_case is null)
 {
     <PageHeader Title="Дело" Icon="@Icons.Material.Filled.FolderOpen" />
     @if (_error is not null)
@@ -136,6 +155,11 @@ else
                                    StartIcon="@Icons.Material.Filled.Lock"
                                    OnClick="@(() => _closeConfirmOpen = true)">Закрыть дело…</MudButton>
                     }
+
+                    @* Уничтожение (ADR-0025) — только Администратор; право проверяет сервер, как и у статуса. *@
+                    <MudButton Variant="Variant.Outlined" Color="Color.Error" FullWidth="true" Disabled="_busy"
+                               StartIcon="@Icons.Material.Filled.DeleteForever" Class="mt-2"
+                               OnClick="OpenPurge">Уничтожить дело…</MudButton>
                 </MudStack>
             </MudPaper>
         </MudItem>
@@ -352,6 +376,34 @@ else
     </DialogActions>
 </MudDialog>
 
+@* --- Уничтожение дела (ADR-0025): номер вводится вручную, основание обязательно --- *@
+<MudDialog @bind-Visible="_purgeOpen" Options="ConfirmDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6" Color="Color.Error">Уничтожить дело безвозвратно?</MudText></TitleContent>
+    <DialogContent>
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+            Будут уничтожены носители этого дела с файлами, кадрами, лицами и шаблонами, вся история поисков
+            с кандидат-листами и решениями верификации, фигуранты, эталоны, появления, основания поиска и сама
+            запись дела. Восстановить их будет нельзя.
+        </MudAlert>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            Сохранятся: зарегистрированные документы документооборота (снимется только привязка к делу) и
+            носители, которые привязаны ещё и к другим делам. Акт с полным составом уничтожаемого и основанием
+            будет записан в неизменяемый журнал аудита. Уничтожение доступно только Администратору.
+        </MudText>
+        <MudTextField T="string" @bind-Value="_purgeNumber" Label="@($"Введите номер дела: {_case?.Number}")"
+                      Variant="Variant.Outlined" Immediate="true" Disabled="_busy" Class="mb-2" />
+        <MudTextField T="string" @bind-Value="_purgeReason" Label="Основание уничтожения *" Lines="2"
+                      HelperText="Реквизиты решения или истечение срока хранения — попадут в акт."
+                      Variant="Variant.Outlined" Immediate="true" Disabled="_busy" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _purgeOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Filled" Disabled="@(_busy || !PurgeReady)" OnClick="ConfirmPurgeAsync">
+            Уничтожить
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
 @* --- Подтверждение закрытия: ТФ-ДЕЛ-04 / ТБ-074 --- *@
 <MudDialog @bind-Visible="_closeConfirmOpen" Options="ConfirmDialogOptions">
     <TitleContent><MudText Typo="Typo.h6">Закрыть дело?</MudText></TitleContent>
@@ -484,6 +536,50 @@ else
 
     // Акт об удалении шаблонов закрытого дела (ТФ-ДЕЛ-04); null у закрытого дела = регламент не исполнен.
     private CaseClosureActRow? _closureAct;
+
+    // --- Уничтожение (ADR-0025) ---
+    private bool _purgeOpen;
+    private string? _purgeNumber;
+    private string? _purgeReason;
+    private CasePurgeSummary? _purged;
+
+    // Кнопка активна, только когда номер введён ТОЧНО и основание осмысленное: сервер проверяет то же
+    // самое, но оператору незачем узнавать о лишнем пробеле через отказ.
+    private bool PurgeReady =>
+        _case is not null
+        && string.Equals(_purgeNumber?.Trim(), _case.Number, StringComparison.Ordinal)
+        && (_purgeReason?.Trim().Length ?? 0) >= PurgeCaseValidator.MinReasonLength;
+
+    private void OpenPurge()
+    {
+        _purgeNumber = null;
+        _purgeReason = null;
+        _purgeOpen = true;
+    }
+
+    private async Task ConfirmPurgeAsync()
+    {
+        _busy = true;
+        _error = null;
+        _notice = null;
+        try
+        {
+            var response = await Dispatcher.Send(new PurgeCaseCommand(Id, _purgeNumber ?? string.Empty, _purgeReason ?? string.Empty));
+            _purgeOpen = false;
+            if (response is { Status: true, Data: { } summary })
+            {
+                _purged = summary;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
     // --- Новый фигурант ---
     private bool _personOpen;
