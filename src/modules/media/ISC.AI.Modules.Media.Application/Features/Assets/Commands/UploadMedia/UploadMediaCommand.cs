@@ -14,15 +14,17 @@ using Microsoft.Extensions.DependencyInjection;
 namespace ISC.AI.Modules.Media.Application.Features.Assets;
 
 /// <summary>
-/// Загрузить носитель (фото/видео) в дело (ТФ-МЕД-01, ТС-010): приём с дедупликацией по хешу, привязка к
-/// делу по значению (ТО-инф-08) и постановка индексации в фоновую очередь (ТП-005).
+/// Загрузить носитель (фото/видео/аудио) в дело (ТФ-МЕД-01, ТС-010; аудио — ADR-0026): приём с дедупликацией
+/// по хешу, привязка к делу по значению (ТО-инф-08) и постановка фоновой обработки в очередь (ТП-005):
+/// индексации лиц — для фото и видео, расшифровки речи — для аудио и видео.
 /// </summary>
 /// <remarks>
 /// ГРИФ И ПОДРАЗДЕЛЕНИЕ НОСИТЕЛЯ БЕРУТСЯ У ДЕЛА (ТБ-070, ТБ-024): пользователь их не выбирает и «по
 /// умолчанию» они не подставляются — недоступное дело означает отказ ещё до приёма байтов. Дубликат
-/// (тот же SHA-256 в том же подразделении) к делу привязывается, но повторно не индексируется.
-/// Семейство файла (изображение/видео) сверяется с СОДЕРЖИМЫМ (<see cref="ContentSniffer"/>), а не с
-/// заявленным типом: подмена типа отклоняется до приёма байтов.
+/// (тот же SHA-256 в том же подразделении) к делу привязывается, но повторно не обрабатывается.
+/// Семейство файла (изображение/видео/аудио) сверяется с СОДЕРЖИМЫМ (<see cref="ContentSniffer"/>), а не с
+/// заявленным типом: подмена типа отклоняется до приёма байтов. Индексация лиц к аудио НЕ ставится вовсе:
+/// лиц в нём нет, и конвейер биометрии не должен касаться материала, к которому он неприменим (ADR-0026).
 /// </remarks>
 public sealed record UploadMediaCommand(
     int CaseId,
@@ -34,6 +36,12 @@ public sealed record UploadMediaCommand(
     string? Place = null)
     : IRequest<ResponseDto<MediaAssetReceipt>>, IAuditableRequest
 {
+    /// <summary>Вид фоновой задачи индексации лиц (показывается в списке задач).</summary>
+    public const string IndexingTaskKind = "Индексация носителя (распознавание лиц)";
+
+    /// <summary>Вид фоновой задачи расшифровки речи (ADR-0026).</summary>
+    public const string TranscriptionTaskKind = "Расшифровка речи носителя";
+
     /// <inheritdoc />
     public AuditAction AuditAction => AuditAction.Ingest;
 
@@ -75,13 +83,14 @@ public sealed record UploadMediaCommand(
             }
 
             // ТС-010: семейство — по сигнатуре байтов, не со слов клиента; расхождение или неизвестная сигнатура — отказ.
-            var sniffed = ContentSniffer.Sniff(command.Content);
-            if (sniffed is null)
+            // Универсальные контейнеры (m4a/3gp/webm) допускаются и как аудио — см. ContentSniffer.IsCompatible.
+            if (ContentSniffer.Sniff(command.Content) is null)
             {
-                return ResponseDto<MediaAssetReceipt>.BadRequest("Содержимое файла не распознано как изображение или видео поддерживаемого формата.");
+                return ResponseDto<MediaAssetReceipt>.BadRequest(
+                    "Содержимое файла не распознано как изображение, видео или аудио поддерживаемого формата.");
             }
 
-            if (sniffed != kind)
+            if (!ContentSniffer.IsCompatible(command.Content, kind.Value))
             {
                 return ResponseDto<MediaAssetReceipt>.BadRequest("Содержимое файла не соответствует заявленному типу.");
             }
@@ -109,10 +118,26 @@ public sealed record UploadMediaCommand(
             {
                 // Захватываем только примитив: scope текущего запроса к моменту выполнения уже закрыт.
                 var assetId = receipt.AssetId;
-                await queue.EnqueueAsync(
-                    "Индексация носителя (распознавание лиц)",
-                    async (sp, ct) => await sp.GetRequiredService<IMediaIndexer>().IndexAsync(assetId, ct),
-                    cancellationToken);
+
+                // Лица — только там, где они могут быть (фото, видео). К аудио конвейер биометрии не
+                // запускается вовсе: статус носителя уже «неприменимо» (ADR-0026).
+                if (kind is MediaKind.Image or MediaKind.Video)
+                {
+                    await queue.EnqueueAsync(
+                        IndexingTaskKind,
+                        async (sp, ct) => await sp.GetRequiredService<IMediaIndexer>().IndexAsync(assetId, ct),
+                        cancellationToken);
+                }
+
+                // Речь — аудио и звуковая дорожка видео (ADR-0026). Отдельная задача: сбой одного конвейера
+                // не мешает другому, и у каждого свой статус в карточке.
+                if (kind is MediaKind.Audio or MediaKind.Video)
+                {
+                    await queue.EnqueueAsync(
+                        TranscriptionTaskKind,
+                        async (sp, ct) => await sp.GetRequiredService<IMediaTranscriptionPipeline>().TranscribeAsync(assetId, ct),
+                        cancellationToken);
+                }
             }
 
             return ResponseDto<MediaAssetReceipt>.Ok(receipt);

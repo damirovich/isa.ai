@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Интеграция распознавания речи (ADR-0026): реализация порта пакета «Медиа» IAudioTranscriber.
+       Звук из любого контейнера приводится ffmpeg (внешний процесс, LGPL-сборка, без линковки) к формату
+       модели, а само распознавание выполняет ОТДЕЛЬНЫЙ процесс ISC.AI.Speech.Worker: нативная библиотека
+       sherpa-onnx несёт свой onnxruntime, и в одном процессе с Microsoft.ML.OnnxRuntime распознавания лиц
+       они могли бы конфликтовать; заодно длинная расшифровка не делит память и потоки с хостом.
+       Зависит от Abstractions и ДОМЕНА модуля «Медиа»; на профиль и хост не ссылается (ТС-011). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FFMpegCore" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <!-- Журнал приложения: неудаление временного WAV (копии материала дела) должно быть видно (ТБ-064). MIT. -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <!-- IHostedService: уборка остатков прошлых прогонов (копий звука из материалов дела) при старте хоста
+         (ТБ-064). Тот же пакет, что у ядра и модулей (уже в CPM и офлайн-поставке). MIT. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Тестам — внутренняя подмена таймаута прогона (проверка остановки по таймауту без многочасового ожидания). -->
+    <InternalsVisibleTo Include="ISC.AI.UnitTests" />
+    <InternalsVisibleTo Include="ISC.AI.IntegrationTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+    <ProjectReference Include="..\..\modules\media\ISC.AI.Modules.Media.Domain\ISC.AI.Modules.Media.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

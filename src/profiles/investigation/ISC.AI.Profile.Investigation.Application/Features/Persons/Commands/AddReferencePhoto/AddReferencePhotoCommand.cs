@@ -1,8 +1,10 @@
+using System.Collections.Frozen;
 using System.Globalization;
 using FluentValidation;
 using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.Security;
+using ISC.AI.Modules.Media.Domain.Model;
 using ISC.AI.Modules.Media.Domain.Services;
 using ISC.AI.Profile.Investigation.Application.Features.Common;
 using ISC.AI.Profile.Investigation.Domain.Services;
@@ -21,7 +23,8 @@ namespace ISC.AI.Profile.Investigation.Application.Features.Persons;
 /// Идентификаторы носителя и лица приходят со страницы как числа и перебираемы; поэтому обработчик ПРОВЕРЯЕТ
 /// через порты пакета «Медиа», что носитель доступен субъекту и привязан именно к делу фигуранта, а лицо (если
 /// указано) принадлежит этому носителю (ТБ-071, ТФ-ДЕЛ-03, ТБ-077 — источник эталона должен быть из материалов
-/// дела). Иначе эталоном стал бы биометрический материал чужого дела/подразделения.
+/// дела). Иначе эталоном стал бы биометрический материал чужого дела/подразделения. Вид носителя —
+/// только из <see cref="ReferenceSourceKinds"/> (изображение, видео): аудиозапись лица не несёт (ADR-0026).
 /// </remarks>
 public sealed record AddReferencePhotoCommand(
     int PersonId,
@@ -34,6 +37,20 @@ public sealed record AddReferencePhotoCommand(
     float? QualityScore = null)
     : IRequest<ResponseDto<int>>, IAuditableRequest
 {
+    /// <summary>
+    /// Отказ по виду носителя: источник эталона — изображение (фото или кадр видео), аудиозапись им быть
+    /// не может (ADR-0026). Различим с <see cref="PersonGuard.ReferenceNotFound"/> намеренно — отказ звучит
+    /// только ПОСЛЕ проверок доступа и принадлежности делу, то есть о носителе, который оператор и так видит
+    /// в материалах дела; нового факта он не раскрывает (ТБ-020/021 не нарушается).
+    /// </summary>
+    public const string SourceKindDenied = "Эталон — изображение; аудиозапись не может быть источником эталона.";
+
+    /// <summary>
+    /// Виды носителей, пригодные источником эталона (ТБ-077): на них может быть лицо. Разрешение СПИСКОМ, а не
+    /// запретом аудио: вид, добавленный в пакет «Медиа» позже, не станет источником эталона по умолчанию.
+    /// </summary>
+    public static readonly FrozenSet<MediaKind> ReferenceSourceKinds = FrozenSet.Create(MediaKind.Image, MediaKind.Video);
+
     /// <inheritdoc />
     public AuditAction AuditAction => AuditAction.Modify;
 
@@ -85,6 +102,22 @@ public sealed record AddReferencePhotoCommand(
             if (!caseAssets.Contains(command.MediaAssetId))
             {
                 return ResponseDto<int>.NotFound(PersonGuard.ReferenceNotFound);
+            }
+
+            // ИНВАРИАНТ (ТБ-077, ADR-0026): эталон — изображение лица; источник — только вид из списка
+            // ReferenceSourceKinds. Без проверки голосовое сообщение дела (лица нет — поле лица необязательно)
+            // стало бы «эталоном» фигуранта. Носитель читается каталогом пакета «Медиа» под тем же контекстом
+            // доступа (решётка ТБ-020/021 на стороне БД, сужение по делам ТБ-071 уже пройдено выше); нет
+            // носителя — тот же неразличимый ответ.
+            var asset = await catalog.GetAsync(command.MediaAssetId, access, cancellationToken);
+            if (asset is null)
+            {
+                return ResponseDto<int>.NotFound(PersonGuard.ReferenceNotFound);
+            }
+
+            if (!ReferenceSourceKinds.Contains(asset.Kind))
+            {
+                return ResponseDto<int>.BadRequest(SourceKindDenied);
             }
 
             // Лицо (если указано) — под контекстом доступа и именно с этого носителя: ссылка «носитель A,

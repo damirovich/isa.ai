@@ -13,7 +13,22 @@ namespace ISC.AI.Modules.Media.Domain.Services;
 /// </remarks>
 public interface IFrameExtractor
 {
-    /// <summary>Извлекает кадры видеофайла <paramref name="videoPath"/> с частотой из <paramref name="sampling"/>.</summary>
+    /// <summary>
+    /// Извлекает кадры видеофайла <paramref name="videoPath"/> с частотой из <paramref name="sampling"/>.
+    /// В файле без видеопотока (только звук) кадров нет — поток пуст, а не ошибка.
+    /// </summary>
     IAsyncEnumerable<VideoFrame> ExtractAsync(
         string videoPath, FrameSamplingOptions sampling, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Есть ли в файле видеопоток (картинка). Обложка звуковой записи (прикреплённое изображение) видеопотоком
+    /// не считается.
+    /// </summary>
+    /// <remarks>
+    /// Нужна до раскадровки (ADR-0026): браузер объявляет голосовое <c>.3gp</c> как <c>video/3gpp</c>, звук в
+    /// mp4/webm — тоже как видео. У такого носителя поиск по лицу неприменим, и конвейер лиц переводит его в
+    /// аудиозаписи, не записывая в журнал «индексацию биометрии», которой не было.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">Внешний инструмент не найден или не разобрал файл.</exception>
+    Task<bool> HasVideoStreamAsync(string videoPath, CancellationToken cancellationToken = default);
 }

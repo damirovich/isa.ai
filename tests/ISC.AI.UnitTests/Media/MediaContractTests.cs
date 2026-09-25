@@ -100,6 +100,33 @@ public sealed class MediaContractTests
         MediaModule.ConfigurationKeys.ShouldContain("Media:Search:ProbeCopyMaxBytes");
     }
 
+    [Fact(DisplayName = "ADR-0026: ключи распознавания речи — процесс-распознаватель и пути с пинами SHA-256 трёх файлов модели — в манифесте, без повторов")]
+    public void Speech_configuration_keys_are_documented()
+    {
+        MediaModule.ConfigurationKeys.ShouldContain("Speech:Worker:Path");
+        MediaModule.ConfigurationKeys.ShouldContain("Speech:Model:Path");
+        MediaModule.ConfigurationKeys.ShouldContain("Speech:Model:Sha256");
+        MediaModule.ConfigurationKeys.ShouldContain("Speech:Tokens:Path");
+        MediaModule.ConfigurationKeys.ShouldContain("Speech:Tokens:Sha256");
+        MediaModule.ConfigurationKeys.ShouldContain("Speech:Vad:Path");
+        MediaModule.ConfigurationKeys.ShouldContain("Speech:Vad:Sha256");
+        MediaModule.ConfigurationKeys.ShouldBeUnique();
+    }
+
+    [Fact(DisplayName = "ADR-0026: порты расшифровки закрыты пакетом — распознаватель регистрирует интеграция (без модели — явный отказ), конвейер — сценарии")]
+    public void Transcription_ports_are_registered_by_the_package()
+    {
+        var services = new ServiceCollection();
+        MediaModule.RegisterServices(services, Configuration());
+
+        // Модель речи в конфигурации НЕ задана — порт всё равно зарегистрирован (явный отказ «не настроено»),
+        // иначе расшифровка молча пропускалась бы или контейнер не собирал бы обработчик загрузки.
+        services.ShouldContain(descriptor => descriptor.ServiceType == typeof(IAudioTranscriber));
+        services.ShouldContain(descriptor => descriptor.ServiceType == typeof(IMediaTranscriptionPipeline)
+            && descriptor.Lifetime == ServiceLifetime.Scoped);
+        MediaModule.RequiredServices.ShouldNotContain(typeof(IAudioTranscriber));
+    }
+
     [Fact(DisplayName = "Настройки поиска: умолчания ТН-008 (20, 5..50), настроенный порог не дальше предела, зажим границ")]
     public void Search_options_defaults_and_clamping()
     {

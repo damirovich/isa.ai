@@ -14,9 +14,10 @@ namespace ISC.AI.Modules.Media.Data;
 /// НЕ <c>ISoftDeletable</c>. Строки снимаются каскадом БД (<c>ON DELETE CASCADE</c> внутри схемы).
 /// </summary>
 /// <remarks>
-/// Порядок FAIL-CLOSED (как у <c>DocumentPurger</c> ядра): запись в неизменяемый аудит идёт ПЕРВОЙ —
-/// недоступен журнал — исключение, удаление не выполняется (нет уничтожения биометрии без записи).
-/// Затем одна транзакция БД (частичного результата нет), и только ПОСЛЕ её фиксации — файлы:
+/// Порядок FAIL-CLOSED (как у <c>DocumentPurger</c> ядра): запись в неизменяемый аудит идёт ДО удаления
+/// строк — недоступен журнал — исключение, удаление не выполняется (нет уничтожения биометрии без записи).
+/// Удаление строк — одна транзакция БД (частичного результата нет; у <see cref="PurgeAsync"/> она же держит
+/// блокировку носителя с момента подсчёта), и только ПОСЛЕ её фиксации — файлы:
 /// осиротевший файл без строки безвреден (недостижим через API, подбирается уборкой), тогда как
 /// строка без файла или файл при откате транзакции — дефект.
 /// </remarks>
@@ -26,10 +27,23 @@ public sealed class MediaPurger(
     IFileStorage fileStorage) : IMediaPurger
 {
     /// <inheritdoc />
+    /// <remarks>
+    /// АКТ СОВПАДАЕТ С УНИЧТОЖЕННЫМ (ТБ-064). Транзакция открывается ДО подсчёта, и первым делом берётся
+    /// блокировка строки носителя (<c>FOR UPDATE</c>) — та же, что у записи расшифровки и результата индексации
+    /// лиц. Пока она держится, ни фрагменты, ни лица этого носителя зафиксировать нельзя: числа в акте равны
+    /// тому, что снесёт каскад. Без блокировки расшифровка, зафиксированная между подсчётом и удалением, ушла бы
+    /// каскадом, а акт назвал бы прежнее число. Журнал пишется своим контекстом ядра под этой блокировкой:
+    /// FAIL-CLOSED сохраняется — исключение журнала откатывает транзакцию, и удаления нет.
+    /// </remarks>
     public async Task<MediaPurgeResult> PurgeAsync(
         int assetId, int? subjectId = null, CancellationToken cancellationToken = default)
     {
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        // Блокировка строки носителя до конца транзакции (см. remarks). Идентификатор — параметром.
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT 1 FROM media.asset WHERE id = {assetId} FOR UPDATE", cancellationToken);
 
         var asset = await db.Assets
             .Where(a => a.Id == assetId)
@@ -48,8 +62,11 @@ public sealed class MediaPurger(
             .ToListAsync(cancellationToken);
         var faceCount = await db.Faces.CountAsync(f => f.AssetId == assetId, cancellationToken);
 
-        // FAIL-CLOSED (ТБ-064): аудит ДО уничтожения данных. Недоступен журнал — WriteAsync бросит и
-        // удаление НЕ произойдёт.
+        // Расшифровка речи (ADR-0026) уходит тем же каскадом; её объём — в акт, как и число лиц.
+        var segmentCount = await db.TranscriptSegments.CountAsync(s => s.AssetId == assetId, cancellationToken);
+
+        // FAIL-CLOSED (ТБ-064): аудит ДО уничтожения данных. Недоступен журнал — WriteAsync бросит, транзакция
+        // откатится при выходе и удаление НЕ произойдёт.
         await auditWriter.WriteAsync(
             new AuditEntry(
                 AuditAction.Purge,
@@ -58,11 +75,12 @@ public sealed class MediaPurger(
                 ObjectRef: "media:asset:" + assetId.ToString(CultureInfo.InvariantCulture),
                 DivisionId: asset.DivisionId,
                 PayloadSensitive:
-                    $"Гарантированное удаление носителя и биометрических производных: лиц {faceCount}, вырезок {crops.Count} (ТБ-064/075)."),
+                    $"Гарантированное удаление носителя и биометрических производных: лиц {faceCount}, вырезок {crops.Count}, "
+                    + $"фрагментов расшифровки {segmentCount} (ТБ-064/075, ADR-0026)."),
             cancellationToken);
 
-        // Атомарно: носитель → кадры/лица/шаблоны каскадом БД (см. конфигурации).
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        // Атомарно и в той же транзакции под блокировкой: носитель → кадры/лица/шаблоны/фрагменты расшифровки
+        // каскадом БД (см. конфигурации).
         await db.Assets.Where(a => a.Id == assetId).ExecuteDeleteAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 

@@ -1,3 +1,4 @@
+using System.Globalization;
 using ISC.AI.Modules.Media.Data.Entities;
 using ISC.AI.Modules.Media.Domain.Model;
 using Microsoft.EntityFrameworkCore;
@@ -19,11 +20,21 @@ public sealed partial class MediaStore
         ArgumentNullException.ThrowIfNull(faces);
 
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-        var asset = await db.Assets.SingleAsync(a => a.Id == assetId, cancellationToken);
 
         // ОДНА транзакция: старые производные снимаются, новые пишутся, статус меняется — либо всё,
         // либо ничего (ТП-005). Кадры/лица/шаблоны носителя каскадом (FK внутри схемы).
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        // Блокировка строки носителя до конца транзакции — та же, что берут запись расшифровки и уничтожение
+        // носителя (MediaPurger, ТБ-064): уничтожение не может посчитать лица для акта, пока результат
+        // индексации фиксируется, и не расходится с тем, что снесёт каскад. Носитель уничтожен, пока шла
+        // индексация, — строки нет: исключение, индексатор снимет свои вырезки и зафиксирует сбой.
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT 1 FROM media.asset WHERE id = {assetId} FOR UPDATE", cancellationToken);
+
+        var asset = await db.Assets.SingleOrDefaultAsync(a => a.Id == assetId, cancellationToken)
+            ?? throw new InvalidOperationException(
+                "Носитель " + assetId.ToString(CultureInfo.InvariantCulture) + " не найден: результат индексации записать некуда.");
 
         await db.Faces.Where(f => f.AssetId == assetId).ExecuteDeleteAsync(cancellationToken);
         await db.Frames.Where(f => f.AssetId == assetId).ExecuteDeleteAsync(cancellationToken);

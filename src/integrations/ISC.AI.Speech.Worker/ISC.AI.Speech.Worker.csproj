@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Процесс-распознаватель речи (ADR-0026): детектор речи Silero VAD + модель распознавания (GigaAM
+       Multilingual, CTC) через sherpa-onnx (Apache-2.0). Вызывается адаптером ISC.AI.Speech как внешний
+       процесс по образцу ffmpeg: на вход — WAV 16 кГц моно, на выход — фрагменты JSON-строками в stdout.
+       Отдельным процессом — чтобы нативный onnxruntime sherpa-onnx не встречался в одном процессе с
+       Microsoft.ML.OnnxRuntime распознавания лиц. На проекты ISC.AI не ссылается НИ НА ОДИН: это
+       самостоятельная утилита, которую можно проверить и поставить отдельно. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- PrivateAssets="all" — ГЛАВНОЕ в этом файле. Пакет (и его нативный onnxruntime.dll в
+         runtimes/win-x64/native/) НЕ должен транзитивно утекать в проекты, ссылающиеся на утилиту
+         (ISC.AI.Speech.Worker.Tests ссылается ради чистой логики): если такой проект заодно тянет распознавание
+         лиц, там же лежит onnxruntime.dll от Microsoft.ML.OnnxRuntime — ДРУГАЯ сборка по тому же пути, одна
+         затёрла бы другую (ADR-0026, п. 1). Сама утилита получает пакет полностью.
+         Пакеты sherpa-onnx (их нативные библиотеки несут eSpeak NG, GPL-3.0) восстанавливают ТОЛЬКО эта утилита и
+         её тестовый проект — оба вне общего офлайн-фида (фильтр решения ISC.AI.Offline.slnf без них, ADR-0026,
+         п. 7); поэтому общие
+         тестовые проекты ISC.AI.UnitTests/IntegrationTests на утилиту не ссылаются.
+         Publish="true" — ОБЯЗАТЕЛЕН в паре с PrivateAssets="all": SDK .NET по умолчанию НЕ публикует пакеты с
+         PrivateAssets="all" (Microsoft.NET.Sdk.Shared.targets, _ComputePackageReferencePublish: без явного
+         Publish → Publish=false). Без него dotnet publish молча выпускает утилиту без sherpa-onnx.dll, без
+         записи пакета в deps.json и без нативных библиотек (проверено 25.09.2026 publish-speech-worker.ps1).
+         На транзитивность Publish не влияет: её отсекает только PrivateAssets.
+         Нативные библиотеки ЭТОГО пакета (с eSpeak NG, GPL-3.0) в поставку не идут: publish-speech-worker.ps1
+         заменяет их сборкой без синтеза речи (ADR-0026, п. 7). -->
+    <PackageReference Include="org.k2fsa.sherpa.onnx" PrivateAssets="all" Publish="true" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Чистая логика утилиты (разбор аргументов, чтение WAV, нарезка длинных участков, хвост тишины и
+         пределы детектора, протокол) проверяется юнит-тестами без моделей; её типы — internal. -->
+    <InternalsVisibleTo Include="ISC.AI.Speech.Worker.Tests" />
+  </ItemGroup>
+
+</Project>

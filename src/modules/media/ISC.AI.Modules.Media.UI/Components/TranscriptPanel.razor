@@ -1,0 +1,411 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Панель «Расшифровка речи» карточки носителя (ADR-0026): аудио и звуковая дорожка видео.
+   Состояние расшифровки, фрагменты «[мм:сс] дословный текст» и переход к месту записи — щелчок по фрагменту
+   перематывает проигрыватель карточки (<audio>/<video> по PlayerElementId) и запускает воспроизведение через
+   ленивый JS-модуль пакета (только после интерактива — предрендер JS не умеет; eval не используется).
+   Переход из поиска по расшифровкам — параметр ?t=<мс> карточки: перемотка к месту и подсветка фрагмента.
+   РЕЖИМ: расшифровку читает GetTranscriptQuery — решётка гриф/подразделение на стороне БД по носителю и по
+   каждому фрагменту, поверх неё сужение по делам субъекта (ТБ-020/021, ТБ-071); недоступное неотличимо от
+   несуществующего. Запрос НЕ аудируется сам: открытие карточки уже записано в журнал (ТБ-030), поэтому
+   «Обновить» журнал не засоряет. Повторная расшифровка — RetranscribeMediaCommand (аудируется).
+   Пометка «автоматическая, требует проверки» показывается ВСЕГДА: текст модели — не протокол. *@
+@implements IAsyncDisposable
+@using System.Globalization
+@using ISC.AI.Modules.Media.Application.Features.Transcripts
+@using ISC.AI.Modules.Media.Domain.Model
+
+<MudPaper Outlined="true" Class="pa-4 my-4">
+    <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+        <div class="d-flex align-center gap-2 flex-wrap">
+            <MudText Typo="Typo.subtitle1">Расшифровка речи</MudText>
+            @if (_transcript is { } header)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@header.Status.ChipColor()">@StatusLabel(header)</MudChip>
+            }
+        </div>
+        <div class="d-flex align-center gap-2 flex-wrap">
+            @if (_transcript is { } current && current.Status.IsInProgress())
+            {
+                <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@(_busy || _loading)"
+                           OnClick="RefreshAsync">Обновить</MudButton>
+            }
+            @if (_transcript is { } shown)
+            {
+                @* Пока расшифровка в очереди или идёт, повторный запуск неактивен: иначе нажатие вместо «Обновить»
+                   ставило бы ещё один полный прогон в общую очередь (сервер такой запуск тоже отклоняет). *@
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.RecordVoiceOver"
+                           Disabled="@(_busy || _loading || shown.Status.IsInProgress())"
+                           OnClick="RetranscribeAsync">@RetranscribeLabel</MudButton>
+            }
+        </div>
+    </div>
+
+    @* Постоянная пометка (ADR-0026): первичный слой — дословный вывод модели, а не документ. *@
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+        Автоматическая расшифровка: дословный текст модели распознавания, без знаков препинания. Требует проверки и не является протоколом.
+        @if (_transcript is { ModelVersion: { Length: > 0 } model } made)
+        {
+            <span> Модель: @model@(made.TranscribedAt is { } at ? $", расшифровано {at.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture)}" : string.Empty).</span>
+        }
+    </MudAlert>
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+    }
+    @if (_notice is not null)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _notice = null)">@_notice</MudAlert>
+    }
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Class="my-2" />
+    }
+    else if (_transcript is { } transcript)
+    {
+        @switch (transcript.Status)
+        {
+            case TranscriptStatus.Pending:
+            case TranscriptStatus.Processing:
+                <div class="d-flex align-center gap-2 mb-2">
+                    <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+                    <MudText Typo="Typo.body2">
+                        Идёт расшифровка@(transcript.Status == TranscriptStatus.Pending ? " (в очереди)" : string.Empty). Длинная запись
+                        расшифровывается несколько минут — нажмите «Обновить», чтобы увидеть результат.
+                    </MudText>
+                </div>
+                break;
+            case TranscriptStatus.Failed:
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-2">
+                    Расшифровка не удалась: @(string.IsNullOrWhiteSpace(transcript.Error) ? "причина не указана" : transcript.Error).
+                    Запустите её заново кнопкой «Расшифровать заново».
+                </MudAlert>
+                break;
+            case TranscriptStatus.NotApplicable:
+                @* Видео, загруженное до появления расшифровки (миграция помечает его «неприменима»). *@
+                <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2">
+                    Расшифровка для этого носителя не выполнялась (он загружен до появления расшифровки речи). Запустите её кнопкой «Расшифровать».
+                </MudText>
+                break;
+            case TranscriptStatus.Done when transcript.Segments.Count == 0:
+                <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2">Речь не обнаружена: в записи не найдено участков речи.</MudText>
+                break;
+        }
+
+        @if (transcript.Segments.Count > 0)
+        {
+            @if (transcript.Status != TranscriptStatus.Done)
+            {
+                @* Прежние фрагменты снимаются только успешным прогоном (MediaStore.CompleteTranscriptionAsync). *@
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
+                    Ниже — прежняя расшифровка; её заменит новая, когда будет успешно завершена.
+                </MudText>
+            }
+            @if (PlayerElementId is null)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
+                    Браузер не воспроизводит формат этой записи — переход к месту записи недоступен; таймкоды — для сверки в проигрывателе.
+                </MudText>
+            }
+            else
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
+                    Щелчок по фрагменту — воспроизвести запись с этого места.
+                </MudText>
+            }
+
+            @* Обычная разметка (нативная кнопка на строку), а не MudList: список фрагментов с обработчиком
+               щелчка — та же конструкция, что уронила circuit в ленте уведомлений (см. NotificationsPanel пакета
+               документооборота). Строка — компонент TranscriptSegmentItem с примитивными параметрами и ОДНИМ
+               колбэком _onPlay: щелчок перерисовывает две строки, а не все (длинные записи — тысячи фрагментов).
+               Без Virtualize: переход по ?t= прокручивает к элементу фрагмента по id (media.js reveal), а
+               виртуализация не держала бы в DOM фрагменты вне видимой части. Прокрутка — внутри списка:
+               страница не уезжает от проигрывателя. *@
+            <div style="max-height:60vh;overflow-y:auto;">
+                @foreach (var segment in transcript.Segments)
+                {
+                    <TranscriptSegmentItem Index="@segment.Index" ElementId="@SegmentElementId(segment.Index)"
+                                           StartMs="@segment.StartMs" Text="@segment.Text" IsActive="@(_activeIndex == segment.Index)"
+                                           Clickable="@(PlayerElementId is not null)" OnPlay="@_onPlay" />
+                }
+            </div>
+        }
+    }
+</MudPaper>
+
+@code {
+    private const string MediaModulePath = "./_content/ISC.AI.Modules.Media.UI/js/media.js";
+
+    /// <summary>Носитель (аудио или видео), чья расшифровка показывается.</summary>
+    [Parameter, EditorRequired] public int AssetId { get; set; }
+
+    /// <summary>
+    /// Id элемента &lt;audio&gt;/&lt;video&gt; карточки, который браузер воспроизводит; <see langword="null"/> —
+    /// формат браузеру не по силам (AMR/3GPP, MKV/AVI/MOV/3GP): фрагменты показываются без перехода к месту записи.
+    /// </summary>
+    [Parameter] public string? PlayerElementId { get; set; }
+
+    /// <summary>
+    /// Место записи, к которому пришли (параметр ?t= карточки, мс): после загрузки — перемотка к нему и
+    /// подсветка фрагмента, в который оно попадает.
+    /// </summary>
+    [Parameter] public long? StartAtMs { get; set; }
+
+    private MediaTranscript? _transcript;
+    private int? _loadedAssetId;
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private string? _notice;
+    private int? _activeIndex;
+    private long? _appliedStartAt;
+    private IJSObjectReference? _module;
+    private bool _moduleFailed;
+    private EventCallback<int> _onPlay;
+
+    private string RetranscribeLabel =>
+        _transcript is { Status: TranscriptStatus.NotApplicable } ? "Расшифровать" : "Расшифровать заново";
+
+    private static string StatusLabel(MediaTranscript transcript) =>
+        transcript.Status == TranscriptStatus.NotApplicable ? "не выполнялась" : transcript.Status.Label();
+
+    private string SegmentElementId(int index) =>
+        $"media-transcript-{AssetId.ToString(CultureInfo.InvariantCulture)}-{index.ToString(CultureInfo.InvariantCulture)}";
+
+    protected override void OnInitialized()
+    {
+        // Один экземпляр колбэка на всю панель: строки получают равный параметр при каждой перерисовке
+        // панели, а не новое замыкание на строку (см. TranscriptSegmentItem).
+        _onPlay = EventCallback.Factory.Create<int>(this, PlayFromAsync);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // ТБ-030 и предрендер: на статическом SSR до подключения circuit'а ничего не грузим — страница
+        // карточки и так отрисовывает панель только после интерактивной загрузки, но панель от этого не зависит.
+        if (!RendererInfo.IsInteractive)
+        {
+            return;
+        }
+
+        if (_loadedAssetId != AssetId)
+        {
+            _loadedAssetId = AssetId;
+            _transcript = null;
+            _activeIndex = null;
+            _appliedStartAt = null;
+            _loading = true;
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var response = await Dispatcher.Send(new GetTranscriptQuery(AssetId));
+            if (response is { Status: true, Data: { } transcript })
+            {
+                _transcript = transcript;
+            }
+            else
+            {
+                // Единый ответ «нет или нельзя» (ТБ-020/021) — показываем как есть, без догадок о причине.
+                _transcript = null;
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Переход из поиска (?t=): только после интерактива (предрендер JS не умеет) и после загрузки
+        // фрагментов — иначе подсвечивать нечего. Одно применение на каждое новое значение t.
+        if (!RendererInfo.IsInteractive || _loading || _transcript is null
+            || StartAtMs is not { } startAt || _appliedStartAt == startAt)
+        {
+            return;
+        }
+
+        _appliedStartAt = startAt;
+        var target = FindSegment(_transcript.Segments, startAt);
+        _activeIndex = target?.Index;
+        StateHasChanged();
+
+        var module = await EnsureModuleAsync();
+        if (module is null)
+        {
+            return;
+        }
+
+        try
+        {
+            // Из поиска — только перемотка, без запуска: звук сам по себе при открытии карточки не включается.
+            if (PlayerElementId is not null)
+            {
+                await module.InvokeAsync<bool>("seek", PlayerElementId, startAt / 1000.0, false);
+            }
+
+            if (target is not null)
+            {
+                await module.InvokeAsync<bool>("reveal", SegmentElementId(target.Index));
+            }
+        }
+        catch (JSException)
+        {
+            // Не перемотали — фрагмент всё равно подсвечен; оператор щёлкнет по нему сам.
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit уже закрыт — показывать некому.
+        }
+    }
+
+    /// <summary>
+    /// Фрагмент, в который попадает место записи: содержащий его, иначе последний начавшийся раньше;
+    /// место до первого фрагмента — <see langword="null"/> (подсвечивать нечего).
+    /// </summary>
+    private static TranscriptSegmentRow? FindSegment(IReadOnlyList<TranscriptSegmentRow> segments, long milliseconds) =>
+        segments.FirstOrDefault(s => s.StartMs <= milliseconds && milliseconds < s.EndMs)
+        ?? segments.LastOrDefault(s => s.StartMs <= milliseconds);
+
+    /// <summary>Ленивая загрузка JS-модуля пакета; после первого сбоя не повторяем (панель живёт без него).</summary>
+    private async Task<IJSObjectReference?> EnsureModuleAsync()
+    {
+        if (_module is not null || _moduleFailed)
+        {
+            return _module;
+        }
+
+        try
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", MediaModulePath);
+        }
+        catch (JSException)
+        {
+            _moduleFailed = true;
+        }
+        catch (JSDisconnectedException)
+        {
+            _moduleFailed = true;
+        }
+
+        return _module;
+    }
+
+    /// <summary>
+    /// Щелчок (Enter, пробел) по фрагменту: перемотать проигрыватель к его началу и запустить воспроизведение.
+    /// </summary>
+    /// <param name="index">Номер фрагмента (<see cref="TranscriptSegmentRow.Index"/>).</param>
+    private async Task PlayFromAsync(int index)
+    {
+        if (_transcript?.Segments.FirstOrDefault(s => s.Index == index) is not { } segment)
+        {
+            return;
+        }
+
+        _activeIndex = segment.Index;
+        if (PlayerElementId is null)
+        {
+            return;
+        }
+
+        var module = await EnsureModuleAsync();
+        if (module is null)
+        {
+            _notice = "Модуль проигрывателя не загружен — обновите страницу и попробуйте снова.";
+            return;
+        }
+
+        try
+        {
+            var ok = await module.InvokeAsync<bool>("seek", PlayerElementId, segment.StartMs / 1000.0, true);
+            if (!ok)
+            {
+                _notice = "Проигрыватель не найден на странице — обновите её и попробуйте снова.";
+            }
+        }
+        catch (JSException ex)
+        {
+            _error = $"Не удалось перейти к месту записи: {ex.Message}";
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit уже закрыт — показывать некому.
+        }
+    }
+
+    /// <summary>«Обновить»: перечитать только расшифровку (не аудируется — открытие карточки уже в журнале).</summary>
+    private async Task RefreshAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            await LoadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>
+    /// «Расшифровать (заново)»: поставить носитель в очередь (RetranscribeMediaCommand — право, решётка и
+    /// сужение по делам проверяет сервер, запуск аудируется). Прежняя расшифровка остаётся видна до успеха новой.
+    /// </summary>
+    private async Task RetranscribeAsync()
+    {
+        _busy = true;
+        _error = null;
+        _notice = null;
+        try
+        {
+            var response = await Dispatcher.Send(new RetranscribeMediaCommand(AssetId));
+            if (response.Status)
+            {
+                _notice = "Носитель поставлен в очередь на расшифровку. Нажмите «Обновить», чтобы увидеть результат.";
+                await LoadAsync();
+            }
+            else
+            {
+                // Отказ показываем как есть. Состояние перечитываем: расшифровку мог уже запустить другой
+                // сотрудник («уже выполняется — нажмите «Обновить»»), и панель должна показать этот статус и
+                // кнопку «Обновить», а не прежний. Причина отказа важнее ошибки перечитывания — она и остаётся.
+                var refusal = response.StatusMessage;
+                await LoadAsync();
+                _error = refusal;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit уже закрыт — освобождать на клиенте нечего.
+            }
+            catch (JSException)
+            {
+                // Сбой очистки не должен ронять уход со страницы.
+            }
+        }
+    }
+}

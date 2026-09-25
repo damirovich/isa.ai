@@ -1,5 +1,6 @@
 using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Security;
+using ISC.AI.Modules.Media.Domain.Model;
 using ISC.AI.Modules.Media.Domain.Services;
 using ISC.AI.Profile.Investigation.Application.Features.Common;
 using ISC.AI.Profile.Investigation.Application.Features.Persons;
@@ -14,7 +15,8 @@ namespace ISC.AI.UnitTests.Investigation;
 /// Эталон фигуранта (ТФ-ПЕР-01, ТБ-077): носитель и лицо пакета «Медиа» принимаются ТОЛЬКО если носитель
 /// доступен субъекту и привязан к делу фигуранта, а лицо — с этого носителя (ТБ-071, ТФ-ДЕЛ-03).
 /// Идентификаторы перебираемы, поэтому любой отказ неразличим с «нет такого» (ТБ-020/021) и хранилище
-/// при отказе не вызывается.
+/// при отказе не вызывается. Вид носителя — только изображение или видео (ADR-0026): аудиозапись
+/// отвергается отдельным ответом уже после проверок доступа.
 /// </summary>
 public sealed class AddReferencePhotoScenarioTests
 {
@@ -48,6 +50,7 @@ public sealed class AddReferencePhotoScenarioTests
         _caseScope.IsAssetAccessibleAsync(AssetId, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>()).Returns(true);
         _caseScope.GetAssetIdsAsync(Arg.Is<IReadOnlyCollection<int>>(ids => ids.Contains(CaseId)), Arg.Any<CancellationToken>())
             .Returns([AssetId, 51]);
+        _catalog.GetAsync(AssetId, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>()).Returns(Asset(AssetId, MediaKind.Image));
         _catalog.GetFaceAsync(FaceId, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>()).Returns(Face(FaceId, AssetId));
         _persons.AddReferencePhotoAsync(Arg.Any<ReferencePhotoDraft>(), Arg.Any<int?>(), Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
             .Returns((PersonWriteResult.Ok, 99));
@@ -134,7 +137,61 @@ public sealed class AddReferencePhotoScenarioTests
         ShouldBeReferenceNotFound(response);
         await AssertStoreUntouchedAsync();
         await _caseScope.DidNotReceive().IsAssetAccessibleAsync(Arg.Any<int>(), Arg.Any<AccessContext>(), Arg.Any<CancellationToken>());
+        await _catalog.DidNotReceive().GetAsync(Arg.Any<int>(), Arg.Any<AccessContext>(), Arg.Any<CancellationToken>());
         await _catalog.DidNotReceive().GetFaceAsync(Arg.Any<int>(), Arg.Any<AccessContext>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "Аудиозапись не может быть источником эталона")]
+    public async Task RejectsAudioAssetAsReferenceSource()
+    {
+        // Голосовое сообщение ИЗ ДЕЛА фигуранта и доступное субъекту: проверки доступа и принадлежности
+        // пройдены, отказ — именно по виду носителя (ТБ-077, ADR-0026). Лицо не указано — как в сценарии
+        // находки, где поле лица оставлено пустым.
+        _catalog.GetAsync(AssetId, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>()).Returns(Asset(AssetId, MediaKind.Audio));
+
+        var response = await HandleAsync(new AddReferencePhotoCommand(PersonId, AssetId));
+
+        response.Status.ShouldBeFalse();
+        response.StatusCode.ShouldBe(ResponseStatusCode.BadRequest);
+        response.StatusMessage.ShouldBe(AddReferencePhotoCommand.SourceKindDenied);
+        await AssertStoreUntouchedAsync();
+        // Носитель читался под контекстом доступа субъекта — решётка каталога не обойдена (ТБ-020/021).
+        await _catalog.Received(1).GetAsync(
+            AssetId, Arg.Is<AccessContext>(a => a.MaxClassification == 2), Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "Вид носителя, которого нет в списке разрешённых, отвергается: разрешение списком, а не запретом аудио")]
+    public async Task Unknown_asset_kind_is_rejected_by_allow_list()
+    {
+        _catalog.GetAsync(AssetId, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>()).Returns(Asset(AssetId, (MediaKind)99));
+
+        var response = await HandleAsync(new AddReferencePhotoCommand(PersonId, AssetId, FaceId));
+
+        response.StatusCode.ShouldBe(ResponseStatusCode.BadRequest);
+        response.StatusMessage.ShouldBe(AddReferencePhotoCommand.SourceKindDenied);
+        await AssertStoreUntouchedAsync();
+    }
+
+    [Fact(DisplayName = "Видеозапись дела — допустимый источник эталона (лицо с кадра)")]
+    public async Task Video_asset_is_accepted_as_reference_source()
+    {
+        _catalog.GetAsync(AssetId, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>()).Returns(Asset(AssetId, MediaKind.Video));
+
+        var response = await HandleAsync(new AddReferencePhotoCommand(PersonId, AssetId, FaceId));
+
+        response.Status.ShouldBeTrue();
+        response.Data.ShouldBe(99);
+    }
+
+    [Fact(DisplayName = "Каталог «Медиа» носитель не отдал (недоступен по решётке) → тот же NotFound, хранилище не вызывается")]
+    public async Task Asset_missing_in_catalog_is_not_found()
+    {
+        _catalog.GetAsync(AssetId, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>()).Returns((MediaAssetRow?)null);
+
+        var response = await HandleAsync(new AddReferencePhotoCommand(PersonId, AssetId));
+
+        ShouldBeReferenceNotFound(response);
+        await AssertStoreUntouchedAsync();
     }
 
     [Theory(DisplayName = "Эксперт, Верификатор и субъект без роли эталон не добавляют — ни хранилище, ни порты не вызываются (ТП-004)")]
@@ -180,6 +237,13 @@ public sealed class AddReferencePhotoScenarioTests
     private async Task AssertStoreUntouchedAsync() =>
         await _persons.DidNotReceive().AddReferencePhotoAsync(
             Arg.Any<ReferencePhotoDraft>(), Arg.Any<int?>(), Arg.Any<AccessContext>(), Arg.Any<CancellationToken>());
+
+    private static MediaAssetRow Asset(int id, MediaKind kind) => new(
+        id, kind, "m.bin", "0123456789abcdef0123456789abcdef.bin", "application/octet-stream", 1024, DurationMs: null,
+        Source: null, CapturedAt: null, Classification: 1, DivisionId: 5, UploadedByUserId: UserId,
+        IndexStatus: kind == MediaKind.Audio ? MediaIndexStatus.NotApplicable : MediaIndexStatus.Indexed,
+        IndexError: null, DetectorVersion: null, EmbedderVersion: null, IndexedAt: null,
+        CreatedAt: new DateTime(2026, 9, 25, 8, 0, 0, DateTimeKind.Utc), FaceCount: 0);
 
     private static FaceRow Face(int id, int assetId) => new(
         id, assetId, FrameIndex: null, FrameTimestampMs: null,

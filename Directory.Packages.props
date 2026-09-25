@@ -59,6 +59,11 @@
     <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.30.0" />
     <PackageVersion Include="SkiaSharp" Version="4.152.0" />
     <PackageVersion Include="FFMpegCore" Version="5.4.0" />
+    <!-- Распознавание речи для профиля «Следствие» (ADR-0026): sherpa-onnx — Apache-2.0 (k2-fsa), только в
+         отдельном процессе ISC.AI.Speech.Worker (свой нативный onnxruntime не встречается с
+         Microsoft.ML.OnnxRuntime). Модель GigaAM Multilingual — MIT (НЕ путать с GigaAM v1 2024 года:
+         та некоммерческая и запрещена); Silero VAD — MIT. Файлы моделей — deploy/offline с пинами SHA-256. -->
+    <PackageVersion Include="org.k2fsa.sherpa.onnx" Version="1.13.8" />
     <!-- UI: Blazor + MudBlazor -->
     <PackageVersion Include="MudBlazor" Version="9.5.0" />
     <PackageVersion Include="Microsoft.AspNetCore.Components.Web" Version="10.0.9" />

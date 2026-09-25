@@ -74,7 +74,14 @@ public sealed partial class MediaStore(
                 Classification = draft.Classification,
                 DivisionId = draft.DivisionId,
                 UploadedByUserId = draft.UploadedByUserId,
-                IndexStatus = MediaIndexStatus.Uploaded,
+
+                // Два независимых конвейера (ADR-0026): лица — для фото и видео; к аудио поиск по лицу
+                // НЕПРИМЕНИМ (не «проиндексировано с нулём лиц» — иначе журнал утверждал бы, что биометрия
+                // обрабатывалась). Расшифровка — для аудио и звуковой дорожки видео; к фото неприменима.
+                IndexStatus = draft.Kind == MediaKind.Audio ? MediaIndexStatus.NotApplicable : MediaIndexStatus.Uploaded,
+                TranscriptStatus = draft.Kind is MediaKind.Audio or MediaKind.Video
+                    ? TranscriptStatus.Pending
+                    : TranscriptStatus.NotApplicable,
             };
             db.Assets.Add(asset);
             await db.SaveChangesAsync(cancellationToken);
@@ -83,7 +90,10 @@ public sealed partial class MediaStore(
             try
             {
                 await using var source = File.OpenRead(tempPath);
-                var extension = Path.GetExtension(draft.OriginalFileName);
+
+                // Расширение — из имени файла с изъятого устройства: кавычка или «\» в конце разорвали бы
+                // командную строку ffmpeg/ffprobe (путь передаётся текстом). Недопустимое — «.bin» (MediaFileNames).
+                var extension = MediaFileNames.SafeExtension(draft.OriginalFileName);
                 asset.StoredFileName = await fileStorage.SaveAsync(
                     source, extension, MediaFileCategories.Originals, subPath, cancellationToken);
                 await db.SaveChangesAsync(cancellationToken);
@@ -148,5 +158,21 @@ public sealed partial class MediaStore(
             .ExecuteUpdateAsync(s => s
                 .SetProperty(a => a.IndexStatus, MediaIndexStatus.Failed)
                 .SetProperty(a => a.IndexError, message), cancellationToken);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Условие <c>kind = Video</c> — в том же UPDATE: изображение или уже аудиозапись этим путём не меняются.
+    /// Лиц у такого носителя нет и не было (раскадровывать нечего), так что снимать производные не нужно.
+    /// </remarks>
+    public async Task<bool> ReclassifyAsAudioAsync(int assetId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var updated = await db.Assets.Where(a => a.Id == assetId && a.Kind == MediaKind.Video)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(a => a.Kind, MediaKind.Audio)
+                .SetProperty(a => a.IndexStatus, MediaIndexStatus.NotApplicable)
+                .SetProperty(a => a.IndexError, (string?)null), cancellationToken);
+        return updated > 0;
     }
 }

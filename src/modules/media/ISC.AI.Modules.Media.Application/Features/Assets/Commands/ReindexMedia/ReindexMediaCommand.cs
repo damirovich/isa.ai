@@ -5,6 +5,7 @@ using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.BackgroundTasks;
 using ISC.AI.Abstractions.Security;
+using ISC.AI.Modules.Media.Domain.Model;
 using ISC.AI.Modules.Media.Domain.Services;
 using Mediator;
 using Microsoft.Extensions.DependencyInjection;
@@ -55,6 +56,12 @@ public sealed record ReindexMediaCommand(int AssetId) : IRequest<ResponseDto<Gui
             if (!await caseScope.IsAssetAccessibleAsync(asset.Id, access, cancellationToken))
             {
                 return ResponseDto<Guid>.NotFound("Носитель не найден или недоступен.");
+            }
+
+            // ADR-0026: в аудиозаписи лиц нет — переиндексировать нечего; отказ явный, а не пустая задача.
+            if (asset.Kind == MediaKind.Audio)
+            {
+                return ResponseDto<Guid>.BadRequest("К аудиозаписи поиск по лицу неприменим: лиц в ней нет.");
             }
 
             // ТБ-074/ADR-0024: у закрытого дела шаблоны удалены регламентом, и переиндексация вернула бы их

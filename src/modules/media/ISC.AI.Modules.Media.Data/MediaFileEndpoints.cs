@@ -28,11 +28,19 @@ public static class MediaFileEndpoints
         @"^[0-9a-fA-F]{32}\.[A-Za-z0-9]{2,5}$", RegexOptions.Compiled);
 
     // Только типы, которые безопасно показывать inline; всё прочее — принудительно вложением
-    // (MIME-confusion: same-origin XSS через text/html).
+    // (MIME-confusion: same-origin XSS через text/html). Аудио (ADR-0026) — только те типы, что браузер
+    // играет сам (проигрыватель карточки с переходом к месту записи); AMR и 3GPP браузеры не играют —
+    // они, как и прочие, отдаются вложением.
     private static readonly HashSet<string> SafeInlineContentTypes = new(StringComparer.OrdinalIgnoreCase)
     {
         "image/png", "image/jpeg", "image/gif", "image/bmp", "image/webp",
         "video/mp4", "video/webm",
+        "audio/mpeg", "audio/mp4", "audio/ogg", "audio/wav", "audio/webm", "audio/flac", "audio/aac",
+        // Синонимы тех же форматов, под которыми их объявляют браузеры и ОС (Chrome на Windows: .m4a —
+        // audio/x-m4a; .wav — audio/x-wav; голосовые Telegram — audio/opus). Без них сохранённый тип не
+        // совпадал бы со списком, файл уходил бы вложением, а проигрыватель карточки полагался бы на то,
+        // что браузер проигнорирует Content-Disposition. Все они — только звук, исполнимого содержимого нет.
+        "audio/x-m4a", "audio/x-wav", "audio/opus",
     };
 
     /// <summary>

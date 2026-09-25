@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Globalization;
 using ISC.AI.Modules.Media.Domain.Model;
 using MudBlazor;
@@ -17,6 +19,7 @@ public static class MediaLabels
         MediaIndexStatus.Processing => "обрабатывается",
         MediaIndexStatus.Indexed => "проиндексирован",
         MediaIndexStatus.Failed => "ошибка обработки",
+        MediaIndexStatus.NotApplicable => "поиск по лицу неприменим",
         _ => status.ToString(),
     };
 
@@ -39,8 +42,42 @@ public static class MediaLabels
     {
         MediaKind.Image => "фото",
         MediaKind.Video => "видео",
+        MediaKind.Audio => "аудио",
         _ => kind.ToString(),
     };
+
+    /// <summary>Значок вида носителя (список носителей дела, выдача поиска по расшифровкам).</summary>
+    public static string Icon(this MediaKind kind) => kind switch
+    {
+        MediaKind.Image => Icons.Material.Filled.Image,
+        MediaKind.Video => Icons.Material.Filled.Movie,
+        MediaKind.Audio => Icons.Material.Filled.Audiotrack,
+        _ => Icons.Material.Filled.InsertDriveFile,
+    };
+
+    /// <summary>Подпись состояния расшифровки речи (ADR-0026).</summary>
+    public static string Label(this TranscriptStatus status) => status switch
+    {
+        TranscriptStatus.NotApplicable => "расшифровка неприменима",
+        TranscriptStatus.Pending => "в очереди на расшифровку",
+        TranscriptStatus.Processing => "идёт расшифровка",
+        TranscriptStatus.Done => "расшифровано",
+        TranscriptStatus.Failed => "ошибка расшифровки",
+        _ => status.ToString(),
+    };
+
+    /// <summary>Цвет чипа состояния расшифровки.</summary>
+    public static Color ChipColor(this TranscriptStatus status) => status switch
+    {
+        TranscriptStatus.Processing => Color.Info,
+        TranscriptStatus.Done => Color.Success,
+        TranscriptStatus.Failed => Color.Error,
+        _ => Color.Default,
+    };
+
+    /// <summary>Расшифровка ещё не завершена (в очереди или выполняется) — её состояние стоит перезапросить.</summary>
+    public static bool IsInProgress(this TranscriptStatus status) =>
+        status is TranscriptStatus.Pending or TranscriptStatus.Processing;
 
     /// <summary>Подпись статуса кандидата (ТБ-073, ТЭ-005): «подтверждён» — только после двух решений.</summary>
     public static string Label(this CandidateStatus status) => status switch
@@ -97,6 +134,56 @@ public static class MediaLabels
         return span.TotalHours >= 1
             ? span.ToString(@"h\:mm\:ss\.f", CultureInfo.InvariantCulture)
             : span.ToString(@"m\:ss\.f", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// Место в записи «мм:сс» (от часа — «ч:мм:сс») для фрагментов расшифровки (ADR-0026): оператор сверяет
+    /// его со шкалой проигрывателя, где десятых долей нет. Доли секунды отбрасываются: фрагмент с 1:05.9
+    /// показан как 01:05, а перемотка идёт к точному началу фрагмента.
+    /// </summary>
+    public static string ClockTimecode(long milliseconds)
+    {
+        var span = TimeSpan.FromMilliseconds(Math.Max(0, milliseconds));
+        return span.TotalHours >= 1
+            ? ((int)span.TotalHours).ToString(CultureInfo.InvariantCulture) + ":" + span.ToString(@"mm\:ss", CultureInfo.InvariantCulture)
+            : span.ToString(@"mm\:ss", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Привычные названия форматов, у которых подтип MIME на название не похож.</summary>
+    private static readonly Dictionary<string, string> FormatNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["video/x-matroska"] = "MKV",
+        ["video/quicktime"] = "MOV",
+        ["video/x-msvideo"] = "AVI",
+        ["video/3gpp"] = "3GP",
+        ["audio/3gpp"] = "3GP",
+        ["audio/mpeg"] = "MP3",
+    };
+
+    /// <summary>
+    /// Короткое название формата по MIME-типу для подсказок («браузер не воспроизводит контейнер MKV»):
+    /// известные — привычным именем (MKV/MOV/AVI/3GP), прочие — подтипом MIME заглавными буквами
+    /// (<c>video/x-flv</c> → «FLV»). Текст подсказки не должен расходиться с типом самого носителя.
+    /// </summary>
+    public static string FormatName(string? contentType)
+    {
+        if (string.IsNullOrWhiteSpace(contentType))
+        {
+            return "неизвестного формата";
+        }
+
+        if (FormatNames.TryGetValue(contentType, out var known))
+        {
+            return known;
+        }
+
+        var subtype = contentType[(contentType.IndexOf('/', StringComparison.Ordinal) + 1)..];
+        if (subtype.StartsWith("x-", StringComparison.OrdinalIgnoreCase))
+        {
+            subtype = subtype[2..];
+        }
+
+        return subtype.Length > 0 ? subtype.ToUpperInvariant() : contentType.ToUpperInvariant();
     }
 
     /// <summary>Человекочитаемый размер файла.</summary>

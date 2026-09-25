@@ -263,15 +263,42 @@ public sealed class DependencyRulesTests
         }
     }
 
-    [Fact(DisplayName = "Каждый проект зависит от Abstractions")]
+    [Fact(DisplayName = "Каждый проект зависит от Abstractions (кроме самостоятельных процессов-исполнителей)")]
     public void Every_project_depends_on_Abstractions()
     {
-        foreach (var project in Graph.Keys.Where(p => p != Abstractions))
+        foreach (var project in Graph.Keys.Where(p => p != Abstractions && !StandaloneProcesses.Contains(p)))
         {
             DependsOn(project, Abstractions).ShouldBeTrue(
                 $"Проект «{project}» должен прямо или транзитивно зависеть от «{Abstractions}».");
         }
     }
+
+    /// <summary>
+    /// Самостоятельный процесс-исполнитель (ADR-0026) — обратная сторона исключения выше: он освобождён
+    /// от зависимости на Abstractions потому, что НЕ ССЫЛАЕТСЯ НИ НА ОДИН проект ISC.AI. Исключение
+    /// проверяется, а не просто разрешается: стоит такому процессу подтянуть что-то из решения — и он
+    /// перестаёт быть изолированной утилитой, ради которой вынесен в отдельный процесс.
+    /// </summary>
+    [Fact(DisplayName = "Самостоятельный процесс-исполнитель не ссылается ни на один проект ISC.AI")]
+    public void Standalone_processes_reference_no_solution_projects()
+    {
+        foreach (var process in StandaloneProcesses)
+        {
+            // Страховка от переименования: исключение для несуществующего проекта молча перестало бы работать.
+            Graph.ContainsKey(process).ShouldBeTrue($"Самостоятельный процесс «{process}» не найден в решении — обновите список.");
+
+            var references = Graph[process].Where(r => r.StartsWith("ISC.AI.", StringComparison.Ordinal)).ToArray();
+            references.ShouldBeEmpty(
+                $"Процесс «{process}» должен быть изолированной утилитой, но ссылается на: {string.Join(", ", references)}.");
+        }
+    }
+
+    /// <summary>
+    /// Процессы, которые хост вызывает как ВНЕШНЮЮ программу (по образцу ffmpeg), а не как библиотеку.
+    /// Распознаватель речи вынесен так потому, что его нативная библиотека несёт свой onnxruntime.dll по
+    /// тому же пути, что и распознавание лиц, — в одном процессе одна сборка затёрла бы другую (ADR-0026).
+    /// </summary>
+    private static readonly string[] StandaloneProcesses = ["ISC.AI.Speech.Worker"];
 
     private static bool IsProfileProject(string name) =>
         name.StartsWith("ISC.AI.Profile.", StringComparison.Ordinal);

@@ -228,18 +228,32 @@ else
                     <MudTh>Снято</MudTh>
                     <MudTh>Источник</MudTh>
                     <MudTh>Индексация</MudTh>
+                    <MudTh>Расшифровка</MudTh>
                     <MudTh Style="text-align:right;">Лиц</MudTh>
                     <MudTh>Гриф</MudTh>
                 </HeaderContent>
                 <RowTemplate>
+                    @* Подписи — CaseMediaLabels профиля (на Media.UI профиль не ссылается, ADR-0022). У аудио
+                       (ADR-0026) поиск по лицу неприменим: вместо числа лиц — прочерк, а не «0». *@
                     <MudTd DataLabel="Файл"><MudLink Href="@($"/media/assets/{context.Id}")">@context.OriginalFileName</MudLink></MudTd>
-                    <MudTd DataLabel="Вид">@(context.Kind == MediaKind.Video ? "Видео" : "Фото")</MudTd>
+                    <MudTd DataLabel="Вид">@CaseMediaLabels.Kind(context.Kind)</MudTd>
                     <MudTd DataLabel="Снято">@(context.CapturedAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—")</MudTd>
                     <MudTd DataLabel="Источник">@(context.Source ?? "—")</MudTd>
                     <MudTd DataLabel="Индексация">
-                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@IndexColor(context.IndexStatus)">@IndexLabel(context.IndexStatus)</MudChip>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@CaseMediaLabels.IndexColor(context.IndexStatus)">@CaseMediaLabels.Index(context.IndexStatus)</MudChip>
                     </MudTd>
-                    <MudTd DataLabel="Лиц" Style="text-align:right;">@context.FaceCount</MudTd>
+                    <MudTd DataLabel="Расшифровка">
+                        @if (context.TranscriptStatus == TranscriptStatus.NotApplicable)
+                        {
+                            <span>@CaseMediaLabels.Transcript(context.TranscriptStatus)</span>
+                        }
+                        else
+                        {
+                            @* Состояние — на момент загрузки вкладки; текст и причину сбоя показывает карточка носителя. *@
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@CaseMediaLabels.TranscriptColor(context.TranscriptStatus)">@CaseMediaLabels.Transcript(context.TranscriptStatus)</MudChip>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Лиц" Style="text-align:right;">@CaseMediaLabels.FaceCount(context)</MudTd>
                     <MudTd DataLabel="Гриф"><ClassificationChip Value="@context.Classification" /></MudTd>
                 </RowTemplate>
                 <NoRecordsContent>
@@ -884,23 +898,6 @@ else
         var name = string.IsNullOrWhiteSpace(account.DisplayName) ? account.UserName : account.DisplayName;
         return string.IsNullOrWhiteSpace(account.Position) ? name : $"{name} · {account.Position}";
     }
-
-    private static string IndexLabel(MediaIndexStatus status) => status switch
-    {
-        MediaIndexStatus.Uploaded => "Загружен",
-        MediaIndexStatus.Processing => "Обрабатывается",
-        MediaIndexStatus.Indexed => "Проиндексирован",
-        MediaIndexStatus.Failed => "Ошибка",
-        _ => status.ToString(),
-    };
-
-    private static Color IndexColor(MediaIndexStatus status) => status switch
-    {
-        MediaIndexStatus.Indexed => Color.Success,
-        MediaIndexStatus.Failed => Color.Error,
-        MediaIndexStatus.Processing => Color.Info,
-        _ => Color.Default,
-    };
 
     private static string ScopeLabel(SearchScopeKind scope) => scope switch
     {

@@ -20,6 +20,10 @@
     <!-- Раскадровка настоящим ffmpeg (категория Video): единственная часть конвейера распознавания,
          которую нельзя проверить без внешнего бинарника. -->
     <ProjectReference Include="..\..\src\integrations\ISC.AI.Vision.Onnx\ISC.AI.Vision.Onnx.csproj" />
+    <!-- Расшифровка речи настоящими ffmpeg и процессом-распознавателем (категория Speech, ADR-0026). Ссылки на
+         утилиту НЕТ: её пакеты sherpa-onnx (GPL-код eSpeak NG) не должны попадать в общий офлайн-фид (ADR-0026,
+         п. 7). Тест запускает уже собранную утилиту как внешний процесс (SpeechTestEnvironment.LocateWorker). -->
+    <ProjectReference Include="..\..\src\integrations\ISC.AI.Speech\ISC.AI.Speech.csproj" />
     <!-- Профиль «Следствие» (ЭС3): InvestigationDbContext, решётка на делах, порты пакетов. -->
     <ProjectReference Include="..\..\src\profiles\investigation\ISC.AI.Profile.Investigation.Data\ISC.AI.Profile.Investigation.Data.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.AI\ISC.AI.AI.csproj" />
