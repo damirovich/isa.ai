@@ -6,7 +6,9 @@ namespace ISC.AI.Speech.Worker;
 
 /// <summary>
 /// Детектор речи Silero VAD + модель распознавания NeMo CTC (GigaAM Multilingual) через sherpa-onnx
-/// (Apache-2.0; ADR-0026). Границы участков речи от детектора — это и есть таймкоды фрагментов.
+/// (Apache-2.0; ADR-0026). Границы участков речи от детектора — это и есть таймкоды фрагментов. Соседние
+/// участки подаются модели одним куском не длиннее предела (<see cref="SpeechChunks"/>: на коротком участке
+/// модель путает киргизский с казахским), а слова раскладываются обратно по участкам по меткам времени.
 /// </summary>
 /// <remarks>
 /// Работает только локально: модели читаются с диска по путям, заданным адаптером после проверки
@@ -32,8 +34,12 @@ internal sealed class SherpaSpeechRecognizer : IDisposable
     // Сырой звук записи для добавки перед участком (pre-roll) — создаётся в Run: в --decode-whole не нужен.
     private SampleHistory? _history;
 
-    // Конец последнего куска, поданного модели: добавка следующего участка не заходит раньше (нет двойного звука).
+    // Конец последнего куска, принятого к распознаванию (в склейку): добавка следующего участка не заходит раньше
+    // (нет двойного звука).
     private long _decodedEnd;
+
+    // Куски участков, набираемые в один кусок для модели (SpeechChunks): по порядку, встык или с паузами между ними.
+    private readonly List<PendingPiece> _pending = [];
 
     private SherpaSpeechRecognizer(VoiceActivityDetector vad, OfflineRecognizer recognizer, double maxSegmentSeconds)
     {
@@ -114,12 +120,16 @@ internal sealed class SherpaSpeechRecognizer : IDisposable
         }
     }
 
-    /// <summary>Сколько кусков подано модели (для диагностики в stderr; пустой текст в протокол не пишется).</summary>
+    /// <summary>
+    /// Сколько раз модель вызвана — сколько кусков ей подано (для диагностики в stderr; пустой текст в протокол не
+    /// пишется). В обычном режиме кусок — это склейка соседних участков, поэтому вызовов меньше, чем фрагментов.
+    /// </summary>
     public int PiecesDecoded { get; private set; }
 
     /// <summary>
-    /// Прогоняет запись: звук порциями окна детектора → участки речи → куски не длиннее предела → текст.
-    /// Фрагменты пишутся в протокол по мере готовности. Возвращает длительность записи, мс.
+    /// Прогоняет запись: звук порциями окна детектора → участки речи → куски не длиннее предела → склейка
+    /// соседних кусков до предела → текст, разложенный обратно по участкам. Фрагменты пишутся в протокол по мере
+    /// готовности склеек. Возвращает длительность записи, мс.
     /// </summary>
     /// <exception cref="InputTooLongException">Запись длиннее <see cref="VadSettings.MaxInputSamples"/>.</exception>
     public long Run(Pcm16WaveReader reader, ProtocolWriter writer)
@@ -129,6 +139,7 @@ internal sealed class SherpaSpeechRecognizer : IDisposable
 
         _history = new SampleHistory(VadSettings.HistorySamples);
         _decodedEnd = 0;
+        _pending.Clear();
 
         var window = new float[VadSettings.WindowSize];
         int read;
@@ -149,6 +160,12 @@ internal sealed class SherpaSpeechRecognizer : IDisposable
             // детектор лишь откладывает у себя до целого окна — до модели и буфера оно само не дойдёт (см. ниже).
             _vad.AcceptWaveform(read == window.Length ? window : window[..read]);
             Drain(writer, reader.SamplesRead);
+
+            // Склейка не ждёт дольше предела куска: следующий участок в неё уже не уложится.
+            if (_pending.Count > 0 && SpeechChunks.IsSealed(_pending[0].Start, reader.SamplesRead, _maxPieceSamples))
+            {
+                FlushChunk(writer);
+            }
         }
 
         // Конец записи. Речь, идущая до последнего отсчёта (оборванное голосовое сообщение), паузой не закрыта.
@@ -177,6 +194,7 @@ internal sealed class SherpaSpeechRecognizer : IDisposable
         // оборванная на слове: конец — последнее целое окно), но при обновлении пакета на это не полагаться.
         _vad.Flush();
         Drain(writer, reader.SamplesRead);
+        FlushChunk(writer);
 
         return SamplesToMs(reader.SamplesRead);
     }
@@ -241,17 +259,85 @@ internal sealed class SherpaSpeechRecognizer : IDisposable
                 }
             }
 
-            _decodedEnd = Math.Max(_decodedEnd, Decode(samples, samples.Length, start, recordingSamples, writer));
+            Enqueue(samples, start, recordingSamples, writer);
         }
     }
 
-    // Режет участок на куски не длиннее предела и пишет их текст с таймкодами на шкале записи. Кусок зажимается
-    // по числу настоящих отсчётов: в конце записи детектору подаётся искусственная тишина, и участок может
-    // захватить её край. Модели подаётся только настоящий звук; кусок целиком из тишины не декодируется.
-    // Возвращает конец последнего поданного модели куска (0 — ни одного).
-    private long Decode(float[] samples, int length, long start, long recordingSamples, ProtocolWriter writer)
+    // Режет участок на куски не длиннее предела (SegmentSplitter) и ставит их в склейку. Кусок, не влезающий в
+    // набираемую склейку, сначала выталкивает её модели. Кусок зажимается по числу настоящих отсчётов (в конце
+    // записи детектору подаётся искусственная тишина); кусок целиком из тишины отбрасывается.
+    private void Enqueue(float[] samples, long start, long recordingSamples, ProtocolWriter writer)
     {
-        long decodedEnd = 0;
+        foreach (var piece in SegmentSplitter.Split(samples, _maxPieceSamples, _quietSearchSamples, QuietFrameSamples))
+        {
+            if (VadSettings.ClampToRecording(start + piece.Offset, piece.Length, recordingSamples) is not { } bounds)
+            {
+                continue;
+            }
+
+            if (_pending.Count > 0 && !SpeechChunks.Fits(_pending[0].Start, bounds.End, _maxPieceSamples))
+            {
+                FlushChunk(writer);
+            }
+
+            var realLength = (int)(bounds.End - bounds.Start);
+            _pending.Add(new PendingPiece(bounds.Start, bounds.End, samples.AsSpan(piece.Offset, realLength).ToArray()));
+            _decodedEnd = Math.Max(_decodedEnd, bounds.End);
+        }
+    }
+
+    // Подаёт набранную склейку модели одним куском — сплошным звуком записи от начала первого участка до конца
+    // последнего, вместе с паузами — и пишет текст по участкам (SpeechChunks.AssignWords). Звук пауз берётся из
+    // истории; если её там уже нет (не должно случаться: склейка выталкивается не позже предела плюс запас, а
+    // история помнит больше 10 минут), паузы заполняются тишиной — таймкоды от этого не сдвигаются. Если метки
+    // времени не сходятся с текстом модели, пишется ОДИН фрагмент на всю склейку: текст важнее дробности таймкодов.
+    private void FlushChunk(ProtocolWriter writer)
+    {
+        if (_pending.Count == 0)
+        {
+            return;
+        }
+
+        var chunkStart = _pending[0].Start;
+        var chunkEnd = _pending[^1].End;
+        var audio = new float[chunkEnd - chunkStart];
+        if (_history is { } history && chunkStart >= history.Start && chunkEnd <= history.End)
+        {
+            history.CopyTo(chunkStart, audio);
+        }
+        else
+        {
+            foreach (var piece in _pending)
+            {
+                piece.Samples.CopyTo(audio, piece.Start - chunkStart);
+            }
+        }
+
+        var (text, tokens, timestamps) = RecognizeWithTimestamps(audio);
+        var pieces = _pending.ConvertAll(p => (p.Start, p.End));
+        var words = SpeechChunks.AssignWords(tokens, timestamps, chunkStart, pieces, Pcm16WaveReader.RequiredSampleRate);
+        if (words is not null
+            && SpeechChunks.NormalizeSpaces(string.Join(' ', words.Select(w => w.Text))) == SpeechChunks.NormalizeSpaces(text))
+        {
+            // Границы — участок, расширенный до места его слов: слово, найденное моделью в паузе, не уводит таймкод.
+            var bounds = SpeechChunks.FragmentBounds(pieces, words, chunkStart, chunkEnd);
+            for (var i = 0; i < pieces.Count; i++)
+            {
+                writer.WriteSegment(SamplesToMs(bounds[i].Start), SamplesToMs(bounds[i].End), words[i].Text);
+            }
+        }
+        else
+        {
+            writer.WriteSegment(SamplesToMs(chunkStart), SamplesToMs(chunkEnd), text);
+        }
+
+        _pending.Clear();
+    }
+
+    // Диагностика --decode-whole: режет блок на куски не длиннее предела и пишет их текст с таймкодами на шкале
+    // записи — каждый кусок отдельно, без склейки и детектора.
+    private void Decode(float[] samples, int length, long start, long recordingSamples, ProtocolWriter writer)
+    {
         foreach (var piece in SegmentSplitter.Split(samples.AsSpan(0, length), _maxPieceSamples, _quietSearchSamples, QuietFrameSamples))
         {
             if (VadSettings.ClampToRecording(start + piece.Offset, piece.Length, recordingSamples) is not { } bounds)
@@ -260,24 +346,20 @@ internal sealed class SherpaSpeechRecognizer : IDisposable
             }
 
             var realLength = (int)(bounds.End - bounds.Start);
-            var text = Recognize(piece.Offset == 0 && realLength == samples.Length
-                ? samples
-                : samples.AsSpan(piece.Offset, realLength).ToArray());
-
+            var (text, _, _) = RecognizeWithTimestamps(samples.AsSpan(piece.Offset, realLength).ToArray());
             writer.WriteSegment(SamplesToMs(bounds.Start), SamplesToMs(bounds.End), text);
-            decodedEnd = bounds.End;
         }
-
-        return decodedEnd;
     }
 
-    private string Recognize(float[] samples)
+    // Один вызов модели: текст и, если модель их даёт, токены с метками времени (секунды от начала куска).
+    private (string Text, string[]? Tokens, float[]? Timestamps) RecognizeWithTimestamps(float[] samples)
     {
         using var stream = _recognizer.CreateStream();
         stream.AcceptWaveform(Pcm16WaveReader.RequiredSampleRate, samples);
         _recognizer.Decode(stream);
         PiecesDecoded++;
-        return stream.Result.Text;
+        var result = stream.Result;
+        return (result.Text, result.Tokens, result.Timestamps);
     }
 
     private static long SamplesToMs(long samples) => samples * 1000 / Pcm16WaveReader.RequiredSampleRate;
