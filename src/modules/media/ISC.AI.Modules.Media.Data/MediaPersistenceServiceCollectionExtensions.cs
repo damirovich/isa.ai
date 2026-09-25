@@ -52,6 +52,10 @@ public static class MediaPersistenceServiceCollectionExtensions
 
         // Журнал просмотров файлов: одна выдача субъекту — одна запись (ТБ-030), состояние в памяти процесса.
         services.AddSingleton<MediaViewAuditThrottle>();
+
+        // Лимитер эндпоинта кадра (ADR-0028): каждый запрос — процесс ffmpeg; политика «media-frames» дополняет
+        // RateLimiterOptions хоста, middleware UseRateLimiter — за хостом.
+        services.AddMediaFrameRateLimiting();
         services.AddScoped<IMediaCatalog, MediaCatalog>();
         services.AddScoped<ISearchSessionStore, SearchSessionStore>();
 

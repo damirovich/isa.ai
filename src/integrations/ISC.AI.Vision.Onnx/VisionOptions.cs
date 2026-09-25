@@ -15,6 +15,12 @@ namespace ISC.AI.Vision.Onnx;
 /// <param name="MaxInputSide">Большая сторона входа детектора; крупнее — уменьшается с сохранением пропорций.</param>
 /// <param name="MinInterocularDistance">Минимальное межзрачковое расстояние (пикс.) для пригодного лица (ТО-мат-07).</param>
 /// <param name="MinDetectionScoreForQuality">Минимальная уверенность детектора для пригодного лица.</param>
+/// <param name="MaxConcurrentFrameExtractions">
+/// Предел одновременных внешних процессов вырезки кадра и пробы видео (ADR-0028, покадровый просмотр с сервера и
+/// снимок кадра); <see langword="null"/> или ≤ 0 — умолчание <see cref="DefaultMaxConcurrentFrameExtractions"/>.
+/// Действующее значение — <see cref="EffectiveMaxConcurrentFrameExtractions"/>. На раскадровку при индексации
+/// (фоновая, по одной задаче) не распространяется.
+/// </param>
 public sealed record VisionOptions(
     string DetectorModelPath,
     string DetectorSha256,
@@ -25,4 +31,23 @@ public sealed record VisionOptions(
     float NmsIouThreshold = 0.3f,
     int MaxInputSide = 640,
     float MinInterocularDistance = 20f,
-    float MinDetectionScoreForQuality = 0.9f);
+    float MinDetectionScoreForQuality = 0.9f,
+    int? MaxConcurrentFrameExtractions = null)
+{
+    /// <summary>Ключ конфигурации предела одновременных процессов вырезки кадра/пробы.</summary>
+    public const string MaxConcurrentFrameExtractionsKey = "Vision:Ffmpeg:MaxConcurrentFrameExtractions";
+
+    /// <summary>
+    /// Умолчание предела одновременных процессов ffmpeg на вырезку кадра/пробу: половина ядер, не меньше одного.
+    /// Каждый процесс декодирует от ближайшего ключевого кадра (секунды CPU и сотни МБ на 4K); половина ядер
+    /// оставляет процессор хосту, фоновой индексации лиц и расшифровке речи (тот же ffmpeg, тот же узел).
+    /// </summary>
+    public static int DefaultMaxConcurrentFrameExtractions => Math.Max(1, Environment.ProcessorCount / 2);
+
+    /// <summary>
+    /// Действующий предел одновременных процессов вырезки кадра/пробы: заданное положительное значение, иначе
+    /// <see cref="DefaultMaxConcurrentFrameExtractions"/>.
+    /// </summary>
+    public int EffectiveMaxConcurrentFrameExtractions =>
+        MaxConcurrentFrameExtractions is > 0 ? MaxConcurrentFrameExtractions.Value : DefaultMaxConcurrentFrameExtractions;
+}

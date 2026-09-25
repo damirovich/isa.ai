@@ -36,12 +36,27 @@ public interface IMediaStore
     /// длительность (видео) и статус <see cref="MediaIndexStatus.Indexed"/>. Прежние лица/шаблоны
     /// носителя (переиндексация) снимаются в той же транзакции — половинчатого состояния нет.
     /// </summary>
+    /// <param name="assetId">Носитель.</param>
+    /// <param name="faces">Найденные лица с шаблонами.</param>
+    /// <param name="detectorVersion">Версия детектора.</param>
+    /// <param name="embedderVersion">Версия векторизатора.</param>
+    /// <param name="durationMs">Длительность по раскадровке (таймкод последнего выбранного кадра, округлён вниз до шага
+    /// выборки) — ОЦЕНКА, запасной источник ТОЛЬКО для носителя без пробы: записывается, лишь пока частоты у носителя
+    /// ещё нет (сбой пробы при переиндексации не огрубляет точное значение прежней пробы); <see langword="null"/> —
+    /// прежнее значение сохраняется. При наличии пробы игнорируется полностью: длительность берётся из пробы КАК ЕСТЬ —
+    /// в том числе <see langword="null"/>, если контейнер её не сообщает (незавершённый Matroska/WebM), — потому что при
+    /// известной частоте длительность считается точной и по ней отсекаются моменты «за концом записи».</param>
+    /// <param name="probe">Проба видеопотока (ADR-0028): точная длительность, нативная частота кадров и размер
+    /// кадра — записываются ПОВЕРХ прежних значений (переиндексация обновляет их). <see langword="null"/> — не
+    /// видео или проба не удалась: поля не меняются.</param>
+    /// <param name="cancellationToken">Отмена.</param>
     Task CompleteIndexingAsync(
         int assetId,
         IReadOnlyList<IndexedFace> faces,
         string detectorVersion,
         string embedderVersion,
         long? durationMs = null,
+        VideoProbe? probe = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>Фиксирует неудачу индексации с причиной (статус <see cref="MediaIndexStatus.Failed"/>).</summary>

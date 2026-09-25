@@ -149,6 +149,35 @@ public static class MediaLabels
             : span.ToString(@"mm\:ss", CultureInfo.InvariantCulture);
     }
 
+    /// <summary>
+    /// Точный таймкод покадрового просмотра «чч:мм:сс.ммм» (ADR-0028): момент записи с точностью до миллисекунды —
+    /// так он входит в реквизиты снимка кадра и в журнал. Часы всегда двумя знаками (от 100 часов — сколько есть);
+    /// отрицательное значение показывается как начало записи.
+    /// </summary>
+    public static string PreciseTimecode(long milliseconds)
+    {
+        var span = TimeSpan.FromMilliseconds(Math.Max(0, milliseconds));
+        return ((long)span.TotalHours).ToString("00", CultureInfo.InvariantCulture)
+            + ":" + span.ToString(@"mm\:ss\.fff", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// Подпись «кадр № N при F к/с» для момента <paramref name="milliseconds"/> (ADR-0028): N — номер кадра по
+    /// НАТИВНОЙ частоте (<see cref="VideoProbe.FrameIndexAt(long, double)"/>), а не индекс раскадровки.
+    /// <see langword="null"/> — частота неизвестна (носитель загружен до ADR-0028 и не переиндексирован).
+    /// </summary>
+    public static string? FrameLabel(long milliseconds, double? frameRate)
+    {
+        if (frameRate is not { } fps || fps <= 0 || double.IsNaN(fps) || double.IsInfinity(fps))
+        {
+            return null;
+        }
+
+        var index = VideoProbe.FrameIndexAt(Math.Max(0, milliseconds), fps);
+        return "кадр № " + index.ToString(CultureInfo.InvariantCulture)
+            + " при " + fps.ToString("0.###", CultureInfo.InvariantCulture) + " к/с";
+    }
+
     /// <summary>Привычные названия форматов, у которых подтип MIME на название не похож.</summary>
     private static readonly Dictionary<string, string> FormatNames = new(StringComparer.OrdinalIgnoreCase)
     {

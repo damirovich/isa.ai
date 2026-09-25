@@ -80,4 +80,27 @@ public class MediaAsset : AuditableEntity, IClassified
 
     /// <summary>Когда записана текущая расшифровка (UTC).</summary>
     public DateTime? TranscribedAt { get; set; }
+
+    /// <summary>
+    /// НАТИВНАЯ частота кадров видео, к/с (проба ffprobe при индексации, ADR-0028) — по ней считается номер кадра
+    /// и шаг покадрового просмотра. <see langword="null"/> — не видео либо проба ещё не выполнялась (носители до
+    /// ADR-0028: заполняется при «Переиндексировать»). Не путать с частотой ВЫБОРКИ раскадровки.
+    /// </summary>
+    public double? FrameRate { get; set; }
+
+    /// <summary>Ширина кадра видео после автоповорота по метке контейнера, пиксели (ADR-0028).</summary>
+    public int? FrameWidth { get; set; }
+
+    /// <summary>Высота кадра видео после автоповорота, пиксели (ADR-0028).</summary>
+    public int? FrameHeight { get; set; }
+
+    /// <summary>
+    /// Носитель-источник для ПРОИЗВОДНОГО носителя — снимка кадра видео (ADR-0028). Слабая ссылка без FK, как
+    /// <see cref="UploadedByUserId"/>: уничтожение видео снимок не трогает и наоборот — у каждого своя запись
+    /// журнала и свой акт (ТБ-064/075); FK с каскадом сделал бы удаление снимка «безмолвным».
+    /// </summary>
+    public int? SourceAssetId { get; set; }
+
+    /// <summary>Момент записи источника, мс, из которого снят кадр (для снимка кадра).</summary>
+    public long? SourceTimestampMs { get; set; }
 }

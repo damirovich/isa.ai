@@ -8,6 +8,10 @@ namespace ISC.AI.Modules.Media.Domain.Services;
 /// <c>TranscriptStatus</c> — состояние расшифровки речи (ADR-0026): нужен списку носителей дела и карточке,
 /// чтобы показать «расшифровывается / готово / ошибка» без отдельного запроса на каждый носитель. Параметр
 /// последний и со значением по умолчанию — добавлен без поломки существующих вызовов.
+/// Хвост ADR-0028 (тоже с умолчаниями): <c>FrameRate</c> — нативная частота кадров видео по пробе (шаг «±1 кадр»,
+/// номер кадра; <see langword="null"/> — не видео или до пробы, интерфейс показывает шаг 40 мс с пометкой),
+/// <c>FrameWidth</c>/<c>FrameHeight</c> — размер кадра после автоповорота, <c>SourceAssetId</c>/<c>SourceTimestampMs</c> —
+/// происхождение снимка кадра (видео-источник и момент записи; у обычных загрузок <see langword="null"/>).
 /// </remarks>
 public sealed record MediaAssetRow(
     int Id,
@@ -29,7 +33,12 @@ public sealed record MediaAssetRow(
     DateTime? IndexedAt,
     DateTime CreatedAt,
     int FaceCount,
-    TranscriptStatus TranscriptStatus = TranscriptStatus.NotApplicable);
+    TranscriptStatus TranscriptStatus = TranscriptStatus.NotApplicable,
+    double? FrameRate = null,
+    int? FrameWidth = null,
+    int? FrameHeight = null,
+    int? SourceAssetId = null,
+    long? SourceTimestampMs = null);
 
 /// <summary>Лицо на носителе для чтения (рамки на фото, шкала лиц видео, вырезки).</summary>
 public sealed record FaceRow(

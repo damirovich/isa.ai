@@ -15,8 +15,9 @@ namespace ISC.AI.Modules.Media.Application.Features.Indexing;
 
 /// <summary>
 /// Конвейер индексации носителя (ТП-005, ТО-мат-05): исходник из хранилища → (для видео) проба потоков — без
-/// видеопотока носитель переводится в аудиозаписи (ADR-0026) — и раскадровка (ТО-мат-06) → детекция лиц → оценка качества (ТО-мат-07) → векторизация пригодных → вырезки →
-/// атомарная запись шаблонов с грифом носителя (ТБ-070). Исполняется фоновой очередью ядра из
+/// видеопотока носитель переводится в аудиозаписи (ADR-0026), иначе носитель получает нативную частоту кадров, точную
+/// длительность и размер кадра (ADR-0028) — и раскадровка (ТО-мат-06) → детекция лиц → оценка качества (ТО-мат-07) →
+/// векторизация пригодных → вырезки → атомарная запись шаблонов с грифом носителя (ТБ-070). Исполняется фоновой очередью ядра из
 /// per-operation scope; повторный запуск идемпотентен — шаблоны перезаписываются хранилищем одной
 /// транзакцией, прежние вырезки снимаются ПОСЛЕ её фиксации (половинчатого состояния нет, ТП-005).
 /// </summary>
@@ -106,13 +107,20 @@ public sealed class MediaIndexer(
 
             await store.MarkProcessingAsync(assetId, cancellationToken);
 
+            // ADR-0028 п.1: проба видеопотока — нативная частота кадров (шаг «на кадр», номер кадра), точная
+            // длительность и размер кадра после автоповорота — для покадрового просмотра и снимка кадра. Сбой пробы
+            // индексацию НЕ валит: поля носителя остаются прежними, длительность возьмётся из раскадровки.
+            var probe = info.Kind == MediaKind.Video ? await TryProbeAsync(assetId, tempPath, cancellationToken) : null;
+
             long? durationMs = await ProcessSourceAsync(info, tempPath, subPath, progress, cancellationToken);
 
             // Строки лиц/шаблонов заменяются одной транзакцией; ТОЛЬКО после её фиксации снимаем вырезки
             // прежнего прогона (ТП-005: файл без строки безвреден, строка без файла — нет; при сбое до этой
             // точки старые лица остаются с файлами, а новые вырезки — сироты — удаляются в catch).
+            // Длительность по раскадровке — запасной источник (пишется, только если у носителя её ещё нет);
+            // проба — поверх прежних значений (переиндексация обновляет их).
             await store.CompleteIndexingAsync(
-                assetId, progress.Faces, detector.ModelVersion, embedder.ModelVersion, durationMs, cancellationToken);
+                assetId, progress.Faces, detector.ModelVersion, embedder.ModelVersion, durationMs, probe, cancellationToken);
             await DeleteCropsAsync(assetId, subPath, info.ExistingCropFileNames);
 
             // ТО-инф-11: факт индексации биометрии — в неизменяемый журнал с грифом/подразделением носителя.
@@ -195,6 +203,28 @@ public sealed class MediaIndexer(
         }
     }
 
+    /// <summary>
+    /// Проба видеопотока (ADR-0028) без проброса: любой сбой ffprobe (инструмент не найден, файл не разобран)
+    /// пишется в журнал и даёт <see langword="null"/> — раскадровка и лица важнее полей покадрового просмотра, и
+    /// носитель не должен уйти в «ошибка» из-за них. Отмена пробрасывается: воркер останавливается штатно.
+    /// </summary>
+    private async Task<VideoProbe?> TryProbeAsync(int assetId, string path, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await frameExtractor.ProbeAsync(path, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            MediaIndexerLog.ProbeFailed(logger, exception, assetId);
+            return null;
+        }
+    }
+
     /// <summary>Копирует исходник носителя из хранилища во временный файл <paramref name="tempPath"/>.</summary>
     private async Task CopySourceAsync(
         MediaAssetIndexingInfo info, string subPath, string tempPath, CancellationToken cancellationToken)
@@ -207,7 +237,8 @@ public sealed class MediaIndexer(
 
     /// <summary>
     /// Прогоняет временную копию исходника через детектор/векторизатор: изображение — одним кадром, видео —
-    /// раскадровкой. Возвращает длительность видео (последний таймкод) либо <see langword="null"/> для изображения.
+    /// раскадровкой. Возвращает длительность видео (последний таймкод выборки — запасной источник, если проба
+    /// ADR-0028 не удалась) либо <see langword="null"/> для изображения.
     /// </summary>
     private async Task<long?> ProcessSourceAsync(
         MediaAssetIndexingInfo info, string tempPath, string subPath, Progress progress, CancellationToken cancellationToken)

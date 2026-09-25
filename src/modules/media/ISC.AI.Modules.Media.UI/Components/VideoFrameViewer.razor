@@ -1,0 +1,600 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Просмотрщик видео карточки носителя с покадровым шагом (ADR-0028, предлагаемый ТФ-МЕД-11).
+   ДВА РЕЖИМА по контейнеру:
+   - Playable (mp4/webm): браузерный <video> КАК ЕСТЬ (ТЭ-007); шаг «предыдущий/следующий кадр» — целиком в
+     браузере (media.js stepFrame: пауза и currentTime = середина кадра N±1), без обращений к серверу; клавиши
+     «,» и «.» — слушатель keydown на document (media.js bindFrameKeys). Положение проигрывателя приходит обратно
+     через DotNetObjectReference (OnFrameStepped) по событиям seeked/pause — подпись «кадр № N» следует и за
+     шагом, и за перемоткой ползунком. «Снимок кадра» берёт ТЕКУЩИЙ момент проигрывателя (media.js currentTime).
+     КАДР ПО ВРЕМЕНИ БРАУЗЕРА: кадр N занимает [N/fps, (N+1)/fps), поэтому из секунд браузера номер кадра —
+     floor(t·fps), а не round; в компонент и в команду снимка уходит НОМИНАЛЬНЫЙ момент кадра TimestampOf(N)
+     (сервер по нему считает round(t·fps) = тот же N) — подпись, снимок и экран называют один и тот же кадр.
+   - Иначе (mkv/avi/mov/3gp — браузер не воспроизводит): <img src="/media/frames/{id}?t=…"> — JPEG кадра,
+     вырезанный СЕРВЕРОМ из оригинала по запросу под той же решёткой доступа, что файл носителя (ТБ-020/021);
+     шаг меняет момент и перерисовывает картинку; клавиши «,» и «.» — обёртка с tabindex (щелчок по кадру даёт
+     фокус). Следующий кадр запрашивается только после загрузки (или ошибки) предыдущего: автоповтор клавиши не
+     плодит процессы ffmpeg на сервере. Ошибка загрузки — «кадра нет», откат на прежний момент.
+   Номер кадра — по НАТИВНОЙ частоте (VideoProbe.FrameIndexAt), это не индекс раскадровки. Без частоты (носитель
+   загружен до ADR-0028) шаг — 40 мс с явной пометкой «выполните «Переиндексировать»». Момент всегда зажат по
+   последнему кадру записи (VideoProbe.LastFrameIndex), если длительность известна: за концом кадра нет.
+   Параметры — только примитивы, ОДИН колбэк OnSnapshotRequested (момент, мс); перерисовка — только при смене
+   параметров или собственного состояния (ShouldRender по кортежу): страница карточки перерисовывается часто,
+   а <video> трогать без нужды не стоит. Сам снимок делает страница (команда, аудит, сообщение). *@
+@implements IAsyncDisposable
+@using System
+@using System.Globalization
+@using System.Threading.Tasks
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.JSInterop
+@using ISC.AI.Modules.Media.Domain.Model
+@using ISC.AI.Modules.Media.Domain.Services
+
+@if (Playable)
+{
+    @* Перемотка работает благодаря Range на эндпоинте. Одна выдача файла субъекту — одна запись аудита
+       (MediaViewAuditThrottle, ТБ-030): продолжения Range-запросов при воспроизведении/шаге журнал не множат. *@
+    <video id="@VideoElementId" controls preload="metadata" src="@MediaFileUrl.Originals(AssetId, StoredFileName)"
+           style="max-width:100%;max-height:70vh;display:block;margin:0 auto;"></video>
+}
+else
+{
+    @* Обёртка с tabindex: клавиши «,»/«.» ловятся только когда кадр в фокусе (щелчок по нему) — на document
+       их не вешаем, чтобы не спорить с браузерным <video> других карточек и полями ввода. *@
+    <div id="@FrameWrapperId" tabindex="0" @onkeydown="OnFrameKeyDown"
+         title="Щёлкните по кадру и нажимайте «,» и «.» — предыдущий и следующий кадр"
+         style="display:inline-block;max-width:100%;outline:none;line-height:0;">
+        <img id="@FrameElementId" src="@MediaFileRoutes.BuildFrame(AssetId, _currentMs)"
+             alt="@($"кадр носителя № {AssetId.ToString(CultureInfo.InvariantCulture)} в момент {MediaLabels.PreciseTimecode(_currentMs)}")"
+             style="max-width:100%;max-height:70vh;display:block;margin:0 auto;"
+             @onload="OnFrameLoaded" @onerror="OnFrameFailed" />
+    </div>
+}
+
+<div class="d-flex align-center justify-center flex-wrap gap-2 mt-2">
+    <MudTooltip Text="Предыдущий кадр (,)">
+        <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" aria-label="Предыдущий кадр" Disabled="_snapshotBusy"
+                       OnClick="@(() => StepAsync(-1))" />
+    </MudTooltip>
+    <span style="font-family:monospace;white-space:nowrap;">@MediaLabels.PreciseTimecode(_currentMs)</span>
+    <MudTooltip Text="Следующий кадр (.)">
+        <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" aria-label="Следующий кадр" Disabled="_snapshotBusy"
+                       OnClick="@(() => StepAsync(1))" />
+    </MudTooltip>
+    <MudText Typo="Typo.caption" Class="mud-text-secondary">@(MediaLabels.FrameLabel(_currentMs, FrameRate) ?? UnknownFrameRateHint)</MudText>
+    @if (CanSnapshot)
+    {
+        @* Кнопка заблокирована на время команды: двойной щелчок — не гонка (ADR-0028, п. 7). *@
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PhotoCamera"
+                   Disabled="_snapshotBusy" OnClick="SnapshotAsync">@(_snapshotBusy ? "Сохраняю кадр…" : "Снимок кадра")</MudButton>
+    }
+    @if (!Playable)
+    {
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download"
+                   Href="@MediaFileUrl.Originals(AssetId, StoredFileName)" download="@OriginalFileName">Скачать оригинал</MudButton>
+    }
+</div>
+@if (_notice is not null)
+{
+    <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-1">@_notice</MudText>
+}
+<MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+    @if (Playable)
+    {
+        <text>Видео воспроизводится без обработки (ТЭ-007); шаг по кадрам — кнопками ◀ ▶ или клавишами «,» и «.», переход к кадру —
+        кнопками у лиц и щелчком по фрагменту расшифровки ниже. «Снимок кадра» снимает кадр, на котором остановлен проигрыватель.
+        Если видео не воспроизводится — файла нет либо он вне вашего допуска.</text>
+    }
+    else
+    {
+        <text>Браузер не воспроизводит контейнер @MediaLabels.FormatName(ContentType) — кадры показываются с сервера: каждый кадр вырезается
+        из оригинала без обработки (ТЭ-007). Шаг по кадрам — кнопками ◀ ▶ или, щёлкнув по кадру, клавишами «,» и «.»; переход к кадру —
+        кнопками у лиц и щелчком по фрагменту расшифровки ниже. Если кадр не отображается — файла нет либо он вне вашего допуска.</text>
+    }
+</MudText>
+
+@code {
+    private const string MediaModulePath = "./_content/ISC.AI.Modules.Media.UI/js/media.js";
+
+    /// <summary>Шаг без известной частоты кадров: 40 мс (25 к/с) с явной пометкой (ADR-0028, п. 1).</summary>
+    private const long FallbackStepMs = 40;
+
+    /// <summary>
+    /// Допуск при переводе секунд браузера в номер кадра: произведение t·fps у границы кадра может недотянуть до
+    /// целого на единицы ulp, а кадр N по определению занимает [N/fps, (N+1)/fps).
+    /// </summary>
+    private const double FrameEpsilon = 1e-6;
+
+    /// <summary>
+    /// Страховка серверного режима: если событие загрузки кадра так и не пришло (оборванный запрос), шаг снова
+    /// разрешается через это время — просмотрщик не должен застрять.
+    /// </summary>
+    private static readonly TimeSpan FrameLoadGrace = TimeSpan.FromSeconds(5);
+
+    private const string UnknownFrameRateHint = "частота кадров неизвестна, шаг 40 мс; выполните «Переиндексировать»";
+    private const string ModuleMissing = "Модуль проигрывателя не загружен — обновите страницу и попробуйте снова.";
+    private const string PlayerMissing = "Проигрыватель не найден на странице — обновите её и попробуйте снова.";
+    private const string FrameMissing = "Кадра нет: момент за концом записи либо файл недоступен.";
+
+    /// <summary>Носитель (видео).</summary>
+    [Parameter, EditorRequired] public int AssetId { get; set; }
+
+    /// <summary>Имя файла в хранилище — для ссылки на оригинал (эндпоинт раздачи, допуск проверяет сервер).</summary>
+    [Parameter, EditorRequired] public string StoredFileName { get; set; } = string.Empty;
+
+    /// <summary>Исходное имя файла — имя при скачивании оригинала (режим без проигрывателя).</summary>
+    [Parameter] public string? OriginalFileName { get; set; }
+
+    /// <summary>MIME-тип носителя — название контейнера в подсказке («браузер не воспроизводит контейнер MKV»).</summary>
+    [Parameter] public string ContentType { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Браузер воспроизводит контейнер (mp4/webm) — режим &lt;video&gt; с шагом в браузере; иначе — кадры с сервера.
+    /// </summary>
+    [Parameter] public bool Playable { get; set; }
+
+    /// <summary>Нативная частота кадров носителя (ffprobe); <see langword="null"/> — неизвестна (шаг 40 мс, пометка).</summary>
+    [Parameter] public double? FrameRate { get; set; }
+
+    /// <summary>Длительность записи, мс; <see langword="null"/> — неизвестна (зажима по последнему кадру нет).</summary>
+    [Parameter] public long? DurationMs { get; set; }
+
+    /// <summary>
+    /// Момент, с которого открыть запись (параметр ?t= карточки, мс): в режиме кадров с сервера — первый показанный
+    /// кадр; для &lt;video&gt; — перемотка без запуска после первой отрисовки. Перемотку по ?t= делает ТОЛЬКО
+    /// просмотрщик (панель расшифровки при нём лишь подсвечивает фрагмент).
+    /// </summary>
+    [Parameter] public long StartMs { get; set; }
+
+    /// <summary>Показывать «Снимок кадра» (носитель привязан к делу — снимок сохраняется в него).</summary>
+    [Parameter] public bool CanSnapshot { get; set; }
+
+    /// <summary>«Снимок кадра»: номинальный момент кадра, мс. Сам снимок (команда, сообщение) делает страница.</summary>
+    [Parameter] public EventCallback<long> OnSnapshotRequested { get; set; }
+
+    private long _currentMs;
+    private long _previousMs;
+    private long? _appliedStartMs;
+    private bool _startSeekPending;
+    private bool _frameLoading;
+    private DateTime _frameRequestedAt;
+    private bool _snapshotBusy;
+    private string? _notice;
+    private IJSObjectReference? _module;
+    private bool _moduleFailed;
+    private DotNetObjectReference<VideoFrameViewer>? _selfRef;
+    private string? _boundElementId;
+    private double? _boundFrameSeconds;
+    private (int AssetId, string StoredFileName, string? OriginalFileName, string ContentType, bool Playable, double? FrameRate,
+        long? DurationMs, bool CanSnapshot, long CurrentMs, bool SnapshotBusy, string? Notice) _shown;
+
+    /// <summary>Id элемента &lt;video&gt; (режим Playable) — по нему панель расшифровки перематывает запись.</summary>
+    public string VideoElementId => "media-video-" + AssetId.ToString(CultureInfo.InvariantCulture);
+
+    private string FrameElementId => "media-frame-" + AssetId.ToString(CultureInfo.InvariantCulture);
+
+    private string FrameWrapperId => "media-frame-wrap-" + AssetId.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>Известная частота кадров (> 0) либо <see langword="null"/>.</summary>
+    private double? Fps => FrameRate is { } fps && fps > 0 && double.IsFinite(fps) ? fps : null;
+
+    /// <summary>Длительность кадра, с: 1/fps либо 40 мс без известной частоты.</summary>
+    private double FrameSeconds => Fps is { } fps ? 1.0 / fps : FallbackStepMs / 1000.0;
+
+    /// <summary>Момент записи, показанный сейчас (мс) — для страницы (сообщение о снимке, ссылки).</summary>
+    public long CurrentMs => _currentMs;
+
+    protected override void OnParametersSet()
+    {
+        // Новое значение StartMs (открытие по ?t=) — новый начальный момент; собственные шаги не сбрасываются
+        // при каждой перерисовке страницы, потому что сравниваем с последним применённым, а не с текущим.
+        if (_appliedStartMs != StartMs)
+        {
+            _appliedStartMs = StartMs;
+            SetMoment(ClampToRecord(StartMs));
+            _startSeekPending = Playable && _currentMs > 0;
+        }
+    }
+
+    /// <summary>Перерисовка — только при смене параметров или собственного состояния (см. комментарий компонента).</summary>
+    protected override bool ShouldRender()
+    {
+        var current = (AssetId, StoredFileName, OriginalFileName, ContentType, Playable, FrameRate, DurationMs, CanSnapshot,
+            _currentMs, _snapshotBusy, _notice);
+        if (current == _shown)
+        {
+            return false;
+        }
+
+        _shown = current;
+        return true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // JS нужен только браузерному <video> и только после интерактива (предрендер JS не умеет).
+        if (!RendererInfo.IsInteractive || !Playable)
+        {
+            return;
+        }
+
+        var module = await EnsureModuleAsync();
+        if (module is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (_boundElementId != VideoElementId || _boundFrameSeconds != FrameSeconds)
+            {
+                // Привязка клавиш и слежения — на пару (элемент, частота): смена носителя или частоты (после
+                // переиндексации) переустанавливает её; прежняя снимается по прежнему id.
+                if (_boundElementId is { } previous && previous != VideoElementId)
+                {
+                    await module.InvokeAsync<bool>("unbindFrameKeys", previous);
+                }
+
+                _boundElementId = VideoElementId;
+                _boundFrameSeconds = FrameSeconds;
+                _selfRef ??= DotNetObjectReference.Create(this);
+                await module.InvokeAsync<bool>("bindFrameKeys", VideoElementId, FrameSeconds, _selfRef);
+            }
+
+            if (_startSeekPending)
+            {
+                // Открытие по ?t= — только перемотка, без запуска: звук сам по себе при открытии карточки не включается.
+                _startSeekPending = false;
+                await module.InvokeAsync<bool>("seek", VideoElementId, SeekSecondsFor(_currentMs), false);
+            }
+        }
+        catch (JSException)
+        {
+            // Без клавиш и перемотки просмотрщик живёт: кнопки шага и «Снимок кадра» работают через те же вызовы.
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit уже закрыт — показывать некому.
+        }
+    }
+
+    /// <summary>
+    /// Обратный вызов из media.js о положении проигрывателя (режим Playable): после шага клавишей, перемотки
+    /// ползунком или паузы (события seeked/pause). Секунды браузера переводятся в номинальный момент кадра —
+    /// для подписи «кадр № N». Публичный и с атрибутом — требование JS-interop, вызывать его со страницы не нужно.
+    /// </summary>
+    /// <param name="seconds">currentTime проигрывателя, с.</param>
+    [JSInvokable]
+    public Task OnFrameStepped(double seconds)
+    {
+        _currentMs = NominalMomentOf(seconds);
+        return InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// «К кадру» (таблица лиц, фрагмент расшифровки): показать кадр в момент <paramref name="milliseconds"/> —
+    /// перемотать &lt;video&gt; на середину кадра без запуска либо запросить кадр с сервера. Момент зажимается
+    /// по последнему кадру записи.
+    /// </summary>
+    public async Task ShowMomentAsync(long milliseconds)
+    {
+        _notice = null;
+        SetMoment(ClampToRecord(milliseconds));
+        if (!Playable)
+        {
+            StateHasChanged();
+            return;
+        }
+
+        var module = await EnsureModuleAsync();
+        if (module is null)
+        {
+            _notice = ModuleMissing;
+            StateHasChanged();
+            return;
+        }
+
+        try
+        {
+            var ok = await module.InvokeAsync<bool>("seek", VideoElementId, SeekSecondsFor(_currentMs), false);
+            if (!ok)
+            {
+                _notice = PlayerMissing;
+            }
+        }
+        catch (JSException ex)
+        {
+            _notice = $"Не удалось перемотать видео: {ex.Message}";
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit уже закрыт — показывать некому.
+        }
+
+        StateHasChanged();
+    }
+
+    /// <summary>Кнопки ◀ ▶: шаг на кадр назад/вперёд.</summary>
+    private async Task StepAsync(int direction)
+    {
+        _notice = null;
+        if (!Playable)
+        {
+            StepServerFrame(direction);
+            return;
+        }
+
+        var module = await EnsureModuleAsync();
+        if (module is null)
+        {
+            _notice = ModuleMissing;
+            return;
+        }
+
+        try
+        {
+            var seconds = await module.InvokeAsync<double?>("stepFrame", VideoElementId, FrameSeconds, direction);
+            if (seconds is { } moved)
+            {
+                _currentMs = NominalMomentOf(moved);
+            }
+            else
+            {
+                _notice = PlayerMissing;
+            }
+        }
+        catch (JSException ex)
+        {
+            _notice = $"Не удалось перейти к кадру: {ex.Message}";
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit уже закрыт — показывать некому.
+        }
+    }
+
+    /// <summary>Клавиши «,»/«.» в режиме кадров с сервера (обёртка кадра в фокусе).</summary>
+    private void OnFrameKeyDown(KeyboardEventArgs args)
+    {
+        switch (args.Key)
+        {
+            case ",":
+                StepServerFrame(-1);
+                break;
+            case ".":
+                StepServerFrame(1);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Шаг в режиме кадров с сервера: момент кадра N±1 по нативной частоте (<see cref="VideoProbe.TimestampOf"/>),
+    /// без частоты — ±40 мс; не раньше начала и не дальше последнего кадра записи. Пока предыдущий кадр грузится,
+    /// шаг не делается — автоповтор клавиши не должен ставить серверу очередь запусков ffmpeg.
+    /// </summary>
+    private void StepServerFrame(int direction)
+    {
+        if (_frameLoading && DateTime.UtcNow - _frameRequestedAt < FrameLoadGrace)
+        {
+            return;
+        }
+
+        long next;
+        if (Fps is { } fps)
+        {
+            var index = Math.Max(0, VideoProbe.FrameIndexAt(_currentMs, fps) + direction);
+            if (VideoProbe.LastFrameIndex(DurationMs, fps) is { } last)
+            {
+                index = Math.Min(index, last);
+            }
+
+            next = VideoProbe.TimestampOf(index, fps);
+        }
+        else
+        {
+            next = ClampToRecord(_currentMs + direction * FallbackStepMs);
+        }
+
+        _notice = null;
+        SetMoment(next);
+    }
+
+    /// <summary>Кадр с сервера загружен — можно запрашивать следующий.</summary>
+    private void OnFrameLoaded(ProgressEventArgs args) => _frameLoading = false;
+
+    /// <summary>
+    /// Кадр с сервера не пришёл (404: момент за концом записи, файла нет или он вне допуска — причины сервер не
+    /// различает): пояснение и откат на прежний момент, чтобы не оставлять «битую» картинку.
+    /// </summary>
+    private void OnFrameFailed(ErrorEventArgs args)
+    {
+        _frameLoading = false;
+        _notice = FrameMissing;
+        if (_previousMs != _currentMs)
+        {
+            SetMoment(_previousMs);
+        }
+    }
+
+    /// <summary>
+    /// Установить показываемый момент. В режиме кадров с сервера смена момента — новый запрос кадра: запоминаем
+    /// прежний (для отката при ошибке) и ждём загрузки перед следующим шагом.
+    /// </summary>
+    private void SetMoment(long milliseconds)
+    {
+        if (milliseconds == _currentMs)
+        {
+            return;
+        }
+
+        _previousMs = _currentMs;
+        _currentMs = milliseconds;
+        if (!Playable)
+        {
+            _frameLoading = true;
+            _frameRequestedAt = DateTime.UtcNow;
+        }
+    }
+
+    /// <summary>
+    /// «Снимок кадра»: момент — текущий currentTime проигрывателя (Playable), переведённый в номинальный момент
+    /// кадра (команда по нему получит тот же номер кадра), либо показанный кадр; страница делает команду, кнопка
+    /// заблокирована до её завершения (колбэк ожидается целиком).
+    /// </summary>
+    private async Task SnapshotAsync()
+    {
+        if (_snapshotBusy || !OnSnapshotRequested.HasDelegate)
+        {
+            return;
+        }
+
+        _notice = null;
+        var moment = _currentMs;
+        if (Playable)
+        {
+            var module = await EnsureModuleAsync();
+            if (module is null)
+            {
+                _notice = ModuleMissing;
+                return;
+            }
+
+            try
+            {
+                var seconds = await module.InvokeAsync<double?>("currentTime", VideoElementId);
+                if (seconds is not { } now)
+                {
+                    _notice = PlayerMissing;
+                    return;
+                }
+
+                moment = NominalMomentOf(now);
+                _currentMs = moment;
+            }
+            catch (JSException ex)
+            {
+                _notice = $"Не удалось узнать текущий момент записи: {ex.Message}";
+                return;
+            }
+            catch (JSDisconnectedException)
+            {
+                return;
+            }
+        }
+
+        _snapshotBusy = true;
+        StateHasChanged();
+        try
+        {
+            await OnSnapshotRequested.InvokeAsync(moment);
+        }
+        finally
+        {
+            _snapshotBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Секунды браузера → номинальный момент показываемого кадра, мс: N = floor(t·fps) (кадр занимает
+    /// [N/fps, (N+1)/fps)), не дальше последнего кадра записи; без частоты — округление до миллисекунды.
+    /// </summary>
+    private long NominalMomentOf(double seconds)
+    {
+        if (!double.IsFinite(seconds) || seconds < 0)
+        {
+            seconds = 0;
+        }
+
+        if (Fps is { } fps)
+        {
+            var index = (long)Math.Floor(seconds * fps + FrameEpsilon);
+            if (VideoProbe.LastFrameIndex(DurationMs, fps) is { } last)
+            {
+                index = Math.Min(index, last);
+            }
+
+            return VideoProbe.TimestampOf(index, fps);
+        }
+
+        return ClampToRecord((long)Math.Round(seconds * 1000.0));
+    }
+
+    /// <summary>
+    /// Момент, мс → момент внутри записи: при известной частоте — номинальное время кадра round(t·fps), не дальше
+    /// последнего; иначе — не дальше конца записи (если длительность известна).
+    /// </summary>
+    private long ClampToRecord(long milliseconds)
+    {
+        milliseconds = Math.Max(0, milliseconds);
+        if (Fps is { } fps)
+        {
+            var index = VideoProbe.FrameIndexAt(milliseconds, fps);
+            if (VideoProbe.LastFrameIndex(DurationMs, fps) is { } last)
+            {
+                index = Math.Min(index, last);
+            }
+
+            return VideoProbe.TimestampOf(index, fps);
+        }
+
+        return DurationMs is { } duration && duration > 0 ? Math.Min(milliseconds, duration - 1) : milliseconds;
+    }
+
+    /// <summary>
+    /// Секунда для перемотки &lt;video&gt; к кадру момента <paramref name="milliseconds"/>: СЕРЕДИНА кадра
+    /// (N + 0,5)/fps — на границе кадра браузер может показать соседний (ADR-0028, п. 3); без частоты — как есть.
+    /// </summary>
+    private double SeekSecondsFor(long milliseconds) =>
+        Fps is { } fps ? (VideoProbe.FrameIndexAt(milliseconds, fps) + 0.5) / fps : milliseconds / 1000.0;
+
+    /// <summary>Ленивая загрузка JS-модуля пакета; после первого сбоя не повторяем (просмотрщик живёт без него).</summary>
+    private async Task<IJSObjectReference?> EnsureModuleAsync()
+    {
+        if (_module is not null || _moduleFailed)
+        {
+            return _module;
+        }
+
+        try
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", MediaModulePath);
+        }
+        catch (JSException)
+        {
+            _moduleFailed = true;
+        }
+        catch (JSDisconnectedException)
+        {
+            _moduleFailed = true;
+        }
+
+        return _module;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try
+            {
+                if (_boundElementId is { } bound)
+                {
+                    // Снять слушатели с document и элемента — иначе они переживут страницу.
+                    await _module.InvokeAsync<bool>("unbindFrameKeys", bound);
+                }
+
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit уже закрыт — освобождать на клиенте нечего.
+            }
+            catch (JSException)
+            {
+                // Сбой очистки не должен ронять уход со страницы.
+            }
+        }
+
+        _selfRef?.Dispose();
+    }
+}

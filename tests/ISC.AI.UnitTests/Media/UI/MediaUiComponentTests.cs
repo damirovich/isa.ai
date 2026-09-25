@@ -4,9 +4,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using AngleSharp.Dom;
 using Bunit;
 using ISC.AI.Abstractions.Application;
 using ISC.AI.Modules.Media.Application.Features.Assets;
+using ISC.AI.Modules.Media.Application.Features.Assets.Commands.SnapshotFrame;
 using ISC.AI.Modules.Media.Application.Features.Scope;
 using ISC.AI.Modules.Media.Application.Features.Transcripts;
 using ISC.AI.Modules.Media.Application.Features.Verification;
@@ -244,10 +246,36 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
         cut.Markup.ShouldContain("mud-progress-linear");
     }
 
-    private static MediaAssetRow Asset(MediaKind kind, string contentType) => new(
-        5, kind, "voice.ogg", "0123456789abcdef0123456789abcdef.ogg", contentType, 1024, 70_000, null, null,
+    private static MediaAssetRow Asset(
+        MediaKind kind, string contentType, double? frameRate = null, int? sourceAssetId = null, long? sourceTimestampMs = null,
+        int id = 5, string fileName = "voice.ogg") => new(
+        id, kind, fileName, "0123456789abcdef0123456789abcdef.ogg", contentType, 1024, 70_000, null, null,
         0, 1, 1, kind == MediaKind.Audio ? MediaIndexStatus.NotApplicable : MediaIndexStatus.Indexed,
-        null, null, null, null, DateTime.UtcNow, 0, TranscriptStatus.Done);
+        null, null, null, null, DateTime.UtcNow, 0, TranscriptStatus.Done,
+        frameRate, frameRate is null ? null : 1920, frameRate is null ? null : 1080, sourceAssetId, sourceTimestampMs);
+
+    /// <summary>Карточка носителя с заданной строкой носителя; лица — по желанию, дело № 3 (или без дела).</summary>
+    private IRenderedComponent<ISC.AI.Modules.Media.UI.AssetCard> RenderCard(MediaAssetRow asset, IReadOnlyList<FaceRow>? faces = null, int? caseId = 3)
+    {
+        Render<MudPopoverProvider>();
+        _mediator.Send(Arg.Any<GetMediaAssetQuery>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<ResponseDto<MediaAssetDetails>>(ResponseDto<MediaAssetDetails>.Ok(
+                new MediaAssetDetails(asset, faces ?? [], caseId))));
+        return Render<ISC.AI.Modules.Media.UI.AssetCard>(p => p.Add(x => x.Id, 5));
+    }
+
+    private static FaceRow VideoFace(int id, long timestampMs) =>
+        new(id, 5, 1, timestampMs, 10, 10, 50, 50, 0.9f, 0.8f, true, null, null, null, 0, 1);
+
+    private static IElement FrameButton(IRenderedComponent<ISC.AI.Modules.Media.UI.AssetCard> cut, string label) =>
+        cut.Find($"button[aria-label='{label}']");
+
+    private static string FrameSrc(IRenderedComponent<ISC.AI.Modules.Media.UI.AssetCard> cut) =>
+        cut.Find("img#media-frame-5").GetAttribute("src")!;
+
+    /// <summary>Браузер загрузил кадр с сервера — просмотрщик снова принимает шаги.</summary>
+    private static void FrameLoaded(IRenderedComponent<ISC.AI.Modules.Media.UI.AssetCard> cut) =>
+        cut.Find("img#media-frame-5").Load(new Microsoft.AspNetCore.Components.Web.ProgressEventArgs());
 
     [Fact(DisplayName = "Карточка аудио: проигрыватель, без блоков лиц и переиндексации, ?t= перематывает")]
     public void AssetCard_audio_player_no_faces_and_query_t()
@@ -418,22 +446,345 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
         }
     }
 
-    [Fact(DisplayName = "Карточка видео 3GP: вместо проигрывателя — «скачать», в подсказке назван именно 3GP")]
+    [Fact(DisplayName = "Карточка видео 3GP: вместо проигрывателя — кадр с сервера и «скачать», в подсказке назван именно 3GP, фрагмент расшифровки ведёт к кадру")]
     public void AssetCard_3gp_video_names_its_container()
     {
-        Render<MudPopoverProvider>();
-        _mediator.Send(Arg.Any<GetMediaAssetQuery>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<ResponseDto<MediaAssetDetails>>(ResponseDto<MediaAssetDetails>.Ok(
-                new MediaAssetDetails(Asset(MediaKind.Video, "video/3gpp"), [], 3))));
         SetupTranscript(Transcript(TranscriptStatus.Done, null, new TranscriptSegmentRow(0, 1_000, 4_000, "бир")));
 
-        var cut = Render<ISC.AI.Modules.Media.UI.AssetCard>(p => p.Add(x => x.Id, 5));
+        var cut = RenderCard(Asset(MediaKind.Video, "video/3gpp"));
 
         cut.FindAll("video").ShouldBeEmpty();
+        FrameSrc(cut).ShouldBe("/media/frames/5?t=0");
         cut.Markup.ShouldContain("Скачать оригинал");
         cut.Markup.ShouldContain("Браузер не воспроизводит контейнер 3GP");
+        cut.Markup.ShouldContain("кадры показываются с сервера");
         cut.Markup.ShouldNotContain("MKV/AVI/MOV");
-        cut.Markup.ShouldContain("переход к месту записи недоступен");
+        cut.Markup.ShouldNotContain("переход к месту записи недоступен");
+
+        // Щелчок по фрагменту — не «воспроизвести», а показать кадр с этого места (ADR-0028, п. 10).
+        var row = cut.Find("#media-transcript-5-0");
+        row.TagName.ShouldBe("BUTTON");
+        row.GetAttribute("title").ShouldBe("Показать кадр с этого места");
+        row.Click();
+        FrameSrc(cut).ShouldBe("/media/frames/5?t=1000");
+        _module.Invocations["seek"].ShouldBeEmpty("проигрывателя нет — перематывать нечего");
+    }
+
+    [Fact(DisplayName = "Видео mp4: панель покадрового шага, «кадр ▶» делает шаг в браузере по частоте носителя, клавиши привязаны")]
+    public async Task Viewer_mp4_next_frame_steps_in_browser()
+    {
+        SetupTranscript(Transcript(TranscriptStatus.NotApplicable));
+        // Реальный stepFrame ставит СЕРЕДИНУ кадра 1 (0,06 с при 25 к/с): подпись обязана назвать кадр № 1, а не № 2.
+        _module.Setup<double?>("stepFrame", _ => true).SetResult(0.06);
+
+        var cut = RenderCard(Asset(MediaKind.Video, "video/mp4", frameRate: 25));
+
+        cut.Find("video#media-video-5");
+        cut.Markup.ShouldContain("25 к/с, 1920×1080");
+        cut.Markup.ShouldContain("00:00:00.000");
+        cut.Markup.ShouldContain("кадр № 0 при 25 к/с");
+        cut.WaitForAssertion(() =>
+        {
+            var bind = _module.Invocations["bindFrameKeys"].ShouldHaveSingleItem();
+            bind.Arguments[0].ShouldBe("media-video-5");
+            bind.Arguments[1].ShouldBe(0.04);
+        });
+
+        FrameButton(cut, "Следующий кадр").Click();
+
+        var step = _module.Invocations["stepFrame"].ShouldHaveSingleItem();
+        step.Arguments[0].ShouldBe("media-video-5");
+        step.Arguments[1].ShouldBe(0.04);
+        step.Arguments[2].ShouldBe(1);
+        cut.Markup.ShouldContain("00:00:00.040");
+        cut.Markup.ShouldContain("кадр № 1 при 25 к/с");
+        cut.FindAll("img#media-frame-5").ShouldBeEmpty();
+
+        // Положение проигрывателя из JS (seeked/pause): середина кадра 1625 → номинальный момент 1:05.000.
+        await cut.FindComponent<VideoFrameViewer>().Instance.OnFrameStepped(65.02);
+        cut.Markup.ShouldContain("00:01:05.000");
+        cut.Markup.ShouldContain("кадр № 1625 при 25 к/с");
+
+        // Уход со страницы снимает слушатель клавиш с document — иначе он пережил бы карточку.
+        await DisposeComponentsAsync();
+        _module.Invocations["unbindFrameKeys"].ShouldHaveSingleItem().Arguments[0].ShouldBe("media-video-5");
+    }
+
+    [Fact(DisplayName = "Видео mp4 по ?t=: перематывает ТОЛЬКО просмотрщик (на середину кадра, без запуска), панель расшифровки лишь подсвечивает фрагмент")]
+    public void Viewer_mp4_start_at_seeks_once_without_play()
+    {
+        SetupTranscript(Transcript(TranscriptStatus.Done, null,
+            new TranscriptSegmentRow(0, 1_000, 4_000, "бир"),
+            new TranscriptSegmentRow(1, 65_000, 70_000, "эки")));
+        Services.GetRequiredService<NavigationManager>().NavigateTo("/media/assets/5?t=65000");
+
+        var cut = RenderCard(Asset(MediaKind.Video, "video/mp4", frameRate: 25));
+
+        cut.WaitForAssertion(() => _module.Invocations["reveal"].ShouldHaveSingleItem().Arguments[0].ShouldBe("media-transcript-5-1"));
+        cut.WaitForAssertion(() =>
+        {
+            var seek = _module.Invocations["seek"].ShouldHaveSingleItem("две перемотки из разных компонентов — гонка прокрутки");
+            seek.Arguments[0].ShouldBe("media-video-5");
+            seek.Arguments[1].ShouldBe(65.02);
+            seek.Arguments[2].ShouldBe(false);
+        });
+        cut.Find("#media-transcript-5-1").GetAttribute("style")!.ShouldContain("var(--mud-palette-primary)");
+        cut.Markup.ShouldContain("00:01:05.000");
+        cut.Markup.ShouldContain("кадр № 1625 при 25 к/с");
+    }
+
+    [Fact(DisplayName = "«Снимок кадра» в mp4: момент проигрывателя переводится в номинальный момент показанного кадра (floor, не дальше последнего)")]
+    public void Viewer_mp4_snapshot_uses_nominal_frame_moment()
+    {
+        SetupTranscript(Transcript(TranscriptStatus.NotApplicable));
+        _mediator.Send(Arg.Any<SnapshotFrameCommand>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<ResponseDto<SnapshotFrameResult>>(ResponseDto<SnapshotFrameResult>.Ok(
+                new SnapshotFrameResult(9, "fedcba9876543210fedcba9876543210.png", false, 1, 40))));
+        var cut = RenderCard(Asset(MediaKind.Video, "video/mp4", frameRate: 25));
+
+        // Проигрыватель стоит на середине кадра 1 (0,06 с) — снимается кадр 1, момент 40 мс.
+        _module.Setup<double?>("currentTime", _ => true).SetResult(0.06);
+        cut.FindAll("button").First(b => b.TextContent.Contains("Снимок кадра")).Click();
+        _mediator.Received(1).Send(Arg.Is<SnapshotFrameCommand>(c => c.AssetId == 5 && c.TimestampMs == 40), Arg.Any<CancellationToken>());
+        cut.Markup.ShouldContain("кадр № 1 при 25 к/с");
+
+        // Проигрыватель на самом конце (70,0 с при длительности 70 000 мс) — не дальше последнего кадра 1749.
+        _module.Setup<double?>("currentTime", _ => true).SetResult(70.0);
+        cut.FindAll("button").First(b => b.TextContent.Contains("Снимок кадра")).Click();
+        _mediator.Received(1).Send(Arg.Is<SnapshotFrameCommand>(c => c.AssetId == 5 && c.TimestampMs == 69_960), Arg.Any<CancellationToken>());
+        cut.Markup.ShouldContain("кадр № 1749 при 25 к/с");
+    }
+
+    [Fact(DisplayName = "Видео MKV: следующий кадр запрашивается только после загрузки предыдущего; ошибка загрузки — «кадра нет» и откат")]
+    public void Viewer_mkv_waits_for_frame_load_and_rolls_back_on_error()
+    {
+        SetupTranscript(Transcript(TranscriptStatus.NotApplicable));
+        var cut = RenderCard(Asset(MediaKind.Video, "video/x-matroska", frameRate: 25));
+
+        FrameButton(cut, "Следующий кадр").Click();
+        FrameSrc(cut).ShouldBe("/media/frames/5?t=40");
+        // Кадр ещё грузится — автоповтор клавиши/кнопки не плодит запросы к серверу.
+        FrameButton(cut, "Следующий кадр").Click();
+        cut.Find("#media-frame-wrap-5").KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "." });
+        FrameSrc(cut).ShouldBe("/media/frames/5?t=40");
+
+        FrameLoaded(cut);
+        FrameButton(cut, "Следующий кадр").Click();
+        FrameSrc(cut).ShouldBe("/media/frames/5?t=80");
+
+        // Сервер кадра не дал (404) — пояснение и возврат к прежнему кадру, а не «битая» картинка.
+        cut.Find("img#media-frame-5").Error(new Microsoft.AspNetCore.Components.Web.ErrorEventArgs());
+        FrameSrc(cut).ShouldBe("/media/frames/5?t=40");
+        cut.Markup.ShouldContain("Кадра нет");
+    }
+
+    [Fact(DisplayName = "Видео MKV по ?t= за концом записи: момент зажат по последнему кадру, кадр за концом не запрашивается")]
+    public void Viewer_mkv_start_at_beyond_end_is_clamped()
+    {
+        SetupTranscript(Transcript(TranscriptStatus.NotApplicable));
+        Services.GetRequiredService<NavigationManager>().NavigateTo("/media/assets/5?t=90000");
+
+        var cut = RenderCard(Asset(MediaKind.Video, "video/x-matroska", frameRate: 25));
+
+        FrameSrc(cut).ShouldBe("/media/frames/5?t=69960");
+        cut.Markup.ShouldContain("кадр № 1749 при 25 к/с");
+        // «К кадру» за концом — тот же зажим.
+        FrameLoaded(cut);
+        cut.FindComponent<VideoFrameViewer>().Instance.ShowMomentAsync(80_000).GetAwaiter().GetResult();
+        FrameSrc(cut).ShouldBe("/media/frames/5?t=69960");
+    }
+
+    [Fact(DisplayName = "Смена носителя в адресе (снимок ↔ источник): карточка перечитывается один раз на новый Id, старые реквизиты не остаются")]
+    public void AssetCard_id_change_reloads_card()
+    {
+        SetupTranscript(Transcript(TranscriptStatus.NotApplicable));
+        var cut = RenderCard(Asset(MediaKind.Video, "video/mp4", frameRate: 25, fileName: "source.mp4"));
+        cut.Find("video#media-video-5");
+        cut.Markup.ShouldContain("source.mp4");
+
+        _mediator.Send(Arg.Is<GetMediaAssetQuery>(q => q.AssetId == 7), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<ResponseDto<MediaAssetDetails>>(ResponseDto<MediaAssetDetails>.Ok(
+                new MediaAssetDetails(Asset(MediaKind.Image, "image/png", sourceAssetId: 5, sourceTimestampMs: 40, id: 7, fileName: "frame.png"), [], 3))));
+
+        cut.Render(p => p.Add(x => x.Id, 7));
+
+        _mediator.Received(1).Send(Arg.Is<GetMediaAssetQuery>(q => q.AssetId == 7), Arg.Any<CancellationToken>());
+        cut.Markup.ShouldContain("frame.png");
+        cut.Markup.ShouldNotContain("source.mp4");
+        cut.FindAll("video").ShouldBeEmpty();
+        cut.Find("img#media-image-7");
+        cut.Markup.ShouldContain("href=\"/media/assets/5?t=40\"");
+
+        // Смена только ?t= того же носителя карточку не перечитывает (ТБ-030: одна запись View на открытие).
+        cut.Render(p => p.Add(x => x.Id, 7));
+        _mediator.Received(1).Send(Arg.Is<GetMediaAssetQuery>(q => q.AssetId == 7), Arg.Any<CancellationToken>());
+        _mediator.Received(1).Send(Arg.Is<GetMediaAssetQuery>(q => q.AssetId == 5), Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "Видео mp4 без частоты кадров: пометка «шаг 40 мс, выполните «Переиндексировать»», шаг 0,04 с")]
+    public void Viewer_unknown_frame_rate_hint_and_fallback_step()
+    {
+        SetupTranscript(Transcript(TranscriptStatus.NotApplicable));
+        _module.Setup<double?>("stepFrame", _ => true).SetResult(0.04);
+
+        var cut = RenderCard(Asset(MediaKind.Video, "video/mp4"));
+
+        cut.Markup.ShouldContain("частота кадров неизвестна, шаг 40 мс; выполните «Переиндексировать»");
+        cut.Markup.ShouldNotContain("кадр №");
+        FrameButton(cut, "Следующий кадр").Click();
+        _module.Invocations["stepFrame"].ShouldHaveSingleItem().Arguments[1].ShouldBe(0.04);
+        cut.Markup.ShouldContain("00:00:00.040");
+    }
+
+    [Fact(DisplayName = "Видео MKV: кадр с сервера, «кадр ▶»/«◀ кадр» и клавиши «.»/«,» меняют момент по частоте, назад от начала — 0")]
+    public void Viewer_mkv_server_frames_step_by_buttons_and_keys()
+    {
+        SetupTranscript(Transcript(TranscriptStatus.NotApplicable));
+
+        var cut = RenderCard(Asset(MediaKind.Video, "video/x-matroska", frameRate: 25));
+
+        cut.FindAll("video").ShouldBeEmpty();
+        FrameSrc(cut).ShouldBe("/media/frames/5?t=0");
+        cut.Markup.ShouldContain("Браузер не воспроизводит контейнер MKV");
+        cut.Markup.ShouldContain("кадры показываются с сервера");
+        cut.Markup.ShouldContain("Скачать оригинал");
+
+        FrameButton(cut, "Следующий кадр").Click();
+        FrameSrc(cut).ShouldBe("/media/frames/5?t=40");
+        cut.Markup.ShouldContain("00:00:00.040");
+        cut.Markup.ShouldContain("кадр № 1 при 25 к/с");
+
+        FrameLoaded(cut);
+        FrameButton(cut, "Следующий кадр").Click();
+        FrameSrc(cut).ShouldBe("/media/frames/5?t=80");
+        FrameLoaded(cut);
+        FrameButton(cut, "Предыдущий кадр").Click();
+        FrameSrc(cut).ShouldBe("/media/frames/5?t=40");
+        FrameLoaded(cut);
+
+        var wrapper = cut.Find("#media-frame-wrap-5");
+        wrapper.GetAttribute("tabindex").ShouldBe("0");
+        wrapper.KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "." });
+        FrameSrc(cut).ShouldBe("/media/frames/5?t=80");
+        FrameLoaded(cut);
+        wrapper.KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "," });
+        FrameLoaded(cut);
+        wrapper.KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "," });
+        FrameSrc(cut).ShouldBe("/media/frames/5?t=0");
+        FrameLoaded(cut);
+        wrapper.KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "," });
+        FrameSrc(cut).ShouldBe("/media/frames/5?t=0");
+
+        // В браузере шаг не делается: серверный просмотрщик модуль для шага не зовёт.
+        _module.Invocations["stepFrame"].ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Видео MKV: «к кадру» у лица показывает кадр с сервера в момент лица")]
+    public void Viewer_mkv_face_timecode_shows_frame()
+    {
+        SetupTranscript(Transcript(TranscriptStatus.NotApplicable));
+
+        var cut = RenderCard(Asset(MediaKind.Video, "video/x-matroska", frameRate: 25), [VideoFace(11, 2_000)]);
+
+        cut.FindAll("button").First(b => b.TextContent.Contains("0:02.0")).Click();
+        FrameSrc(cut).ShouldBe("/media/frames/5?t=2000");
+        cut.Markup.ShouldContain("кадр № 50 при 25 к/с");
+    }
+
+    [Fact(DisplayName = "«Снимок кадра»: команда с носителем и моментом, сообщение со ссылкой на новое фото и «скачать», карточка не перечитывается")]
+    public void Viewer_snapshot_sends_command_and_shows_link()
+    {
+        SetupTranscript(Transcript(TranscriptStatus.NotApplicable));
+        _mediator.Send(Arg.Any<SnapshotFrameCommand>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<ResponseDto<SnapshotFrameResult>>(ResponseDto<SnapshotFrameResult>.Ok(
+                new SnapshotFrameResult(9, "fedcba9876543210fedcba9876543210.png", false, 1, 40))));
+
+        var cut = RenderCard(Asset(MediaKind.Video, "video/x-matroska", frameRate: 25));
+        FrameButton(cut, "Следующий кадр").Click();
+        cut.FindAll("button").First(b => b.TextContent.Contains("Снимок кадра")).Click();
+
+        _mediator.Received(1).Send(Arg.Is<SnapshotFrameCommand>(c => c.AssetId == 5 && c.TimestampMs == 40), Arg.Any<CancellationToken>());
+        cut.Markup.ShouldContain("Кадр № 1 (00:00:00.040) сохранён как фото");
+        cut.Markup.ShouldContain("href=\"/media/assets/9\"");
+        cut.FindAll("a[download]").Any(a => a.GetAttribute("href") == "/media/files/media-originals/9/fedcba9876543210fedcba9876543210.png")
+            .ShouldBeTrue("ссылка «скачать» — оригинал нового носителя, вложением");
+        cut.Markup.ShouldNotContain("уже есть");
+        // Повторный GetMediaAssetQuery — вторая запись View в журнале (ТБ-030): после снимка карточку не перечитываем.
+        _mediator.Received(1).Send(Arg.Any<GetMediaAssetQuery>(), Arg.Any<CancellationToken>());
+        cut.FindAll("button").First(b => b.TextContent.Contains("Снимок кадра")).HasAttribute("disabled").ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "«Снимок кадра»: такой кадр уже есть (дедуп) — сообщение про существующий носитель")]
+    public void Viewer_snapshot_duplicate_says_already_exists()
+    {
+        SetupTranscript(Transcript(TranscriptStatus.NotApplicable));
+        _mediator.Send(Arg.Any<SnapshotFrameCommand>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<ResponseDto<SnapshotFrameResult>>(ResponseDto<SnapshotFrameResult>.Ok(
+                new SnapshotFrameResult(12, "fedcba9876543210fedcba9876543210.png", true, 0, 0))));
+
+        var cut = RenderCard(Asset(MediaKind.Video, "video/x-matroska", frameRate: 25));
+        cut.FindAll("button").First(b => b.TextContent.Contains("Снимок кадра")).Click();
+
+        cut.Markup.ShouldContain("Такой кадр уже есть в деле — носитель");
+        cut.Markup.ShouldContain("href=\"/media/assets/12\"");
+        cut.Markup.ShouldNotContain("сохранён как фото");
+    }
+
+    [Fact(DisplayName = "«Снимок кадра»: отказ сервера показан как ошибка карточки")]
+    public void Viewer_snapshot_refusal_shows_error()
+    {
+        SetupTranscript(Transcript(TranscriptStatus.NotApplicable));
+        _mediator.Send(Arg.Any<SnapshotFrameCommand>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<ResponseDto<SnapshotFrameResult>>(
+                ResponseDto<SnapshotFrameResult>.BadRequest("Снимок кадра недоступен: нет права загрузки")));
+
+        var cut = RenderCard(Asset(MediaKind.Video, "video/x-matroska", frameRate: 25));
+        cut.FindAll("button").First(b => b.TextContent.Contains("Снимок кадра")).Click();
+
+        cut.FindAll(".mud-alert").Any(a => a.TextContent.Contains("Снимок кадра недоступен: нет права загрузки")).ShouldBeTrue();
+        cut.Markup.ShouldNotContain("сохранён как фото");
+    }
+
+    [Fact(DisplayName = "Носитель без дела: «Снимок кадра» не предлагается — сохранять снимок некуда")]
+    public void Viewer_no_case_hides_snapshot()
+    {
+        SetupTranscript(Transcript(TranscriptStatus.NotApplicable));
+        var cut = RenderCard(Asset(MediaKind.Video, "video/mp4", frameRate: 25), caseId: null);
+        cut.FindAll("button").Any(b => b.TextContent.Contains("Снимок кадра")).ShouldBeFalse();
+        FrameButton(cut, "Следующий кадр");
+    }
+
+    [Fact(DisplayName = "Карточка снимка кадра: в шапке ссылка на носитель-источник с моментом кадра")]
+    public void AssetCard_snapshot_shows_source_link()
+    {
+        var cut = RenderCard(Asset(MediaKind.Image, "image/png", sourceAssetId: 7, sourceTimestampMs: 65_040));
+        cut.Markup.ShouldContain("Снимок кадра из носителя");
+        cut.Markup.ShouldContain("href=\"/media/assets/7?t=65040\"");
+        cut.Markup.ShouldContain("(00:01:05.040)");
+    }
+
+    [Fact(DisplayName = "Панель расшифровки без проигрывателя, но с OnSeekRequested: фрагменты кликабельны и отдают момент")]
+    public void Panel_seek_callback_without_player_makes_segments_clickable()
+    {
+        SetupTranscript(Transcript(TranscriptStatus.Done, null,
+            new TranscriptSegmentRow(0, 1_000, 4_000, "бир"),
+            new TranscriptSegmentRow(1, 65_000, 70_000, "эки")));
+        var received = new List<long>();
+
+        var cut = Render<TranscriptPanel>(p => p
+            .Add(x => x.AssetId, 5)
+            .Add(x => x.OnSeekRequested, ms => received.Add(ms)));
+
+        cut.Markup.ShouldContain("показать кадр с этого места");
+        cut.Markup.ShouldNotContain("переход к месту записи недоступен");
+        var row = cut.Find("#media-transcript-5-1");
+        row.TagName.ShouldBe("BUTTON");
+        row.GetAttribute("title").ShouldBe("Показать кадр с этого места");
+        row.Click();
+
+        received.ShouldBe([65_000L]);
+        cut.Find("#media-transcript-5-1").GetAttribute("style")!.ShouldContain("var(--mud-palette-primary)");
+        _module.Invocations["seek"].ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Поиск по расшифровкам дела: найденное выделено, разметка экранирована, ссылка ведёт к месту записи")]

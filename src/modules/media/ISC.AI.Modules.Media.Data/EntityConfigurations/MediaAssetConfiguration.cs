@@ -41,5 +41,10 @@ public sealed class MediaAssetConfiguration : IEntityTypeConfiguration<MediaAsse
         builder.HasIndex(a => a.StoredFileName).IsUnique();
         builder.HasIndex(a => new { a.Classification, a.DivisionId });
         builder.HasIndex(a => a.IndexStatus);
+
+        // Происхождение снимка кадра (ADR-0028): слабая ссылка на видео-источник БЕЗ FK (как uploaded_by_user_id) —
+        // уничтожение видео не должно каскадом и без своей записи журнала снести снимок (ТБ-064/075). Индекс —
+        // частичный: заполнен только у снимков, а нужен для «снимки этого видео» в карточке носителя.
+        builder.HasIndex(a => a.SourceAssetId).HasFilter("source_asset_id IS NOT NULL");
     }
 }

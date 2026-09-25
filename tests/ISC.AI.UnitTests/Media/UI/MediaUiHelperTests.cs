@@ -45,6 +45,30 @@ public sealed class MediaUiHelperTests
         MediaLabels.ClockTimecode(36_000_000 + 5_000).ShouldBe("10:00:05");
     }
 
+    [Fact(DisplayName = "Точный таймкод покадрового просмотра: «чч:мм:сс.ммм», отрицательное — начало записи")]
+    public void PreciseTimecode_formats()
+    {
+        MediaLabels.PreciseTimecode(0).ShouldBe("00:00:00.000");
+        MediaLabels.PreciseTimecode(40).ShouldBe("00:00:00.040");
+        MediaLabels.PreciseTimecode(65_900).ShouldBe("00:01:05.900");
+        MediaLabels.PreciseTimecode(3_661_001).ShouldBe("01:01:01.001");
+        MediaLabels.PreciseTimecode(36_000_000 + 5_000).ShouldBe("10:00:05.000");
+        MediaLabels.PreciseTimecode(-5).ShouldBe("00:00:00.000");
+    }
+
+    [Fact(DisplayName = "Подпись «кадр № N при F к/с» — по нативной частоте; без частоты подписи нет")]
+    public void FrameLabel_by_native_frame_rate()
+    {
+        MediaLabels.FrameLabel(0, 25).ShouldBe("кадр № 0 при 25 к/с");
+        MediaLabels.FrameLabel(40, 25).ShouldBe("кадр № 1 при 25 к/с");
+        MediaLabels.FrameLabel(2_000, 25).ShouldBe("кадр № 50 при 25 к/с");
+        MediaLabels.FrameLabel(1_000, 29.97).ShouldBe("кадр № 30 при 29.97 к/с");
+        MediaLabels.FrameLabel(-40, 25).ShouldBe("кадр № 0 при 25 к/с");
+        MediaLabels.FrameLabel(40, null).ShouldBeNull();
+        MediaLabels.FrameLabel(40, 0).ShouldBeNull();
+        MediaLabels.FrameLabel(40, double.NaN).ShouldBeNull();
+    }
+
     [Fact(DisplayName = "Числовые параметры адреса: разбираются только десятичные цифры, остальное — «параметра нет»")]
     public void QueryValues_parse_digits_only()
     {

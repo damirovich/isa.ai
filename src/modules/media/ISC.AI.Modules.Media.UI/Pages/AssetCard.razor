@@ -2,9 +2,12 @@
 @* Карточка носителя (ТФ-МЕД-03, ТФ-ПЛ-03): реквизиты, гриф, дело; изображение/видео КАК ЕСТЬ (ТЭ-007) —
    рамки лиц на фото рисуются CSS-оверлеем поверх <img> (в процентах от натурального размера, который
    измеряет JS-модуль пакета), сам файл не меняется; лица носителя — вырезки с пригодностью и баллом
-   детектора; у видео — таймкоды с кнопкой «к кадру» (перемотка через ленивый JS-модуль пакета, только
-   в OnAfterRenderAsync — предрендер JS не умеет). Контейнеры MKV/AVI/MOV/3GP браузер не воспроизводит —
-   вместо плеера ссылка на скачивание оригинала, «к кадру» недоступно.
+   детектора; у видео — таймкоды с кнопкой «к кадру». ВИДЕО показывает VideoFrameViewer (ADR-0028): mp4/webm —
+   браузерный <video> с шагом по кадрам в браузере; контейнеры MKV/AVI/MOV/3GP, которые браузер не воспроизводит, —
+   кадрами JPEG с сервера (/media/frames/{id}?t=…, та же решётка доступа), «к кадру» работает в обоих режимах.
+   «Снимок кадра» — SnapshotFrameCommand: кадр из ОРИГИНАЛА (PNG, ТЭ-007) становится новым фото-носителем того же
+   дела с реквизитами происхождения; после снимка карточка НЕ перечитывается (повторный GetMediaAssetQuery —
+   вторая запись View в журнале, ТБ-030). У снимка в шапке — ссылка на носитель-источник и момент.
    У каждого лица — «Найти этого человека в других материалах» (проба = лицо носителя, ТФ-ПЛ-03) и
    «Привязать к фигуранту» (ручная привязка создаёт КАНДИДАТА для двойной верификации, ТФ-МЕД-03).
    Допуск проверяет сервер: и запрос карточки, и каждая отдача файла (ТБ-020/021, ТБ-073).
@@ -18,6 +21,7 @@
 @inject NavigationManager Navigation
 @using System.Globalization
 @using ISC.AI.Modules.Media.Application.Features.Assets
+@using ISC.AI.Modules.Media.Application.Features.Assets.Commands.SnapshotFrame
 @using ISC.AI.Modules.Media.Application.Features.Scope
 @using ISC.AI.Modules.Media.Domain.Model
 @using ISC.AI.Modules.Media.Domain.Services
@@ -48,7 +52,19 @@ else
                 {
                     <span> · длительность @MediaLabels.Timecode(duration)</span>
                 }
+                @if (asset.Kind == MediaKind.Video && asset.FrameRate is { } frameRate)
+                {
+                    @* Нативная частота и размер кадра после автоповорота — из пробы ffprobe (ADR-0028); у носителей,
+                       загруженных раньше, их нет до «Переиндексировать». *@
+                    <span> · @frameRate.ToString("0.###", CultureInfo.InvariantCulture) к/с@(asset.FrameWidth is { } w && asset.FrameHeight is { } h ? $", {w}×{h}" : string.Empty)</span>
+                }
             </MudText>
+            @if (asset.SourceAssetId is { } sourceAssetId)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    Снимок кадра из носителя <MudLink Href="@SourceHref(sourceAssetId, asset.SourceTimestampMs)" Typo="Typo.body2">№ @sourceAssetId</MudLink>@(asset.SourceTimestampMs is { } sourceMs ? $" ({MediaLabels.PreciseTimecode(sourceMs)})" : string.Empty)
+                </MudText>
+            }
         </div>
         <div class="d-flex align-center gap-2 flex-wrap">
             @if (FacesApplicable(asset))
@@ -81,6 +97,25 @@ else
     {
         <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="my-3"
                   ShowCloseIcon="true" CloseIconClicked="@(() => _notice = null)">@_notice</MudAlert>
+    }
+    @if (_snapshot is { } snapshot)
+    {
+        @* Итог «Снимка кадра» (ADR-0028): ссылка на новый носитель и «скачать» его оригинал; при дедупе (ТНД-002)
+           новый носитель не создан — сообщаем существующий. *@
+        <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="my-3"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _snapshot = null)">
+            @if (snapshot.Duplicate)
+            {
+                <span>Такой кадр уже есть в деле — носитель </span>
+            }
+            else
+            {
+                <span>@SnapshotCaption(snapshot) сохранён как фото </span>
+            }
+            <MudLink Href="@($"/media/assets/{snapshot.AssetId.ToString(CultureInfo.InvariantCulture)}")" Typo="Typo.body2">№ @snapshot.AssetId</MudLink>
+            <span> · </span>
+            <a href="@MediaFileUrl.Originals(snapshot.AssetId, snapshot.StoredFileName)" download>скачать</a>
+        </MudAlert>
     }
     @if (FacesApplicable(asset) && asset.IndexStatus == MediaIndexStatus.Failed && !string.IsNullOrWhiteSpace(asset.IndexError))
     {
@@ -152,32 +187,12 @@ else
         }
         else if (asset.Kind == MediaKind.Video)
         {
-            @if (IsBrowserPlayable(asset.ContentType))
-            {
-                @* Перемотка работает благодаря Range на эндпоинте. Одна выдача файла субъекту — одна запись
-                   аудита (правило MediaViewAuditThrottle в слое данных, ТБ-030): продолжения Range-запросов
-                   при воспроизведении/перемотке журнал не множат. *@
-                <video id="@VideoElementId" controls preload="metadata" src="@MediaFileUrl.Originals(asset.Id, asset.StoredFileName)"
-                       style="max-width:100%;max-height:70vh;display:block;margin:0 auto;"></video>
-                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
-                    Видео воспроизводится без обработки (ТЭ-007); переход к кадру — кнопками у лиц и щелчком по фрагменту расшифровки ниже.
-                    Если оно не воспроизводится — файла нет либо он вне вашего допуска.
-                </MudText>
-            }
-            else
-            {
-                @* MKV/AVI/MOV/3GP браузер не проигрывает (эндпоинт отдаёт их вложением): честная ссылка вместо мёртвого
-                   плеера. Название формата в подсказке — из типа самого носителя, а не перечнем. *@
-                <div class="d-flex flex-column align-center gap-2 py-4">
-                    <MudIcon Icon="@Icons.Material.Filled.VideoFile" Size="Size.Large" Class="mud-text-secondary" />
-                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download"
-                               Href="@MediaFileUrl.Originals(asset.Id, asset.StoredFileName)" download="@asset.OriginalFileName">Скачать оригинал</MudButton>
-                </div>
-                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
-                    Браузер не воспроизводит контейнер @MediaLabels.FormatName(asset.ContentType) — откройте файл в проигрывателе; переход к кадру недоступен.
-                    Оригинал отдаётся без обработки (ТЭ-007); если скачать не удаётся — файла нет либо он вне вашего допуска.
-                </MudText>
-            }
+            @* Покадровый просмотр (ADR-0028): mp4/webm — <video> с шагом в браузере, остальные контейнеры — кадры с
+               сервера. «Снимок кадра» доступен, когда носитель привязан к делу: снимок сохраняется в это дело. *@
+            <VideoFrameViewer @key="asset.Id" @ref="_viewer" AssetId="@asset.Id" StoredFileName="@asset.StoredFileName" OriginalFileName="@asset.OriginalFileName"
+                              ContentType="@asset.ContentType" Playable="@IsBrowserPlayable(asset.ContentType)"
+                              FrameRate="@asset.FrameRate" DurationMs="@asset.DurationMs" StartMs="@(StartAtMs ?? 0)"
+                              CanSnapshot="@(_details.CaseId is not null)" OnSnapshotRequested="SnapshotAsync" />
         }
         else
         {
@@ -207,7 +222,17 @@ else
     @* ================= Расшифровка речи (ADR-0026): аудио и звуковая дорожка видео ================= *@
     @if (asset.Kind is MediaKind.Audio or MediaKind.Video)
     {
-        <TranscriptPanel AssetId="@asset.Id" PlayerElementId="@PlayableElementId(asset)" StartAtMs="@StartAtMs" />
+        @if (asset.Kind == MediaKind.Video && !IsBrowserPlayable(asset.ContentType))
+        {
+            @* Видео кадрами с сервера: проигрывателя нет, щелчок по фрагменту показывает кадр (ADR-0028, п. 10). *@
+            <TranscriptPanel AssetId="@asset.Id" StartAtMs="@StartAtMs" OnSeekRequested="ShowFrameAsync" />
+        }
+        else
+        {
+            @* У видео перемотку по ?t= делает просмотрщик (владелец <video>); у аудио проигрывателем владеет панель. *@
+            <TranscriptPanel AssetId="@asset.Id" PlayerElementId="@PlayableElementId(asset)" StartAtMs="@StartAtMs"
+                             SeekToStart="@(asset.Kind != MediaKind.Video)" />
+        }
     }
 
     @* ================= Лица носителя (к аудио неприменимо — блок скрыт) ================= *@
@@ -228,7 +253,6 @@ else
             }
             else if (asset.Kind == MediaKind.Video)
             {
-                var playable = IsBrowserPlayable(asset.ContentType);
                 <MudTable T="FaceRow" Items="_details.Faces" Dense="true" Hover="true" Elevation="0">
                     <HeaderContent>
                         <MudTh>Вырезка</MudTh><MudTh>Таймкод</MudTh><MudTh>Лицо</MudTh><MudTh>Детектор</MudTh><MudTh>Пригодность</MudTh><MudTh></MudTh>
@@ -240,15 +264,9 @@ else
                         <MudTd DataLabel="Таймкод">
                             @if (context.FrameTimestampMs is { } ms)
                             {
-                                @if (playable)
-                                {
-                                    <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.PlayCircle"
-                                               OnClick="@(() => SeekAsync(ms))">@MediaLabels.Timecode(ms)</MudButton>
-                                }
-                                else
-                                {
-                                    <span>@MediaLabels.Timecode(ms)</span>
-                                }
+                                @* «К кадру» работает в обоих режимах просмотрщика: перемотка <video> либо кадр с сервера. *@
+                                <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.PlayCircle"
+                                           OnClick="@(() => ShowFrameAsync(ms))">@MediaLabels.Timecode(ms)</MudButton>
                             }
                         </MudTd>
                         <MudTd DataLabel="Лицо">№ @context.Id@(context.TrackId is { } track ? $" · трек {track}" : string.Empty)</MudTd>
@@ -406,8 +424,11 @@ else
     private long? StartAtMs => MediaQueryValues.ParseLong(StartAtQuery);
 
     private MediaAssetDetails? _details;
+    private int? _loadedId;
     private string? _error;
     private string? _notice;
+    private SnapshotFrameResult? _snapshot;
+    private VideoFrameViewer? _viewer;
     private bool _busy;
     private bool _purgeOpen;
     private IJSObjectReference? _module;
@@ -425,6 +446,7 @@ else
     private int? _linkPersonRef;
     private string? _linkError;
 
+    /// <summary>Id &lt;video&gt; просмотрщика (см. <see cref="VideoFrameViewer.VideoElementId"/>) — для панели расшифровки.</summary>
     private string VideoElementId => $"media-video-{Id}";
 
     private string AudioElementId => $"media-audio-{Id}";
@@ -463,6 +485,19 @@ else
     private static string? CropUrl(FaceRow face) =>
         face.CropStoredFileName is { } crop ? MediaFileUrl.FaceCrop(face.AssetId, crop) : null;
 
+    /// <summary>Ссылка на носитель-источник снимка с переходом к моменту кадра (?t=), если он известен.</summary>
+    private static string SourceHref(int sourceAssetId, long? sourceTimestampMs)
+    {
+        var href = "/media/assets/" + sourceAssetId.ToString(CultureInfo.InvariantCulture);
+        return sourceTimestampMs is { } ms ? href + "?t=" + ms.ToString(CultureInfo.InvariantCulture) : href;
+    }
+
+    /// <summary>«Кадр № N (чч:мм:сс.ммм)»; без частоты кадров у источника — только момент.</summary>
+    private static string SnapshotCaption(SnapshotFrameResult snapshot) =>
+        snapshot.FrameIndex is { } frame
+            ? $"Кадр № {frame.ToString(CultureInfo.InvariantCulture)} ({MediaLabels.PreciseTimecode(snapshot.TimestampMs)})"
+            : $"Кадр ({MediaLabels.PreciseTimecode(snapshot.TimestampMs)})";
+
     /// <summary>Рамка лица в процентах от натурального размера (ТФ-МЕД-03): цвет — пригодность, выбранное лицо — Primary.</summary>
     private string FaceBoxStyle(FaceRow face, ImageSize size)
     {
@@ -487,13 +522,48 @@ else
     private static string Percent(float value, int total) =>
         Math.Clamp(total > 0 ? value / total * 100f : 0f, 0f, 100f).ToString("0.##", CultureInfo.InvariantCulture);
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnParametersSetAsync()
     {
         // ТБ-030 «одно открытие — одна запись»: на предрендере (статический SSR до подключения circuit'а)
         // карточку не грузим — GetMediaAssetQuery аудируется и попадал бы в журнал дважды.
-        if (!RendererInfo.IsInteractive) { return; }
+        if (!RendererInfo.IsInteractive)
+        {
+            return;
+        }
 
+        // Переход карточка → карточка (снимок ↔ источник, ADR-0028) переиспользует тот же экземпляр страницы:
+        // Router меняет только параметр Id, OnInitialized повторно не вызывается. Защёлка по Id — одна загрузка
+        // (и одна запись View) на носитель; смена ?t=/?face= того же носителя карточку не перечитывает.
+        if (_loadedId == Id)
+        {
+            return;
+        }
+
+        _loadedId = Id;
+        ResetState();
         await ReloadAsync();
+    }
+
+    /// <summary>Сброс всего состояния прежнего носителя перед загрузкой нового (реквизиты, сообщения, диалоги, рамки).</summary>
+    private void ResetState()
+    {
+        _details = null;
+        _error = null;
+        _notice = null;
+        _snapshot = null;
+        _viewer = null;
+        _purgeOpen = false;
+        _imageSize = null;
+        _measureRequested = false;
+        _linkOpen = false;
+        _linkLoaded = false;
+        _linkLoading = false;
+        _linkFace = null;
+        _linkAuthorizations = [];
+        _linkPersons = [];
+        _linkAuthorizationId = null;
+        _linkPersonRef = null;
+        _linkError = null;
     }
 
     private async Task ReloadAsync()
@@ -519,14 +589,11 @@ else
             return;
         }
 
+        // Видео обслуживает VideoFrameViewer со своим экземпляром модуля; здесь модуль нужен только картинке.
         if (_details.Asset.Kind == MediaKind.Image && !_measureRequested)
         {
             _measureRequested = true;
             await MeasureImageAsync();
-        }
-        else if (_details.Asset.Kind == MediaKind.Video && IsBrowserPlayable(_details.Asset.ContentType))
-        {
-            await EnsureModuleAsync();
         }
     }
 
@@ -584,31 +651,39 @@ else
         }
     }
 
-    /// <summary>«К кадру»: перемотать плеер к таймкоду лица (ничего не обрабатывая, ТЭ-007).</summary>
-    private async Task SeekAsync(long milliseconds)
-    {
-        var module = await EnsureModuleAsync();
-        if (module is null)
-        {
-            _notice = "Модуль плеера не загружен — обновите страницу и попробуйте снова.";
-            return;
-        }
+    /// <summary>
+    /// «К кадру» (таймкод лица, фрагмент расшифровки видео без проигрывателя): показать кадр в просмотрщике —
+    /// перемотка &lt;video&gt; либо кадр с сервера; ничего не обрабатывая (ТЭ-007).
+    /// </summary>
+    private Task ShowFrameAsync(long milliseconds) =>
+        _viewer?.ShowMomentAsync(milliseconds) ?? Task.CompletedTask;
 
+    /// <summary>
+    /// «Снимок кадра» (ADR-0028): кадр момента <paramref name="milliseconds"/> из оригинала — новый фото-носитель
+    /// дела; право, гриф, дело и аудит — на сервере (SnapshotFrameCommand). Карточку после снимка НЕ перечитываем:
+    /// источник не изменился, а повторный GetMediaAssetQuery дал бы вторую запись View в журнале (ТБ-030).
+    /// </summary>
+    private async Task SnapshotAsync(long milliseconds)
+    {
+        _busy = true;
+        _error = null;
+        _notice = null;
+        _snapshot = null;
         try
         {
-            var ok = await module.InvokeAsync<bool>("seek", VideoElementId, milliseconds / 1000.0);
-            if (!ok)
+            var response = await Dispatcher.Send(new SnapshotFrameCommand(Id, milliseconds));
+            if (response is { Status: true, Data: { } result })
             {
-                _notice = "Плеер не найден на странице — обновите её и попробуйте снова.";
+                _snapshot = result;
+            }
+            else
+            {
+                _error = response.StatusMessage;
             }
         }
-        catch (JSException ex)
+        finally
         {
-            _error = $"Не удалось перемотать видео: {ex.Message}";
-        }
-        catch (JSDisconnectedException)
-        {
-            // Circuit уже закрыт — показывать некому.
+            _busy = false;
         }
     }
 

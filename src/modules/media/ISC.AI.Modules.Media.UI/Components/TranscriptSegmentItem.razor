@@ -14,7 +14,7 @@
 @if (Clickable)
 {
     <button type="button" id="@ElementId" class="d-flex align-start gap-3 px-2 py-1" style="@ButtonStyle"
-            title="Воспроизвести с этого места" @onclick="PlayAsync">
+            title="@Title" @onclick="PlayAsync">
         <span class="mud-text-secondary" style="font-family:monospace;white-space:nowrap;">[@MediaLabels.ClockTimecode(StartMs)]</span>
         <span class="mud-typography mud-typography-body2">@Text</span>
     </button>
@@ -48,15 +48,18 @@ else
     [Parameter] public bool IsActive { get; set; }
 
     /// <summary>
-    /// Запись воспроизводится браузером — строка кнопка «воспроизвести с этого места»; иначе — просто текст
-    /// (AMR/3GPP, MKV/AVI/MOV/3GP: перехода к месту записи нет).
+    /// Переход к месту записи возможен — строка кнопка (запись воспроизводится браузером либо видео показывается
+    /// кадрами с сервера, ADR-0028); иначе — просто текст (AMR/3GPP: перехода к месту записи нет).
     /// </summary>
     [Parameter] public bool Clickable { get; set; }
+
+    /// <summary>Подсказка кнопки-строки: «воспроизвести» для проигрывателя, «показать кадр» для кадров с сервера.</summary>
+    [Parameter] public string Title { get; set; } = "Воспроизвести с этого места";
 
     /// <summary>Щелчок (Enter, пробел) по строке: номер фрагмента, с которого воспроизводить.</summary>
     [Parameter] public EventCallback<int> OnPlay { get; set; }
 
-    private (int Index, string ElementId, long StartMs, string? Text, bool IsActive, bool Clickable) _shown;
+    private (int Index, string ElementId, long StartMs, string? Text, bool IsActive, bool Clickable, string Title) _shown;
     private bool _changed = true;
 
     private string RowStyle =>
@@ -69,7 +72,7 @@ else
     protected override void OnParametersSet()
     {
         // OnPlay в сравнение не входит: он читается в момент щелчка, а не при отрисовке.
-        var current = (Index, ElementId, StartMs, Text, IsActive, Clickable);
+        var current = (Index, ElementId, StartMs, Text, IsActive, Clickable, Title);
         _changed = _changed || current != _shown;
         _shown = current;
     }

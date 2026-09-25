@@ -38,6 +38,12 @@ public sealed class MediaTempFiles
     public const string FramesPrefix = "frames-";
 
     /// <summary>
+    /// Префикс копии оригинала видео для снимка кадра (ADR-0028) — только когда хранилище не даёт локального
+    /// пути (<c>ILocalFileLocator</c> не зарегистрирован или вернул <see langword="null"/>).
+    /// </summary>
+    public const string SnapshotPrefix = "snapshot-";
+
+    /// <summary>
     /// Шаблоны файлов пакета в САМОМ корне %TEMP%: копии конвейеров прежних версий (<c>isc-speech-*</c>,
     /// <c>isc-media-*</c> — до управляемого каталога) и буфер приёма файла хранилищем (<c>iscai-media-*</c>,
     /// хеш считается до записи в хранилище). Их тоже подбирает уборка при старте.
@@ -69,7 +75,7 @@ public sealed class MediaTempFiles
     /// Путь для новой временной копии: <c>{Root}\{префикс}{GUID}{расширение}</c>. Каталог создаётся при
     /// необходимости; файл — нет (его пишет вызывающий и удаляет в <c>finally</c>).
     /// </summary>
-    /// <param name="prefix">Префикс конвейера (<see cref="SpeechPrefix"/>, <see cref="FramesPrefix"/>).</param>
+    /// <param name="prefix">Префикс конвейера (<see cref="SpeechPrefix"/>, <see cref="FramesPrefix"/>, <see cref="SnapshotPrefix"/>).</param>
     /// <param name="storedFileName">Имя исходника в хранилище — только ради расширения (после фильтра).</param>
     public string NewPath(string prefix, string? storedFileName)
     {

@@ -69,7 +69,7 @@ public static class MediaModule
         MediaPersistenceServiceCollectionExtensions.EfSearchKey,
         "Vision:Detector:Path", "Vision:Detector:Sha256",
         "Vision:Embedder:Path", "Vision:Embedder:Sha256",
-        "Vision:Ffmpeg:Folder",
+        "Vision:Ffmpeg:Folder", "Vision:Ffmpeg:MaxConcurrentFrameExtractions",
         "Vision:Detection:ScoreThreshold", "Vision:Detection:NmsIou", "Vision:Detection:MaxInputSide",
         "Vision:Quality:MinInterocular", "Vision:Quality:MinDetectionScore",
         MediaSearchOptions.CandidateListSizeKey,
@@ -121,10 +121,14 @@ public static class MediaModule
     public static IServiceCollection RegisterDataContexts(IServiceCollection services, IConfiguration configuration) =>
         services.AddMediaPersistence(configuration);
 
-    /// <summary>Сырые HTTP-эндпоинты пакета: раздача файлов носителей и вырезок (ТБ-073).</summary>
+    /// <summary>
+    /// Сырые HTTP-эндпоинты пакета: раздача файлов носителей и вырезок (ТБ-073) и кадр видео по времени для
+    /// покадрового просмотра с сервера (<c>GET /media/frames/{id}?t=</c>, ADR-0028) — под той же решёткой.
+    /// </summary>
     public static IEndpointRouteBuilder MapEndpoints(IEndpointRouteBuilder endpoints)
     {
         endpoints.MapMediaFileEndpoints();
+        endpoints.MapMediaFrameEndpoints();
         return endpoints;
     }
 }

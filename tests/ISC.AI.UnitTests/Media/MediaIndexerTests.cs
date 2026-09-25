@@ -55,7 +55,7 @@ public sealed class MediaIndexerTests : IDisposable
 
         _store.GetForIndexingAsync(AssetId, Arg.Any<CancellationToken>())
             .Returns(new MediaAssetIndexingInfo(AssetId, MediaKind.Video, "src.mp4", "video/mp4", Classification: 2, DivisionId: 7, ["old.jpg"]));
-        _store.When(s => s.CompleteIndexingAsync(Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<long?>(), Arg.Any<CancellationToken>()))
+        _store.When(s => s.CompleteIndexingAsync(Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<long?>(), Arg.Any<VideoProbe?>(), Arg.Any<CancellationToken>()))
             .Do(_ => _calls.Add("complete"));
 
         // Исходник: байт 5 — «кадр с двумя лицами» (для пути изображения).
@@ -112,7 +112,7 @@ public sealed class MediaIndexerTests : IDisposable
                 && faces[1].Template == null && !faces[1].Quality.Acceptable
                 && faces[0].Template != null && faces[2].Template != null
                 && faces.All(f => f.CropStoredFileName != null)),
-            "yunet-1", "sface-1", 10000L, Arg.Any<CancellationToken>());
+            "yunet-1", "sface-1", 10000L, Arg.Any<VideoProbe?>(), Arg.Any<CancellationToken>());
 
         // ТО-мат-07: для непригодного лица шаблон не строился.
         await _embedder.DidNotReceive().EmbedAsync(Arg.Any<byte[]>(), FaceB, Arg.Any<CancellationToken>());
@@ -146,7 +146,7 @@ public sealed class MediaIndexerTests : IDisposable
         result.Frames.ShouldBe(3);
         await _store.Received(1).FailIndexingAsync(AssetId, "модель не загружена", Arg.Any<CancellationToken>());
         await _store.DidNotReceive().CompleteIndexingAsync(
-            Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<long?>(), Arg.Any<CancellationToken>());
+            Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<long?>(), Arg.Any<VideoProbe?>(), Arg.Any<CancellationToken>());
         await _files.Received(1).DeleteAsync("new1.jpg", MediaFileCategories.FaceCrops, "9", Arg.Any<CancellationToken>());
         await _files.Received(1).DeleteAsync("new2.jpg", MediaFileCategories.FaceCrops, "9", Arg.Any<CancellationToken>());
         await _files.DidNotReceive().DeleteAsync("old.jpg", Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
@@ -163,7 +163,7 @@ public sealed class MediaIndexerTests : IDisposable
 
         await _store.Received(1).FailIndexingAsync(AssetId, "индексация отменена", Arg.Any<CancellationToken>());
         await _store.DidNotReceive().CompleteIndexingAsync(
-            Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<long?>(), Arg.Any<CancellationToken>());
+            Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<long?>(), Arg.Any<VideoProbe?>(), Arg.Any<CancellationToken>());
         await _files.DidNotReceive().DeleteAsync("old.jpg", Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await _files.Received(1).DeleteAsync("new1.jpg", MediaFileCategories.FaceCrops, "9", Arg.Any<CancellationToken>());
         await _audit.DidNotReceive().WriteAsync(Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>());
@@ -184,8 +184,10 @@ public sealed class MediaIndexerTests : IDisposable
         await _store.Received(1).CompleteIndexingAsync(
             AssetId,
             Arg.Is<IReadOnlyList<IndexedFace>>(faces => faces.Count == 2 && faces.All(f => f.FrameIndex == null && f.FrameTimestampMs == null)),
-            "yunet-1", "sface-1", null, Arg.Any<CancellationToken>());
+            "yunet-1", "sface-1", null, null, Arg.Any<CancellationToken>());
         _frames.DidNotReceive().ExtractAsync(Arg.Any<string>(), Arg.Any<FrameSamplingOptions>(), Arg.Any<CancellationToken>());
+        // Проба видеопотока (ADR-0028) — только для видео: у изображения ни частоты кадров, ни длительности нет.
+        await _frames.DidNotReceive().ProbeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
         await _files.DidNotReceive().DeleteAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
@@ -216,7 +218,7 @@ public sealed class MediaIndexerTests : IDisposable
         await _store.DidNotReceive().MarkProcessingAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
         await _store.DidNotReceive().CompleteIndexingAsync(
             Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<string>(), Arg.Any<string>(),
-            Arg.Any<long?>(), Arg.Any<CancellationToken>());
+            Arg.Any<long?>(), Arg.Any<VideoProbe?>(), Arg.Any<CancellationToken>());
         await _audit.DidNotReceive().WriteAsync(Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>());
     }
 
@@ -238,7 +240,7 @@ public sealed class MediaIndexerTests : IDisposable
         await _store.DidNotReceive().FailIndexingAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await _store.DidNotReceive().CompleteIndexingAsync(
             Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<string>(), Arg.Any<string>(),
-            Arg.Any<long?>(), Arg.Any<CancellationToken>());
+            Arg.Any<long?>(), Arg.Any<VideoProbe?>(), Arg.Any<CancellationToken>());
         await _files.DidNotReceive().OpenReadAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await _detector.DidNotReceive().DetectAsync(Arg.Any<byte[]>(), Arg.Any<CancellationToken>());
         await _caseScope.DidNotReceive().IsBiometricIndexingAllowedAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
@@ -269,7 +271,7 @@ public sealed class MediaIndexerTests : IDisposable
         await _store.DidNotReceive().FailIndexingAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await _store.DidNotReceive().CompleteIndexingAsync(
             Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<string>(), Arg.Any<string>(),
-            Arg.Any<long?>(), Arg.Any<CancellationToken>());
+            Arg.Any<long?>(), Arg.Any<VideoProbe?>(), Arg.Any<CancellationToken>());
         await _audit.DidNotReceive().WriteAsync(Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>());
         _frames.DidNotReceive().ExtractAsync(Arg.Any<string>(), Arg.Any<FrameSamplingOptions>(), Arg.Any<CancellationToken>());
         await _detector.DidNotReceive().DetectAsync(Arg.Any<byte[]>(), Arg.Any<CancellationToken>());
@@ -302,6 +304,46 @@ public sealed class MediaIndexerTests : IDisposable
         extractedPath.ShouldNotContain("\"");
         File.Exists(extractedPath).ShouldBeFalse();
         Directory.EnumerateFiles(_tempFiles.Root).ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "ADR-0028: проба видеопотока (частота, точная длительность, размер после поворота) читается по временной копии и передаётся в CompleteIndexingAsync вместе с запасной длительностью по раскадровке")]
+    public async Task Video_probe_is_read_and_passed_to_store()
+    {
+        string? probedPath = null;
+        _frames.ProbeAsync(Arg.Do<string>(p => probedPath = p), Arg.Any<CancellationToken>())
+            .Returns(new VideoProbe(29.97, TimeSpan.FromMilliseconds(12_345), 1080, 1920));
+
+        var result = await Indexer().IndexAsync(AssetId);
+
+        result.Success.ShouldBeTrue();
+        result.Faces.ShouldBe(3);
+        await _store.Received(1).CompleteIndexingAsync(
+            AssetId, Arg.Any<IReadOnlyList<IndexedFace>>(), "yunet-1", "sface-1", 10000L,
+            Arg.Is<VideoProbe?>(p => p != null && p.FrameRate == 29.97 && p.DurationMs == 12345 && p.Width == 1080 && p.Height == 1920),
+            Arg.Any<CancellationToken>());
+
+        // Проба — по той же временной копии в управляемом каталоге, что и раскадровка; копия удалена после прогона.
+        probedPath.ShouldNotBeNull();
+        Path.GetDirectoryName(probedPath).ShouldBe(_tempFiles.Root);
+        Path.GetFileName(probedPath).ShouldStartWith(MediaTempFiles.FramesPrefix);
+        File.Exists(probedPath).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "ADR-0028: сбой пробы (ffprobe) индексацию не валит — лица записаны, проба null, длительность по раскадровке, аудит есть, статус не «ошибка»")]
+    public async Task Probe_failure_does_not_fail_indexing()
+    {
+        _frames.ProbeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns<VideoProbe?>(_ => throw new InvalidOperationException("ffprobe не найден"));
+
+        var result = await Indexer().IndexAsync(AssetId);
+
+        result.Success.ShouldBeTrue();
+        result.Frames.ShouldBe(3);
+        result.Faces.ShouldBe(3);
+        await _store.Received(1).CompleteIndexingAsync(
+            AssetId, Arg.Any<IReadOnlyList<IndexedFace>>(), "yunet-1", "sface-1", 10000L, null, Arg.Any<CancellationToken>());
+        await _store.DidNotReceive().FailIndexingAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _audit.Received(1).WriteAsync(Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>());
     }
 
     /// <inheritdoc />
