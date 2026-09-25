@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.Storage;
+using ISC.AI.Modules.Media.Application.Features.Maintenance;
 using ISC.AI.Modules.Media.Domain.Model;
 using ISC.AI.Modules.Media.Domain.Services;
 using Microsoft.Extensions.Logging;
@@ -13,8 +14,8 @@ using Microsoft.Extensions.Logging;
 namespace ISC.AI.Modules.Media.Application.Features.Indexing;
 
 /// <summary>
-/// Конвейер индексации носителя (ТП-005, ТО-мат-05): исходник из хранилища → (для видео) раскадровка
-/// (ТО-мат-06) → детекция лиц → оценка качества (ТО-мат-07) → векторизация пригодных → вырезки →
+/// Конвейер индексации носителя (ТП-005, ТО-мат-05): исходник из хранилища → (для видео) проба потоков — без
+/// видеопотока носитель переводится в аудиозаписи (ADR-0026) — и раскадровка (ТО-мат-06) → детекция лиц → оценка качества (ТО-мат-07) → векторизация пригодных → вырезки →
 /// атомарная запись шаблонов с грифом носителя (ТБ-070). Исполняется фоновой очередью ядра из
 /// per-operation scope; повторный запуск идемпотентен — шаблоны перезаписываются хранилищем одной
 /// транзакцией, прежние вырезки снимаются ПОСЛЕ её фиксации (половинчатого состояния нет, ТП-005).
@@ -38,8 +39,16 @@ public sealed class MediaIndexer(
     IAuditWriter auditWriter,
     ICaseScope caseScope,
     MediaSearchOptions options,
+    MediaTempFiles tempFiles,
     ILogger<MediaIndexer> logger) : IMediaIndexer
 {
+    /// <summary>Причина отказа индексации аудиозаписи (результат задачи; статус носителя не меняется).</summary>
+    public const string NotApplicableToAudioError = "Поиск по лицу к аудиозаписи неприменим: лиц в ней нет.";
+
+    /// <summary>Причина отказа индексации «видео» без видеопотока (результат задачи; носитель переведён в аудио).</summary>
+    public const string NoVideoStreamError =
+        "Видеопотока в файле нет (только звук): носитель переведён в аудиозаписи, поиск по лицу неприменим.";
+
     /// <inheritdoc />
     public async Task<MediaIndexResult> IndexAsync(int assetId, CancellationToken cancellationToken = default)
     {
@@ -48,6 +57,16 @@ public sealed class MediaIndexer(
         {
             MediaIndexerLog.AssetNotFound(logger, assetId);
             return new MediaIndexResult(false, 0, 0, 0, "Носитель не найден.");
+        }
+
+        // ADR-0026: в аудиозаписи лиц нет — конвейер биометрии к ней НЕПРИМЕНИМ. Выход без каких-либо
+        // изменений: ни статуса «в обработке», ни «проиндексировано с нулём лиц», ни записи в журнал —
+        // иначе журнал утверждал бы, что биометрия обрабатывалась. Статус носителя уже «неприменимо»
+        // (ставится при приёме). Проверка здесь, а не только в сценариях: задача может прийти любым путём.
+        if (info.Kind == MediaKind.Audio)
+        {
+            MediaIndexerLog.NotApplicableToAudio(logger, assetId);
+            return new MediaIndexResult(false, 0, 0, 0, NotApplicableToAudioError);
         }
 
         // ПОСЛЕДНИЙ РУБЕЖ регламента ТБ-074 (ADR-0024): закрытое дело лишилось шаблонов, и строить их
@@ -64,11 +83,30 @@ public sealed class MediaIndexer(
 
         var progress = new Progress();
         var subPath = assetId.ToString(CultureInfo.InvariantCulture);
+        string? tempPath = null;
         try
         {
+            // Исходник → временная копия (раскадровщик и проба потоков — внешние процессы, работают с путём).
+            // Копия — в управляемом каталоге (ТБ-064): переживи она аварийную остановку, её удалит уборка при
+            // старте хоста; расширение — через фильтр (путь уходит ffmpeg текстом командной строки).
+            tempPath = tempFiles.NewPath(MediaTempFiles.FramesPrefix, info.StoredFileName);
+            await CopySourceAsync(info, subPath, tempPath, cancellationToken);
+
+            // ADR-0026 п.6: «видео» без видеопотока — голосовое .3gp (браузер объявляет его video/3gpp), звук в
+            // mp4/webm. Лиц в нём нет и быть не может: носитель переводится в аудиозаписи с «поиск по лицу
+            // неприменим» ДО статуса «в обработке» — ни «проиндексировано с нулём лиц», ни записи в журнал (журнал
+            // не должен утверждать, что биометрия обрабатывалась), ни «ошибки» по сбою ffmpeg на входе без картинки.
+            // Расшифровка звука (поставлена при загрузке отдельной задачей) идёт своим ходом.
+            if (info.Kind == MediaKind.Video && !await frameExtractor.HasVideoStreamAsync(tempPath, cancellationToken))
+            {
+                await store.ReclassifyAsAudioAsync(assetId, cancellationToken);
+                MediaIndexerLog.NoVideoStream(logger, assetId);
+                return new MediaIndexResult(false, 0, 0, 0, NoVideoStreamError);
+            }
+
             await store.MarkProcessingAsync(assetId, cancellationToken);
 
-            long? durationMs = await ProcessSourceAsync(info, subPath, progress, cancellationToken);
+            long? durationMs = await ProcessSourceAsync(info, tempPath, subPath, progress, cancellationToken);
 
             // Строки лиц/шаблонов заменяются одной транзакцией; ТОЛЬКО после её фиксации снимаем вырезки
             // прежнего прогона (ТП-005: файл без строки безвреден, строка без файла — нет; при сбое до этой
@@ -108,6 +146,14 @@ public sealed class MediaIndexer(
             await DeleteCropsAsync(assetId, subPath, NewCropNames(progress));
             await store.FailIndexingAsync(assetId, exception.Message, cancellationToken);
             return new MediaIndexResult(false, progress.Frames, progress.Faces.Count, progress.Rejected, exception.Message);
+        }
+        finally
+        {
+            // Временная копия исходника — в любом исходе (успех, сбой, отмена, «нет видеопотока»).
+            if (tempPath is not null)
+            {
+                DeleteTempFile(assetId, tempPath);
+            }
         }
     }
 
@@ -149,60 +195,61 @@ public sealed class MediaIndexer(
         }
     }
 
+    /// <summary>Копирует исходник носителя из хранилища во временный файл <paramref name="tempPath"/>.</summary>
+    private async Task CopySourceAsync(
+        MediaAssetIndexingInfo info, string subPath, string tempPath, CancellationToken cancellationToken)
+    {
+        await using var source = await fileStorage.OpenReadAsync(
+            info.StoredFileName, MediaFileCategories.Originals, subPath, cancellationToken);
+        await using var target = File.Create(tempPath);
+        await source.CopyToAsync(target, cancellationToken);
+    }
+
     /// <summary>
-    /// Копирует исходник во временный файл (раскадровщик работает с путём, а не потоком) и прогоняет
-    /// кадры через детектор/векторизатор. Возвращает длительность видео (последний таймкод) либо
-    /// <see langword="null"/> для изображения. Временный файл удаляется в любом исходе.
+    /// Прогоняет временную копию исходника через детектор/векторизатор: изображение — одним кадром, видео —
+    /// раскадровкой. Возвращает длительность видео (последний таймкод) либо <see langword="null"/> для изображения.
     /// </summary>
     private async Task<long?> ProcessSourceAsync(
-        MediaAssetIndexingInfo info, string subPath, Progress progress, CancellationToken cancellationToken)
+        MediaAssetIndexingInfo info, string tempPath, string subPath, Progress progress, CancellationToken cancellationToken)
     {
-        var tempPath = Path.Combine(
-            Path.GetTempPath(),
-            "isc-media-" + Guid.NewGuid().ToString("N") + Path.GetExtension(info.StoredFileName));
+        if (info.Kind == MediaKind.Image)
+        {
+            var bytes = await File.ReadAllBytesAsync(tempPath, cancellationToken);
+            progress.Frames = 1;
+            await ProcessImageAsync(bytes, frameIndex: null, frameTimestampMs: null, subPath, progress, cancellationToken);
+            return null;
+        }
+
+        long? durationMs = null;
+        var sampling = new FrameSamplingOptions(options.SampleFps);
+        await foreach (var frame in frameExtractor.ExtractAsync(tempPath, sampling, cancellationToken))
+        {
+            progress.Frames++;
+            var timestampMs = (long)frame.Timestamp.TotalMilliseconds;
+            durationMs = timestampMs;
+            await ProcessImageAsync(frame.JpegBytes, frame.Index, timestampMs, subPath, progress, cancellationToken);
+        }
+
+        return durationMs;
+    }
+
+    /// <summary>
+    /// Удаляет временную копию без проброса: неудача пишется в журнал с путём (файл удалит уборка при следующем
+    /// старте хоста, до того — вручную), а падение здесь скрыло бы исход индексации.
+    /// </summary>
+    private void DeleteTempFile(int assetId, string tempPath)
+    {
         try
         {
-            await using (var source = await fileStorage.OpenReadAsync(
-                info.StoredFileName, MediaFileCategories.Originals, subPath, cancellationToken))
-            await using (var target = File.Create(tempPath))
-            {
-                await source.CopyToAsync(target, cancellationToken);
-            }
-
-            if (info.Kind == MediaKind.Image)
-            {
-                var bytes = await File.ReadAllBytesAsync(tempPath, cancellationToken);
-                progress.Frames = 1;
-                await ProcessImageAsync(bytes, frameIndex: null, frameTimestampMs: null, subPath, progress, cancellationToken);
-                return null;
-            }
-
-            long? durationMs = null;
-            var sampling = new FrameSamplingOptions(options.SampleFps);
-            await foreach (var frame in frameExtractor.ExtractAsync(tempPath, sampling, cancellationToken))
-            {
-                progress.Frames++;
-                var timestampMs = (long)frame.Timestamp.TotalMilliseconds;
-                durationMs = timestampMs;
-                await ProcessImageAsync(frame.JpegBytes, frame.Index, timestampMs, subPath, progress, cancellationToken);
-            }
-
-            return durationMs;
+            File.Delete(tempPath);
         }
-        finally
+        catch (IOException exception)
         {
-            try
-            {
-                File.Delete(tempPath);
-            }
-            catch (IOException exception)
-            {
-                MediaIndexerLog.TempFileNotDeleted(logger, exception, info.AssetId, tempPath);
-            }
-            catch (UnauthorizedAccessException exception)
-            {
-                MediaIndexerLog.TempFileNotDeleted(logger, exception, info.AssetId, tempPath);
-            }
+            MediaIndexerLog.TempFileNotDeleted(logger, exception, assetId, tempPath);
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            MediaIndexerLog.TempFileNotDeleted(logger, exception, assetId, tempPath);
         }
     }
 

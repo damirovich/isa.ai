@@ -14,6 +14,14 @@ internal static partial class MediaIndexerLog
         Message = "Индексация носителя {AssetId}: носитель не найден — конвейер не запущен.")]
     public static partial void AssetNotFound(ILogger logger, int assetId);
 
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Индексация носителя {AssetId} не запускается: аудиозапись, поиск по лицу неприменим (ADR-0026).")]
+    public static partial void NotApplicableToAudio(ILogger logger, int assetId);
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Индексация носителя {AssetId} не выполняется: видеопотока в файле нет (только звук) — носитель переведён в аудиозаписи, поиск по лицу неприменим (ADR-0026).")]
+    public static partial void NoVideoStream(ILogger logger, int assetId);
+
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Индексация носителя {AssetId} не выполнена: дело закрыто, шаблоны удалены регламентом (ТБ-074).")]
     public static partial void IndexingForbiddenByClosedCase(ILogger logger, int assetId);
@@ -27,7 +35,7 @@ internal static partial class MediaIndexerLog
     public static partial void Cancelled(ILogger logger, int assetId, int frames);
 
     [LoggerMessage(Level = LogLevel.Warning,
-        Message = "Индексация носителя {AssetId}: временный файл «{TempPath}» не удалён — подберёт уборка.")]
+        Message = "Индексация носителя {AssetId}: временный файл «{TempPath}» не удалён — удалится при следующем старте хоста; до этого удалите его вручную по пути из сообщения (копия материала дела, ТБ-064).")]
     public static partial void TempFileNotDeleted(ILogger logger, Exception exception, int assetId, string tempPath);
 
     [LoggerMessage(Level = LogLevel.Warning,

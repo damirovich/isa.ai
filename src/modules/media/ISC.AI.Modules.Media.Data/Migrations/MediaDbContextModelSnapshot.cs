@@ -298,6 +298,24 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("stored_file_name");
 
+                    b.Property<DateTime?>("TranscribedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("transcribed_at");
+
+                    b.Property<string>("TranscriberVersion")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("transcriber_version");
+
+                    b.Property<string>("TranscriptError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("transcript_error");
+
+                    b.Property<int>("TranscriptStatus")
+                        .HasColumnType("integer")
+                        .HasColumnName("transcript_status");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -557,6 +575,71 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                     b.ToTable("search_session", "media");
                 });
 
+            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.TranscriptSegment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AssetId")
+                        .HasColumnType("integer")
+                        .HasColumnName("asset_id");
+
+                    b.Property<short>("Classification")
+                        .HasColumnType("smallint")
+                        .HasColumnName("classification");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("DivisionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("division_id");
+
+                    b.Property<long>("EndMs")
+                        .HasColumnType("bigint")
+                        .HasColumnName("end_ms");
+
+                    b.Property<int>("Index")
+                        .HasColumnType("integer")
+                        .HasColumnName("index");
+
+                    b.Property<string>("ModelVersion")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("model_version");
+
+                    b.Property<long>("StartMs")
+                        .HasColumnType("bigint")
+                        .HasColumnName("start_ms");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_transcript_segment");
+
+                    b.HasIndex("AssetId", "Index")
+                        .IsUnique()
+                        .HasDatabaseName("ix_transcript_segment_asset_id_index");
+
+                    b.HasIndex("Classification", "DivisionId")
+                        .HasDatabaseName("ix_transcript_segment_classification_division_id");
+
+                    b.ToTable("transcript_segment", "media");
+                });
+
             modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.VerificationDecisionEntity", b =>
                 {
                     b.Property<int>("Id")
@@ -671,6 +754,18 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                         .HasConstraintName("fk_search_candidate_search_sessions_session_id");
 
                     b.Navigation("Session");
+                });
+
+            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.TranscriptSegment", b =>
+                {
+                    b.HasOne("ISC.AI.Modules.Media.Data.Entities.MediaAsset", "Asset")
+                        .WithMany()
+                        .HasForeignKey("AssetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_transcript_segment_asset_asset_id");
+
+                    b.Navigation("Asset");
                 });
 
             modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.VerificationDecisionEntity", b =>

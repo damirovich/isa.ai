@@ -1,12 +1,13 @@
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.Media.Data.Entities;
+using ISC.AI.Modules.Media.Domain.Model;
 using ISC.AI.Modules.Media.Domain.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace ISC.AI.Modules.Media.Data;
 
 /// <summary>
-/// Чтение носителей, лиц и шаблонов (ТФ-МЕД-03, ТФ-ПЛ-03) под решёткой доступа НА СТОРОНЕ БД
+/// Чтение носителей, лиц, шаблонов (ТФ-МЕД-03, ТФ-ПЛ-03) и расшифровок речи (ADR-0026) под решёткой доступа НА СТОРОНЕ БД
 /// (ТБ-020/070): каждый запрос проходит через <see cref="MediaAccessFilters.VisibleTo{T}"/> — floor ядра
 /// плюс политика профиля. Недоступная строка неотличима от несуществующей (<see langword="null"/>/пусто).
 /// </summary>
@@ -16,6 +17,12 @@ public sealed class MediaCatalog(
     IDbContextFactory<MediaDbContext> contextFactory,
     IAccessPolicy accessPolicy) : IMediaCatalog
 {
+    /// <summary>Минимальная длина искомого текста (после обрезки пробелов) — короче выдача бессмысленна.</summary>
+    public const int MinSearchTextLength = 2;
+
+    // Экранирующий символ LIKE — задаётся явно (ESCAPE), не полагаясь на умолчание сервера.
+    private const string LikeEscape = "\\";
+
     /// <inheritdoc />
     public async Task<MediaAssetRow?> GetAsync(int assetId, AccessContext access, CancellationToken cancellationToken = default)
     {
@@ -82,6 +89,92 @@ public sealed class MediaCatalog(
         return embedding?.ToArray();
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Решётка (ТБ-020/021) — ДВАЖДЫ и на стороне БД: по строке носителя (есть ли что показывать вообще) и по
+    /// строке каждого фрагмента (гриф денормализован с носителя). Недоступный носитель — <see langword="null"/>,
+    /// неотличимо от несуществующего. Сужение по делам субъекта (ТБ-071) — забота сценария, не каталога.
+    /// </remarks>
+    public async Task<MediaTranscript?> GetTranscriptAsync(int assetId, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var asset = await db.Assets.AsNoTracking()
+            .VisibleTo(access, accessPolicy)
+            .Where(a => a.Id == assetId)
+            .Select(a => new { a.Id, a.TranscriptStatus, a.TranscriptError, a.TranscriberVersion, a.TranscribedAt })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (asset is null)
+        {
+            return null;
+        }
+
+        var segments = await db.TranscriptSegments.AsNoTracking()
+            .VisibleTo(access, accessPolicy)
+            .Where(s => s.AssetId == assetId)
+            .OrderBy(s => s.Index)
+            .Select(s => new TranscriptSegmentRow(s.Index, s.StartMs, s.EndMs, s.Text))
+            .ToListAsync(cancellationToken);
+
+        return new MediaTranscript(
+            asset.Id, asset.TranscriptStatus, asset.TranscriptError, asset.TranscriberVersion, asset.TranscribedAt, segments);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// FAIL-CLOSED (ТБ-021): без контекста доступа — <see cref="AccessContextRequiredException"/> ДО любой
+    /// проверки аргументов, в т.ч. при пустой области: «поиск без фильтра» невозможен ни в какой ветке.
+    /// Решётка — на стороне БД по строке фрагмента И по строке носителя (подпись выдачи берётся у носителя).
+    /// </para>
+    /// <para>
+    /// Совпадение — <c>ILIKE '%…%'</c> с экранированием <c>\</c>, <c>%</c> и <c>_</c>: ввод пользователя — всегда
+    /// буквальная подстрока, а не шаблон. Искомый текст дополнительно приводится к строчным в приложении:
+    /// регистронезависимость <c>ILIKE</c> для кириллицы (в т.ч. киргизских ү, ө, ң) зависит от локали БД, а
+    /// модель пишет текст строчными (ADR-0026) — так совпадение не зависит от того, как развёрнут сервер.
+    /// Индекс по тексту не нужен: область — носители одного дела (индекс по носителю).
+    /// </para>
+    /// </remarks>
+    public async Task<IReadOnlyList<TranscriptHit>> SearchTranscriptsAsync(
+        IReadOnlyCollection<int> assetIds,
+        string text,
+        int limit,
+        AccessContext access,
+        CancellationToken cancellationToken = default)
+    {
+        if (access is null)
+        {
+            throw new AccessContextRequiredException();
+        }
+
+        ArgumentNullException.ThrowIfNull(assetIds);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+
+        var needle = text?.Trim().ToLowerInvariant();
+        if (assetIds.Count == 0 || needle is null || needle.Length < MinSearchTextLength)
+        {
+            return [];
+        }
+
+        var ids = assetIds as int[] ?? assetIds.ToArray();
+        var pattern = "%" + EscapeLikePattern(needle) + "%";
+
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var hits =
+            from s in db.TranscriptSegments.AsNoTracking().VisibleTo(access, accessPolicy)
+            join a in db.Assets.AsNoTracking().VisibleTo(access, accessPolicy) on s.AssetId equals a.Id
+            where ids.Contains(s.AssetId) && EF.Functions.ILike(s.Text, pattern, LikeEscape)
+            orderby s.AssetId, s.StartMs, s.Index
+            select new TranscriptHit(a.Id, a.OriginalFileName, a.Kind, s.Index, s.StartMs, s.EndMs, s.Text);
+
+        return await hits.Take(limit).ToListAsync(cancellationToken);
+    }
+
+    /// <summary>Экранирует метасимволы LIKE (<c>\</c>, <c>%</c>, <c>_</c>): ввод — буквальная подстрока.</summary>
+    internal static string EscapeLikePattern(string value) =>
+        value.Replace(LikeEscape, LikeEscape + LikeEscape, StringComparison.Ordinal)
+            .Replace("%", LikeEscape + "%", StringComparison.Ordinal)
+            .Replace("_", LikeEscape + "_", StringComparison.Ordinal);
+
     // Проекции — единственное место, где строка БД превращается в строку чтения; FaceCount — подзапрос.
     private static IQueryable<MediaAssetRow> ProjectAssets(MediaDbContext db, IQueryable<MediaAsset> assets) =>
         assets.Select(a => new MediaAssetRow(
@@ -103,7 +196,8 @@ public sealed class MediaCatalog(
             a.EmbedderVersion,
             a.IndexedAt,
             a.CreatedAt,
-            db.Faces.Count(f => f.AssetId == a.Id)));
+            db.Faces.Count(f => f.AssetId == a.Id),
+            a.TranscriptStatus));
 
     private static IQueryable<FaceRow> ProjectFaces(IQueryable<Face> faces) =>
         faces.Select(f => new FaceRow(

@@ -1,0 +1,83 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Строка фрагмента расшифровки «[мм:сс] текст» панели TranscriptPanel (ADR-0026).
+   ОТДЕЛЬНЫЙ КОМПОНЕНТ ради длинных записей (1–3 тыс. фрагментов): параметры — только примитивы, колбэк
+   OnPlay панель создаёт один раз, строка перерисовывается лишь при смене своих параметров (ShouldRender) —
+   щелчок по фрагменту перерисовывает две строки (прежнюю и новую активную), а не весь список.
+   Воспроизводимая запись — НАТИВНАЯ <button type="button">: Enter и пробел браузер сам превращает в щелчок,
+   фокус и доступность для экранного диктора — штатные, прочие клавиши на сервер не уходят. Текст — span с
+   классами типографики MudBlazor: блочный <p> (MudText) внутри <button> — невалидная разметка.
+   Текст фрагмента выводится только как текст (Razor экранирует) — разметка из расшифровки не исполняется. *@
+@using System.Threading.Tasks
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+
+@if (Clickable)
+{
+    <button type="button" id="@ElementId" class="d-flex align-start gap-3 px-2 py-1" style="@ButtonStyle"
+            title="Воспроизвести с этого места" @onclick="PlayAsync">
+        <span class="mud-text-secondary" style="font-family:monospace;white-space:nowrap;">[@MediaLabels.ClockTimecode(StartMs)]</span>
+        <span class="mud-typography mud-typography-body2">@Text</span>
+    </button>
+}
+else
+{
+    <div id="@ElementId" class="d-flex align-start gap-3 px-2 py-1" style="@RowStyle">
+        <span class="mud-text-secondary" style="font-family:monospace;white-space:nowrap;">[@MediaLabels.ClockTimecode(StartMs)]</span>
+        <span class="mud-typography mud-typography-body2">@Text</span>
+    </div>
+}
+
+@code {
+    /// <summary>Сброс оформления кнопки браузера: строка выглядит как текст списка, а не как кнопка.</summary>
+    private const string ButtonReset =
+        "width:100%;text-align:left;border:0;background:none;font:inherit;color:inherit;cursor:pointer;";
+
+    /// <summary>Номер фрагмента в расшифровке — передаётся в <see cref="OnPlay"/>.</summary>
+    [Parameter, EditorRequired] public int Index { get; set; }
+
+    /// <summary>Id элемента строки: по нему JS-модуль прокручивает к фрагменту при переходе по ?t=.</summary>
+    [Parameter, EditorRequired] public string ElementId { get; set; } = string.Empty;
+
+    /// <summary>Начало фрагмента в записи, мс (таймкод «[мм:сс]»).</summary>
+    [Parameter] public long StartMs { get; set; }
+
+    /// <summary>Дословный текст фрагмента.</summary>
+    [Parameter] public string? Text { get; set; }
+
+    /// <summary>Фрагмент активен (щёлкнули по нему или пришли к нему по ?t=) — выделяется полосой слева.</summary>
+    [Parameter] public bool IsActive { get; set; }
+
+    /// <summary>
+    /// Запись воспроизводится браузером — строка кнопка «воспроизвести с этого места»; иначе — просто текст
+    /// (AMR/3GPP, MKV/AVI/MOV/3GP: перехода к месту записи нет).
+    /// </summary>
+    [Parameter] public bool Clickable { get; set; }
+
+    /// <summary>Щелчок (Enter, пробел) по строке: номер фрагмента, с которого воспроизводить.</summary>
+    [Parameter] public EventCallback<int> OnPlay { get; set; }
+
+    private (int Index, string ElementId, long StartMs, string? Text, bool IsActive, bool Clickable) _shown;
+    private bool _changed = true;
+
+    private string RowStyle =>
+        IsActive
+            ? "border-radius:4px;border-left:3px solid var(--mud-palette-primary);background:var(--mud-palette-background-grey);"
+            : "border-radius:4px;border-left:3px solid transparent;";
+
+    private string ButtonStyle => ButtonReset + RowStyle;
+
+    protected override void OnParametersSet()
+    {
+        // OnPlay в сравнение не входит: он читается в момент щелчка, а не при отрисовке.
+        var current = (Index, ElementId, StartMs, Text, IsActive, Clickable);
+        _changed = _changed || current != _shown;
+        _shown = current;
+    }
+
+    /// <summary>Перерисовка — только когда поменялись параметры строки (см. комментарий компонента).</summary>
+    protected override bool ShouldRender() => _changed;
+
+    protected override void OnAfterRender(bool firstRender) => _changed = false;
+
+    private Task PlayAsync() => OnPlay.InvokeAsync(Index);
+}

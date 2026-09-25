@@ -37,8 +37,12 @@ public sealed class FfmpegFrameExtractorTests : IAsyncLifetime
     private string _ffmpegFolder = string.Empty;
     private string _mp4Path = string.Empty;
     private string _webmPath = string.Empty;
+    private string _voicePath = string.Empty;
 
-    /// <summary>Готовит два клипа (MPEG-4 и VP9/WebM) — проверяем не кодек, а раскадровку.</summary>
+    /// <summary>
+    /// Готовит два клипа (MPEG-4 и VP9/WebM) — проверяем не кодек, а раскадровку — и «голосовое» 3GP без
+    /// картинки (только звук): такое браузер объявляет video/3gpp (ADR-0026).
+    /// </summary>
     public async Task InitializeAsync()
     {
         _ffmpegFolder = LocateFfmpegFolder();
@@ -46,10 +50,14 @@ public sealed class FfmpegFrameExtractorTests : IAsyncLifetime
 
         _mp4Path = Path.Combine(_workDir, "clip.mp4");
         _webmPath = Path.Combine(_workDir, "clip.webm");
+        _voicePath = Path.Combine(_workDir, "voice.3gp");
 
         // mpeg4 и libvpx-vp9 — кодеки БЕЗ обязательств GPL: в LGPL-сборке x264/x265 отключены (ADR-0020).
         await RunFfmpegAsync($"-y -f lavfi -i testsrc2=size=320x240:rate={ClipFps} -t {ClipSeconds} -c:v mpeg4 -q:v 5 \"{_mp4Path}\"");
         await RunFfmpegAsync($"-y -f lavfi -i testsrc2=size=320x240:rate={ClipFps} -t {ClipSeconds} -c:v libvpx-vp9 -b:v 300k \"{_webmPath}\"");
+
+        // Встроенный кодер AAC ffmpeg (LGPL): тон 3 с в контейнере 3GP, видеопотока нет.
+        await RunFfmpegAsync($"-y -f lavfi -i sine=frequency=440:duration=3 -c:a aac -b:a 32k \"{_voicePath}\"");
     }
 
     /// <inheritdoc />
@@ -161,6 +169,26 @@ public sealed class FfmpegFrameExtractorTests : IAsyncLifetime
         // один «лишний» кадр после отмены — нормальная работа, а не утечка. Существенно то, что клип
         // НЕ дочитывается до конца: иначе отмена долгой раскадровки ничего бы не экономила.
         read.ShouldBeInRange(1, ClipSeconds - 1);
+    }
+
+    [Fact(DisplayName = "ADR-0026: голосовое .3gp без картинки — проба «видеопотока нет», раскадровка даёт ноль кадров без ошибки ffmpeg; у видеоклипов поток есть")]
+    public async Task Audio_only_container_has_no_video_stream_and_yields_no_frames()
+    {
+        var extractor = new FfmpegFrameExtractor(Options());
+
+        (await extractor.HasVideoStreamAsync(_voicePath)).ShouldBeFalse();
+        (await extractor.HasVideoStreamAsync(_mp4Path)).ShouldBeTrue();
+        (await extractor.HasVideoStreamAsync(_webmPath)).ShouldBeTrue();
+
+        // Второй рубеж: даже если раскадровку позвали, ffmpeg на входе без картинки не запускается — кадров
+        // просто нет (без него было бы «Output file does not contain any stream» и «ошибка обработки»).
+        var frames = new List<VideoFrame>();
+        await foreach (var frame in extractor.ExtractAsync(_voicePath, new FrameSamplingOptions(1.0)))
+        {
+            frames.Add(frame);
+        }
+
+        frames.ShouldBeEmpty();
     }
 
     private VisionOptions Options() =>

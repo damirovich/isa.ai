@@ -8,6 +8,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.AI\ISC.AI.AI.csproj" />
+    <!-- Оценка расшифровки речи (Speech/, КИ-10, ADR-0026): только порт IAudioTranscriber и модель фрагментов.
+         Реализацию распознавателя (ISC.AI.Speech) сюда НЕ подключаем — её передаёт вызывающий код. -->
+    <ProjectReference Include="..\..\src\modules\media\ISC.AI.Modules.Media.Domain\ISC.AI.Modules.Media.Domain.csproj" />
   </ItemGroup>
 
 </Project>

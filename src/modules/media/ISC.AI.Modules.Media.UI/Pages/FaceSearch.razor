@@ -273,11 +273,20 @@
 }
 
 @code {
-    /// <summary>Дело из адресной строки (переход из медиатеки дела / карточки носителя).</summary>
-    [SupplyParameterFromQuery(Name = "caseId")] public int? QueryCaseId { get; set; }
+    /// <summary>
+    /// Параметр <c>?caseId=</c> как пришёл в адресе — строкой, чтобы нечисловое значение не роняло страницу
+    /// (см. <see cref="MediaQueryValues"/>); разбор — <see cref="QueryCaseId"/>.
+    /// </summary>
+    [SupplyParameterFromQuery(Name = "caseId")] public string? CaseIdQuery { get; set; }
 
-    /// <summary>Лицо носителя как проба (ТФ-ПЛ-03) из адресной строки.</summary>
-    [SupplyParameterFromQuery(Name = "faceId")] public int? QueryFaceId { get; set; }
+    /// <summary>Параметр <c>?faceId=</c> как пришёл в адресе — строкой по той же причине; разбор — <see cref="QueryFaceId"/>.</summary>
+    [SupplyParameterFromQuery(Name = "faceId")] public string? FaceIdQuery { get; set; }
+
+    /// <summary>Дело из адресной строки (переход из медиатеки дела / карточки носителя); неразобранное — нет дела.</summary>
+    private int? QueryCaseId => MediaQueryValues.ParseInt(CaseIdQuery);
+
+    /// <summary>Лицо носителя как проба (ТФ-ПЛ-03) из адресной строки; неразобранное — пробы нет.</summary>
+    private int? QueryFaceId => MediaQueryValues.ParseInt(FaceIdQuery);
 
     private IReadOnlyList<CaseScopeItem> _cases = [];
     private IReadOnlyList<CaseAuthorizationItem> _authorizations = [];

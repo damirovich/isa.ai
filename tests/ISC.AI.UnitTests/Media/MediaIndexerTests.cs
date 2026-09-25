@@ -8,6 +8,7 @@ using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.Storage;
 using ISC.AI.Modules.Media.Application;
 using ISC.AI.Modules.Media.Application.Features.Indexing;
+using ISC.AI.Modules.Media.Application.Features.Maintenance;
 using ISC.AI.Modules.Media.Domain.Model;
 using ISC.AI.Modules.Media.Domain.Services;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -22,9 +23,14 @@ namespace ISC.AI.UnitTests.Media;
 /// для пригодных, вырезки для всех, порядок удаления старых вырезок (ПОСЛЕ фиксации строк), компенсация при
 /// сбое и отмене, аудит без субъекта с грифом носителя (ТО-инф-11).
 /// </summary>
-public sealed class MediaIndexerTests
+public sealed class MediaIndexerTests : IDisposable
 {
     private const int AssetId = 9;
+
+    // Временные копии — в своём каталоге теста: настоящий %TEMP%\iscai-media тесты не трогают.
+    private readonly MediaTempFiles _tempFiles = new(
+        Path.Combine(Path.GetTempPath(), "iscai-media-unit-tests", Guid.NewGuid().ToString("N")),
+        Path.Combine(Path.GetTempPath(), "iscai-media-unit-tests", Guid.NewGuid().ToString("N") + "-legacy"));
 
     private static readonly DetectedFace FaceA = new(new BoundingBox(0, 0, 10, 10), default, 0.9f);
     private static readonly DetectedFace FaceB = new(new BoundingBox(20, 20, 10, 10), default, 0.5f);
@@ -70,6 +76,9 @@ public sealed class MediaIndexerTests
         _embedder.EmbedAsync(Arg.Any<byte[]>(), Arg.Any<DetectedFace>(), Arg.Any<CancellationToken>()).Returns(new float[128]);
         _imageTools.ReadSize(Arg.Any<byte[]>()).Returns(new ImageSize(640, 480));
         _imageTools.CropJpeg(Arg.Any<byte[]>(), Arg.Any<BoundingBox>(), Arg.Any<float>(), Arg.Any<int>(), Arg.Any<int>()).Returns([9]);
+
+        // Видеопоток в файле есть (голосовое «видео» без картинки — отдельный случай).
+        _frames.HasVideoStreamAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(true);
 
         // Кадры: 0 — без лиц, 5 — два лица (B непригодно), 10 — одно лицо.
         _frames.ExtractAsync(Arg.Any<string>(), Arg.Any<FrameSamplingOptions>(), Arg.Any<CancellationToken>())
@@ -211,9 +220,109 @@ public sealed class MediaIndexerTests
         await _audit.DidNotReceive().WriteAsync(Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact(DisplayName = "ADR-0026: аудиозапись — немедленный выход без изменений: ни статуса, ни чтения исходника, ни лиц, ни журнала")]
+    public async Task Audio_asset_is_not_indexed_and_nothing_changes()
+    {
+        _store.GetForIndexingAsync(AssetId, Arg.Any<CancellationToken>())
+            .Returns(new MediaAssetIndexingInfo(AssetId, MediaKind.Audio, "voice.ogg", "audio/ogg", 2, 7, []));
+
+        var result = await Indexer().IndexAsync(AssetId);
+
+        result.Success.ShouldBeFalse();
+        result.Error.ShouldBe(MediaIndexer.NotApplicableToAudioError);
+        result.Faces.ShouldBe(0);
+
+        // Статус носителя уже «неприменимо» (ставится при приёме) и не трогается: ни «в обработке», ни
+        // «проиндексировано с нулём лиц», ни «ошибка» — журнал не должен утверждать, что биометрия обрабатывалась.
+        await _store.DidNotReceive().MarkProcessingAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _store.DidNotReceive().FailIndexingAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _store.DidNotReceive().CompleteIndexingAsync(
+            Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<long?>(), Arg.Any<CancellationToken>());
+        await _files.DidNotReceive().OpenReadAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _detector.DidNotReceive().DetectAsync(Arg.Any<byte[]>(), Arg.Any<CancellationToken>());
+        await _caseScope.DidNotReceive().IsBiometricIndexingAllowedAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _audit.DidNotReceive().WriteAsync(Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "ADR-0026: «видео» без видеопотока (голосовое .3gp) → носитель переведён в аудио, лиц «неприменимо»: ни «в обработке», ни ошибки, ни журнала индексации")]
+    public async Task Video_without_video_stream_is_reclassified_as_audio()
+    {
+        _store.GetForIndexingAsync(AssetId, Arg.Any<CancellationToken>())
+            .Returns(new MediaAssetIndexingInfo(AssetId, MediaKind.Video, "voice.3gp", "video/3gpp", 2, 7, []));
+        string? probedPath = null;
+        _frames.HasVideoStreamAsync(Arg.Do<string>(p => probedPath = p), Arg.Any<CancellationToken>()).Returns(false);
+
+        var result = await Indexer().IndexAsync(AssetId);
+
+        result.Success.ShouldBeFalse();
+        result.Error.ShouldBe(MediaIndexer.NoVideoStreamError);
+        result.Frames.ShouldBe(0);
+        result.Faces.ShouldBe(0);
+
+        // Перевод в аудиозаписи — хранилищем (Kind=Audio, лица «неприменимо»).
+        await _store.Received(1).ReclassifyAsAudioAsync(AssetId, Arg.Any<CancellationToken>());
+
+        // Биометрия не обрабатывалась — и ни статус, ни журнал этого не утверждают: ни «в обработке», ни
+        // «проиндексировано с нулём лиц», ни «ошибка обработки» (сбой ffmpeg на входе без картинки).
+        await _store.DidNotReceive().MarkProcessingAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _store.DidNotReceive().FailIndexingAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _store.DidNotReceive().CompleteIndexingAsync(
+            Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<long?>(), Arg.Any<CancellationToken>());
+        await _audit.DidNotReceive().WriteAsync(Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>());
+        _frames.DidNotReceive().ExtractAsync(Arg.Any<string>(), Arg.Any<FrameSamplingOptions>(), Arg.Any<CancellationToken>());
+        await _detector.DidNotReceive().DetectAsync(Arg.Any<byte[]>(), Arg.Any<CancellationToken>());
+
+        // Проба шла по временной копии в управляемом каталоге, и копия удалена.
+        probedPath.ShouldNotBeNull();
+        Path.GetDirectoryName(probedPath).ShouldBe(_tempFiles.Root);
+        Path.GetFileName(probedPath).ShouldStartWith(MediaTempFiles.FramesPrefix);
+        Path.GetExtension(probedPath).ShouldBe(".3gp");
+        File.Exists(probedPath).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Временная копия видео — в управляемом каталоге с префиксом frames-, удаляется после прогона; «плохое» расширение хранилища → .bin")]
+    public async Task Temp_copy_lives_in_managed_folder_with_safe_extension()
+    {
+        // Имя, сохранённое до фильтра при приёме: кавычка в расширении разорвала бы командную строку ffmpeg.
+        _store.GetForIndexingAsync(AssetId, Arg.Any<CancellationToken>())
+            .Returns(new MediaAssetIndexingInfo(AssetId, MediaKind.Video, "src.mp4\" -y \"out", "video/mp4", 2, 7, []));
+        string? extractedPath = null;
+        _frames.ExtractAsync(Arg.Do<string>(p => extractedPath = p), Arg.Any<FrameSamplingOptions>(), Arg.Any<CancellationToken>())
+            .Returns(Frames(new VideoFrame(0, TimeSpan.Zero, [0])));
+
+        var result = await Indexer().IndexAsync(AssetId);
+
+        result.Success.ShouldBeTrue();
+        extractedPath.ShouldNotBeNull();
+        Path.GetDirectoryName(extractedPath).ShouldBe(_tempFiles.Root);
+        Path.GetFileName(extractedPath).ShouldStartWith(MediaTempFiles.FramesPrefix);
+        Path.GetExtension(extractedPath).ShouldBe(MediaFileNames.FallbackExtension);
+        extractedPath.ShouldNotContain("\"");
+        File.Exists(extractedPath).ShouldBeFalse();
+        Directory.EnumerateFiles(_tempFiles.Root).ShouldBeEmpty();
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        try
+        {
+            if (Directory.Exists(_tempFiles.Root))
+            {
+                Directory.Delete(_tempFiles.Root, recursive: true);
+            }
+        }
+        catch (IOException)
+        {
+            // Каталог теста — не повод валить прогон.
+        }
+    }
+
     private MediaIndexer Indexer() =>
         new(_store, _files, _detector, _embedder, _quality, _imageTools, _frames, _audit, _caseScope,
-            new MediaSearchOptions(), NullLogger<MediaIndexer>.Instance);
+            new MediaSearchOptions(), _tempFiles, NullLogger<MediaIndexer>.Instance);
 
     private static async IAsyncEnumerable<VideoFrame> Frames(params VideoFrame[] frames)
     {

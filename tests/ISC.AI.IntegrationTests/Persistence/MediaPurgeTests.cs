@@ -5,6 +5,7 @@ using ISC.AI.Modules.Media.Domain.Model;
 using ISC.AI.Modules.Media.Domain.Services;
 using ISC.AI.Persistence.Audit;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Pgvector;
 using Shouldly;
 using Testcontainers.PostgreSql;
@@ -177,6 +178,128 @@ public sealed class MediaPurgeTests : IAsyncLifetime
         {
             (await db.AuditRecords.CountAsync(r => r.Action == AuditAction.Purge)).ShouldBe(1);
         }
+    }
+
+    [Fact(DisplayName = "ТБ-064: уничтожение ждёт фиксации идущей расшифровки (блокировка строки носителя) — число фрагментов в акте равно числу снесённых каскадом")]
+    public async Task Purge_waits_for_in_flight_transcription_and_audits_actual_count()
+    {
+        var connectionString = _postgres.GetConnectionString();
+        var media = new MediaContextFactory(connectionString);
+        var core = new CoreContextFactory(connectionString);
+        int assetId;
+        await using (var db = media.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+            assetId = await SeedVideoAsync(db, "transcription-race");
+        }
+
+        await using (var db = core.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+        }
+
+        // Идущая запись расшифровки — ровно то, что делает MediaStore.CompleteTranscriptionAsync: транзакция,
+        // блокировка строки носителя, фрагменты вставлены, но ещё НЕ зафиксированы.
+        await using var writer = media.CreateDbContext();
+        await using var transcription = await writer.Database.BeginTransactionAsync();
+        await writer.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM media.asset WHERE id = {assetId} FOR UPDATE");
+        for (var i = 0; i < 3; i++)
+        {
+            writer.TranscriptSegments.Add(new TranscriptSegment
+            {
+                AssetId = assetId, Index = i, StartMs = i * 1000, EndMs = (i * 1000) + 900, Text = "фраза " + i,
+                ModelVersion = "m1", Classification = 2, DivisionId = 7,
+            });
+        }
+
+        await writer.SaveChangesAsync();
+
+        var purger = new MediaPurger(media, new AuditWriter(core), new RecordingFileStorage());
+        var purge = Task.Run(() => purger.PurgeAsync(assetId, subjectId: 42));
+
+        // Уничтожение упёрлось в блокировку носителя — ждём, пока ожидание станет видно серверу (без пауз наугад).
+        // До исправления оно успевало посчитать «0 фрагментов» и записать акт, а ждало уже на DELETE.
+        await WaitForLockWaitAsync(connectionString);
+        purge.IsCompleted.ShouldBeFalse();
+
+        await transcription.CommitAsync();
+        var result = await purge.WaitAsync(TimeSpan.FromSeconds(60));
+
+        result.Found.ShouldBeTrue();
+        await using (var db = media.CreateDbContext())
+        {
+            (await db.Assets.AnyAsync(a => a.Id == assetId)).ShouldBeFalse();
+            (await db.TranscriptSegments.AnyAsync(s => s.AssetId == assetId)).ShouldBeFalse();
+        }
+
+        await using (var db = core.CreateDbContext())
+        {
+            var audit = await db.AuditRecords.SingleAsync(r => r.Action == AuditAction.Purge);
+            audit.PayloadSensitive.ShouldNotBeNull().ShouldContain("фрагментов расшифровки 3");
+            audit.PayloadSensitive.ShouldContain("лиц 2");
+        }
+    }
+
+    [Fact(DisplayName = "ТБ-064: запись результата индексации лиц берёт ту же блокировку — носитель уничтожен, пока она ждала, → отказ «не найден», ни лица, ни кадра не записано")]
+    public async Task Indexing_result_waits_for_purge_lock_and_fails_on_purged_asset()
+    {
+        var connectionString = _postgres.GetConnectionString();
+        var media = new MediaContextFactory(connectionString);
+        int assetId;
+        await using (var db = media.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+            assetId = await SeedVideoAsync(db, "indexing-race");
+        }
+
+        // Уничтожение в разгаре: его транзакция держит блокировку строки носителя (как MediaPurger.PurgeAsync).
+        await using var purgeDb = media.CreateDbContext();
+        await using var purge = await purgeDb.Database.BeginTransactionAsync();
+        await purgeDb.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM media.asset WHERE id = {assetId} FOR UPDATE");
+
+        var store = new MediaStore(media, new RecordingFileStorage());
+        var complete = Task.Run(() => store.CompleteIndexingAsync(assetId, [], "yunet-1", "sface-1", durationMs: 2000));
+
+        await WaitForLockWaitAsync(connectionString);
+        complete.IsCompleted.ShouldBeFalse();
+
+        await purgeDb.Assets.Where(a => a.Id == assetId).ExecuteDeleteAsync();
+        await purge.CommitAsync();
+
+        // Индексатор получит исключение, снимет свои вырезки и зафиксирует сбой (строки уже нет — без следа).
+        var error = await Should.ThrowAsync<InvalidOperationException>(complete.WaitAsync(TimeSpan.FromSeconds(60)));
+        error.Message.ShouldContain("не найден");
+
+        await using (var db = media.CreateDbContext())
+        {
+            (await db.Faces.AnyAsync(f => f.AssetId == assetId)).ShouldBeFalse();
+            (await db.Frames.AnyAsync(f => f.AssetId == assetId)).ShouldBeFalse();
+        }
+    }
+
+    /// <summary>
+    /// Ждёт, пока какой-либо сеанс этой БД встанет в ожидание блокировки (<c>pg_stat_activity</c>): так тест знает,
+    /// что конкурирующая операция дошла до блокировки, без пауз наугад.
+    /// </summary>
+    private static async Task WaitForLockWaitAsync(string connectionString)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < deadline)
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()",
+                connection);
+            if ((long)(await command.ExecuteScalarAsync())! > 0)
+            {
+                return;
+            }
+
+            await Task.Delay(50);
+        }
+
+        throw new TimeoutException("Конкурирующая операция так и не встала в ожидание блокировки строки носителя за 30 с.");
     }
 
     // Видео с двумя кадрами, на каждом — лицо с вырезкой и шаблоном. Гриф 2, подразделение 7.

@@ -9,6 +9,8 @@
     <Project Path="src/core/ISC.AI.Web/ISC.AI.Web.csproj" Id="4e1b5082-ddb3-4d56-a277-a84a52cd5a6f" />
   </Folder>
   <Folder Name="/src/integrations/">
+    <Project Path="src/integrations/ISC.AI.Speech.Worker/ISC.AI.Speech.Worker.csproj" />
+    <Project Path="src/integrations/ISC.AI.Speech/ISC.AI.Speech.csproj" />
     <Project Path="src/integrations/ISC.AI.Vision.Onnx/ISC.AI.Vision.Onnx.csproj" />
   </Folder>
   <Folder Name="/src/modules/" />
@@ -54,6 +56,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/ISC.AI.Evals/ISC.AI.Evals.csproj" Id="d8e5669e-a27a-47c3-b0d7-3943d7069417" />
     <Project Path="tests/ISC.AI.IntegrationTests/ISC.AI.IntegrationTests.csproj" Id="99eae9dd-2d2b-4861-adc8-13b31c0a392d" />
+    <Project Path="tests/ISC.AI.Speech.Worker.Tests/ISC.AI.Speech.Worker.Tests.csproj" />
     <Project Path="tests/ISC.AI.UnitTests/ISC.AI.UnitTests.csproj" Id="a40dc825-5021-4354-9808-3e6e8e2c22ef" />
   </Folder>
   <Folder Name="/spikes/">

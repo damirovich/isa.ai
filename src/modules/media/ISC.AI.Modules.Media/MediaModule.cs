@@ -3,6 +3,7 @@ using ISC.AI.Modules.Media.Application;
 using ISC.AI.Modules.Media.Data;
 using ISC.AI.Modules.Media.Domain.Services;
 using ISC.AI.Modules.Media.UI;
+using ISC.AI.Speech;
 using ISC.AI.Vision.Onnx;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
@@ -12,8 +13,8 @@ using MudBlazor;
 namespace ISC.AI.Modules.Media;
 
 /// <summary>
-/// Манифест пакета модулей «Медиа» (ADR-0017, ДОК-13 §5): хранение фото/видео, распознавание и
-/// поиск лиц — переиспользуемая вертикаль, которую ПРОФИЛЬ («Следствие», ЭС3) включает в свой
+/// Манифест пакета модулей «Медиа» (ADR-0017, ДОК-13 §5): хранение фото/видео/аудио, распознавание и
+/// поиск лиц, расшифровка речи с поиском по словам (ADR-0026) — переиспользуемая вертикаль, которую ПРОФИЛЬ («Следствие», ЭС3) включает в свой
 /// реестр. Пакет НЕ зависит ни от профиля, ни от хоста (DependencyRulesTests).
 /// </summary>
 /// <remarks>
@@ -58,9 +59,12 @@ public static class MediaModule
     /// <summary>
     /// Ключи конфигурации, которые читает пакет: строка подключения и модели — обязательны; параметры
     /// поиска (ТН-008, ТФ-ПЛ-06), раскадровки (ТО-мат-06) и копии пробы в аудите (ТБ-072) — с умолчаниями.
+    /// Секция <c>Speech</c> (ADR-0026) — из единого списка интеграции (<see cref="SpeechConfigurationKeys.All"/>):
+    /// процесс-распознаватель, пути и пины SHA-256 модели, словаря и детектора речи, параметры.
     /// </summary>
     public static IReadOnlyList<string> ConfigurationKeys { get; } =
     [
+        .. SpeechConfigurationKeys.All,
         "ConnectionStrings:Media",
         MediaPersistenceServiceCollectionExtensions.EfSearchKey,
         "Vision:Detector:Path", "Vision:Detector:Sha256",
@@ -100,11 +104,18 @@ public static class MediaModule
     public static IReadOnlyList<IShellWidget> ShellWidgets { get; } = [];
 
     /// <summary>
-    /// Конвейер распознавания (ONNX Runtime, ffmpeg) и сценарии пакета (валидаторы, индексатор, настройки
-    /// поиска) — вызывается профилем в <c>IProfile.RegisterServices</c>. Обработчики Mediator регистрирует хост.
+    /// Конвейер распознавания лиц (ONNX Runtime, ffmpeg), распознавание речи (порт <see cref="IAudioTranscriber"/>
+    /// — внешний процесс-распознаватель, ADR-0026) и сценарии пакета (валидаторы, индексатор, конвейер
+    /// расшифровки, настройки поиска, обслуживание при старте хоста: уборка временных копий материалов и перевод
+    /// прерванных перезапуском расшифровок/индексаций в «ошибка») — вызывается профилем в
+    /// <c>IProfile.RegisterServices</c>. Обработчики Mediator регистрирует хост.
     /// </summary>
+    /// <remarks>
+    /// Распознавание речи регистрируется ВСЕГДА: без настроенной модели интеграция ставит явный отказ («не
+    /// настроено» с перечнем ключей), и расшифровка носителя честно уходит в «ошибка», а не пропускается молча.
+    /// </remarks>
     public static IServiceCollection RegisterServices(IServiceCollection services, IConfiguration configuration) =>
-        services.AddVisionOnnx(configuration).AddMediaApplication(configuration);
+        services.AddVisionOnnx(configuration).AddSpeechTranscription(configuration).AddMediaApplication(configuration);
 
     /// <summary>Контекст данных и порты хранения/поиска — вызывается профилем в <c>IProfile.RegisterDataContexts</c>.</summary>
     public static IServiceCollection RegisterDataContexts(IServiceCollection services, IConfiguration configuration) =>

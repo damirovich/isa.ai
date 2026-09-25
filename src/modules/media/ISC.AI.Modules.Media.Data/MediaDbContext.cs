@@ -6,8 +6,8 @@ namespace ISC.AI.Modules.Media.Data;
 
 /// <summary>
 /// Контекст данных пакета «Медиа» (схема <c>media</c>, ДОК-13 §5.2): носители, кадры, лица, шаблоны,
-/// поисковые сессии с кандидат-листами и решениями верификации (ТО-инф-12, ТБ-073).
-/// Ведёт собственную историю миграций (<c>media.__ef_migrations_history</c>, ADR-0017, ТО-инф-08).
+/// поисковые сессии с кандидат-листами и решениями верификации (ТО-инф-12, ТБ-073), фрагменты
+/// расшифровки речи (ADR-0026). Ведёт собственную историю миграций (<c>media.__ef_migrations_history</c>, ADR-0017, ТО-инф-08).
 /// </summary>
 /// <remarks>
 /// Наследует общий механизм таймстемпов у ядра (<see cref="AuditedDbContext"/>). Мягкого удаления в
@@ -22,7 +22,7 @@ public class MediaDbContext(DbContextOptions<MediaDbContext> options) : AuditedD
     /// <summary>Имя схемы пакета «Медиа».</summary>
     public const string Schema = "media";
 
-    /// <summary>Носители (фото/видео).</summary>
+    /// <summary>Носители (фото/видео/аудио).</summary>
     public DbSet<MediaAsset> Assets { get; set; } = null!;
 
     /// <summary>Кадры видео с лицами.</summary>
@@ -42,6 +42,9 @@ public class MediaDbContext(DbContextOptions<MediaDbContext> options) : AuditedD
 
     /// <summary>Решения верификации (ТБ-073).</summary>
     public DbSet<VerificationDecisionEntity> VerificationDecisions { get; set; } = null!;
+
+    /// <summary>Фрагменты расшифровки речи (ADR-0026) — первичный дословный слой под решёткой носителя.</summary>
+    public DbSet<TranscriptSegment> TranscriptSegments { get; set; } = null!;
 
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)

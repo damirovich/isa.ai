@@ -2,7 +2,7 @@ using FluentValidation;
 
 namespace ISC.AI.Modules.Media.Application.Features.Assets;
 
-/// <summary>Правила загрузки носителя (ТС-010, ТФ-МЕД-01): дело, имя, allowlist формата, размер, длины реквизитов.</summary>
+/// <summary>Правила загрузки носителя (ТС-010, ТФ-МЕД-01; аудио — ADR-0026): дело, имя, allowlist формата, размер, длины реквизитов.</summary>
 /// <remarks>Пределы длин — публичные константы: интерфейс берёт <c>MaxLength</c> отсюда, а не дублирует числа.</remarks>
 public sealed class UploadMediaValidator : AbstractValidator<UploadMediaCommand>
 {
@@ -19,7 +19,8 @@ public sealed class UploadMediaValidator : AbstractValidator<UploadMediaCommand>
         RuleFor(c => c.FileName).NotEmpty().MaximumLength(MediaFileRules.MaxFileNameLength);
         RuleFor(c => c.ContentType).NotEmpty().MaximumLength(200)
             .Must(MediaFileRules.IsAllowed)
-            .WithMessage("Допустимые форматы носителя: JPEG, PNG, BMP, WebP, MP4, WebM, MKV, MOV, AVI.");
+            .WithMessage("Допустимые форматы носителя: JPEG, PNG, BMP, WebP, MP4, WebM, MKV, MOV, AVI; "
+                + "аудио — MP3, M4A, AAC, OGG/Opus, WAV, WebM, FLAC, AMR, 3GP.");
         RuleFor(c => c.Content)
             .Must(content => content is { LongLength: > 0 and <= MediaFileRules.MaxFileBytes })
             .WithMessage("Файл пуст или больше 200 МБ.");

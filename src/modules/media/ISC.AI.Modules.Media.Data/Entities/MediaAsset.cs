@@ -5,7 +5,7 @@ using ISC.AI.Modules.Media.Domain.Model;
 namespace ISC.AI.Modules.Media.Data.Entities;
 
 /// <summary>
-/// Носитель (<c>media.asset</c>, ТС-010): фото или видео, принятое в хранилище. Байты лежат в
+/// Носитель (<c>media.asset</c>, ТС-010): фото, видео или аудио (ADR-0026), принятое в хранилище. Байты лежат в
 /// <c>IFileStorage</c> ядра (категория <c>media-originals</c>, подкаталог = идентификатор), здесь —
 /// метаданные, хеш и режимные поля. Физически удаляемый носитель биометрии (ТБ-064/075):
 /// намеренно НЕ <c>ISoftDeletable</c>.
@@ -30,7 +30,7 @@ public class MediaAsset : AuditableEntity, IClassified
     /// <summary>Размер, байт.</summary>
     public long ByteSize { get; set; }
 
-    /// <summary>Длительность видео, мс; <see langword="null"/> — изображение.</summary>
+    /// <summary>Длительность видео или аудио, мс; <see langword="null"/> — изображение либо ещё не известна.</summary>
     public long? DurationMs { get; set; }
 
     /// <summary>Источник/происхождение записи (свободный текст, ТФ-МЕД).</summary>
@@ -65,4 +65,19 @@ public class MediaAsset : AuditableEntity, IClassified
 
     /// <summary>Когда завершена индексация (UTC).</summary>
     public DateTime? IndexedAt { get; set; }
+
+    /// <summary>
+    /// Состояние расшифровки речи (ADR-0026). Отдельно от <see cref="IndexStatus"/>: другой конвейер, другая
+    /// модель, другой сбой. По умолчанию — неприменима (изображение; носители до ADR-0026).
+    /// </summary>
+    public TranscriptStatus TranscriptStatus { get; set; } = TranscriptStatus.NotApplicable;
+
+    /// <summary>Причина неудачи расшифровки (при <see cref="TranscriptStatus.Failed"/>).</summary>
+    public string? TranscriptError { get; set; }
+
+    /// <summary>Модель, которой сделана текущая расшифровка (с пином файлов).</summary>
+    public string? TranscriberVersion { get; set; }
+
+    /// <summary>Когда записана текущая расшифровка (UTC).</summary>
+    public DateTime? TranscribedAt { get; set; }
 }

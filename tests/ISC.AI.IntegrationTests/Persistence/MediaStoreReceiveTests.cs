@@ -101,6 +101,40 @@ public sealed class MediaStoreReceiveTests : IAsyncLifetime
         }
     }
 
+    [Fact(DisplayName = "Приём: расширение имени с изъятого устройства фильтруется — кавычка, «\\», кириллица, длина вне 2–5 → .bin; допустимое сохраняется")]
+    public async Task Unsafe_extension_is_stored_as_bin()
+    {
+        var factory = new MediaContextFactory(_postgres.GetConnectionString());
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+        }
+
+        var store = new MediaStore(factory, new RecordingFileStorage());
+
+        var injected = await store.ReceiveAsync(Draft("запись.m4a\" -y \"out", classification: 0), new MemoryStream([7, 1]));
+        var backslash = await store.ReceiveAsync(Draft("x.m4a\\", classification: 0), new MemoryStream([7, 2]));
+        var cyrillic = await store.ReceiveAsync(Draft("x.мп3", classification: 0), new MemoryStream([7, 3]));
+        var tooLong = await store.ReceiveAsync(Draft("x.abcdef", classification: 0), new MemoryStream([7, 4]));
+        var normal = await store.ReceiveAsync(Draft("voice.OGG", classification: 0), new MemoryStream([7, 5]));
+
+        await using (var db = factory.CreateDbContext())
+        {
+            async Task<string> StoredAsync(int id) =>
+                (await db.Assets.AsNoTracking().SingleAsync(a => a.Id == id)).StoredFileName;
+
+            (await StoredAsync(injected.AssetId)).ShouldEndWith(".bin");
+            (await StoredAsync(injected.AssetId)).ShouldNotContain("\"");
+            (await StoredAsync(backslash.AssetId)).ShouldEndWith(".bin");
+            (await StoredAsync(cyrillic.AssetId)).ShouldEndWith(".bin");
+            (await StoredAsync(tooLong.AssetId)).ShouldEndWith(".bin");
+            (await StoredAsync(normal.AssetId)).ShouldEndWith(".OGG");
+
+            // Исходное имя для показа — как было (на диск оно не попадает).
+            (await db.Assets.AsNoTracking().SingleAsync(a => a.Id == normal.AssetId)).OriginalFileName.ShouldBe("voice.OGG");
+        }
+    }
+
     private static MediaAssetDraft Draft(string fileName, short classification) => new(
         OriginalFileName: fileName,
         ContentType: "image/png",

@@ -22,6 +22,12 @@ public sealed class MediaAssetConfiguration : IEntityTypeConfiguration<MediaAsse
         builder.Property(a => a.DetectorVersion).HasMaxLength(50);
         builder.Property(a => a.EmbedderVersion).HasMaxLength(50);
 
+        // Расшифровка речи (ADR-0026). Статус — без HasDefaultValue намеренно: значение по умолчанию CLR (0 =
+        // «неприменима») совпало бы со «сторожем» EF, и явная запись NotApplicable подменялась бы умолчанием
+        // БД. Существующим строкам 0 проставляет сама миграция (см. AudioTranscripts).
+        builder.Property(a => a.TranscriptError).HasMaxLength(2000);
+        builder.Property(a => a.TranscriberVersion).HasMaxLength(TranscriptSegmentConfiguration.ModelVersionMaxLength);
+
         // Режимные поля обязательны (ТБ-020): носитель без грифа в схему не попадает.
         builder.Property(a => a.Classification).IsRequired();
         builder.Property(a => a.DivisionId).IsRequired();

@@ -4,6 +4,11 @@ using ISC.AI.Modules.Media.Domain.Model;
 namespace ISC.AI.Modules.Media.Domain.Services;
 
 /// <summary>Носитель для чтения (карточка, списки) — без байтов; байты отдаёт эндпоинт раздачи.</summary>
+/// <remarks>
+/// <c>TranscriptStatus</c> — состояние расшифровки речи (ADR-0026): нужен списку носителей дела и карточке,
+/// чтобы показать «расшифровывается / готово / ошибка» без отдельного запроса на каждый носитель. Параметр
+/// последний и со значением по умолчанию — добавлен без поломки существующих вызовов.
+/// </remarks>
 public sealed record MediaAssetRow(
     int Id,
     MediaKind Kind,
@@ -23,7 +28,8 @@ public sealed record MediaAssetRow(
     string? EmbedderVersion,
     DateTime? IndexedAt,
     DateTime CreatedAt,
-    int FaceCount);
+    int FaceCount,
+    TranscriptStatus TranscriptStatus = TranscriptStatus.NotApplicable);
 
 /// <summary>Лицо на носителе для чтения (рамки на фото, шкала лиц видео, вырезки).</summary>
 public sealed record FaceRow(
@@ -64,4 +70,27 @@ public interface IMediaCatalog
 
     /// <summary>Шаблон лица для поиска «этого человека в других материалах» (ТФ-ПЛ-03); <see langword="null"/> — нет/недоступен.</summary>
     Task<float[]?> GetTemplateAsync(int faceId, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Расшифровка носителя (ADR-0026), если носитель доступен; иначе <see langword="null"/> (неотличимо от
+    /// несуществующего). Фрагменты несут гриф носителя и проходят ту же решётку на стороне БД.
+    /// </summary>
+    Task<MediaTranscript?> GetTranscriptAsync(int assetId, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Поиск по словам в расшифровках перечисленных носителей (обычно — носителей дела). Совпадение —
+    /// по подстроке без учёта регистра: у киргизского нет морфологического словаря в PostgreSQL, а слово с
+    /// аффиксами («үйдө», «үйгө») должно находиться по основе («үй»). Решётка — на стороне БД.
+    /// </summary>
+    /// <param name="assetIds">Область поиска — носители, уже прошедшие сужение по делам субъекта.</param>
+    /// <param name="text">Искомые слова (подстрока, не короче 2 символов).</param>
+    /// <param name="limit">Предел выдачи.</param>
+    /// <param name="access">Контекст доступа субъекта.</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    Task<IReadOnlyList<TranscriptHit>> SearchTranscriptsAsync(
+        IReadOnlyCollection<int> assetIds,
+        string text,
+        int limit,
+        AccessContext access,
+        CancellationToken cancellationToken = default);
 }

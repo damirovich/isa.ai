@@ -134,8 +134,17 @@ else
     /// <summary>Стадия из адресной строки (<c>Expert</c>/<c>Verifier</c>); по умолчанию — эксперт.</summary>
     [SupplyParameterFromQuery(Name = "stage")] public string? StageQuery { get; set; }
 
-    /// <summary>Фигурант, указанный при ручной привязке лица (ТФ-МЕД-03) — подсказка эксперту; верификатору не показывается (ТФ-ВЕР-02).</summary>
-    [SupplyParameterFromQuery(Name = "person")] public int? SuggestedPersonRef { get; set; }
+    /// <summary>
+    /// Параметр <c>?person=</c> как пришёл в адресе — строкой, чтобы нечисловое значение не роняло страницу
+    /// (см. <see cref="MediaQueryValues"/>); разбор — <see cref="SuggestedPersonRef"/>.
+    /// </summary>
+    [SupplyParameterFromQuery(Name = "person")] public string? PersonQuery { get; set; }
+
+    /// <summary>
+    /// Фигурант, указанный при ручной привязке лица (ТФ-МЕД-03) — подсказка эксперту; верификатору не
+    /// показывается (ТФ-ВЕР-02). Неразобранное значение — подсказки нет.
+    /// </summary>
+    private int? SuggestedPersonRef => MediaQueryValues.ParseInt(PersonQuery);
 
     private VerificationStage Stage =>
         Enum.TryParse<VerificationStage>(StageQuery, ignoreCase: true, out var stage) ? stage : VerificationStage.Expert;

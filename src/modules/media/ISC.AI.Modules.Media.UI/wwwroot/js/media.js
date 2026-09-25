@@ -1,24 +1,60 @@
 // Вспомогательные функции страниц пакета «Медиа» — ES-модуль, грузится ЛЕНИВО через
 // IJSRuntime.InvokeAsync("import", "./_content/ISC.AI.Modules.Media.UI/js/media.js") только со страниц,
 // которым он нужен (Blazor JS isolation): хосту/профилю про модуль знать не нужно (никаких правок App.razor).
-// Изображение и видео показываются КАК ЕСТЬ (ТЭ-007): здесь только перемотка к таймкоду и измерение
-// натурального размера картинки для CSS-оверлея рамок лиц — никакой обработки пикселей.
+// Изображение, видео и аудио показываются КАК ЕСТЬ (ТЭ-007): здесь только перемотка к таймкоду, измерение
+// натурального размера картинки для CSS-оверлея рамок лиц и прокрутка к фрагменту расшифровки — никакой
+// обработки пикселей и звука.
 
 /**
- * Перемотать <video id="..."> к секунде и поставить на паузу — кнопка «к кадру» у лица видео.
+ * Перемотать проигрыватель (<video> или <audio> с id="...") к секунде.
+ * play = false (по умолчанию) — поставить на паузу: кнопка «к кадру» у лица видео показывает КАДР.
+ * play = true — запустить воспроизведение с этого места: щелчок по фрагменту расшифровки (ADR-0026).
+ * Если метаданные записи ещё не загружены (preload="metadata" не успел), место применяется по событию
+ * loadedmetadata. Отказ браузера воспроизводить без жеста пользователя (autoplay policy) глотается:
+ * перемотка при этом состоялась, оператор нажмёт «пуск» сам.
  * Возвращает false, если элемента нет (страница уже перерисована) — исключений наружу не даём.
  */
-export function seek(elementId, seconds) {
-    const video = document.getElementById(elementId);
-    if (!video || typeof video.currentTime !== 'number') {
+export function seek(elementId, seconds, play) {
+    const media = document.getElementById(elementId);
+    if (!media || typeof media.currentTime !== 'number') {
         return false;
     }
     try {
-        video.pause();
-        video.currentTime = Math.max(0, Number(seconds) || 0);
-        if (typeof video.scrollIntoView === 'function') {
-            video.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        const target = Math.max(0, Number(seconds) || 0);
+        if (!play) {
+            media.pause();
         }
+        if (media.readyState >= 1) {
+            media.currentTime = target;
+        } else {
+            media.addEventListener('loadedmetadata', () => { media.currentTime = target; }, { once: true });
+        }
+        if (play) {
+            const started = media.play();
+            if (started && typeof started.catch === 'function') {
+                started.catch(() => { /* autoplay policy — перемотка уже сделана */ });
+            }
+        }
+        if (typeof media.scrollIntoView === 'function') {
+            media.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Прокрутить к элементу с id="..." (фрагмент расшифровки, к которому пришли из поиска по ?t=) — и в
+ * прокручиваемом списке фрагментов, и на странице. Возвращает false, если элемента нет.
+ */
+export function reveal(elementId) {
+    const element = document.getElementById(elementId);
+    if (!element || typeof element.scrollIntoView !== 'function') {
+        return false;
+    }
+    try {
+        element.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         return true;
     } catch {
         return false;
@@ -54,4 +90,4 @@ export function measure(elementId) {
 }
 
 // Глобальный алиас для отладки из консоли; страницы используют экспорт модуля.
-window.iscaiMedia = { seek, measure };
+window.iscaiMedia = { seek, reveal, measure };

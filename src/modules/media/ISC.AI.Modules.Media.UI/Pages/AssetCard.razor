@@ -3,11 +3,15 @@
    рамки лиц на фото рисуются CSS-оверлеем поверх <img> (в процентах от натурального размера, который
    измеряет JS-модуль пакета), сам файл не меняется; лица носителя — вырезки с пригодностью и баллом
    детектора; у видео — таймкоды с кнопкой «к кадру» (перемотка через ленивый JS-модуль пакета, только
-   в OnAfterRenderAsync — предрендер JS не умеет). Контейнеры MKV/AVI/MOV браузер не воспроизводит —
+   в OnAfterRenderAsync — предрендер JS не умеет). Контейнеры MKV/AVI/MOV/3GP браузер не воспроизводит —
    вместо плеера ссылка на скачивание оригинала, «к кадру» недоступно.
    У каждого лица — «Найти этого человека в других материалах» (проба = лицо носителя, ТФ-ПЛ-03) и
    «Привязать к фигуранту» (ручная привязка создаёт КАНДИДАТА для двойной верификации, ТФ-МЕД-03).
-   Допуск проверяет сервер: и запрос карточки, и каждая отдача файла (ТБ-020/021, ТБ-073). *@
+   Допуск проверяет сервер: и запрос карточки, и каждая отдача файла (ТБ-020/021, ТБ-073).
+   АУДИО (ADR-0026): встроенный проигрыватель <audio> (AMR/3GPP браузер не играет — ссылка «скачать»); лиц в
+   записи нет (MediaIndexStatus.NotApplicable) — блоки лиц, поиска по лицу и переиндексации скрыты. У аудио и
+   видео — панель «Расшифровка речи» (TranscriptPanel): фрагменты с таймкодами, щелчок — воспроизведение с места;
+   ?t=<мс> (переход из поиска по расшифровкам дела) — перемотка к месту и подсветка фрагмента. *@
 @page "/media/assets/{Id:int}"
 @rendermode InteractiveServer
 @implements IAsyncDisposable
@@ -47,9 +51,16 @@ else
             </MudText>
         </div>
         <div class="d-flex align-center gap-2 flex-wrap">
-            <MudChip T="string" Variant="Variant.Text" Color="@asset.IndexStatus.ChipColor()">@asset.IndexStatus.Label()</MudChip>
+            @if (FacesApplicable(asset))
+            {
+                <MudChip T="string" Variant="Variant.Text" Color="@asset.IndexStatus.ChipColor()">@asset.IndexStatus.Label()</MudChip>
+            }
             <ClassificationChip Classification="@asset.Classification" />
-            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" Disabled="_busy" OnClick="ReindexAsync">Переиндексировать</MudButton>
+            @if (FacesApplicable(asset))
+            {
+                @* Переиндексация = повторный поиск лиц; к аудио неприменима (сервер тоже откажет). *@
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" Disabled="_busy" OnClick="ReindexAsync">Переиндексировать</MudButton>
+            }
             <MudTooltip Text="Гарантированное удаление — роли Администратор/Руководитель">
                 <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteForever" Disabled="_busy"
                            OnClick="@(() => _purgeOpen = true)">Удалить</MudButton>
@@ -71,7 +82,7 @@ else
         <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="my-3"
                   ShowCloseIcon="true" CloseIconClicked="@(() => _notice = null)">@_notice</MudAlert>
     }
-    @if (asset.IndexStatus == MediaIndexStatus.Failed && !string.IsNullOrWhiteSpace(asset.IndexError))
+    @if (FacesApplicable(asset) && asset.IndexStatus == MediaIndexStatus.Failed && !string.IsNullOrWhiteSpace(asset.IndexError))
     {
         <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="my-3">Ошибка обработки: @asset.IndexError</MudAlert>
     }
@@ -109,9 +120,37 @@ else
         </div>
     </MudPaper>
 
-    @* ================= Само изображение / видео — как есть (ТЭ-007) ================= *@
+    @* ================= Само изображение / видео / аудио — как есть (ТЭ-007) ================= *@
     <MudPaper Outlined="true" Class="pa-4 my-4 text-center">
-        @if (asset.Kind == MediaKind.Video)
+        @if (asset.Kind == MediaKind.Audio)
+        {
+            @if (IsBrowserPlayableAudio(asset.ContentType))
+            {
+                @* Тот же эндпоинт раздачи, что у видео: допуск и сужение по делам — на каждый запрос, Range для
+                   перемотки, одна выдача субъекту — одна запись аудита (MediaViewAuditThrottle, ТБ-030). *@
+                <audio id="@AudioElementId" controls preload="metadata" src="@MediaFileUrl.Originals(asset.Id, asset.StoredFileName)"
+                       style="width:100%;max-width:720px;display:block;margin:0 auto;"></audio>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+                    Запись воспроизводится без обработки (ТЭ-007); переход к месту записи — щелчком по фрагменту расшифровки ниже.
+                    Если она не воспроизводится — файла нет либо он вне вашего допуска.
+                </MudText>
+            }
+            else
+            {
+                @* AMR/3GPP браузер не воспроизводит (эндпоинт отдаёт их вложением): честная ссылка вместо мёртвого плеера. *@
+                <div class="d-flex flex-column align-center gap-2 py-4">
+                    <MudIcon Icon="@Icons.Material.Filled.AudioFile" Size="Size.Large" Class="mud-text-secondary" />
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download"
+                               Href="@MediaFileUrl.Originals(asset.Id, asset.StoredFileName)" download="@asset.OriginalFileName">Скачать оригинал</MudButton>
+                </div>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+                    Браузер не воспроизводит формат @MediaLabels.FormatName(asset.ContentType) — откройте файл в проигрывателе; переход к месту
+                    записи недоступен, таймкоды фрагментов — для сверки. Оригинал отдаётся без обработки (ТЭ-007); если скачать
+                    не удаётся — файла нет либо он вне вашего допуска.
+                </MudText>
+            }
+        }
+        else if (asset.Kind == MediaKind.Video)
         {
             @if (IsBrowserPlayable(asset.ContentType))
             {
@@ -121,20 +160,21 @@ else
                 <video id="@VideoElementId" controls preload="metadata" src="@MediaFileUrl.Originals(asset.Id, asset.StoredFileName)"
                        style="max-width:100%;max-height:70vh;display:block;margin:0 auto;"></video>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
-                    Видео воспроизводится без обработки (ТЭ-007); переход к кадру — кнопками у лиц ниже.
+                    Видео воспроизводится без обработки (ТЭ-007); переход к кадру — кнопками у лиц и щелчком по фрагменту расшифровки ниже.
                     Если оно не воспроизводится — файла нет либо он вне вашего допуска.
                 </MudText>
             }
             else
             {
-                @* MKV/AVI/MOV браузер не проигрывает (эндпоинт отдаёт их вложением): честная ссылка вместо мёртвого плеера. *@
+                @* MKV/AVI/MOV/3GP браузер не проигрывает (эндпоинт отдаёт их вложением): честная ссылка вместо мёртвого
+                   плеера. Название формата в подсказке — из типа самого носителя, а не перечнем. *@
                 <div class="d-flex flex-column align-center gap-2 py-4">
                     <MudIcon Icon="@Icons.Material.Filled.VideoFile" Size="Size.Large" Class="mud-text-secondary" />
                     <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download"
                                Href="@MediaFileUrl.Originals(asset.Id, asset.StoredFileName)" download="@asset.OriginalFileName">Скачать оригинал</MudButton>
                 </div>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
-                    Браузер не воспроизводит контейнер MKV/AVI/MOV — откройте файл в проигрывателе; переход к кадру недоступен.
+                    Браузер не воспроизводит контейнер @MediaLabels.FormatName(asset.ContentType) — откройте файл в проигрывателе; переход к кадру недоступен.
                     Оригинал отдаётся без обработки (ТЭ-007); если скачать не удаётся — файла нет либо он вне вашего допуска.
                 </MudText>
             }
@@ -164,86 +204,95 @@ else
         }
     </MudPaper>
 
-    @* ================= Лица носителя ================= *@
-    <MudPaper Outlined="true" Class="pa-4 my-4">
-        <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
-            <MudText Typo="Typo.subtitle1">Лица на носителе: @_details.Faces.Count</MudText>
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                Балл детектора — уверенность, что это лицо; непригодные для сравнения помечены с причиной (ТО-мат-07).
-            </MudText>
-        </div>
-        @if (_details.Faces.Count == 0)
-        {
-            <MudText Typo="Typo.body2" Class="mud-text-secondary">
-                @(asset.IndexStatus == MediaIndexStatus.Indexed ? "Лиц не найдено." : "Лица появятся после обработки носителя.")
-            </MudText>
-        }
-        else if (asset.Kind == MediaKind.Video)
-        {
-            var playable = IsBrowserPlayable(asset.ContentType);
-            <MudTable T="FaceRow" Items="_details.Faces" Dense="true" Hover="true" Elevation="0">
-                <HeaderContent>
-                    <MudTh>Вырезка</MudTh><MudTh>Таймкод</MudTh><MudTh>Лицо</MudTh><MudTh>Детектор</MudTh><MudTh>Пригодность</MudTh><MudTh></MudTh>
-                </HeaderContent>
-                <RowTemplate>
-                    <MudTd DataLabel="Вырезка">
-                        <FaceCropTile Url="@CropUrl(context)" Size="64" Highlighted="@(HighlightFaceId == context.Id)" />
-                    </MudTd>
-                    <MudTd DataLabel="Таймкод">
-                        @if (context.FrameTimestampMs is { } ms)
-                        {
-                            @if (playable)
+    @* ================= Расшифровка речи (ADR-0026): аудио и звуковая дорожка видео ================= *@
+    @if (asset.Kind is MediaKind.Audio or MediaKind.Video)
+    {
+        <TranscriptPanel AssetId="@asset.Id" PlayerElementId="@PlayableElementId(asset)" StartAtMs="@StartAtMs" />
+    }
+
+    @* ================= Лица носителя (к аудио неприменимо — блок скрыт) ================= *@
+    @if (FacesApplicable(asset))
+    {
+        <MudPaper Outlined="true" Class="pa-4 my-4">
+            <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+                <MudText Typo="Typo.subtitle1">Лица на носителе: @_details.Faces.Count</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    Балл детектора — уверенность, что это лицо; непригодные для сравнения помечены с причиной (ТО-мат-07).
+                </MudText>
+            </div>
+            @if (_details.Faces.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    @(asset.IndexStatus == MediaIndexStatus.Indexed ? "Лиц не найдено." : "Лица появятся после обработки носителя.")
+                </MudText>
+            }
+            else if (asset.Kind == MediaKind.Video)
+            {
+                var playable = IsBrowserPlayable(asset.ContentType);
+                <MudTable T="FaceRow" Items="_details.Faces" Dense="true" Hover="true" Elevation="0">
+                    <HeaderContent>
+                        <MudTh>Вырезка</MudTh><MudTh>Таймкод</MudTh><MudTh>Лицо</MudTh><MudTh>Детектор</MudTh><MudTh>Пригодность</MudTh><MudTh></MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Вырезка">
+                            <FaceCropTile Url="@CropUrl(context)" Size="64" Highlighted="@(HighlightFaceId == context.Id)" />
+                        </MudTd>
+                        <MudTd DataLabel="Таймкод">
+                            @if (context.FrameTimestampMs is { } ms)
                             {
-                                <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.PlayCircle"
-                                           OnClick="@(() => SeekAsync(ms))">@MediaLabels.Timecode(ms)</MudButton>
+                                @if (playable)
+                                {
+                                    <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.PlayCircle"
+                                               OnClick="@(() => SeekAsync(ms))">@MediaLabels.Timecode(ms)</MudButton>
+                                }
+                                else
+                                {
+                                    <span>@MediaLabels.Timecode(ms)</span>
+                                }
+                            }
+                        </MudTd>
+                        <MudTd DataLabel="Лицо">№ @context.Id@(context.TrackId is { } track ? $" · трек {track}" : string.Empty)</MudTd>
+                        <MudTd DataLabel="Детектор">@context.DetectionScore.ToString("0.00")</MudTd>
+                        <MudTd DataLabel="Пригодность">
+                            @if (context.QualityAcceptable)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">пригодно · качество @context.QualityScore.ToString("0.00")</MudChip>
                             }
                             else
                             {
-                                <span>@MediaLabels.Timecode(ms)</span>
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text">непригодно: @(context.QualityReason ?? "причина не указана")</MudChip>
                             }
-                        }
-                    </MudTd>
-                    <MudTd DataLabel="Лицо">№ @context.Id@(context.TrackId is { } track ? $" · трек {track}" : string.Empty)</MudTd>
-                    <MudTd DataLabel="Детектор">@context.DetectionScore.ToString("0.00")</MudTd>
-                    <MudTd DataLabel="Пригодность">
-                        @if (context.QualityAcceptable)
-                        {
-                            <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">пригодно · качество @context.QualityScore.ToString("0.00")</MudChip>
-                        }
-                        else
-                        {
-                            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text">непригодно: @(context.QualityReason ?? "причина не указана")</MudChip>
-                        }
-                    </MudTd>
-                    <MudTd>
-                        <div class="d-flex gap-1 flex-wrap">
-                            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonSearch"
-                                       Disabled="@(!context.QualityAcceptable)" OnClick="@(() => SearchFace(context.Id))">Найти в других материалах</MudButton>
-                            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonAdd"
-                                       Disabled="@(_busy || _details.CaseId is null)" OnClick="@(() => OpenLinkAsync(context))">Привязать к фигуранту</MudButton>
-                        </div>
-                    </MudTd>
-                </RowTemplate>
-            </MudTable>
-        }
-        else
-        {
-            <div class="d-flex flex-wrap gap-4">
-                @foreach (var face in _details.Faces)
-                {
-                    var current = face;
-                    <FaceCropTile Url="@CropUrl(current)" Size="128" Highlighted="@(HighlightFaceId == current.Id)"
-                                  Caption="@($"лицо № {current.Id} · детектор {current.DetectionScore:0.00} · качество {current.QualityScore:0.00}")"
-                                  Unusable="@(!current.QualityAcceptable)" UnusableReason="@current.QualityReason">
-                        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonSearch" Class="mt-1"
-                                   Disabled="@(!current.QualityAcceptable)" OnClick="@(() => SearchFace(current.Id))">Найти в других материалах</MudButton>
-                        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonAdd"
-                                   Disabled="@(_busy || _details.CaseId is null)" OnClick="@(() => OpenLinkAsync(current))">Привязать к фигуранту</MudButton>
-                    </FaceCropTile>
-                }
-            </div>
-        }
-    </MudPaper>
+                        </MudTd>
+                        <MudTd>
+                            <div class="d-flex gap-1 flex-wrap">
+                                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonSearch"
+                                           Disabled="@(!context.QualityAcceptable)" OnClick="@(() => SearchFace(context.Id))">Найти в других материалах</MudButton>
+                                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonAdd"
+                                           Disabled="@(_busy || _details.CaseId is null)" OnClick="@(() => OpenLinkAsync(context))">Привязать к фигуранту</MudButton>
+                            </div>
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+            else
+            {
+                <div class="d-flex flex-wrap gap-4">
+                    @foreach (var face in _details.Faces)
+                    {
+                        var current = face;
+                        <FaceCropTile Url="@CropUrl(current)" Size="128" Highlighted="@(HighlightFaceId == current.Id)"
+                                      Caption="@($"лицо № {current.Id} · детектор {current.DetectionScore:0.00} · качество {current.QualityScore:0.00}")"
+                                      Unusable="@(!current.QualityAcceptable)" UnusableReason="@current.QualityReason">
+                            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonSearch" Class="mt-1"
+                                       Disabled="@(!current.QualityAcceptable)" OnClick="@(() => SearchFace(current.Id))">Найти в других материалах</MudButton>
+                            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonAdd"
+                                       Disabled="@(_busy || _details.CaseId is null)" OnClick="@(() => OpenLinkAsync(current))">Привязать к фигуранту</MudButton>
+                        </FaceCropTile>
+                    }
+                </div>
+            }
+        </MudPaper>
+    }
 }
 
 @* --- Подтверждение гарантированного удаления (ТБ-064/075, GATE-6) --- *@
@@ -251,7 +300,7 @@ else
     <TitleContent><MudText Typo="Typo.h6">Удалить носитель?</MudText></TitleContent>
     <DialogContent>
         <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
-            Удаление гарантированное и необратимое: будут уничтожены исходный файл, все найденные лица,
+            Удаление гарантированное и необратимое: будут уничтожены исходный файл, расшифровка речи, все найденные лица,
             их вырезки и биометрические шаблоны. Факт удаления записывается в неизменяемый журнал.
             Доступно ролям Администратор/Руководитель.
         </MudAlert>
@@ -312,8 +361,19 @@ else
 @code {
     private const string MediaModulePath = "./_content/ISC.AI.Modules.Media.UI/js/media.js";
 
-    /// <summary>Контейнеры, которые воспроизводит браузерный &lt;video&gt;; остальное из allowlist (MKV/AVI/MOV) — только скачать.</summary>
+    /// <summary>Контейнеры, которые воспроизводит браузерный &lt;video&gt;; остальное из allowlist (MKV/AVI/MOV/3GP) — только скачать.</summary>
     private static readonly string[] BrowserPlayableVideoTypes = ["video/mp4", "video/webm"];
+
+    /// <summary>
+    /// Звуковые форматы, которые воспроизводит браузерный &lt;audio&gt; (ADR-0026): весь аудио-allowlist
+    /// <c>MediaFileRules</c>, КРОМЕ AMR и 3GPP — их браузеры не играют, для них только «скачать».
+    /// Синонимы (<c>audio/x-m4a</c>, <c>audio/x-wav</c>) — потому что браузеры заявляют один файл по-разному.
+    /// </summary>
+    private static readonly string[] BrowserPlayableAudioTypes =
+    [
+        "audio/mpeg", "audio/mp4", "audio/x-m4a", "audio/aac", "audio/ogg", "audio/opus",
+        "audio/wav", "audio/x-wav", "audio/webm", "audio/flac",
+    ];
 
     private static readonly DialogOptions DialogOptionsSmall =
         new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true };
@@ -324,8 +384,26 @@ else
     /// <summary>Носитель из маршрута.</summary>
     [Parameter] public int Id { get; set; }
 
+    /// <summary>
+    /// Параметр <c>?face=</c> как пришёл в адресе — строкой, чтобы нечисловое значение не роняло страницу
+    /// (см. <see cref="MediaQueryValues"/>); разбор — <see cref="HighlightFaceId"/>.
+    /// </summary>
+    [SupplyParameterFromQuery(Name = "face")] public string? FaceQuery { get; set; }
+
+    /// <summary>
+    /// Параметр <c>?t=</c> как пришёл в адресе — строкой по той же причине; разбор — <see cref="StartAtMs"/>.
+    /// </summary>
+    [SupplyParameterFromQuery(Name = "t")] public string? StartAtQuery { get; set; }
+
     /// <summary>Лицо, к которому пришли по ссылке (с выдачи поиска / верификации) — подсвечивается рамкой.</summary>
-    [SupplyParameterFromQuery(Name = "face")] public int? HighlightFaceId { get; set; }
+    private int? HighlightFaceId => MediaQueryValues.ParseInt(FaceQuery);
+
+    /// <summary>
+    /// Место записи в миллисекундах, к которому пришли из поиска по расшифровкам дела (ADR-0026):
+    /// после загрузки проигрыватель перематывается сюда, фрагмент расшифровки подсвечивается. Нечисловое
+    /// значение — как если бы места не было: запись просто открывается с начала.
+    /// </summary>
+    private long? StartAtMs => MediaQueryValues.ParseLong(StartAtQuery);
 
     private MediaAssetDetails? _details;
     private string? _error;
@@ -349,7 +427,33 @@ else
 
     private string VideoElementId => $"media-video-{Id}";
 
+    private string AudioElementId => $"media-audio-{Id}";
+
     private string ImageElementId => $"media-image-{Id}";
+
+    /// <summary>
+    /// Лица к носителю применимы: не аудио и не «неприменимо» (ADR-0026). Иначе блоки лиц, поиска по лицу и
+    /// переиндексации скрыты — в записи без изображения их нет и быть не может.
+    /// </summary>
+    private static bool FacesApplicable(MediaAssetRow asset) =>
+        asset.Kind != MediaKind.Audio && asset.IndexStatus != MediaIndexStatus.NotApplicable;
+
+    /// <summary>
+    /// Id проигрывателя, который браузер воспроизводит (для перехода к месту записи из расшифровки);
+    /// <see langword="null"/> — формат браузеру не по силам (AMR/3GPP, MKV/AVI/MOV/3GP), перехода нет.
+    /// </summary>
+    private string? PlayableElementId(MediaAssetRow asset) => asset.Kind switch
+    {
+        MediaKind.Audio when IsBrowserPlayableAudio(asset.ContentType) => AudioElementId,
+        MediaKind.Video when IsBrowserPlayable(asset.ContentType) => VideoElementId,
+        _ => null,
+    };
+
+    // Аудиозапись в видеоконтейнере (индексатор перевёл «видео» без видеопотока в аудио — тип файла остаётся
+    // video/mp4 или video/webm): звуковую дорожку такого файла <audio> воспроизводит так же, как <video>.
+    private static bool IsBrowserPlayableAudio(string contentType) =>
+        BrowserPlayableAudioTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase)
+        || BrowserPlayableVideoTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase);
 
     private bool CanLink => !_busy && !_linkLoading && _linkFace is not null && _linkAuthorizationId is not null && _linkPersonRef is not null;
 

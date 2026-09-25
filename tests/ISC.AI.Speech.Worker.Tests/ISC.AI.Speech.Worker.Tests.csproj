@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Юнит-тесты процесса-распознавателя речи ISC.AI.Speech.Worker (ADR-0026): чистая логика без моделей и без
+       нативного sherpa-onnx (аргументы, WAV, нарезка, хвост тишины и пределы детектора, протокол). ОТДЕЛЬНЫЙ
+       проект — потому что ссылка на утилиту заставляет restore скачать пакеты sherpa-onnx всех платформ, а их
+       нативные библиотеки несут eSpeak NG (GPL-3.0). Этот проект, как и сама утилита, НЕ входит в фильтр решения
+       ISC.AI.Offline.slnf, по которому собирается общий офлайн-фид (ADR-0026, п. 7), — в контур эти пакеты не уходят.
+       Общая тестовая обвязка (xUnit, NSubstitute, Shouldly, CA1707) наследуется из tests/Directory.Build.props. -->
+  <ItemGroup>
+    <!-- internal-типы утилиты открыты этому проекту (InternalsVisibleTo в её csproj). Пакет sherpa-onnx сюда не
+         приходит (PrivateAssets="all" там же): тесты не трогают типы, которым нужна нативная библиотека. -->
+    <ProjectReference Include="..\..\src\integrations\ISC.AI.Speech.Worker\ISC.AI.Speech.Worker.csproj" />
+    <!-- Адаптер — ради проверки, что протокол утилиты разбирается его парсером (формат согласован с двух сторон). -->
+    <ProjectReference Include="..\..\src\integrations\ISC.AI.Speech\ISC.AI.Speech.csproj" />
+  </ItemGroup>
+
+</Project>

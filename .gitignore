@@ -402,3 +402,9 @@ deploy/offline/models/
 # Бинарники ffmpeg (LGPL-сборка, ~148 МБ) — поставляются офлайн скриптом export-ffmpeg.ps1 с пином
 # SHA-256; в git не хранятся (размер и лицензионная чистота проверяются при переносе, ADR-0020).
 deploy/offline/ffmpeg/
+# Поставка процесса-распознавателя речи (ADR-0026): папка публикации publish-speech-worker.ps1 — бинарники
+# (утилита, sherpa-onnx, onnxruntime); переносится за периметр с манифестом worker.sha256, в git не хранится.
+deploy/offline/speech-worker/
+# Нативные sherpa-onnx БЕЗ синтеза речи (ADR-0026, п. 7): официальные сборки k2-fsa, скачиваются
+# export-sherpa-no-tts.ps1 с пинами SHA-256 (сборка из NuGet содержит eSpeak NG, GPL-3.0) — в git не хранятся.
+deploy/offline/sherpa-no-tts/
