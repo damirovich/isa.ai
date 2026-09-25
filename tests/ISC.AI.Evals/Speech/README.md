@@ -11,7 +11,7 @@
 Гипотезу можно получить двумя способами:
 
 - **через распознаватель системы** — порт `IAudioTranscriber`, рабочая реализация `ISC.AI.Speech` с GigaAM
-  220M или 600M (`SpeechEvalPilot.RunAndExportAsync`);
+  600M (основная) или 220M (`SpeechEvalPilot.RunAndExportAsync`);
 - **из готового выхода сторонней модели** — Vosk и Whisper прогоняются на стенде своими утилитами, их тексты
   кладутся в `hyp/<модель>/` (`SpeechEvalPilot.RunPrecomputedAndExportAsync`). Нормализация, учёт
   `[неразборчиво]` и сводки у обоих способов общие, поэтому числа сравнимы.
@@ -174,7 +174,7 @@ using var transcriber = new SpeechWorkerTranscriber(options with { Threads = 4, 
 var report = await SpeechEvalPilot.RunAndExportAsync(
     transcriber,
     datasetFolder: @"D:\pilot\set",
-    outputFolder: @"D:\pilot\out\gigaam-220m-t4",
+    outputFolder: @"D:\pilot\out\gigaam-600m-t4",
     ffprobeFolder: options.FfmpegFolder,          // тот же каталог, что Speech:Ffmpeg:Folder
     progress: new Progress<SpeechEvalProgress>(p => Console.WriteLine($"{p.Completed}/{p.Total} {p.Last.Recording.File}")));
 ```
