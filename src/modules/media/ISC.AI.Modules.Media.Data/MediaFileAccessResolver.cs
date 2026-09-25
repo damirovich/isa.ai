@@ -69,6 +69,22 @@ public sealed class MediaFileAccessResolver(IDbContextFactory<MediaDbContext> co
         }
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Решётка здесь НЕ применяется намеренно (как и в <see cref="ResolveAsync"/>): запись несёт гриф и подразделение
+    /// носителя, и эндпоинт кадра проверяет по ним floor ядра (ТБ-020/021) и область дел субъекта (ТБ-071) до
+    /// запуска ffmpeg. Носителя нет — <see langword="null"/>; вид носителя (только видео) проверяет эндпоинт.
+    /// </remarks>
+    public async Task<MediaFrameSource?> ResolveFrameSourceAsync(int assetId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        return await db.Assets.AsNoTracking()
+            .Where(a => a.Id == assetId)
+            .Select(a => new MediaFrameSource(
+                a.Id, a.StoredFileName, a.Kind, a.ContentType, a.Classification, a.DivisionId, a.DurationMs, a.FrameRate))
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     /// <summary>
     /// Подкаталог хранилища для вырезок проб (категория <see cref="MediaFileCategories.Probes"/>): идентификатор
     /// ДЕЛА. Сценарий поиска обязан сохранять вырезку пробы под этим же подкаталогом до создания сессии.

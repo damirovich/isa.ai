@@ -22,6 +22,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Тестам — аргументы вырезки кадра без ffmpeg и подмена таймаута вырезки (проверка остановки по таймауту
+         без минутного ожидания), ADR-0028. -->
+    <InternalsVisibleTo Include="ISC.AI.UnitTests" />
+    <InternalsVisibleTo Include="ISC.AI.IntegrationTests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
     <ProjectReference Include="..\..\modules\media\ISC.AI.Modules.Media.Domain\ISC.AI.Modules.Media.Domain.csproj" />
   </ItemGroup>

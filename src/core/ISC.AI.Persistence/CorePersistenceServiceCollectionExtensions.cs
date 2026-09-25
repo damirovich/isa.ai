@@ -73,8 +73,15 @@ public static class CorePersistenceServiceCollectionExtensions
         // Нейтральный файловый порт ядра (ADR-0018): байты носителей и исходников вне БД, корень —
         // Storage:BasePath (на проде — защищённый том, ТБ-062). Каталог создаётся лениво при первом
         // сохранении, поэтому регистрация свободна от побочных эффектов на диске.
-        services.AddSingleton<Abstractions.Storage.IFileStorage>(
+        services.AddSingleton<Storage.LocalFileStorage>(
             _ => new Storage.LocalFileStorage(configuration["Storage:BasePath"]));
+        services.AddSingleton<Abstractions.Storage.IFileStorage>(
+            sp => sp.GetRequiredService<Storage.LocalFileStorage>());
+
+        // Путь на диске для внешних процессов (ffmpeg — кадр видео по времени, ADR-0028): тот же экземпляр,
+        // те же границы корня; хранилище без локальных путей этот порт просто не регистрирует.
+        services.AddSingleton<Abstractions.Storage.ILocalFileLocator>(
+            sp => sp.GetRequiredService<Storage.LocalFileStorage>());
 
         return services;
     }

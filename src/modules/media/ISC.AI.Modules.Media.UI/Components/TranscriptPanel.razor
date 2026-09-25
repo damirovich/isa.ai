@@ -3,6 +3,9 @@
    Состояние расшифровки, фрагменты «[мм:сс] дословный текст» и переход к месту записи — щелчок по фрагменту
    перематывает проигрыватель карточки (<audio>/<video> по PlayerElementId) и запускает воспроизведение через
    ленивый JS-модуль пакета (только после интерактива — предрендер JS не умеет; eval не используется).
+   Видео, которое браузер не воспроизводит (кадры с сервера, ADR-0028): вместо id проигрывателя страница даёт
+   обратный вызов OnSeekRequested — щелчок по фрагменту отдаёт ему момент (мс), просмотрщик показывает кадр.
+   Ни того ни другого (AMR/3GPP) — фрагменты не кликабельны, таймкоды для сверки.
    Переход из поиска по расшифровкам — параметр ?t=<мс> карточки: перемотка к месту и подсветка фрагмента.
    РЕЖИМ: расшифровку читает GetTranscriptQuery — решётка гриф/подразделение на стороне БД по носителю и по
    каждому фрагменту, поверх неё сужение по делам субъекта (ТБ-020/021, ТБ-071); недоступное неотличимо от
@@ -104,16 +107,22 @@
                     Ниже — прежняя расшифровка; её заменит новая, когда будет успешно завершена.
                 </MudText>
             }
-            @if (PlayerElementId is null)
+            @if (PlayerElementId is not null)
             {
                 <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
-                    Браузер не воспроизводит формат этой записи — переход к месту записи недоступен; таймкоды — для сверки в проигрывателе.
+                    Щелчок по фрагменту — воспроизвести запись с этого места.
+                </MudText>
+            }
+            else if (OnSeekRequested.HasDelegate)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
+                    Щелчок по фрагменту — показать кадр с этого места (без звука: браузер не воспроизводит этот контейнер).
                 </MudText>
             }
             else
             {
                 <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
-                    Щелчок по фрагменту — воспроизвести запись с этого места.
+                    Браузер не воспроизводит формат этой записи — переход к месту записи недоступен; таймкоды — для сверки в проигрывателе.
                 </MudText>
             }
 
@@ -129,7 +138,7 @@
                 {
                     <TranscriptSegmentItem Index="@segment.Index" ElementId="@SegmentElementId(segment.Index)"
                                            StartMs="@segment.StartMs" Text="@segment.Text" IsActive="@(_activeIndex == segment.Index)"
-                                           Clickable="@(PlayerElementId is not null)" OnPlay="@_onPlay" />
+                                           Clickable="@CanSeek" Title="@SegmentTitle" OnPlay="@_onPlay" />
                 }
             </div>
         }
@@ -144,15 +153,29 @@
 
     /// <summary>
     /// Id элемента &lt;audio&gt;/&lt;video&gt; карточки, который браузер воспроизводит; <see langword="null"/> —
-    /// формат браузеру не по силам (AMR/3GPP, MKV/AVI/MOV/3GP): фрагменты показываются без перехода к месту записи.
+    /// формат браузеру не по силам (AMR/3GPP, MKV/AVI/MOV/3GP): переход к месту записи — только через
+    /// <see cref="OnSeekRequested"/>, а без него фрагменты показываются без перехода.
     /// </summary>
     [Parameter] public string? PlayerElementId { get; set; }
 
     /// <summary>
-    /// Место записи, к которому пришли (параметр ?t= карточки, мс): после загрузки — перемотка к нему и
-    /// подсветка фрагмента, в который оно попадает.
+    /// Переход к месту записи без проигрывателя (видео кадрами с сервера, ADR-0028): щелчок по фрагменту отдаёт
+    /// его начало (мс), страница показывает кадр. Учитывается, только если <see cref="PlayerElementId"/> не задан.
+    /// </summary>
+    [Parameter] public EventCallback<long> OnSeekRequested { get; set; }
+
+    /// <summary>
+    /// Место записи, к которому пришли (параметр ?t= карточки, мс): после загрузки — перемотка к нему (если
+    /// <see cref="SeekToStart"/>) и подсветка фрагмента, в который оно попадает, с прокруткой к нему.
     /// </summary>
     [Parameter] public long? StartAtMs { get; set; }
+
+    /// <summary>
+    /// Перематывать проигрыватель к <see cref="StartAtMs"/> при открытии. <see langword="false"/> — перемотку по ?t=
+    /// делает просмотрщик видео (ADR-0028), а панель только подсвечивает фрагмент и прокручивает к нему: две
+    /// перемотки из разных компонентов — гонка прокрутки (последняя утащила бы страницу от фрагмента к видео).
+    /// </summary>
+    [Parameter] public bool SeekToStart { get; set; } = true;
 
     private MediaTranscript? _transcript;
     private int? _loadedAssetId;
@@ -168,6 +191,11 @@
 
     private string RetranscribeLabel =>
         _transcript is { Status: TranscriptStatus.NotApplicable } ? "Расшифровать" : "Расшифровать заново";
+
+    /// <summary>Переход к месту записи возможен: есть проигрыватель либо обратный вызов просмотрщика кадров.</summary>
+    private bool CanSeek => PlayerElementId is not null || OnSeekRequested.HasDelegate;
+
+    private string SegmentTitle => PlayerElementId is not null ? "Воспроизвести с этого места" : "Показать кадр с этого места";
 
     private static string StatusLabel(MediaTranscript transcript) =>
         transcript.Status == TranscriptStatus.NotApplicable ? "не выполнялась" : transcript.Status.Label();
@@ -248,7 +276,8 @@
         try
         {
             // Из поиска — только перемотка, без запуска: звук сам по себе при открытии карточки не включается.
-            if (PlayerElementId is not null)
+            // Если проигрывателем владеет просмотрщик видео (SeekToStart = false), перематывает он.
+            if (PlayerElementId is not null && SeekToStart)
             {
                 await module.InvokeAsync<bool>("seek", PlayerElementId, startAt / 1000.0, false);
             }
@@ -301,7 +330,8 @@
     }
 
     /// <summary>
-    /// Щелчок (Enter, пробел) по фрагменту: перемотать проигрыватель к его началу и запустить воспроизведение.
+    /// Щелчок (Enter, пробел) по фрагменту: перемотать проигрыватель к его началу и запустить воспроизведение;
+    /// без проигрывателя — отдать момент просмотрщику кадров (<see cref="OnSeekRequested"/>).
     /// </summary>
     /// <param name="index">Номер фрагмента (<see cref="TranscriptSegmentRow.Index"/>).</param>
     private async Task PlayFromAsync(int index)
@@ -314,6 +344,11 @@
         _activeIndex = segment.Index;
         if (PlayerElementId is null)
         {
+            if (OnSeekRequested.HasDelegate)
+            {
+                await OnSeekRequested.InvokeAsync(segment.StartMs);
+            }
+
             return;
         }
 

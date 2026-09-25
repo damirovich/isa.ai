@@ -46,8 +46,15 @@ public static class VisionOnnxServiceCollectionExtensions
             NmsIouThreshold: ReadFloat(configuration, "Vision:Detection:NmsIou", 0.3f),
             MaxInputSide: ReadInt(configuration, "Vision:Detection:MaxInputSide", 640),
             MinInterocularDistance: ReadFloat(configuration, "Vision:Quality:MinInterocular", 20f),
-            MinDetectionScoreForQuality: ReadFloat(configuration, "Vision:Quality:MinDetectionScore", 0.9f));
+            MinDetectionScoreForQuality: ReadFloat(configuration, "Vision:Quality:MinDetectionScore", 0.9f),
+            MaxConcurrentFrameExtractions: ReadOptionalInt(configuration, VisionOptions.MaxConcurrentFrameExtractionsKey));
     }
+
+    // Необязательное положительное целое: отсутствие, null или мусор — «не задано» (умолчание считает получатель).
+    private static int? ReadOptionalInt(IConfiguration configuration, string key) =>
+        int.TryParse(configuration[key], NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) && value > 0
+            ? value
+            : null;
 
     private static float ReadFloat(IConfiguration configuration, string key, float fallback) =>
         float.TryParse(configuration[key], NumberStyles.Float, CultureInfo.InvariantCulture, out var value) && value > 0

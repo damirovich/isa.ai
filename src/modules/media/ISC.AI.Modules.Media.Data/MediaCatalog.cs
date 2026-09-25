@@ -197,7 +197,13 @@ public sealed class MediaCatalog(
             a.IndexedAt,
             a.CreatedAt,
             db.Faces.Count(f => f.AssetId == a.Id),
-            a.TranscriptStatus));
+            a.TranscriptStatus,
+            // Покадровый просмотр и происхождение снимка (ADR-0028): у носителей до пробы/не видео — null.
+            a.FrameRate,
+            a.FrameWidth,
+            a.FrameHeight,
+            a.SourceAssetId,
+            a.SourceTimestampMs));
 
     private static IQueryable<FaceRow> ProjectFaces(IQueryable<Face> faces) =>
         faces.Select(f => new FaceRow(

@@ -15,6 +15,7 @@ public sealed partial class MediaStore
         string detectorVersion,
         string embedderVersion,
         long? durationMs = null,
+        VideoProbe? probe = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(faces);
@@ -101,7 +102,27 @@ public sealed partial class MediaStore
         asset.IndexError = null;
         asset.DetectorVersion = detectorVersion;
         asset.EmbedderVersion = embedderVersion;
-        asset.DurationMs = durationMs ?? asset.DurationMs;
+        if (probe is not null)
+        {
+            // Проба видеопотока (ADR-0028) — ПОВЕРХ прежних значений: переиндексация обновляет частоту, размер
+            // кадра и точную длительность (таймкод последнего кадра выборки — лишь запасная оценка без пробы).
+            // Длительность из пробы может быть неизвестна (незавершённый Matroska/WebM) — тогда она и остаётся
+            // неизвестной (null), а НЕ подменяется оценкой по раскадровке: при известной частоте кадров длительность
+            // считается точной и по ней отсекаются моменты «за концом записи» (эндпоинт кадра, снимок); оценка,
+            // округлённая вниз до шага выборки, отрезала бы хвост записи. Точную длительность такого файла позже
+            // даёт расшифровка речи (длина звука), если она есть.
+            asset.FrameRate = probe.FrameRate;
+            asset.FrameWidth = probe.Width;
+            asset.FrameHeight = probe.Height;
+            asset.DurationMs = probe.DurationMs;
+        }
+        else if (asset.FrameRate is null)
+        {
+            // Пробы нет и раньше не было: оценка по раскадровке. Если проба была (частота известна), точную
+            // длительность оценкой не перетирать — сбой пробы при переиндексации не должен огрублять данные.
+            asset.DurationMs = durationMs ?? asset.DurationMs;
+        }
+
         asset.IndexedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync(cancellationToken);

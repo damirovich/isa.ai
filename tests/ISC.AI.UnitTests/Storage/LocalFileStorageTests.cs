@@ -96,4 +96,55 @@ public sealed class LocalFileStorageTests : IDisposable
         await Should.ThrowAsync<InvalidOperationException>(
             () => storage.SaveAsync(new MemoryStream([1]), ".bin", siblingCategory, "1"));
     }
+
+    // ---- ILocalFileLocator (ADR-0028): путь к оригиналу для внешнего процесса — под теми же границами корня ----
+
+    [Fact(DisplayName = "ADR-0028: локальный путь сохранённого файла — под корнем хранилища, файл по нему читается")]
+    public async Task Local_path_of_stored_file_is_under_root()
+    {
+        var storage = new LocalFileStorage(_root);
+        var stored = await storage.SaveAsync(new MemoryStream([9, 8, 7]), ".mkv", "media-originals", "42");
+
+        var path = storage.TryGetLocalPath(stored, "media-originals", "42");
+
+        path.ShouldNotBeNull();
+        Path.IsPathFullyQualified(path).ShouldBeTrue();
+        path.ShouldStartWith(storage.Root + Path.DirectorySeparatorChar);
+        Path.GetFileName(path).ShouldBe(stored);
+        (await File.ReadAllBytesAsync(path)).ShouldBe(new byte[] { 9, 8, 7 });
+    }
+
+    [Fact(DisplayName = "ADR-0028: локальный путь отсутствующего файла — null (не исключение): вызывающий пойдёт через копию/404")]
+    public async Task Local_path_of_missing_file_is_null()
+    {
+        var storage = new LocalFileStorage(_root);
+        var stored = await storage.SaveAsync(new MemoryStream([1]), ".mp4", "media-originals", "1");
+
+        storage.TryGetLocalPath("00000000000000000000000000000000.mp4", "media-originals", "1").ShouldBeNull();
+        storage.TryGetLocalPath(stored, "media-originals", "2").ShouldBeNull(); // другой подкаталог — чужой носитель
+        storage.TryGetLocalPath(stored, "media-faces", "1").ShouldBeNull();    // другая категория
+    }
+
+    [Theory(DisplayName = "ADR-0028: локальный путь за корень отклоняется так же, как чтение: «..», абсолютный подкаталог, разделители в имени")]
+    [InlineData("..", "x", "a.mkv")]
+    [InlineData("media-originals", "..\\..\\etc", "a.mkv")]
+    [InlineData("media-originals", "1", "..\\a.mkv")]
+    [InlineData("media-originals", "1", "sub/a.mkv")]
+    [InlineData("media-originals", "1", "sub\\a.mkv")]
+    [InlineData("media-originals", "1", "")]
+    public void Local_path_escaping_root_is_rejected(string category, string subPath, string name)
+    {
+        var storage = new LocalFileStorage(_root);
+
+        Should.Throw<InvalidOperationException>(() => storage.TryGetLocalPath(name, category, subPath));
+    }
+
+    [Fact(DisplayName = "ADR-0028: абсолютный подкаталог не подменяет корень и для локального пути")]
+    public void Local_path_with_absolute_subpath_is_rejected()
+    {
+        var storage = new LocalFileStorage(_root);
+        var elsewhere = Path.Combine(Path.GetTempPath(), "isc-elsewhere-" + Guid.NewGuid().ToString("N"));
+
+        Should.Throw<InvalidOperationException>(() => storage.TryGetLocalPath("a.mkv", "media-originals", elsewhere));
+    }
 }

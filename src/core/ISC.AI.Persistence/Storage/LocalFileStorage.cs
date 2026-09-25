@@ -13,7 +13,7 @@ namespace ISC.AI.Persistence.Storage;
 /// Проверка «путь под корнем» сравнивает с корнем + разделитель: голое <c>StartsWith</c> пропустило бы
 /// соседний каталог с тем же префиксом (<c>store</c> vs <c>store-other</c>).
 /// </remarks>
-public sealed class LocalFileStorage : IFileStorage
+public sealed class LocalFileStorage : IFileStorage, ILocalFileLocator
 {
     /// <summary>Каталог по умолчанию — относительно рабочего каталога хоста (как у документооборота).</summary>
     public const string DefaultBasePath = "storage-files";
@@ -76,6 +76,17 @@ public sealed class LocalFileStorage : IFileStorage
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Та же проверка «под корнем», что у чтения и удаления (<see cref="ResolveFile"/>): путь для внешнего
+    /// процесса не должен уметь больше, чем поток для своего кода.
+    /// </remarks>
+    public string? TryGetLocalPath(string storedFileName, string category, string subPath)
+    {
+        var fullPath = ResolveFile(storedFileName, category, subPath);
+        return File.Exists(fullPath) ? fullPath : null;
     }
 
     private string ResolveFile(string storedFileName, string category, string subPath)

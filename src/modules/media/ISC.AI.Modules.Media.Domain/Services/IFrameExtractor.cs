@@ -31,4 +31,28 @@ public interface IFrameExtractor
     /// </remarks>
     /// <exception cref="InvalidOperationException">Внешний инструмент не найден или не разобрал файл.</exception>
     Task<bool> HasVideoStreamAsync(string videoPath, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Проба видеопотока (ADR-0028): нативная частота кадров, длительность, размер кадра после автоповорота.
+    /// <see langword="null"/> — видеопотока нет (только звук или обложка).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Внешний инструмент не найден или не разобрал файл.</exception>
+    Task<VideoProbe?> ProbeAsync(string videoPath, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Вырезает ОДИН кадр в момент <paramref name="at"/> из оригинала: точный поиск (не ближайший ключевой кадр),
+    /// автоповорот по метке контейнера, без иной обработки (ТЭ-007). Момент для кадра № N —
+    /// <see cref="VideoProbe.SeekTimeFor"/>.
+    /// </summary>
+    /// <param name="videoPath">Путь к файлу (оригинал на месте или временная копия).</param>
+    /// <param name="at">Момент записи.</param>
+    /// <param name="format">PNG (снимок, без потерь) или JPEG (просмотр).</param>
+    /// <param name="maxSide">Наибольшая сторона результата, пиксели: кадр крупнее уменьшается с сохранением
+    /// пропорций (просмотр); <see langword="null"/> — исходный размер (снимок).</param>
+    /// <param name="cancellationToken">Отмена останавливает внешний процесс.</param>
+    /// <returns>Байты изображения; <see langword="null"/> — момент за концом записи (кадра нет).</returns>
+    /// <exception cref="InvalidOperationException">Внешний инструмент не найден, файл без видеопотока или не разобран.</exception>
+    Task<byte[]?> ExtractFrameAsync(
+        string videoPath, TimeSpan at, FrameImageFormat format, int? maxSide = null,
+        CancellationToken cancellationToken = default);
 }

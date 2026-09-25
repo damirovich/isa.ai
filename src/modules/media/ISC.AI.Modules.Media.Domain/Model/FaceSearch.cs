@@ -65,6 +65,11 @@ public sealed record FaceCandidate(
 /// <param name="Source">Источник/происхождение (откуда получена запись — ТФ-МЕД, свободный текст).</param>
 /// <param name="CapturedAt">Дата/время съёмки, если известны.</param>
 /// <param name="UploadedByUserId">Кто загрузил (слабая ссылка на <c>core.app_user</c>).</param>
+/// <param name="SourceAssetId">
+/// Носитель-источник, если этот носитель ПРОИЗВОДНЫЙ — снимок кадра видео (ADR-0028). Слабая ссылка (без FK):
+/// уничтожение видео снимок не трогает — у него своя запись журнала и своя привязка к делу (ТБ-064/075).
+/// </param>
+/// <param name="SourceTimestampMs">Момент записи источника, мс, из которого взят кадр (снимок кадра).</param>
 public sealed record MediaAssetDraft(
     string OriginalFileName,
     string ContentType,
@@ -73,7 +78,9 @@ public sealed record MediaAssetDraft(
     int DivisionId,
     string? Source = null,
     DateTimeOffset? CapturedAt = null,
-    int? UploadedByUserId = null);
+    int? UploadedByUserId = null,
+    int? SourceAssetId = null,
+    long? SourceTimestampMs = null);
 
 /// <summary>Результат приёма носителя: идентификатор и признак «такой файл уже был» (дедуп по хешу).</summary>
 /// <param name="AssetId">Носитель в схеме <c>media</c>.</param>

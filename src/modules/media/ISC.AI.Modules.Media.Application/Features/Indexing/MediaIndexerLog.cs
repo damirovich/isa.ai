@@ -41,4 +41,8 @@ internal static partial class MediaIndexerLog
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Индексация носителя {AssetId}: вырезка «{CropStoredFileName}» не удалена — остаётся сиротой в хранилище.")]
     public static partial void CropNotDeleted(ILogger logger, Exception exception, int assetId, string cropStoredFileName);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Индексация носителя {AssetId}: проба видеопотока (частота кадров, длительность, размер кадра) не удалась — поля носителя не обновлены, раскадровка продолжается (ADR-0028).")]
+    public static partial void ProbeFailed(ILogger logger, Exception exception, int assetId);
 }

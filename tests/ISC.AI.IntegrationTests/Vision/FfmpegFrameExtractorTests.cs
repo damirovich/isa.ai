@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -20,8 +19,7 @@ namespace ISC.AI.IntegrationTests.Vision;
 /// медиафайла, а реальные съёмки людей в тесты не попадают (ТО-прог-13).
 /// </summary>
 /// <remarks>
-/// Требуется поставка ffmpeg: <c>deploy/offline/ffmpeg/win-x64</c> (скрипт
-/// <c>deploy/offline/export-ffmpeg.ps1</c>, ТИ-004, ADR-0020). Без неё тест падает с инструкцией —
+/// Поставка ffmpeg и генерация клипов — <see cref="VideoTestEnvironment"/>; без поставки тест падает с инструкцией —
 /// намеренно, вместо тихого пропуска: «видео не проверено» должно быть видно. Прогон без поставки:
 /// <c>dotnet test --filter "Category!=Video"</c>.
 /// </remarks>
@@ -31,9 +29,7 @@ public sealed class FfmpegFrameExtractorTests : IAsyncLifetime
     private const int ClipSeconds = 6;
     private const int ClipFps = 25;
 
-    private readonly string _workDir = Path.Combine(
-        Path.GetTempPath(), "iscai-video-tests", Guid.NewGuid().ToString("N"));
-
+    private string _workDir = string.Empty;
     private string _ffmpegFolder = string.Empty;
     private string _mp4Path = string.Empty;
     private string _webmPath = string.Empty;
@@ -45,8 +41,8 @@ public sealed class FfmpegFrameExtractorTests : IAsyncLifetime
     /// </summary>
     public async Task InitializeAsync()
     {
-        _ffmpegFolder = LocateFfmpegFolder();
-        Directory.CreateDirectory(_workDir);
+        _ffmpegFolder = VideoTestEnvironment.LocateFfmpegFolder();
+        _workDir = VideoTestEnvironment.CreateWorkDir();
 
         _mp4Path = Path.Combine(_workDir, "clip.mp4");
         _webmPath = Path.Combine(_workDir, "clip.webm");
@@ -63,15 +59,7 @@ public sealed class FfmpegFrameExtractorTests : IAsyncLifetime
     /// <inheritdoc />
     public Task DisposeAsync()
     {
-        try
-        {
-            Directory.Delete(_workDir, recursive: true);
-        }
-        catch (IOException)
-        {
-            // Временный каталог — не повод валить прогон.
-        }
-
+        VideoTestEnvironment.TryDeleteWorkDir(_workDir);
         return Task.CompletedTask;
     }
 
@@ -194,39 +182,5 @@ public sealed class FfmpegFrameExtractorTests : IAsyncLifetime
     private VisionOptions Options() =>
         new("d.onnx", "00", "e.onnx", "00", FfmpegFolder: _ffmpegFolder);
 
-    /// <summary>Папка поставки ffmpeg; её отсутствие — явная ошибка с инструкцией, а не тихий пропуск.</summary>
-    private static string LocateFfmpegFolder()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "ISC.AI.slnx")))
-        {
-            dir = dir.Parent;
-        }
-
-        var folder = Path.Combine(dir?.FullName ?? ".", "deploy", "offline", "ffmpeg", "win-x64");
-        if (!File.Exists(Path.Combine(folder, "ffmpeg.exe")))
-        {
-            throw new InvalidOperationException(
-                $"Поставка ffmpeg не найдена: {folder}. Выполните deploy/offline/export-ffmpeg.ps1 "
-                + "(LGPL-сборка с пином SHA-256, ADR-0020/ТИ-004) либо исключите категорию: "
-                + "dotnet test --filter \"Category!=Video\".");
-        }
-
-        return folder;
-    }
-
-    private async Task RunFfmpegAsync(string arguments)
-    {
-        var info = new ProcessStartInfo(Path.Combine(_ffmpegFolder, "ffmpeg.exe"), "-hide_banner -loglevel error " + arguments)
-        {
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-
-        using var process = Process.Start(info) ?? throw new InvalidOperationException("Не удалось запустить ffmpeg.");
-        var error = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        process.ExitCode.ShouldBe(0, $"подготовка клипа: ffmpeg {arguments}{Environment.NewLine}{error}");
-    }
+    private Task RunFfmpegAsync(string arguments) => VideoTestEnvironment.RunFfmpegAsync(_ffmpegFolder, arguments);
 }
