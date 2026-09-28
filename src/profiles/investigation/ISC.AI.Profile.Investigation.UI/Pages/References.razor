@@ -1,0 +1,209 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@* Справочники профиля (ТФ-АДМ-07): подразделения-инициаторы заданий (ГУ), звания, должности, типы связей,
+   категории материалов. Ведёт Администратор (режим первичной настройки — любой вошедший); право проверяет
+   обработчик, отказ показывается. Запись не удаляется, а выключается: на неё ссылаются задания, и выключенная
+   запись остаётся читаемой в старых делах. Вид записи задаётся вкладкой при создании и не меняется. *@
+@page "/admin/references"
+@rendermode InteractiveServer
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Profile.Investigation.Application.Features.References
+@using ISC.AI.Profile.Investigation.Domain.Enums
+@using ISC.AI.Profile.Investigation.Domain.Services
+
+<PageHeader Title="Справочники" Subtitle="Инициаторы заданий, звания, должности, типы связей, категории материалов (ТФ-АДМ-07) · ведёт Администратор"
+            Icon="@Icons.Material.Filled.MenuBook">
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="OpenCreate" Disabled="_busy">Новая запись</MudButton>
+</PageHeader>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+<MudTabs Elevation="0" Border="true" Rounded="true" @bind-ActivePanelIndex="_activeTab">
+    @foreach (var kind in Kinds)
+    {
+        <MudTabPanel Text="@kind.Label()" BadgeData="@_items.Count(i => i.Kind == kind && i.IsActive)" BadgeColor="Color.Default">
+            <MudTable T="ReferenceItemRow" Items="ItemsOf(kind)" Hover="true" Dense="true" Outlined="true" Loading="_busy" Class="mt-3"
+                      RowClassFunc="@((item, _) => item.IsActive ? string.Empty : "mud-text-secondary")">
+                <HeaderContent>
+                    <MudTh>Наименование</MudTh>
+                    <MudTh>Код</MudTh>
+                    <MudTh Style="text-align:right;">Порядок</MudTh>
+                    <MudTh>Состояние</MudTh>
+                    <MudTh Style="width:220px;">Действия</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Наименование">@context.Name</MudTd>
+                    <MudTd DataLabel="Код">@(context.Code ?? "—")</MudTd>
+                    <MudTd DataLabel="Порядок" Style="text-align:right;">@context.SortOrder</MudTd>
+                    <MudTd DataLabel="Состояние">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@(context.IsActive ? Color.Success : Color.Default)">
+                            @(context.IsActive ? "действует" : "выключено")
+                        </MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="Действия">
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="_busy"
+                                   OnClick="@(() => OpenEdit(context))">Изменить</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="@(context.IsActive ? Color.Error : Color.Success)" Disabled="_busy"
+                                   OnClick="@(() => SetActiveAsync(context, !context.IsActive))">@(context.IsActive ? "Выключить" : "Включить")</MudButton>
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Справочник пуст либо недоступен вам.</MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </MudTabPanel>
+    }
+</MudTabs>
+
+@* Одна форма на создание и правку (_formId is null → создание); вид — активная вкладка. *@
+<MudDialog @bind-Visible="_formOpen" Options="FormDialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(_formId is null ? "Новая запись" : "Изменить запись") · @_formKind.Label()</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_formError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_formError</MudAlert>
+        }
+        <MudGrid Spacing="2">
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_formName" Label="Наименование *" Variant="Variant.Outlined" Immediate="true"
+                              MaxLength="@ReferenceGuard.MaxNameLength" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_formCode" Label="Код" Variant="Variant.Outlined" MaxLength="@ReferenceGuard.MaxCodeLength" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudNumericField T="int" @bind-Value="_formSortOrder" Label="Порядок в списке" Variant="Variant.Outlined"
+                                 HelperText="Меньше — выше; звания — по старшинству" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _formOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(string.IsNullOrWhiteSpace(_formName) || _busy)" OnClick="SaveAsync">Сохранить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly DialogOptions FormDialogOptions =
+        new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true };
+
+    private static readonly ReferenceKind[] Kinds = Enum.GetValues<ReferenceKind>();
+
+    private readonly List<ReferenceItemRow> _items = [];
+    private int _activeTab;
+    private bool _busy = true; // «загрузка…» до первой интерактивной загрузки (предрендер данных не грузит)
+    private string? _error;
+
+    private bool _formOpen;
+    private string? _formError;
+    private int? _formId;
+    private ReferenceKind _formKind;
+    private string? _formName;
+    private string? _formCode;
+    private int _formSortOrder;
+
+    private ReferenceKind ActiveKind => Kinds[Math.Clamp(_activeTab, 0, Kinds.Length - 1)];
+
+    private IEnumerable<ReferenceItemRow> ItemsOf(ReferenceKind kind) =>
+        _items.Where(i => i.Kind == kind)
+            .OrderBy(i => i.SortOrder)
+            .ThenBy(i => i.Name, StringComparer.CurrentCulture);
+
+    protected override async Task OnInitializedAsync()
+    {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере справочник не грузим.
+        if (!RendererInfo.IsInteractive) { return; }
+
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ListReferenceItemsQuery());
+            _items.Clear();
+            if (response is { Status: true, Data: { } list })
+            {
+                _items.AddRange(list);
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void OpenCreate()
+    {
+        _formId = null;
+        _formKind = ActiveKind;
+        _formName = null;
+        _formCode = null;
+        _formSortOrder = 0;
+        _formError = null;
+        _formOpen = true;
+    }
+
+    private void OpenEdit(ReferenceItemRow item)
+    {
+        _formId = item.Id;
+        _formKind = item.Kind;
+        _formName = item.Name;
+        _formCode = item.Code;
+        _formSortOrder = item.SortOrder;
+        _formError = null;
+        _formOpen = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_formName)) { return; }
+        _busy = true;
+        _formError = null;
+        try
+        {
+            var name = _formName.Trim();
+            var code = string.IsNullOrWhiteSpace(_formCode) ? null : _formCode.Trim();
+            IResponseDto response = _formId is { } id
+                ? await Dispatcher.Send(new UpdateReferenceItemCommand(id, name, code, _formSortOrder))
+                : await Dispatcher.Send(new CreateReferenceItemCommand(_formKind, name, code, _formSortOrder));
+            if (!response.Status)
+            {
+                _formError = response.StatusMessage;
+                return;
+            }
+
+            _formOpen = false;
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task SetActiveAsync(ReferenceItemRow item, bool isActive)
+    {
+        _error = null;
+        var response = await Dispatcher.Send(new SetReferenceItemActiveCommand(item.Id, isActive));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        await ReloadAsync();
+    }
+}

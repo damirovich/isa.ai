@@ -75,14 +75,14 @@ public sealed class InvestigationPersonStoreTests : IAsyncLifetime
         (await persons.GetAsync(p3.PersonId, InvestigationTestKit.Access(10, 9, 6))).ShouldBeNull();
 
         // Установление личности сохраняет номер; пустое имя у установленного — ошибка вызывающего.
-        (await persons.UpdateAsync(p1.PersonId, "Сидоров", false, "подозреваемый", null, owner)).ShouldBe(PersonWriteResult.Ok);
+        (await persons.UpdateAsync(p1.PersonId, new PersonDraft(0, "Сидоров", false, "подозреваемый", null), owner)).ShouldBe(PersonWriteResult.Ok);
         var updated = (await persons.GetAsync(p1.PersonId, owner)).ShouldNotBeNull();
         updated.DisplayName.ShouldBe("Сидоров");
         updated.IsUnidentified.ShouldBeFalse();
         updated.UnidentifiedNumber.ShouldBe(1);
 
         await Should.ThrowAsync<ArgumentException>(
-            () => persons.UpdateAsync(p3.PersonId, "", false, null, null, owner));
+            () => persons.UpdateAsync(p3.PersonId, new PersonDraft(0, "", false, null, null), owner));
     }
 
     [Fact(DisplayName = "Смена эталона: прежний помечается SupersededById и НЕ удаляется (ТБ-077); гриф эталона — с фигуранта")]
@@ -215,7 +215,7 @@ public sealed class InvestigationPersonStoreTests : IAsyncLifetime
         rows.Where(r => r.IsUnidentified).Select(r => r.UnidentifiedNumber).OrderBy(n => n).ShouldBe([1, 2, 3, 4]);
 
         // Перевод в «неустановлен» через UpdateAsync параллельно с созданием — тот же механизм, номер 5/6.
-        var updating = persons.UpdateAsync(person.PersonId, null, true, null, null, owner);
+        var updating = persons.UpdateAsync(person.PersonId, new PersonDraft(0, null, true, null, null), owner);
         var creating = persons.CreateAsync(new PersonDraft(caseA.CaseId, null, IsUnidentified: true, null, null), owner);
         (await updating).ShouldBe(PersonWriteResult.Ok);
         (await creating).Result.ShouldBe(PersonWriteResult.Ok);

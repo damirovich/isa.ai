@@ -34,6 +34,9 @@ public static class InvestigationPersistenceServiceCollectionExtensions
         services.AddScoped<IUserRoleStore, UserRoleStore>();
         services.AddScoped<IDivisionAdminStore, DivisionAdminStore>();
 
+        // Справочники профиля (ТФ-АДМ-07): инициаторы заданий, звания, должности, типы связей, категории.
+        services.AddScoped<IReferenceStore, ReferenceStore>();
+
         // Дела и фигуранты (ТФ-ДЕЛ-01..03, ТФ-ПЕР-01/02): решётка ядра + CaseAccessRule на стороне БД.
         services.AddScoped<ICaseStore, CaseStore>();
         services.AddScoped<IPersonStore, PersonStore>();

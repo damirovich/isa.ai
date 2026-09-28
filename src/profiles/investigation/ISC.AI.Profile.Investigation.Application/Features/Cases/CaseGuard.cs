@@ -15,12 +15,20 @@ public static class CaseGuard
     /// <summary>Отказ по занятому номеру дела в подразделении.</summary>
     public const string DuplicateNumber = "Дело с таким номером в этом подразделении уже есть.";
 
+    /// <summary>
+    /// Отказ по реквизитам задания (ТФ-ДЕЛ-05, ТФ-АДМ-07): не заполнены, указаны у дела другого вида или
+    /// ссылаются на отсутствующую, выключенную либо чужого вида запись справочника.
+    /// </summary>
+    public const string InvalidTask =
+        "Реквизиты задания не согласованы: проверьте обязательные поля и выберите действующие записи справочников (ТФ-ДЕЛ-05).";
+
     /// <summary>Единый перевод исхода записи дела в конверт ответа (для команд без полезной нагрузки).</summary>
     public static ResponseDto<bool> ToResponse(CaseWriteResult result) => result switch
     {
         CaseWriteResult.Ok => ResponseDto<bool>.Ok(true),
         CaseWriteResult.DuplicateNumber => ResponseDto<bool>.Conflict(DuplicateNumber),
         CaseWriteResult.OutsideClearance => ResponseDto<bool>.BadRequest(OutsideClearance),
+        CaseWriteResult.InvalidTask => ResponseDto<bool>.BadRequest(InvalidTask),
         _ => ResponseDto<bool>.NotFound(NotFound),
     };
 }

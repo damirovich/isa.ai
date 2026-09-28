@@ -3,8 +3,46 @@ using ISC.AI.Profile.Investigation.Domain.Enums;
 
 namespace ISC.AI.Profile.Investigation.Domain.Services;
 
+/// <summary>
+/// Анкета объекта (ТФ-ПЕР-05): все поля необязательны. При известной дате рождения год рождения равен её
+/// году — это приводит хранилище, а валидатор отклоняет противоречивую пару.
+/// </summary>
+/// <param name="BirthDate">Дата рождения, если известна полностью.</param>
+/// <param name="BirthYear">Год рождения (когда известен только год).</param>
+/// <param name="BirthPlace">Место рождения.</param>
+/// <param name="WorkPlace">Место работы.</param>
+/// <param name="Residence">Место жительства.</param>
+/// <param name="Sex">Пол.</param>
+/// <param name="Alias">Псевдоним (оперативная кличка).</param>
+public sealed record PersonQuestionnaire(
+    DateOnly? BirthDate = null,
+    int? BirthYear = null,
+    string? BirthPlace = null,
+    string? WorkPlace = null,
+    string? Residence = null,
+    PersonSex? Sex = null,
+    string? Alias = null)
+{
+    /// <summary>Пустая анкета.</summary>
+    public static PersonQuestionnaire Empty { get; } = new();
+}
+
 /// <summary>Черновик фигуранта (ТФ-ПЕР-01). Пустое имя при <paramref name="IsUnidentified"/> → «Неустановленное лицо № N».</summary>
-public sealed record PersonDraft(int CaseId, string? DisplayName, bool IsUnidentified, string? RoleInCase, string? Notes);
+/// <param name="CaseId">Дело.</param>
+/// <param name="DisplayName">ФИО/установочные данные.</param>
+/// <param name="IsUnidentified">Личность не установлена.</param>
+/// <param name="RoleInCase">Уточнение роли свободным текстом.</param>
+/// <param name="Notes">Примечания.</param>
+/// <param name="Role">Роль по перечню (объект, связь, иная).</param>
+/// <param name="Questionnaire">Анкета (ТФ-ПЕР-05); <see langword="null"/> — пустая.</param>
+public sealed record PersonDraft(
+    int CaseId,
+    string? DisplayName,
+    bool IsUnidentified,
+    string? RoleInCase,
+    string? Notes,
+    PersonRole Role = PersonRole.Other,
+    PersonQuestionnaire? Questionnaire = null);
 
 /// <summary>Фигурант в списке/карточке.</summary>
 public sealed record PersonRow(
@@ -18,7 +56,9 @@ public sealed record PersonRow(
     short Classification,
     int DivisionId,
     int ReferencePhotoCount,
-    int AppearanceCount);
+    int AppearanceCount,
+    PersonRole Role = PersonRole.Other,
+    PersonQuestionnaire? Questionnaire = null);
 
 /// <summary>Подтверждённое появление (ТФ-ПЕР-02).</summary>
 public sealed record AppearanceRow(
@@ -86,8 +126,11 @@ public interface IPersonStore
     /// <summary>Создать фигуранта в деле (дело должно быть доступно).</summary>
     Task<(PersonWriteResult Result, int PersonId)> CreateAsync(PersonDraft draft, AccessContext access, CancellationToken cancellationToken = default);
 
-    /// <summary>Изменить реквизиты.</summary>
-    Task<PersonWriteResult> UpdateAsync(int personId, string? displayName, bool isUnidentified, string? roleInCase, string? notes, AccessContext access, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Изменить реквизиты, роль и анкету — заменяются целиком. Дело, гриф и подразделение не меняются:
+    /// <see cref="PersonDraft.CaseId"/> черновика правки игнорируется.
+    /// </summary>
+    Task<PersonWriteResult> UpdateAsync(int personId, PersonDraft edit, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>Появления фигуранта (только подтверждённые, ТБ-073), новые первыми.</summary>
     Task<IReadOnlyList<AppearanceRow>> ListAppearancesAsync(int personId, AccessContext access, CancellationToken cancellationToken = default);

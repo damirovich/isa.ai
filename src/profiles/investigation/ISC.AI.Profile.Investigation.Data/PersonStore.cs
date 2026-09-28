@@ -74,12 +74,14 @@ public sealed class PersonStore(
             CaseId = caseFile.Id,
             DisplayName = string.Empty,
             IsUnidentified = draft.IsUnidentified,
+            Role = draft.Role,
             RoleInCase = Clean(draft.RoleInCase),
             Notes = Clean(draft.Notes),
             // ТБ-070: режимные поля фигуранта — с дела, не из черновика.
             Classification = caseFile.Classification,
             DivisionId = caseFile.DivisionId,
         };
+        ApplyQuestionnaire(entity, draft.Questionnaire);
 
         // Номер и запись — в одной транзакции под блокировкой дела: два одновременных «неустановленных»
         // в одном деле получают разные номера, а не 23505 на уникальном индексе.
@@ -100,9 +102,9 @@ public sealed class PersonStore(
 
     /// <inheritdoc />
     public async Task<PersonWriteResult> UpdateAsync(
-        int personId, string? displayName, bool isUnidentified, string? roleInCase, string? notes,
-        AccessContext access, CancellationToken cancellationToken = default)
+        int personId, PersonDraft edit, AccessContext access, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(edit);
         ArgumentNullException.ThrowIfNull(access);
 
         var role = await ResolveRoleAsync(access, cancellationToken);
@@ -120,15 +122,17 @@ public sealed class PersonStore(
         // Выдача — в транзакции под блокировкой дела (см. NextUnidentifiedNumberAsync).
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
-        if (isUnidentified && entity.UnidentifiedNumber is null)
+        if (edit.IsUnidentified && entity.UnidentifiedNumber is null)
         {
             entity.UnidentifiedNumber = await NextUnidentifiedNumberAsync(db, entity.CaseId, cancellationToken);
         }
 
-        entity.IsUnidentified = isUnidentified;
-        entity.DisplayName = ResolveDisplayName(displayName, isUnidentified, entity.UnidentifiedNumber);
-        entity.RoleInCase = Clean(roleInCase);
-        entity.Notes = Clean(notes);
+        entity.IsUnidentified = edit.IsUnidentified;
+        entity.DisplayName = ResolveDisplayName(edit.DisplayName, edit.IsUnidentified, entity.UnidentifiedNumber);
+        entity.Role = edit.Role;
+        entity.RoleInCase = Clean(edit.RoleInCase);
+        entity.Notes = Clean(edit.Notes);
+        ApplyQuestionnaire(entity, edit.Questionnaire);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return PersonWriteResult.Ok;
@@ -330,7 +334,25 @@ public sealed class PersonStore(
                 p.Id, p.CaseId, p.DisplayName, p.IsUnidentified, p.UnidentifiedNumber, p.RoleInCase, p.Notes,
                 p.Classification, p.DivisionId,
                 db.ReferencePhotos.Count(r => r.PersonId == p.Id),
-                db.Appearances.Count(a => a.PersonId == p.Id)));
+                db.Appearances.Count(a => a.PersonId == p.Id),
+                p.Role,
+                new PersonQuestionnaire(p.BirthDate, p.BirthYear, p.BirthPlace, p.WorkPlace, p.Residence, p.Sex, p.Alias)));
+
+    /// <summary>
+    /// Переносит анкету (ТФ-ПЕР-05) в сущность целиком; <see langword="null"/> — пустая анкета. При известной
+    /// дате рождения год берётся из неё: год и дата не расходятся (то же держит ограничение таблицы).
+    /// </summary>
+    private static void ApplyQuestionnaire(Person entity, PersonQuestionnaire? questionnaire)
+    {
+        var q = questionnaire ?? PersonQuestionnaire.Empty;
+        entity.BirthDate = q.BirthDate;
+        entity.BirthYear = q.BirthDate?.Year ?? q.BirthYear;
+        entity.BirthPlace = Clean(q.BirthPlace);
+        entity.WorkPlace = Clean(q.WorkPlace);
+        entity.Residence = Clean(q.Residence);
+        entity.Sex = q.Sex;
+        entity.Alias = Clean(q.Alias);
+    }
 
     /// <summary>
     /// Следующий номер неустановленного лица в деле: max + 1 под транзакционной advisory-блокировкой дела.

@@ -1,0 +1,65 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@using ISC.AI.Profile.Investigation.Application.Features.Persons
+@using ISC.AI.Profile.Investigation.Domain.Enums
+
+@* Поля анкеты объекта (ТФ-ПЕР-05) — общие для заведения фигуранта (CaseCard) и правки (PersonCard). Все
+   поля необязательны. Дата рождения или только год: при выбранной дате поле года недоступно и равно её
+   году. Пределы длин — константы PersonQuestionnaireValidator (единственный источник). Фотография объекта —
+   эталонное изображение (вкладка «Эталоны» карточки фигуранта, ТБ-077), а не поле анкеты. *@
+
+<MudText Typo="Typo.subtitle2" Class="mt-2 mb-1">Анкета</MudText>
+<MudGrid Spacing="2">
+    <MudItem xs="12" sm="6">
+        <MudTextField @bind-Value="Model.Alias" Label="Псевдоним (оперативная кличка)" Variant="Variant.Outlined"
+                      MaxLength="@PersonQuestionnaireValidator.MaxAliasLength" />
+    </MudItem>
+    <MudItem xs="12" sm="6">
+        <MudSelect T="PersonSex?" @bind-Value="Model.Sex" Label="Пол" Variant="Variant.Outlined" Dense="true"
+                   Clearable="true" Placeholder="Не указан">
+            @foreach (var sex in Enum.GetValues<PersonSex>())
+            {
+                <MudSelectItem T="PersonSex?" Value="@sex">@sex.Label()</MudSelectItem>
+            }
+        </MudSelect>
+    </MudItem>
+    <MudItem xs="12" sm="6">
+        @* Ширина пикера — обёрткой div, не Style (MudBlazor копирует Style на календарь). *@
+        <div>
+            <MudDatePicker @bind-Date="Model.BirthDate" @bind-Date:after="SyncYear" Label="Дата рождения"
+                           Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" Clearable="true"
+                           MaxDate="DateTime.Today" OpenTo="OpenTo.Year" />
+        </div>
+    </MudItem>
+    <MudItem xs="12" sm="6">
+        <MudNumericField T="int?" @bind-Value="Model.BirthYear" Label="Год рождения" Variant="Variant.Outlined"
+                         Min="@PersonQuestionnaireValidator.MinBirthYear" Max="@DateTime.Today.Year"
+                         Disabled="@(Model.BirthDate is not null)"
+                         HelperText="@(Model.BirthDate is null ? "Если известен только год" : "Из даты рождения")" />
+    </MudItem>
+    <MudItem xs="12" sm="6">
+        <MudTextField @bind-Value="Model.BirthPlace" Label="Место рождения" Variant="Variant.Outlined"
+                      MaxLength="@PersonQuestionnaireValidator.MaxPlaceLength" />
+    </MudItem>
+    <MudItem xs="12" sm="6">
+        <MudTextField @bind-Value="Model.WorkPlace" Label="Место работы" Variant="Variant.Outlined"
+                      MaxLength="@PersonQuestionnaireValidator.MaxPlaceLength" />
+    </MudItem>
+    <MudItem xs="12">
+        <MudTextField @bind-Value="Model.Residence" Label="Место жительства" Variant="Variant.Outlined"
+                      MaxLength="@PersonQuestionnaireValidator.MaxResidenceLength" />
+    </MudItem>
+</MudGrid>
+
+@code {
+    /// <summary>Модель анкеты (изменяется на месте).</summary>
+    [Parameter, EditorRequired] public PersonQuestionnaireForm Model { get; set; } = null!;
+
+    // Год всегда соответствует выбранной дате: форма не даёт ввести противоречивую пару.
+    private void SyncYear()
+    {
+        if (Model.BirthDate is { } date)
+        {
+            Model.BirthYear = date.Year;
+        }
+    }
+}

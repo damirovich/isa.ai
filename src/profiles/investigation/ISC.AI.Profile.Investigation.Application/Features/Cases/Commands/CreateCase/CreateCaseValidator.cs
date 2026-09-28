@@ -1,4 +1,5 @@
 using FluentValidation;
+using ISC.AI.Profile.Investigation.Domain.Enums;
 
 namespace ISC.AI.Profile.Investigation.Application.Features.Cases;
 
@@ -34,5 +35,12 @@ public sealed class CreateCaseValidator : AbstractValidator<CreateCaseCommand>
         RuleFor(c => c.DivisionId).GreaterThan(0).WithMessage("Укажите подразделение дела (ТБ-024).");
         RuleFor(c => c.InvestigatorUserId).GreaterThan(0).When(c => c.InvestigatorUserId is not null);
         RuleFor(c => c.Basis).MaximumLength(MaxBasisLength);
+
+        // ТФ-ДЕЛ-05: реквизиты задания — ровно у вида «задание по объекту».
+        RuleFor(c => c.TaskRequisites).NotNull().When(c => c.Kind == CaseKind.ObjectTask)
+            .WithMessage(TaskRequisitesValidator.TaskRequired);
+        RuleFor(c => c.TaskRequisites).Null().When(c => c.Kind != CaseKind.ObjectTask)
+            .WithMessage(TaskRequisitesValidator.TaskOnlyForTaskKind);
+        RuleFor(c => c.TaskRequisites!).SetValidator(new TaskRequisitesValidator()).When(c => c.TaskRequisites is not null);
     }
 }

@@ -77,6 +77,7 @@ public sealed class InvestigationProfileTests
         profile.Modules.ShouldContain(m => m.Route == "/admin/roles");
         profile.Modules.ShouldContain(m => m.Route == "/admin/clearances");
         profile.Modules.ShouldContain(m => m.Route == "/admin/divisions");
+        profile.Modules.ShouldContain(m => m.Route == "/admin/references");
 
         // Страницы пакетов подмешаны как есть — ни маршрут, ни компонент профиль не переопределяет.
         foreach (var module in DocFlowModule.Modules.Concat(AdminModule.Modules))

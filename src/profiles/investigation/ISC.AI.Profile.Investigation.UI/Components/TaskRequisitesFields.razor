@@ -1,0 +1,89 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@using ISC.AI.Profile.Investigation.Application.Features.Cases
+@using ISC.AI.Profile.Investigation.Domain.Enums
+@using ISC.AI.Profile.Investigation.Domain.Services
+
+@* Поля реквизитов задания (ТФ-ДЕЛ-05) — общие для заведения (Cases) и правки (CaseCard) дела. ГУ, звание
+   и должность — из справочников профиля (ТФ-АДМ-07): предлагаются действующие записи плюс уже выбранная.
+   Пределы длин — константы TaskRequisitesValidator (единственный источник). Каждое изменение сообщается
+   родителю (Changed): от полноты реквизитов зависит доступность его кнопки «Сохранить». *@
+
+<MudText Typo="Typo.subtitle2" Class="mt-2 mb-1">Реквизиты задания</MudText>
+@if (!References.Any(r => r.Kind == ReferenceKind.InitiatorUnit && r.IsActive))
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-2">
+        Справочник подразделений-инициаторов пуст: Администратор заполняет его на странице «Справочники».
+    </MudAlert>
+}
+<MudGrid Spacing="2">
+    <MudItem xs="12" sm="4">
+        <MudTextField @bind-Value="Model.TaskNumber" @bind-Value:after="NotifyAsync" Immediate="true"
+                      Label="№ задания *" Variant="Variant.Outlined" MaxLength="@TaskRequisitesValidator.MaxTaskNumberLength" />
+    </MudItem>
+    <MudItem xs="12" sm="8">
+        <MudSelect T="int?" @bind-Value="Model.InitiatorUnitId" @bind-Value:after="NotifyAsync"
+                   Label="Подразделение-инициатор (ГУ) *" Variant="Variant.Outlined" Dense="true" Placeholder="Из справочника">
+            @foreach (var item in ReferenceLookup.Options(References, ReferenceKind.InitiatorUnit, Model.InitiatorUnitId, Model.InitialUnitId))
+            {
+                <MudSelectItem T="int?" Value="@item.Id">@item.Name</MudSelectItem>
+            }
+        </MudSelect>
+    </MudItem>
+    <MudItem xs="12" sm="6">
+        <MudTextField @bind-Value="Model.InitiatorName" Label="Инициатор: ФИО" Variant="Variant.Outlined"
+                      MaxLength="@TaskRequisitesValidator.MaxInitiatorNameLength" />
+    </MudItem>
+    <MudItem xs="12" sm="6">
+        <MudTextField @bind-Value="Model.InitiatorPhone" Label="Инициатор: контактный телефон" Variant="Variant.Outlined"
+                      MaxLength="@TaskRequisitesValidator.MaxInitiatorPhoneLength" />
+    </MudItem>
+    <MudItem xs="12" sm="6">
+        <MudSelect T="int?" @bind-Value="Model.InitiatorRankId" Label="Инициатор: звание" Variant="Variant.Outlined"
+                   Dense="true" Clearable="true" Placeholder="Не указано">
+            @foreach (var item in ReferenceLookup.Options(References, ReferenceKind.Rank, Model.InitiatorRankId, Model.InitialRankId))
+            {
+                <MudSelectItem T="int?" Value="@item.Id">@item.Name</MudSelectItem>
+            }
+        </MudSelect>
+    </MudItem>
+    <MudItem xs="12" sm="6">
+        <MudSelect T="int?" @bind-Value="Model.InitiatorPositionId" Label="Инициатор: должность" Variant="Variant.Outlined"
+                   Dense="true" Clearable="true" Placeholder="Не указана">
+            @foreach (var item in ReferenceLookup.Options(References, ReferenceKind.Position, Model.InitiatorPositionId, Model.InitialPositionId))
+            {
+                <MudSelectItem T="int?" Value="@item.Id">@item.Name</MudSelectItem>
+            }
+        </MudSelect>
+    </MudItem>
+    <MudItem xs="12">
+        <MudTextField @bind-Value="Model.InitiatorDetails" Label="Инициатор: служебные реквизиты" Variant="Variant.Outlined"
+                      MaxLength="@TaskRequisitesValidator.MaxInitiatorDetailsLength" />
+    </MudItem>
+    <MudItem xs="12">
+        <MudTextField @bind-Value="Model.Justification" @bind-Value:after="NotifyAsync" Immediate="true"
+                      Label="Обоснование мероприятия *" Variant="Variant.Outlined" Lines="3"
+                      MaxLength="@TaskRequisitesValidator.MaxJustificationLength" />
+    </MudItem>
+    <MudItem xs="12">
+        <MudTextField @bind-Value="Model.Purpose" @bind-Value:after="NotifyAsync" Immediate="true"
+                      Label="Цель мероприятия *" Variant="Variant.Outlined" Lines="2"
+                      MaxLength="@TaskRequisitesValidator.MaxPurposeLength" />
+    </MudItem>
+    <MudItem xs="12">
+        <MudTextField @bind-Value="Model.Notes" Label="Примечание" Variant="Variant.Outlined" Lines="2"
+                      MaxLength="@TaskRequisitesValidator.MaxNotesLength" />
+    </MudItem>
+</MudGrid>
+
+@code {
+    /// <summary>Модель полей (изменяется на месте).</summary>
+    [Parameter, EditorRequired] public TaskRequisitesForm Model { get; set; } = null!;
+
+    /// <summary>Записи справочников профиля (все виды, включая выключенные).</summary>
+    [Parameter] public IReadOnlyList<ReferenceItemRow> References { get; set; } = [];
+
+    /// <summary>Сообщение родителю об изменении обязательного поля.</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private Task NotifyAsync() => Changed.InvokeAsync();
+}
