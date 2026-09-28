@@ -111,7 +111,7 @@ public sealed class TaskScenarioTests
         var questionnaire = new PersonQuestionnaire(Residence: "г. Бишкек");
 
         var response = await new UpdatePersonCommand.Handler(_persons, _roles, _subject, _access)
-            .Handle(new UpdatePersonCommand(9, " Иванов ", false, PersonRole.Link, questionnaire, " брат "), CancellationToken.None);
+            .Handle(new UpdatePersonCommand(9, " Иванов ", false, PersonRole.Link, questionnaire, 7, 4, " брат "), CancellationToken.None);
 
         response.Status.ShouldBeTrue();
         await _persons.Received(1).UpdateAsync(

@@ -12,7 +12,8 @@ namespace ISC.AI.Profile.Investigation.Application.Features.Persons;
 /// <summary>
 /// Завести фигуранта в деле (ТФ-ПЕР-01). Пустое имя при <paramref name="IsUnidentified"/> хранилище заменяет
 /// на «Неустановленное лицо № N». Гриф и подразделение фигуранта — дела (ТБ-070), выбора нет.
-/// Роль — по перечню (объект, связь, иная); анкета (ТФ-ПЕР-05) необязательна.
+/// Роль — по перечню (объект, связь, иная); анкета (ТФ-ПЕР-05) необязательна; у роли «связь» — чья это связь
+/// и кем приходится (ТФ-ПЕР-06).
 /// </summary>
 public sealed record CreatePersonCommand(
     int CaseId,
@@ -21,7 +22,9 @@ public sealed record CreatePersonCommand(
     string? RoleInCase = null,
     string? Notes = null,
     PersonRole Role = PersonRole.Other,
-    PersonQuestionnaire? Questionnaire = null)
+    PersonQuestionnaire? Questionnaire = null,
+    int? LinkedToPersonId = null,
+    int? LinkTypeId = null)
     : IRequest<ResponseDto<int>>, IAuditableRequest
 {
     /// <inheritdoc />
@@ -58,12 +61,17 @@ public sealed record CreatePersonCommand(
                 string.IsNullOrWhiteSpace(command.RoleInCase) ? null : command.RoleInCase.Trim(),
                 string.IsNullOrWhiteSpace(command.Notes) ? null : command.Notes.Trim(),
                 command.Role,
-                command.Questionnaire);
+                command.Questionnaire,
+                command.LinkedToPersonId,
+                command.LinkTypeId);
 
             var (result, personId) = await persons.CreateAsync(draft, access, cancellationToken);
-            return result == PersonWriteResult.Ok
-                ? ResponseDto<int>.Ok(personId)
-                : ResponseDto<int>.NotFound(PersonGuard.NotFound);
+            return result switch
+            {
+                PersonWriteResult.Ok => ResponseDto<int>.Ok(personId),
+                PersonWriteResult.InvalidLink => ResponseDto<int>.BadRequest(PersonGuard.InvalidLink),
+                _ => ResponseDto<int>.NotFound(PersonGuard.NotFound),
+            };
         }
     }
 }
@@ -86,5 +94,11 @@ public sealed class CreatePersonValidator : AbstractValidator<CreatePersonComman
         RuleFor(c => c.RoleInCase).MaximumLength(200);
         RuleFor(c => c.Notes).MaximumLength(4000);
         RuleFor(c => c.Questionnaire!).SetValidator(new PersonQuestionnaireValidator()).When(c => c.Questionnaire is not null);
+
+        // ТФ-ПЕР-06: поля связи — только у роли «связь».
+        RuleFor(c => c.LinkedToPersonId).Null().When(c => c.Role != PersonRole.Link).WithMessage(PersonLinkRules.OnlyForLink);
+        RuleFor(c => c.LinkTypeId).Null().When(c => c.Role != PersonRole.Link).WithMessage(PersonLinkRules.OnlyForLink);
+        RuleFor(c => c.LinkedToPersonId).GreaterThan(0).When(c => c.LinkedToPersonId is not null);
+        RuleFor(c => c.LinkTypeId).GreaterThan(0).When(c => c.LinkTypeId is not null);
     }
 }

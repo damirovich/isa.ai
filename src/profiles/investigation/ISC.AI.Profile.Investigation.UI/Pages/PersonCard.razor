@@ -6,6 +6,7 @@
 @using ISC.AI.Abstractions.Security
 @using ISC.AI.Profile.Investigation.Application.Features.Directory
 @using ISC.AI.Profile.Investigation.Application.Features.Persons
+@using ISC.AI.Profile.Investigation.Application.Features.References
 @using ISC.AI.Profile.Investigation.Domain.Enums
 @using ISC.AI.Profile.Investigation.Domain.Services
 @inject NavigationManager Navigation
@@ -15,7 +16,9 @@
    показывается с предупреждением о его вероятностной природе (ТЭ-006); слова «идентифицирован» и т.п.
    в интерфейсе не используются (ТЭ-005). Эталоны при замене не удаляются — прежний помечается заменённым
    (ТБ-077). Носители и сессии пакета «Медиа» — по URL (/media/...). Гриф и подразделение фигуранта —
-   с дела (решётка ТБ-020: недоступный фигурант неотличим от несуществующего). *@
+   с дела (решётка ТБ-020: недоступный фигурант неотличим от несуществующего). Связи объекта (ТФ-ПЕР-06) —
+   фигуранты того же дела с ролью «связь»; адреса и автотранспорт — отдельные строки под той же решёткой,
+   по их нормализованным значениям (ТО-мат-11) ищутся пересечения (ТФ-ПЕР-07). *@
 
 @if (_person is null)
 {
@@ -63,6 +66,26 @@ else
                     <tr><td class="mud-text-secondary">Номер неустановленного лица</td><td>№ @number</td></tr>
                 }
                 <tr><td class="mud-text-secondary">Роль в деле</td><td>@_person.Role.Label()@(_person.RoleInCase is { } roleText ? $" · {roleText}" : string.Empty)</td></tr>
+                @if (_person.Role == PersonRole.Link)
+                {
+                    <tr>
+                        <td class="mud-text-secondary">Связь с</td>
+                        <td>
+                            @if (_person.LinkedToPersonId is { } linkedId)
+                            {
+                                <MudLink Href="@($"/persons/{linkedId}")">@PersonName(linkedId)</MudLink>
+                            }
+                            else
+                            {
+                                <span>—</span>
+                            }
+                            @if (_person.LinkTypeId is not null)
+                            {
+                                <span class="mud-text-secondary"> · @ReferenceLookup.Name(_references, _person.LinkTypeId)</span>
+                            }
+                        </td>
+                    </tr>
+                }
                 @* Анкета (ТФ-ПЕР-05). Фотография объекта — актуальный эталон на вкладке «Эталоны» (ТБ-077). *@
                 <tr><td class="mud-text-secondary">Псевдоним</td><td>@QuestionnaireLabels.OrDash(Q.Alias)</td></tr>
                 <tr><td class="mud-text-secondary">Пол</td><td>@(Q.Sex?.Label() ?? "—")</td></tr>
@@ -77,6 +100,115 @@ else
     </MudPaper>
 
     <MudTabs Elevation="0" Border="true" Rounded="true">
+    @* --- Связи (ТФ-ПЕР-06): фигуранты этого дела, чьей связью указан этот фигурант --- *@
+    <MudTabPanel Text="Связи" Icon="@Icons.Material.Filled.Hub" BadgeData="@Links.Count()" BadgeColor="Color.Default">
+        <div class="pt-3">
+            <div class="d-flex justify-end mb-2">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonAdd"
+                           OnClick="OpenAddLink" Disabled="_busy">Добавить связь</MudButton>
+            </div>
+            @if (_casePersonsError is not null)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_casePersonsError</MudAlert>
+            }
+            <MudTable T="PersonRow" Items="Links" Hover="true" Dense="true" Outlined="true" Loading="_busy"
+                      OnRowClick="@(row => Navigation.NavigateTo($"/persons/{row.Item!.Id}"))" RowClass="cursor-pointer">
+                <HeaderContent>
+                    <MudTh>Связь</MudTh>
+                    <MudTh>Кем приходится</MudTh>
+                    <MudTh>Рождение</MudTh>
+                    <MudTh Style="text-align:right;">Эталонов</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Связь">
+                        @context.DisplayName
+                        @if (context.Questionnaire?.Alias is { } alias)
+                        {
+                            <span class="mud-text-secondary"> «@alias»</span>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Кем приходится">
+                        @ReferenceLookup.Name(_references, context.LinkTypeId)@(context.RoleInCase is { } roleText ? $" · {roleText}" : string.Empty)
+                    </MudTd>
+                    <MudTd DataLabel="Рождение">@QuestionnaireLabels.Birth(context.Questionnaire)</MudTd>
+                    <MudTd DataLabel="Эталонов" Style="text-align:right;">@context.ReferencePhotoCount</MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                        Связей нет либо они вне вашего допуска. Связь — отдельный фигурант дела со своей карточкой.
+                    </MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </div>
+    </MudTabPanel>
+
+    @* --- Адреса и автотранспорт (ТФ-ПЕР-06): по нормализованным значениям ищутся пересечения (ТФ-ПЕР-07) --- *@
+    <MudTabPanel Text="Адреса и транспорт" Icon="@Icons.Material.Filled.DirectionsCar"
+                 BadgeData="@(_addresses.Count + _vehicles.Count)" BadgeColor="Color.Default">
+        <div class="pt-3">
+            @if (_requisitesError is not null)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+                          ShowCloseIcon="true" CloseIconClicked="@(() => _requisitesError = null)">@_requisitesError</MudAlert>
+            }
+            <div class="d-flex align-center justify-space-between mb-2">
+                <MudText Typo="Typo.subtitle2">Адреса</MudText>
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.AddLocationAlt"
+                           OnClick="@(() => OpenAddress(null))" Disabled="_busy">Добавить адрес</MudButton>
+            </div>
+            <MudTable T="PersonAddressRow" Items="_addresses" Hover="true" Dense="true" Outlined="true" Loading="_busy" Class="mb-4">
+                <HeaderContent>
+                    <MudTh>Вид</MudTh>
+                    <MudTh>Адрес</MudTh>
+                    <MudTh>Примечание</MudTh>
+                    <MudTh Style="width:200px;">Действия</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Вид">@context.Kind.Label()</MudTd>
+                    <MudTd DataLabel="Адрес">@context.Text</MudTd>
+                    <MudTd DataLabel="Примечание">@(context.Notes ?? "—")</MudTd>
+                    <MudTd DataLabel="Действия">
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="_busy" OnClick="@(() => OpenAddress(context))">Изменить</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" Disabled="_busy"
+                                   OnClick="@(() => DeleteAddressAsync(context))">Удалить</MudButton>
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Адресов нет. Место жительства из анкеты показано в реквизитах.</MudText>
+                </NoRecordsContent>
+            </MudTable>
+
+            <div class="d-flex align-center justify-space-between mb-2">
+                <MudText Typo="Typo.subtitle2">Автотранспорт</MudText>
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.DirectionsCar"
+                           OnClick="@(() => OpenVehicle(null))" Disabled="_busy">Добавить транспорт</MudButton>
+            </div>
+            <MudTable T="PersonVehicleRow" Items="_vehicles" Hover="true" Dense="true" Outlined="true" Loading="_busy">
+                <HeaderContent>
+                    <MudTh>Госномер</MudTh>
+                    <MudTh>Марка и модель</MudTh>
+                    <MudTh>Цвет</MudTh>
+                    <MudTh>Примечание</MudTh>
+                    <MudTh Style="width:200px;">Действия</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Госномер">@(context.PlateNumber ?? "неизвестен")</MudTd>
+                    <MudTd DataLabel="Марка и модель">@VehicleName(context)</MudTd>
+                    <MudTd DataLabel="Цвет">@(context.Color ?? "—")</MudTd>
+                    <MudTd DataLabel="Примечание">@(context.Notes ?? "—")</MudTd>
+                    <MudTd DataLabel="Действия">
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="_busy" OnClick="@(() => OpenVehicle(context))">Изменить</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" Disabled="_busy"
+                                   OnClick="@(() => DeleteVehicleAsync(context))">Удалить</MudButton>
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Автотранспорта нет.</MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </div>
+    </MudTabPanel>
+
     @* --- Появления: только подтверждённые двумя лицами (ТБ-073), всегда «следственная версия» --- *@
     <MudTabPanel Text="Появления" Icon="@Icons.Material.Filled.Visibility" BadgeData="@_appearances.Count" BadgeColor="Color.Default">
         <div class="pt-3">
@@ -220,6 +352,12 @@ else
                 <MudTextField @bind-Value="_editRole" Label="Уточнение роли" Variant="Variant.Outlined" MaxLength="200" />
             </MudItem>
         </MudGrid>
+        @if (_editKind == PersonRole.Link)
+        {
+            <PersonLinkFields Persons="_casePersons" ExcludePersonId="Id" References="_references"
+                              @bind-LinkedToPersonId="_editLinkedTo" @bind-LinkTypeId="_editLinkType"
+                              InitialLinkTypeId="_person?.LinkTypeId" />
+        }
         <PersonQuestionnaireFields Model="_editQuestionnaire" />
         <MudGrid Spacing="2" Class="mt-1">
             <MudItem xs="12">
@@ -279,6 +417,123 @@ else
     </DialogActions>
 </MudDialog>
 
+@* --- Новая связь (CreatePersonCommand с ролью «связь», ТФ-ПЕР-06): отдельный фигурант этого дела --- *@
+<MudDialog @bind-Visible="_linkOpen" Options="FormDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Новая связь: @_person?.DisplayName</MudText></TitleContent>
+    <DialogContent>
+        @if (_linkError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_linkError</MudAlert>
+        }
+        <MudGrid Spacing="2">
+            <MudItem xs="12">
+                <MudCheckBox T="bool" @bind-Value="_linkUnidentified" Label="Личность не установлена (номер присвоится автоматически)" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_linkName" Label="@(_linkUnidentified ? "ФИО (необязательно)" : "ФИО *")"
+                              Variant="Variant.Outlined" MaxLength="300" Immediate="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="int?" @bind-Value="_linkType" Label="Кем приходится" Variant="Variant.Outlined" Dense="true"
+                           Clearable="true" Placeholder="Из справочника «Типы связей»">
+                    @foreach (var item in ReferenceLookup.Options(_references, ReferenceKind.LinkType, _linkType))
+                    {
+                        <MudSelectItem T="int?" Value="@item.Id">@item.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_linkRoleText" Label="Уточнение" Variant="Variant.Outlined" MaxLength="200"
+                              HelperText="Например: старший брат, партнёр по бизнесу" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_linkNotes" Label="Примечания" Variant="Variant.Outlined" Lines="2" MaxLength="4000" />
+            </MudItem>
+        </MudGrid>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+            Анкету, адреса, транспорт и эталоны связи заполните в её карточке после добавления.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _linkOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@(_busy || (!_linkUnidentified && string.IsNullOrWhiteSpace(_linkName)))" OnClick="SaveLinkAsync">Добавить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* --- Адрес (SavePersonAddressCommand): новый или правка --- *@
+<MudDialog @bind-Visible="_addressOpen" Options="FormDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">@(_addressId is null ? "Новый адрес" : "Изменить адрес")</MudText></TitleContent>
+    <DialogContent>
+        @if (_addressError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_addressError</MudAlert>
+        }
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="4">
+                <MudSelect T="AddressKind" @bind-Value="_addressKind" Label="Вид *" Variant="Variant.Outlined" Dense="true">
+                    @foreach (var kind in Enum.GetValues<AddressKind>())
+                    {
+                        <MudSelectItem T="AddressKind" Value="@kind">@kind.Label()</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="8">
+                <MudTextField @bind-Value="_addressText" Label="Адрес *" Variant="Variant.Outlined" Immediate="true"
+                              MaxLength="@SavePersonAddressValidator.MaxTextLength" HelperText="Например: г. Бишкек, ул. Токтогула, 1, кв. 5" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_addressNotes" Label="Примечание" Variant="Variant.Outlined"
+                              MaxLength="@SavePersonAddressValidator.MaxNotesLength" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _addressOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_busy || string.IsNullOrWhiteSpace(_addressText))"
+                   OnClick="SaveAddressAsync">Сохранить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* --- Автотранспорт (SavePersonVehicleCommand): нужен госномер или марка --- *@
+<MudDialog @bind-Visible="_vehicleOpen" Options="FormDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">@(_vehicleId is null ? "Новый автотранспорт" : "Изменить автотранспорт")</MudText></TitleContent>
+    <DialogContent>
+        @if (_vehicleError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_vehicleError</MudAlert>
+        }
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="4">
+                <MudTextField @bind-Value="_vehiclePlate" Label="Госномер" Variant="Variant.Outlined" Immediate="true"
+                              MaxLength="@SavePersonVehicleValidator.MaxPlateLength" HelperText="Например: 01 KG 123 ABC" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudTextField @bind-Value="_vehicleMake" Label="Марка" Variant="Variant.Outlined" Immediate="true"
+                              MaxLength="@SavePersonVehicleValidator.MaxMakeLength" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudTextField @bind-Value="_vehicleModel" Label="Модель" Variant="Variant.Outlined"
+                              MaxLength="@SavePersonVehicleValidator.MaxMakeLength" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudTextField @bind-Value="_vehicleColor" Label="Цвет" Variant="Variant.Outlined"
+                              MaxLength="@SavePersonVehicleValidator.MaxColorLength" />
+            </MudItem>
+            <MudItem xs="12" sm="8">
+                <MudTextField @bind-Value="_vehicleNotes" Label="Примечание" Variant="Variant.Outlined"
+                              MaxLength="@SavePersonVehicleValidator.MaxNotesLength" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _vehicleOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@(_busy || (string.IsNullOrWhiteSpace(_vehiclePlate) && string.IsNullOrWhiteSpace(_vehicleMake)))"
+                   OnClick="SaveVehicleAsync">Сохранить</MudButton>
+    </DialogActions>
+</MudDialog>
+
 @code {
     private static readonly DialogOptions FormDialogOptions =
         new() { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true };
@@ -309,6 +564,46 @@ else
     // Анкета фигуранта для показа (пустая, если строка пришла без неё).
     private PersonQuestionnaire Q => _person?.Questionnaire ?? PersonQuestionnaire.Empty;
 
+    // --- Связи, адреса, транспорт (ТФ-ПЕР-06) ---
+    private readonly List<PersonRow> _casePersons = [];
+    private readonly List<ReferenceItemRow> _references = [];
+    private readonly List<PersonAddressRow> _addresses = [];
+    private readonly List<PersonVehicleRow> _vehicles = [];
+    private string? _casePersonsError;
+    private string? _requisitesError;
+    private int? _editLinkedTo;
+    private int? _editLinkType;
+
+    // Связи этого фигуранта — фигуранты дела, у которых он указан как «чья связь».
+    private IEnumerable<PersonRow> Links => _casePersons.Where(p => p.LinkedToPersonId == Id);
+
+    // --- Новая связь ---
+    private bool _linkOpen;
+    private string? _linkError;
+    private bool _linkUnidentified;
+    private string? _linkName;
+    private int? _linkType;
+    private string? _linkRoleText;
+    private string? _linkNotes;
+
+    // --- Адрес ---
+    private bool _addressOpen;
+    private string? _addressError;
+    private int? _addressId;
+    private AddressKind _addressKind = AddressKind.Residence;
+    private string? _addressText;
+    private string? _addressNotes;
+
+    // --- Автотранспорт ---
+    private bool _vehicleOpen;
+    private string? _vehicleError;
+    private int? _vehicleId;
+    private string? _vehiclePlate;
+    private string? _vehicleMake;
+    private string? _vehicleModel;
+    private string? _vehicleColor;
+    private string? _vehicleNotes;
+
     // --- Новый эталон ---
     private bool _photoOpen;
     private string? _photoError;
@@ -331,6 +626,13 @@ else
         if (accounts is { Status: true, Data: { } rows })
         {
             _accounts.AddRange(rows);
+        }
+
+        // Справочники профиля (ТФ-АДМ-07) — имена типов связей; отказ не мешает карточке.
+        var references = await Dispatcher.Send(new ListReferenceItemsQuery());
+        if (references is { Status: true, Data: { } items })
+        {
+            _references.AddRange(items);
         }
 
         await ReloadAsync();
@@ -374,6 +676,187 @@ else
             _photos.Clear();
             if (photos is { Status: true, Data: { } p }) { _photos.AddRange(p); }
             else { _photosError = photos.StatusMessage; }
+
+            // Фигуранты дела — для вкладки «Связи», имени «Связь с» и выбора «чья связь» (ТФ-ПЕР-06).
+            _casePersonsError = null;
+            var casePersons = await Dispatcher.Send(new ListPersonsQuery(person.CaseId));
+            _casePersons.Clear();
+            if (casePersons is { Status: true, Data: { } list }) { _casePersons.AddRange(list); }
+            else { _casePersonsError = casePersons.StatusMessage; }
+
+            await LoadRequisitesAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task LoadRequisitesAsync()
+    {
+        _requisitesError = null;
+        var requisites = await Dispatcher.Send(new GetPersonRequisitesQuery(Id));
+        _addresses.Clear();
+        _vehicles.Clear();
+        if (requisites is { Status: true, Data: { } r })
+        {
+            _addresses.AddRange(r.Addresses);
+            _vehicles.AddRange(r.Vehicles);
+        }
+        else
+        {
+            _requisitesError = requisites.StatusMessage;
+        }
+    }
+
+    // --- Новая связь ---
+    private void OpenAddLink()
+    {
+        _linkError = null;
+        _linkUnidentified = false;
+        _linkName = null;
+        _linkType = null;
+        _linkRoleText = null;
+        _linkNotes = null;
+        _linkOpen = true;
+    }
+
+    private async Task SaveLinkAsync()
+    {
+        if (_person is not { } person) { return; }
+        _busy = true;
+        _linkError = null;
+        try
+        {
+            var response = await Dispatcher.Send(new CreatePersonCommand(
+                person.CaseId,
+                string.IsNullOrWhiteSpace(_linkName) ? null : _linkName.Trim(),
+                _linkUnidentified,
+                string.IsNullOrWhiteSpace(_linkRoleText) ? null : _linkRoleText.Trim(),
+                _linkNotes,
+                PersonRole.Link,
+                Questionnaire: null,
+                LinkedToPersonId: Id,
+                LinkTypeId: _linkType));
+            if (!response.Status)
+            {
+                _linkError = response.StatusMessage;
+                return;
+            }
+
+            _linkOpen = false;
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    // --- Адреса ---
+    private void OpenAddress(PersonAddressRow? row)
+    {
+        _addressError = null;
+        _addressId = row?.Id;
+        _addressKind = row?.Kind ?? AddressKind.Residence;
+        _addressText = row?.Text;
+        _addressNotes = row?.Notes;
+        _addressOpen = true;
+    }
+
+    private async Task SaveAddressAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_addressText)) { return; }
+        _busy = true;
+        _addressError = null;
+        try
+        {
+            var response = await Dispatcher.Send(new SavePersonAddressCommand(Id, _addressId, _addressKind, _addressText, _addressNotes));
+            if (!response.Status)
+            {
+                _addressError = response.StatusMessage;
+                return;
+            }
+
+            _addressOpen = false;
+            await LoadRequisitesAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DeleteAddressAsync(PersonAddressRow row)
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new DeletePersonAddressCommand(row.Id));
+            if (!response.Status)
+            {
+                _requisitesError = response.StatusMessage;
+                return;
+            }
+
+            await LoadRequisitesAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    // --- Автотранспорт ---
+    private void OpenVehicle(PersonVehicleRow? row)
+    {
+        _vehicleError = null;
+        _vehicleId = row?.Id;
+        _vehiclePlate = row?.PlateNumber;
+        _vehicleMake = row?.Make;
+        _vehicleModel = row?.Model;
+        _vehicleColor = row?.Color;
+        _vehicleNotes = row?.Notes;
+        _vehicleOpen = true;
+    }
+
+    private async Task SaveVehicleAsync()
+    {
+        _busy = true;
+        _vehicleError = null;
+        try
+        {
+            var response = await Dispatcher.Send(new SavePersonVehicleCommand(
+                Id, _vehicleId, _vehiclePlate, _vehicleMake, _vehicleModel, _vehicleColor, _vehicleNotes));
+            if (!response.Status)
+            {
+                _vehicleError = response.StatusMessage;
+                return;
+            }
+
+            _vehicleOpen = false;
+            await LoadRequisitesAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DeleteVehicleAsync(PersonVehicleRow row)
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new DeletePersonVehicleCommand(row.Id));
+            if (!response.Status)
+            {
+                _requisitesError = response.StatusMessage;
+                return;
+            }
+
+            await LoadRequisitesAsync();
         }
         finally
         {
@@ -390,6 +873,8 @@ else
         _editRole = p.RoleInCase;
         _editKind = p.Role;
         _editQuestionnaire = PersonQuestionnaireForm.From(p.Questionnaire);
+        _editLinkedTo = p.LinkedToPersonId;
+        _editLinkType = p.LinkTypeId;
         _editNotes = p.Notes;
         _editOpen = true;
     }
@@ -403,6 +888,9 @@ else
             var response = await Dispatcher.Send(new UpdatePersonCommand(
                 Id, string.IsNullOrWhiteSpace(_editName) ? null : _editName.Trim(), _editUnidentified,
                 _editKind, _editQuestionnaire.ToQuestionnaire(),
+                // Поля связи — только у роли «связь» (ТФ-ПЕР-06): при смене роли они очищаются.
+                _editKind == PersonRole.Link ? _editLinkedTo : null,
+                _editKind == PersonRole.Link ? _editLinkType : null,
                 string.IsNullOrWhiteSpace(_editRole) ? null : _editRole.Trim(), _editNotes));
             if (!response.Status)
             {
@@ -463,6 +951,13 @@ else
     }
 
     // --- Подписи ---
+
+    // Имя фигуранта этого дела по идентификатору (для «Связь с»); недоступный — «№ id».
+    private string PersonName(int id) => _casePersons.FirstOrDefault(p => p.Id == id)?.DisplayName ?? $"фигурант № {id}";
+
+    // «Toyota Camry», «Toyota», «—».
+    private static string VehicleName(PersonVehicleRow row) =>
+        string.Join(' ', new[] { row.Make, row.Model }.Where(s => !string.IsNullOrWhiteSpace(s))) is { Length: > 0 } name ? name : "—";
 
     // «Объект · «Шторм»» — роль по перечню и псевдоним, если есть.
     private static string Subtitle(PersonRow person) =>

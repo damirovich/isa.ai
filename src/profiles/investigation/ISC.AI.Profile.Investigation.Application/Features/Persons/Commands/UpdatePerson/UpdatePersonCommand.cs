@@ -13,7 +13,8 @@ namespace ISC.AI.Profile.Investigation.Application.Features.Persons;
 /// Изменить реквизиты, роль и анкету фигуранта (ТФ-ПЕР-01/05) — заменяются целиком; дело, гриф и
 /// подразделение не меняются. Роль и анкета — обязательные параметры без умолчаний: правка заменяет их
 /// целиком, и вызов, «забывший» их передать, молча стёр бы анкету. <see langword="null"/> в
-/// <paramref name="Questionnaire"/> — осознанная очистка анкеты.
+/// <paramref name="Questionnaire"/> — осознанная очистка анкеты. По той же причине обязательны поля связи
+/// (ТФ-ПЕР-06): у роли, отличной от «связь», передаются <see langword="null"/>.
 /// </summary>
 public sealed record UpdatePersonCommand(
     int PersonId,
@@ -21,6 +22,8 @@ public sealed record UpdatePersonCommand(
     bool IsUnidentified,
     PersonRole Role,
     PersonQuestionnaire? Questionnaire,
+    int? LinkedToPersonId,
+    int? LinkTypeId,
     string? RoleInCase = null,
     string? Notes = null)
     : IRequest<ResponseDto<bool>>, IAuditableRequest
@@ -57,7 +60,9 @@ public sealed record UpdatePersonCommand(
                 string.IsNullOrWhiteSpace(command.RoleInCase) ? null : command.RoleInCase.Trim(),
                 string.IsNullOrWhiteSpace(command.Notes) ? null : command.Notes.Trim(),
                 command.Role,
-                command.Questionnaire);
+                command.Questionnaire,
+                command.LinkedToPersonId,
+                command.LinkTypeId);
             var result = await persons.UpdateAsync(command.PersonId, edit, access, cancellationToken);
             return PersonGuard.ToResponse(result);
         }
@@ -79,5 +84,12 @@ public sealed class UpdatePersonValidator : AbstractValidator<UpdatePersonComman
         RuleFor(c => c.RoleInCase).MaximumLength(200);
         RuleFor(c => c.Notes).MaximumLength(4000);
         RuleFor(c => c.Questionnaire!).SetValidator(new PersonQuestionnaireValidator()).When(c => c.Questionnaire is not null);
+
+        // ТФ-ПЕР-06: поля связи — только у роли «связь».
+        RuleFor(c => c.LinkedToPersonId).Null().When(c => c.Role != PersonRole.Link).WithMessage(PersonLinkRules.OnlyForLink);
+        RuleFor(c => c.LinkTypeId).Null().When(c => c.Role != PersonRole.Link).WithMessage(PersonLinkRules.OnlyForLink);
+        RuleFor(c => c.LinkedToPersonId).GreaterThan(0).When(c => c.LinkedToPersonId is not null);
+        RuleFor(c => c.LinkTypeId).GreaterThan(0).When(c => c.LinkTypeId is not null);
+        RuleFor(c => c).Must(c => c.LinkedToPersonId != c.PersonId).WithMessage("Фигурант не может быть связью самого себя.");
     }
 }

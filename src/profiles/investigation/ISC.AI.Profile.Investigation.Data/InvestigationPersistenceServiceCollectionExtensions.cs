@@ -41,6 +41,12 @@ public static class InvestigationPersistenceServiceCollectionExtensions
         services.AddScoped<ICaseStore, CaseStore>();
         services.AddScoped<IPersonStore, PersonStore>();
 
+        // Адреса и автотранспорт фигурантов (ТФ-ПЕР-06) — та же решётка через PersonAccess.
+        services.AddScoped<IPersonRequisiteStore, PersonRequisiteStore>();
+
+        // Дозаполнение нормализованных реквизитов прежних фигурантов при старте (ТО-мат-11).
+        services.AddHostedService<InvestigationStartupMaintenance>();
+
         // Порты пакета «Документооборот» (ADR-0017): справочник подразделений, право настройки,
         // кандидаты в ответственные/исполнители. Без реализаций модуль fail-closed.
         services.AddScoped<ISC.AI.Modules.DocFlow.Domain.Services.IDivisionDirectory, InvestigationDivisionDirectory>();

@@ -50,9 +50,35 @@ public enum ReferenceKind
     MaterialCategory = 5,
 }
 
+/// <summary>Вид адреса фигуранта (ТФ-ПЕР-06: «адреса проживания/пребывания»).</summary>
+public enum AddressKind
+{
+    /// <summary>Адрес проживания.</summary>
+    Residence = 1,
+
+    /// <summary>Адрес пребывания (временный).</summary>
+    Stay = 2,
+
+    /// <summary>Место работы.</summary>
+    Work = 3,
+
+    /// <summary>Иной адрес (часто посещаемое место и т. п.).</summary>
+    Other = 4,
+}
+
 /// <summary>Русские подписи перечислений фигурантов и справочников.</summary>
 public static class PersonLabels
 {
+    /// <summary>Подпись вида адреса.</summary>
+    public static string Label(this AddressKind kind) => kind switch
+    {
+        AddressKind.Residence => "Проживание",
+        AddressKind.Stay => "Пребывание",
+        AddressKind.Work => "Работа",
+        AddressKind.Other => "Иной",
+        _ => kind.ToString(),
+    };
+
     /// <summary>Подпись роли фигуранта.</summary>
     public static string Label(this PersonRole role) => role switch
     {

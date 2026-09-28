@@ -35,6 +35,8 @@ public sealed record PersonQuestionnaire(
 /// <param name="Notes">Примечания.</param>
 /// <param name="Role">Роль по перечню (объект, связь, иная).</param>
 /// <param name="Questionnaire">Анкета (ТФ-ПЕР-05); <see langword="null"/> — пустая.</param>
+/// <param name="LinkedToPersonId">Чьей связью является (фигурант того же дела) — только у роли «связь» (ТФ-ПЕР-06).</param>
+/// <param name="LinkTypeId">Кем приходится — запись справочника «тип связи» — только у роли «связь».</param>
 public sealed record PersonDraft(
     int CaseId,
     string? DisplayName,
@@ -42,7 +44,9 @@ public sealed record PersonDraft(
     string? RoleInCase,
     string? Notes,
     PersonRole Role = PersonRole.Other,
-    PersonQuestionnaire? Questionnaire = null);
+    PersonQuestionnaire? Questionnaire = null,
+    int? LinkedToPersonId = null,
+    int? LinkTypeId = null);
 
 /// <summary>Фигурант в списке/карточке.</summary>
 public sealed record PersonRow(
@@ -58,7 +62,9 @@ public sealed record PersonRow(
     int ReferencePhotoCount,
     int AppearanceCount,
     PersonRole Role = PersonRole.Other,
-    PersonQuestionnaire? Questionnaire = null);
+    PersonQuestionnaire? Questionnaire = null,
+    int? LinkedToPersonId = null,
+    int? LinkTypeId = null);
 
 /// <summary>Подтверждённое появление (ТФ-ПЕР-02).</summary>
 public sealed record AppearanceRow(
@@ -112,6 +118,12 @@ public enum PersonWriteResult
 
     /// <summary>Фигурант/дело не найдены или недоступны.</summary>
     NotFound = 1,
+
+    /// <summary>
+    /// Связь не согласована (ТФ-ПЕР-06): поля связи у роли, отличной от «связь»; фигурант, с которым связь,
+    /// не из этого дела или это он сам; тип связи — не запись справочника «тип связи» или выключен.
+    /// </summary>
+    InvalidLink = 2,
 }
 
 /// <summary>Хранилище фигурантов, эталонов и появлений (ТФ-ПЕР-01/02). Чтение — под решёткой; гриф/подразделение берутся у дела.</summary>
