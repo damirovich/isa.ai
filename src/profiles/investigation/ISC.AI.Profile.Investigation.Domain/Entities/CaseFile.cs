@@ -43,4 +43,38 @@ public class CaseFile : AuditableEntity, IClassified
 
     /// <summary>Кто создал запись (слабая ссылка).</summary>
     public int? CreatedByUserId { get; set; }
+
+    // --- Реквизиты задания (ТФ-ДЕЛ-05). Инвариант: у вида «задание по объекту» обязательные реквизиты
+    // заполнены, у остальных видов все реквизиты задания пусты. Держат его хранилище (CaseStore) и
+    // ограничение CHECK таблицы — форма и валидатор лишь избавляют оператора от отказа сервера.
+
+    /// <summary>№ задания — реквизит инициатора, вводится оператором.</summary>
+    public string? TaskNumber { get; set; }
+
+    /// <summary>Подразделение-инициатор (ГУ) — запись справочника вида «инициатор» (FK внутри схемы).</summary>
+    public int? InitiatorUnitId { get; set; }
+
+    /// <summary>ФИО инициатора задания.</summary>
+    public string? InitiatorName { get; set; }
+
+    /// <summary>Звание инициатора — запись справочника вида «звание».</summary>
+    public int? InitiatorRankId { get; set; }
+
+    /// <summary>Должность инициатора — запись справочника вида «должность».</summary>
+    public int? InitiatorPositionId { get; set; }
+
+    /// <summary>Контактный телефон инициатора.</summary>
+    public string? InitiatorPhone { get; set; }
+
+    /// <summary>Прочие служебные реквизиты инициатора.</summary>
+    public string? InitiatorDetails { get; set; }
+
+    /// <summary>Обоснование мероприятия.</summary>
+    public string? Justification { get; set; }
+
+    /// <summary>Цель мероприятия.</summary>
+    public string? Purpose { get; set; }
+
+    /// <summary>Примечание к заданию.</summary>
+    public string? TaskNotes { get; set; }
 }

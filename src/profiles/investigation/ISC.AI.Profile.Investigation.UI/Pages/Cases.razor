@@ -6,6 +6,7 @@
 @using ISC.AI.Profile.Investigation.Application.Features.Directory
 @using ISC.AI.Profile.Investigation.Application.Features.Cases
 @using ISC.AI.Profile.Investigation.Application.Features.Divisions
+@using ISC.AI.Profile.Investigation.Application.Features.References
 @using ISC.AI.Profile.Investigation.Application.Features.Scope
 @using ISC.AI.Profile.Investigation.Domain.Enums
 @using ISC.AI.Profile.Investigation.Domain.Services
@@ -15,9 +16,10 @@
    руководитель — дела подразделения; сужение делает хранилище на стороне БД, ТБ-020) и заведение
    дела. В форме гриф и подразделение — В ПРЕДЕЛАХ допуска субъекта (GetAccessScopeQuery) и гриф
    БЕЗ умолчания (ТБ-024): это удобство, серверная проверка в CreateCaseCommand остаётся. Кнопку
-   «Новое дело» видят все — право ведения дел проверяет обработчик (RoleGuard), отказ показывается. *@
+   «Новое дело» видят все — право ведения дел проверяет обработчик (RoleGuard), отказ показывается.
+   У вида «Задание по объекту» форма требует реквизиты задания (ТФ-ДЕЛ-05) из справочников профиля. *@
 
-<PageHeader Title="Дела" Subtitle="Уголовные дела, материалы и ОРМ · только в пределах допуска и роли"
+<PageHeader Title="Дела" Subtitle="Уголовные дела, материалы, ОРМ и задания по объектам · только в пределах допуска и роли"
             Icon="@Icons.Material.Filled.FolderOpen">
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
                OnClick="OpenCreateAsync">Новое дело</MudButton>
@@ -31,7 +33,7 @@
 
 <MudPaper Outlined="true" Class="pa-3 my-4">
     <div class="d-flex gap-3 align-end flex-wrap">
-        <MudTextField @bind-Value="_filterText" Label="Номер или название" Variant="Variant.Outlined" Immediate="true"
+        <MudTextField @bind-Value="_filterText" Label="Номер, № задания или название" Variant="Variant.Outlined" Immediate="true"
                       Style="min-width:260px;" Class="flex-grow-1"
                       OnKeyDown="@(async e => { if (e.Key == "Enter") { await SearchAsync(); } })" />
         <MudSelect T="CaseKind?" Value="_filterKind" ValueChanged="@(async (CaseKind? v) => { _filterKind = v; await SearchAsync(); })"
@@ -67,13 +69,20 @@
         <MudTh>Вид</MudTh>
         <MudTh>Статус</MudTh>
         <MudTh>Открыто</MudTh>
+        <MudTh>Инициатор (ГУ)</MudTh>
         <MudTh>Подразделение</MudTh>
         <MudTh>Гриф</MudTh>
         <MudTh Style="text-align:right;">Носителей</MudTh>
         <MudTh Style="text-align:right;">Фигурантов</MudTh>
     </HeaderContent>
     <RowTemplate>
-        <MudTd DataLabel="Номер">@context.Number</MudTd>
+        <MudTd DataLabel="Номер">
+            @context.Number
+            @if (context.TaskNumber is { } taskNumber)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">задание № @taskNumber</MudText>
+            }
+        </MudTd>
         <MudTd DataLabel="Название">@context.Title</MudTd>
         <MudTd DataLabel="Вид">@context.Kind.Label()</MudTd>
         <MudTd DataLabel="Статус">
@@ -82,6 +91,7 @@
             </MudChip>
         </MudTd>
         <MudTd DataLabel="Открыто">@context.OpenedAt.ToString("dd.MM.yyyy")</MudTd>
+        <MudTd DataLabel="Инициатор (ГУ)">@ReferenceLookup.Name(_references, context.InitiatorUnitId)</MudTd>
         <MudTd DataLabel="Подразделение">@DivisionName(context.DivisionId)</MudTd>
         <MudTd DataLabel="Гриф"><ClassificationChip Value="@context.Classification" /></MudTd>
         <MudTd DataLabel="Носителей" Style="text-align:right;">@context.MediaCount</MudTd>
@@ -166,6 +176,11 @@
                 <MudTextField @bind-Value="_formBasis" Label="Основание возбуждения / регистрации" Variant="Variant.Outlined" Lines="3" MaxLength="@CreateCaseValidator.MaxBasisLength" />
             </MudItem>
         </MudGrid>
+        @* Реквизиты задания (ТФ-ДЕЛ-05) — только у вида «Задание по объекту»; у других видов не отправляются. *@
+        @if (_formKind == CaseKind.ObjectTask)
+        {
+            <TaskRequisitesFields Model="_formTask" References="_references" Changed="StateHasChanged" />
+        }
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _formOpen = false)">Отмена</MudButton>
@@ -182,6 +197,7 @@
     private readonly List<DivisionNode> _divisions = [];
     private readonly List<DivisionNode> _ownerDivisions = [];
     private readonly List<UserAccountRow> _accounts = [];
+    private readonly List<ReferenceItemRow> _references = [];
     private AccessScope? _scope;
 
     private string? _filterText;
@@ -204,6 +220,7 @@
     private short? _formClassification;
     private int? _formInvestigatorId;
     private string? _formBasis;
+    private TaskRequisitesForm _formTask = new();
 
     private int PageCount => Math.Max(1, (int)Math.Ceiling(_total / (double)PageSize));
 
@@ -214,7 +231,8 @@
     private bool FormValid =>
         !string.IsNullOrWhiteSpace(_formNumber) && !string.IsNullOrWhiteSpace(_formTitle)
         && _formKind is not null && _formOpenedAt is not null
-        && _formDivisionId is > 0 && _formClassification is not null;
+        && _formDivisionId is > 0 && _formClassification is not null
+        && (_formKind != CaseKind.ObjectTask || _formTask.IsComplete);
 
     protected override async Task OnInitializedAsync()
     {
@@ -229,7 +247,19 @@
             _divisions.AddRange(list.Where(d => d.IsActive));
         }
 
+        await LoadReferencesAsync();
         await ReloadAsync();
+    }
+
+    // Справочники профиля (ТФ-АДМ-07) — для колонки «Инициатор» и формы задания; отказ не мешает реестру.
+    private async Task LoadReferencesAsync()
+    {
+        var references = await Dispatcher.Send(new ListReferenceItemsQuery());
+        _references.Clear();
+        if (references is { Status: true, Data: { } items })
+        {
+            _references.AddRange(items);
+        }
     }
 
     private Task SearchAsync()
@@ -317,6 +347,10 @@
         _formClassification = null; // гриф — только осознанным выбором (ТБ-024)
         _formInvestigatorId = _scope?.UserId is { } me && _accounts.Any(a => a.UserId == me) ? me : null;
         _formBasis = null;
+
+        // Справочники заново: Администратор мог добавить ГУ, пока страница открыта.
+        await LoadReferencesAsync();
+        _formTask = new TaskRequisitesForm();
         _formOpen = true;
     }
 
@@ -334,7 +368,8 @@
         {
             var response = await Dispatcher.Send(new CreateCaseCommand(
                 _formNumber!.Trim(), _formTitle!.Trim(), kind, DateOnly.FromDateTime(openedAt),
-                _formInvestigatorId, divisionId, classification, _formBasis));
+                _formInvestigatorId, divisionId, classification, _formBasis,
+                kind == CaseKind.ObjectTask ? _formTask.ToRequisites() : null));
             if (response is not { Status: true, Data: var id })
             {
                 _formError = response.StatusMessage;

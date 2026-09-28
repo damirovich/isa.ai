@@ -131,14 +131,14 @@ public sealed class InvestigationCaseAccessTests : IAsyncLifetime
         var stranger = InvestigationTestKit.Access(11, 9, 5);
         var owner = InvestigationTestKit.Access(10, 9, 5);
 
-        (await store.UpdateAsync(created.CaseId, "Новое название", CaseKind.Material, new DateOnly(2026, 9, 2), 10, "основание", stranger))
+        (await store.UpdateAsync(created.CaseId, "Новое название", CaseKind.Material, new DateOnly(2026, 9, 2), 10, "основание", null, stranger))
             .ShouldBe(CaseWriteResult.NotFound);
         (await store.SetStatusAsync(created.CaseId, CaseStatus.Closed, stranger)).ShouldBe(CaseWriteResult.NotFound);
         (await store.AddAuthorizationAsync(
             new SearchAuthorizationDraft(created.CaseId, AuthorizationKind.Resolution, "№ 1", new DateOnly(2026, 9, 3), null, null, null),
             stranger)).Result.ShouldBe(CaseWriteResult.NotFound);
 
-        (await store.UpdateAsync(created.CaseId, "Новое название", CaseKind.Material, new DateOnly(2026, 9, 2), 10, "основание", owner))
+        (await store.UpdateAsync(created.CaseId, "Новое название", CaseKind.Material, new DateOnly(2026, 9, 2), 10, "основание", null, owner))
             .ShouldBe(CaseWriteResult.Ok);
         (await store.AddAuthorizationAsync(
             new SearchAuthorizationDraft(created.CaseId, AuthorizationKind.Resolution, "№ 1", new DateOnly(2026, 9, 3), null, null, null),

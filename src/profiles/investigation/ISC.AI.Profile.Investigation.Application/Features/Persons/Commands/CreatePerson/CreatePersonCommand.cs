@@ -3,6 +3,7 @@ using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Profile.Investigation.Application.Features.Common;
+using ISC.AI.Profile.Investigation.Domain.Enums;
 using ISC.AI.Profile.Investigation.Domain.Services;
 using Mediator;
 
@@ -11,21 +12,27 @@ namespace ISC.AI.Profile.Investigation.Application.Features.Persons;
 /// <summary>
 /// Завести фигуранта в деле (ТФ-ПЕР-01). Пустое имя при <paramref name="IsUnidentified"/> хранилище заменяет
 /// на «Неустановленное лицо № N». Гриф и подразделение фигуранта — дела (ТБ-070), выбора нет.
+/// Роль — по перечню (объект, связь, иная); анкета (ТФ-ПЕР-05) необязательна.
 /// </summary>
 public sealed record CreatePersonCommand(
     int CaseId,
     string? DisplayName,
     bool IsUnidentified,
     string? RoleInCase = null,
-    string? Notes = null)
+    string? Notes = null,
+    PersonRole Role = PersonRole.Other,
+    PersonQuestionnaire? Questionnaire = null)
     : IRequest<ResponseDto<int>>, IAuditableRequest
 {
     /// <inheritdoc />
     public AuditAction AuditAction => AuditAction.Modify;
 
     /// <inheritdoc />
-    /// <remarks>Установочные данные — персональные данные: в сводку идёт только дело и признак (ТБ-032).</remarks>
-    public string? AuditSummary => $"investigation:case:{CaseId}:person:create:unidentified={IsUnidentified}";
+    /// <remarks>
+    /// Установочные данные и анкета — персональные данные: в сводку идут только дело, признак и роль по
+    /// перечню (ТБ-032).
+    /// </remarks>
+    public string? AuditSummary => $"investigation:case:{CaseId}:person:create:unidentified={IsUnidentified};role={Role}";
 
     /// <inheritdoc cref="CreatePersonCommand" />
     public sealed class Handler(
@@ -49,7 +56,9 @@ public sealed record CreatePersonCommand(
                 string.IsNullOrWhiteSpace(command.DisplayName) ? null : command.DisplayName.Trim(),
                 command.IsUnidentified,
                 string.IsNullOrWhiteSpace(command.RoleInCase) ? null : command.RoleInCase.Trim(),
-                string.IsNullOrWhiteSpace(command.Notes) ? null : command.Notes.Trim());
+                string.IsNullOrWhiteSpace(command.Notes) ? null : command.Notes.Trim(),
+                command.Role,
+                command.Questionnaire);
 
             var (result, personId) = await persons.CreateAsync(draft, access, cancellationToken);
             return result == PersonWriteResult.Ok
@@ -62,7 +71,10 @@ public sealed record CreatePersonCommand(
 /// <summary>Правила формы фигуранта: у установленного лица имя обязательно.</summary>
 public sealed class CreatePersonValidator : AbstractValidator<CreatePersonCommand>
 {
-    /// <summary>Дело обязательно; имя ≤500 (обязательно, если личность установлена); роль ≤200; примечания ≤4000.</summary>
+    /// <summary>
+    /// Дело обязательно; имя ≤500 (обязательно, если личность установлена); роль из перечня, уточнение ≤200;
+    /// примечания ≤4000; анкета — по <see cref="PersonQuestionnaireValidator"/>.
+    /// </summary>
     public CreatePersonValidator()
     {
         RuleFor(c => c.CaseId).GreaterThan(0);
@@ -70,7 +82,9 @@ public sealed class CreatePersonValidator : AbstractValidator<CreatePersonComman
             .NotEmpty().When(c => !c.IsUnidentified)
             .WithMessage("Укажите установочные данные либо отметьте «личность не установлена».");
         RuleFor(c => c.DisplayName).MaximumLength(500);
+        RuleFor(c => c.Role).IsInEnum().WithMessage("Неизвестная роль фигуранта.");
         RuleFor(c => c.RoleInCase).MaximumLength(200);
         RuleFor(c => c.Notes).MaximumLength(4000);
+        RuleFor(c => c.Questionnaire!).SetValidator(new PersonQuestionnaireValidator()).When(c => c.Questionnaire is not null);
     }
 }

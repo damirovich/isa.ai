@@ -11,6 +11,12 @@ public enum CaseKind
 
     /// <summary>Оперативно-розыскное мероприятие (Закон об ОРД № 127).</summary>
     OperativeMeasure = 3,
+
+    /// <summary>
+    /// Задание по объекту (ТФ-ДЕЛ-01/05): работа за лицом по поручению подразделения-инициатора (ГУ).
+    /// Только у этого вида есть реквизиты задания, и у него они обязательны (инвариант хранилища и БД).
+    /// </summary>
+    ObjectTask = 4,
 }
 
 /// <summary>Статус дела (ТФ-ДЕЛ-01). Закрытие запускает регламент удаления шаблонов (ТФ-ДЕЛ-04, ТБ-074).</summary>
@@ -55,6 +61,7 @@ public static class CaseLabels
         CaseKind.CriminalCase => "Уголовное дело",
         CaseKind.Material => "Материал",
         CaseKind.OperativeMeasure => "ОРМ",
+        CaseKind.ObjectTask => "Задание по объекту",
         _ => kind.ToString(),
     };
 

@@ -3,7 +3,34 @@ using ISC.AI.Profile.Investigation.Domain.Enums;
 
 namespace ISC.AI.Profile.Investigation.Domain.Services;
 
+/// <summary>
+/// Реквизиты задания по объекту (ТФ-ДЕЛ-05). Обязательны № задания, подразделение-инициатор, обоснование
+/// и цель (Приложение В ТЗ, вопрос 19, умолчание); данные инициатора и примечание — по наличию.
+/// </summary>
+/// <param name="TaskNumber">№ задания — реквизит инициатора.</param>
+/// <param name="InitiatorUnitId">Подразделение-инициатор (ГУ) — запись справочника вида <see cref="ReferenceKind.InitiatorUnit"/>.</param>
+/// <param name="Justification">Обоснование мероприятия.</param>
+/// <param name="Purpose">Цель мероприятия.</param>
+/// <param name="InitiatorName">ФИО инициатора.</param>
+/// <param name="InitiatorRankId">Звание инициатора — запись справочника вида <see cref="ReferenceKind.Rank"/>.</param>
+/// <param name="InitiatorPositionId">Должность инициатора — запись справочника вида <see cref="ReferenceKind.Position"/>.</param>
+/// <param name="InitiatorPhone">Контактный телефон инициатора.</param>
+/// <param name="InitiatorDetails">Прочие служебные реквизиты инициатора.</param>
+/// <param name="Notes">Примечание.</param>
+public sealed record TaskRequisites(
+    string TaskNumber,
+    int InitiatorUnitId,
+    string Justification,
+    string Purpose,
+    string? InitiatorName = null,
+    int? InitiatorRankId = null,
+    int? InitiatorPositionId = null,
+    string? InitiatorPhone = null,
+    string? InitiatorDetails = null,
+    string? Notes = null);
+
 /// <summary>Черновик дела (ТФ-ДЕЛ-01). Гриф и подразделение обязательны — без умолчаний (ТБ-024).</summary>
+/// <remarks><paramref name="TaskRequisites"/> задаётся ровно у вида <see cref="CaseKind.ObjectTask"/> (ТФ-ДЕЛ-05).</remarks>
 public sealed record CaseDraft(
     string Number,
     string Title,
@@ -13,7 +40,8 @@ public sealed record CaseDraft(
     int DivisionId,
     short Classification,
     string? Basis,
-    int? CreatedByUserId);
+    int? CreatedByUserId,
+    TaskRequisites? TaskRequisites = null);
 
 /// <summary>Фильтр списка дел.</summary>
 public sealed record CaseFilter(
@@ -25,7 +53,7 @@ public sealed record CaseFilter(
     int Page = 1,
     int PageSize = 25);
 
-/// <summary>Строка списка дел.</summary>
+/// <summary>Строка списка дел; у задания — ещё № задания и подразделение-инициатор (ТФ-ДЕЛ-05).</summary>
 public sealed record CaseRow(
     int Id,
     string Number,
@@ -37,7 +65,9 @@ public sealed record CaseRow(
     int DivisionId,
     short Classification,
     int MediaCount,
-    int PersonCount);
+    int PersonCount,
+    string? TaskNumber = null,
+    int? InitiatorUnitId = null);
 
 /// <summary>Страница дел.</summary>
 public sealed record CasePage(IReadOnlyList<CaseRow> Rows, int TotalCount);
@@ -57,7 +87,8 @@ public sealed record CaseDetails(
     DateTime? ClosedAt,
     DateTime CreatedAt,
     IReadOnlyList<CaseMediaLinkRow> Media,
-    IReadOnlyList<SearchAuthorizationRow> Authorizations);
+    IReadOnlyList<SearchAuthorizationRow> Authorizations,
+    TaskRequisites? TaskRequisites = null);
 
 /// <summary>Привязанный носитель (идентификатор в схеме <c>media</c> — по значению).</summary>
 public sealed record CaseMediaLinkRow(int MediaAssetId, string? Place, int? LinkedByUserId, DateTime LinkedAt);
@@ -84,6 +115,12 @@ public enum CaseWriteResult
 
     /// <summary>Гриф/подразделение вне допуска субъекта.</summary>
     OutsideClearance = 3,
+
+    /// <summary>
+    /// Реквизиты задания не согласованы с видом дела либо ссылаются на запись справочника, которой нет,
+    /// которая другого вида или выключена (ТФ-ДЕЛ-05, ТФ-АДМ-07).
+    /// </summary>
+    InvalidTask = 4,
 }
 
 /// <summary>
@@ -102,8 +139,11 @@ public interface ICaseStore
     /// <summary>Создать дело.</summary>
     Task<(CaseWriteResult Result, int CaseId)> CreateAsync(CaseDraft draft, AccessContext access, CancellationToken cancellationToken = default);
 
-    /// <summary>Изменить реквизиты (гриф/подразделение не меняются — иначе рассинхрон с производными).</summary>
-    Task<CaseWriteResult> UpdateAsync(int caseId, string title, CaseKind kind, DateOnly openedAt, int? investigatorUserId, string? basis, AccessContext access, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Изменить реквизиты (гриф/подразделение не меняются — иначе рассинхрон с производными). Реквизиты
+    /// задания заменяются целиком: у вида, отличного от задания, они очищаются.
+    /// </summary>
+    Task<CaseWriteResult> UpdateAsync(int caseId, string title, CaseKind kind, DateOnly openedAt, int? investigatorUserId, string? basis, TaskRequisites? task, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>Сменить статус; закрытие ставит <c>ClosedAt</c> (регламент удаления шаблонов — ТФ-ДЕЛ-04, отдельно).</summary>
     Task<CaseWriteResult> SetStatusAsync(int caseId, CaseStatus status, AccessContext access, CancellationToken cancellationToken = default);

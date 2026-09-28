@@ -6,7 +6,8 @@ namespace ISC.AI.Profile.Investigation.Data;
 
 /// <summary>
 /// Доменный контекст профиля «Следствие» (схема <c>investigation</c>): дела, фигуранты, эталоны,
-/// появления, основания поиска, привязки носителей/документов, справочник подразделений и роли.
+/// появления, основания поиска, привязки носителей/документов, справочник подразделений, справочники
+/// профиля (инициаторы заданий, звания, должности, типы связей, категории — ТФ-АДМ-07) и роли.
 /// Ведёт собственную историю миграций (<c>investigation.__ef_migrations_history</c>, ADR-0003, ТО-инф-01).
 /// </summary>
 /// <remarks>
@@ -50,6 +51,9 @@ public class InvestigationDbContext(DbContextOptions<InvestigationDbContext> opt
 
     /// <summary>Роли пользователей (ТП-004).</summary>
     public DbSet<UserRoleAssignment> UserRoleAssignments { get; set; } = null!;
+
+    /// <summary>Справочники профиля: инициаторы, звания, должности, типы связей, категории (ТФ-АДМ-07).</summary>
+    public DbSet<ReferenceItem> ReferenceItems { get; set; } = null!;
 
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)

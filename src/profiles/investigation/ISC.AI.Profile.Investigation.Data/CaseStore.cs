@@ -35,7 +35,9 @@ public sealed class CaseStore(
         if (!string.IsNullOrWhiteSpace(filter.Text))
         {
             var pattern = "%" + filter.Text.Trim() + "%";
-            query = query.Where(c => EF.Functions.ILike(c.Number, pattern) || EF.Functions.ILike(c.Title, pattern));
+            // № задания (ТФ-ДЕЛ-05) ищется тем же полем: оператор знает задание по номеру инициатора.
+            query = query.Where(c => EF.Functions.ILike(c.Number, pattern) || EF.Functions.ILike(c.Title, pattern)
+                || (c.TaskNumber != null && EF.Functions.ILike(c.TaskNumber, pattern)));
         }
 
         if (filter.Kind is { } kind)
@@ -72,7 +74,9 @@ public sealed class CaseStore(
                 c.Id, c.Number, c.Title, c.Kind, c.Status, c.OpenedAt, c.InvestigatorUserId,
                 c.DivisionId, c.Classification,
                 db.CaseMediaLinks.Count(l => l.CaseId == c.Id),
-                db.Persons.Count(p => p.CaseId == c.Id)))
+                db.Persons.Count(p => p.CaseId == c.Id),
+                c.TaskNumber,
+                c.InitiatorUnitId))
             .ToListAsync(cancellationToken);
 
         return new CasePage(rows, total);
@@ -110,7 +114,7 @@ public sealed class CaseStore(
         return new CaseDetails(
             entity.Id, entity.Number, entity.Title, entity.Kind, entity.Status, entity.OpenedAt,
             entity.InvestigatorUserId, entity.DivisionId, entity.Classification, entity.Basis,
-            entity.ClosedAt, entity.CreatedAt, media, authorizations);
+            entity.ClosedAt, entity.CreatedAt, media, authorizations, ToTaskRequisites(entity));
     }
 
     /// <inheritdoc />
@@ -128,6 +132,12 @@ public sealed class CaseStore(
         }
 
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // ТФ-ДЕЛ-05: реквизиты задания — ровно у задания и со ссылками на действующие записи справочников.
+        if (!await IsTaskConsistentAsync(db, draft.Kind, draft.TaskRequisites, current: null, cancellationToken))
+        {
+            return (CaseWriteResult.InvalidTask, 0);
+        }
 
         var number = draft.Number.Trim();
         if (await db.Cases.AnyAsync(c => c.DivisionId == draft.DivisionId && c.Number == number, cancellationToken))
@@ -147,6 +157,7 @@ public sealed class CaseStore(
             Basis = string.IsNullOrWhiteSpace(draft.Basis) ? null : draft.Basis.Trim(),
             CreatedByUserId = draft.CreatedByUserId ?? access.NumericSubjectId,
         };
+        ApplyTaskRequisites(entity, draft.TaskRequisites);
         db.Cases.Add(entity);
 
         try
@@ -166,7 +177,7 @@ public sealed class CaseStore(
     /// <inheritdoc />
     public async Task<CaseWriteResult> UpdateAsync(
         int caseId, string title, CaseKind kind, DateOnly openedAt, int? investigatorUserId, string? basis,
-        AccessContext access, CancellationToken cancellationToken = default)
+        TaskRequisites? task, AccessContext access, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(access);
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
@@ -182,11 +193,22 @@ public sealed class CaseStore(
             return CaseWriteResult.NotFound;
         }
 
+        // Сверка со справочником — относительно ТЕКУЩИХ значений дела: выключенный после заведения ГУ
+        // не мешает поправить обоснование старого задания, но выбрать его заново нельзя.
+        if (!await IsTaskConsistentAsync(db, kind, task, entity, cancellationToken))
+        {
+            return CaseWriteResult.InvalidTask;
+        }
+
         entity.Title = title.Trim();
         entity.Kind = kind;
         entity.OpenedAt = openedAt;
         entity.InvestigatorUserId = investigatorUserId;
         entity.Basis = string.IsNullOrWhiteSpace(basis) ? null : basis.Trim();
+
+        // Замена целиком: при смене вида с задания на другой реквизиты задания очищаются, иначе они
+        // остались бы в деле невидимыми для формы (и нарушили бы ограничение таблицы).
+        ApplyTaskRequisites(entity, task);
         await db.SaveChangesAsync(cancellationToken);
         return CaseWriteResult.Ok;
     }
@@ -444,6 +466,78 @@ public sealed class CaseStore(
 
         return CaseWriteResult.Ok;
     }
+
+    /// <summary>
+    /// Согласованы ли реквизиты задания с видом дела (ТФ-ДЕЛ-05) и справочниками (ТФ-АДМ-07): у задания —
+    /// обязательные поля непусты, инициатор, звание и должность — существующие записи СВОЕГО вида; у иного
+    /// вида реквизитов нет вовсе. Выключенная запись допустима только если она уже стоит в деле
+    /// (<paramref name="current"/>): выключение записи не блокирует правку старых заданий, но новое
+    /// значение берётся только из действующих.
+    /// </summary>
+    private static async Task<bool> IsTaskConsistentAsync(
+        InvestigationDbContext db, CaseKind kind, TaskRequisites? task, CaseFile? current, CancellationToken cancellationToken)
+    {
+        if (kind != CaseKind.ObjectTask)
+        {
+            return task is null;
+        }
+
+        if (task is null
+            || string.IsNullOrWhiteSpace(task.TaskNumber)
+            || string.IsNullOrWhiteSpace(task.Justification)
+            || string.IsNullOrWhiteSpace(task.Purpose))
+        {
+            return false;
+        }
+
+        var wanted = new List<(int Id, ReferenceKind Kind, int? Current)>
+        {
+            (task.InitiatorUnitId, ReferenceKind.InitiatorUnit, current?.InitiatorUnitId),
+        };
+        if (task.InitiatorRankId is { } rankId)
+        {
+            wanted.Add((rankId, ReferenceKind.Rank, current?.InitiatorRankId));
+        }
+
+        if (task.InitiatorPositionId is { } positionId)
+        {
+            wanted.Add((positionId, ReferenceKind.Position, current?.InitiatorPositionId));
+        }
+
+        var ids = wanted.Select(w => w.Id).Distinct().ToArray();
+        var items = await db.ReferenceItems.AsNoTracking()
+            .Where(i => ids.Contains(i.Id))
+            .Select(i => new { i.Id, i.Kind, i.IsActive })
+            .ToListAsync(cancellationToken);
+
+        return wanted.All(w => items.Any(i => i.Id == w.Id && i.Kind == w.Kind && (i.IsActive || w.Current == w.Id)));
+    }
+
+    /// <summary>Переносит реквизиты задания в сущность целиком; <see langword="null"/> очищает все поля.</summary>
+    private static void ApplyTaskRequisites(CaseFile entity, TaskRequisites? task)
+    {
+        entity.TaskNumber = Clean(task?.TaskNumber);
+        entity.InitiatorUnitId = task?.InitiatorUnitId;
+        entity.InitiatorName = Clean(task?.InitiatorName);
+        entity.InitiatorRankId = task?.InitiatorRankId;
+        entity.InitiatorPositionId = task?.InitiatorPositionId;
+        entity.InitiatorPhone = Clean(task?.InitiatorPhone);
+        entity.InitiatorDetails = Clean(task?.InitiatorDetails);
+        entity.Justification = Clean(task?.Justification);
+        entity.Purpose = Clean(task?.Purpose);
+        entity.TaskNotes = Clean(task?.Notes);
+    }
+
+    /// <summary>Реквизиты задания дела; у иного вида — <see langword="null"/>.</summary>
+    private static TaskRequisites? ToTaskRequisites(CaseFile entity) =>
+        entity is { Kind: CaseKind.ObjectTask, TaskNumber: { } number, InitiatorUnitId: { } unitId }
+            ? new TaskRequisites(
+                number, unitId, entity.Justification ?? string.Empty, entity.Purpose ?? string.Empty,
+                entity.InitiatorName, entity.InitiatorRankId, entity.InitiatorPositionId, entity.InitiatorPhone,
+                entity.InitiatorDetails, entity.TaskNotes)
+            : null;
+
+    private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private async Task<InvestigationRole?> ResolveRoleAsync(AccessContext access, CancellationToken cancellationToken) =>
         access.NumericSubjectId is { } userId

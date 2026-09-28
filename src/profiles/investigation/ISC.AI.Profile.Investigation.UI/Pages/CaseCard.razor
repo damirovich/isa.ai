@@ -11,11 +11,13 @@
 @using ISC.AI.Profile.Investigation.Application.Features.Cases
 @using ISC.AI.Profile.Investigation.Application.Features.Divisions
 @using ISC.AI.Profile.Investigation.Application.Features.Persons
+@using ISC.AI.Profile.Investigation.Application.Features.References
 @using ISC.AI.Profile.Investigation.Domain.Enums
 @using ISC.AI.Profile.Investigation.Domain.Services
 @inject NavigationManager Navigation
 
-@* Карточка дела (ТФ-ДЕЛ-02): реквизиты, смена статуса, фигуранты, носители, основания поиска и
+@* Карточка дела (ТФ-ДЕЛ-02): реквизиты (у задания по объекту — и реквизиты задания, ТФ-ДЕЛ-05), смена
+   статуса, фигуранты с ролью и анкетой (ТФ-ПЕР-01/05), носители, основания поиска и
    поисковые сессии. Носители и сессии — данные пакета «Медиа» (ListCaseMediaQuery,
    ListCaseSearchSessionsQuery), их страницы — по URL (/media/...): на Media.UI профиль не ссылается
    (ADR-0022). Вкладки грузятся по первому открытию: каждое обращение к биометрии пишется в журнал
@@ -82,7 +84,7 @@ else
                 <div class="d-flex align-center justify-space-between mb-2">
                     <MudText Typo="Typo.subtitle1">Реквизиты</MudText>
                     <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit"
-                               OnClick="OpenEdit" Disabled="_busy">Изменить</MudButton>
+                               OnClick="OpenEditAsync" Disabled="_busy">Изменить</MudButton>
                 </div>
                 <MudSimpleTable Dense="true" Elevation="0" Class="requisites">
                     <tbody>
@@ -93,6 +95,18 @@ else
                         <tr><td class="mud-text-secondary">Подразделение</td><td>@DivisionName(_case.DivisionId)</td></tr>
                         <tr><td class="mud-text-secondary">Гриф</td><td><ClassificationChip Value="@_case.Classification" /></td></tr>
                         <tr><td class="mud-text-secondary">Основание</td><td style="white-space:pre-wrap;">@(string.IsNullOrWhiteSpace(_case.Basis) ? "—" : _case.Basis)</td></tr>
+                        @* Реквизиты задания (ТФ-ДЕЛ-05) — только у задания по объекту. *@
+                        @if (_case.TaskRequisites is { } task)
+                        {
+                            <tr><td class="mud-text-secondary">№ задания</td><td>@task.TaskNumber</td></tr>
+                            <tr><td class="mud-text-secondary">Подразделение-инициатор</td><td>@ReferenceLookup.Name(_references, task.InitiatorUnitId)</td></tr>
+                            <tr><td class="mud-text-secondary">Инициатор</td><td>@InitiatorLabel(task)</td></tr>
+                            <tr><td class="mud-text-secondary">Телефон инициатора</td><td>@QuestionnaireLabels.OrDash(task.InitiatorPhone)</td></tr>
+                            <tr><td class="mud-text-secondary">Служебные реквизиты</td><td>@QuestionnaireLabels.OrDash(task.InitiatorDetails)</td></tr>
+                            <tr><td class="mud-text-secondary">Обоснование</td><td style="white-space:pre-wrap;">@task.Justification</td></tr>
+                            <tr><td class="mud-text-secondary">Цель</td><td style="white-space:pre-wrap;">@task.Purpose</td></tr>
+                            <tr><td class="mud-text-secondary">Примечание</td><td style="white-space:pre-wrap;">@QuestionnaireLabels.OrDash(task.Notes)</td></tr>
+                        }
                         <tr><td class="mud-text-secondary">Заведено</td><td>@_case.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td></tr>
                         @if (_case.ClosedAt is { } closedAt)
                         {
@@ -182,6 +196,7 @@ else
                 <HeaderContent>
                     <MudTh>Фигурант</MudTh>
                     <MudTh>Роль в деле</MudTh>
+                    <MudTh>Рождение</MudTh>
                     <MudTh Style="text-align:right;">Эталонов</MudTh>
                     <MudTh Style="text-align:right;">Появлений</MudTh>
                     <MudTh>Гриф</MudTh>
@@ -189,12 +204,24 @@ else
                 <RowTemplate>
                     <MudTd DataLabel="Фигурант">
                         @context.DisplayName
+                        @if (context.Questionnaire?.Alias is { } alias)
+                        {
+                            <span class="mud-text-secondary"> «@alias»</span>
+                        }
                         @if (context.IsUnidentified)
                         {
                             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ml-2">личность не установлена</MudChip>
                         }
                     </MudTd>
-                    <MudTd DataLabel="Роль в деле">@(context.RoleInCase ?? "—")</MudTd>
+                    <MudTd DataLabel="Роль в деле">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                                 Color="@(context.Role == PersonRole.Target ? Color.Primary : Color.Default)">@context.Role.Label()</MudChip>
+                        @if (context.RoleInCase is { } roleText)
+                        {
+                            <span class="mud-text-secondary">@roleText</span>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Рождение">@QuestionnaireLabels.Birth(context.Questionnaire)</MudTd>
                     <MudTd DataLabel="Эталонов" Style="text-align:right;">@context.ReferencePhotoCount</MudTd>
                     <MudTd DataLabel="Появлений" Style="text-align:right;">@context.AppearanceCount</MudTd>
                     <MudTd DataLabel="Гриф"><ClassificationChip Value="@context.Classification" /></MudTd>
@@ -383,6 +410,17 @@ else
                 <MudTextField @bind-Value="_editBasis" Label="Основание" Variant="Variant.Outlined" Lines="3" MaxLength="@CreateCaseValidator.MaxBasisLength" />
             </MudItem>
         </MudGrid>
+        @* Реквизиты задания (ТФ-ДЕЛ-05): при смене вида с задания на другой они очищаются сервером. *@
+        @if (_editKind == CaseKind.ObjectTask)
+        {
+            <TaskRequisitesFields Model="_editTask" References="_references" Changed="StateHasChanged" />
+        }
+        else if (_case?.TaskRequisites is not null)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-3">
+                При смене вида реквизиты задания (№ задания, инициатор, обоснование, цель) будут удалены.
+            </MudAlert>
+        }
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _editOpen = false)">Отмена</MudButton>
@@ -451,13 +489,24 @@ else
                 <MudCheckBox T="bool" @bind-Value="_personUnidentified" Label="Личность не установлена (номер присвоится автоматически)" />
             </MudItem>
             <MudItem xs="12">
-                <MudTextField @bind-Value="_personName" Label="@(_personUnidentified ? "Имя (необязательно)" : "Имя *")"
+                <MudTextField @bind-Value="_personName" Label="@(_personUnidentified ? "ФИО (необязательно)" : "ФИО *")"
                               Variant="Variant.Outlined" MaxLength="300" />
             </MudItem>
             <MudItem xs="12" sm="6">
-                <MudTextField @bind-Value="_personRole" Label="Роль в деле" Variant="Variant.Outlined" MaxLength="200"
-                              HelperText="Подозреваемый, свидетель, потерпевший…" />
+                <MudSelect T="PersonRole" @bind-Value="_personKind" Label="Роль *" Variant="Variant.Outlined" Dense="true">
+                    @foreach (var role in Enum.GetValues<PersonRole>())
+                    {
+                        <MudSelectItem T="PersonRole" Value="@role">@role.Label()</MudSelectItem>
+                    }
+                </MudSelect>
             </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_personRole" Label="Уточнение роли" Variant="Variant.Outlined" MaxLength="200"
+                              HelperText="Подозреваемый, свидетель, брат объекта…" />
+            </MudItem>
+        </MudGrid>
+        <PersonQuestionnaireFields Model="_personQuestionnaire" />
+        <MudGrid Spacing="2" Class="mt-1">
             <MudItem xs="12">
                 <MudTextField @bind-Value="_personNotes" Label="Примечания" Variant="Variant.Outlined" Lines="3" MaxLength="4000" />
             </MudItem>
@@ -525,6 +574,7 @@ else
     private readonly List<SearchSessionRow> _sessions = [];
     private readonly List<DivisionNode> _divisions = [];
     private readonly List<UserAccountRow> _accounts = [];
+    private readonly List<ReferenceItemRow> _references = [];
     private bool _mediaLoaded;
     private bool _sessionsLoaded;
     private int _activeTab;
@@ -543,7 +593,9 @@ else
     private DateTime? _editOpenedAt;
     private int? _editInvestigatorId;
     private string? _editBasis;
-    private bool EditValid => !string.IsNullOrWhiteSpace(_editTitle) && _editKind is not null && _editOpenedAt is not null;
+    private TaskRequisitesForm _editTask = new();
+    private bool EditValid => !string.IsNullOrWhiteSpace(_editTitle) && _editKind is not null && _editOpenedAt is not null
+        && (_editKind != CaseKind.ObjectTask || _editTask.IsComplete);
 
     // --- Закрытие ---
     private bool _closeConfirmOpen;
@@ -601,6 +653,8 @@ else
     private string? _personName;
     private bool _personUnidentified;
     private string? _personRole;
+    private PersonRole _personKind = PersonRole.Other;
+    private PersonQuestionnaireForm _personQuestionnaire = new();
     private string? _personNotes;
     private bool PersonValid => _personUnidentified || !string.IsNullOrWhiteSpace(_personName);
 
@@ -634,7 +688,20 @@ else
             _accounts.AddRange(rows);
         }
 
+        await LoadReferencesAsync();
         await ReloadAsync();
+    }
+
+    // Справочники профиля (ТФ-АДМ-07) — имена ГУ, званий и должностей в реквизитах задания; отказ не
+    // мешает карточке (вместо имени будет «№ id»).
+    private async Task LoadReferencesAsync()
+    {
+        var references = await Dispatcher.Send(new ListReferenceItemsQuery());
+        if (references is { Status: true, Data: { } items })
+        {
+            _references.Clear();
+            _references.AddRange(items);
+        }
     }
 
     protected override async Task OnParametersSetAsync()
@@ -774,15 +841,19 @@ else
         await SetStatusAsync(CaseStatus.Closed);
     }
 
-    private void OpenEdit()
+    private async Task OpenEditAsync()
     {
         if (_case is not { } c) { return; }
+
+        // Справочники заново: Администратор мог добавить ГУ или звание, пока карточка открыта.
+        await LoadReferencesAsync();
         _editError = null;
         _editTitle = c.Title;
         _editKind = c.Kind;
         _editOpenedAt = c.OpenedAt.ToDateTime(TimeOnly.MinValue);
         _editInvestigatorId = c.InvestigatorUserId;
         _editBasis = c.Basis;
+        _editTask = TaskRequisitesForm.From(c.TaskRequisites);
         _editOpen = true;
     }
 
@@ -794,7 +865,8 @@ else
         try
         {
             var response = await Dispatcher.Send(new UpdateCaseCommand(
-                Id, _editTitle!.Trim(), kind, DateOnly.FromDateTime(openedAt), _editInvestigatorId, _editBasis));
+                Id, _editTitle!.Trim(), kind, DateOnly.FromDateTime(openedAt), _editInvestigatorId, _editBasis,
+                kind == CaseKind.ObjectTask ? _editTask.ToRequisites() : null));
             if (!response.Status)
             {
                 _editError = response.StatusMessage;
@@ -818,6 +890,13 @@ else
         _personUnidentified = false;
         _personRole = null;
         _personNotes = null;
+        _personQuestionnaire = new PersonQuestionnaireForm();
+
+        // Подсказка роли: в задании первый фигурант — объект, последующие — связи; в иных делах — «иная».
+        // Выбор остаётся за оператором.
+        _personKind = _case?.Kind == CaseKind.ObjectTask
+            ? (_persons.Any(p => p.Role == PersonRole.Target) ? PersonRole.Link : PersonRole.Target)
+            : PersonRole.Other;
         _personOpen = true;
     }
 
@@ -829,7 +908,8 @@ else
         {
             var response = await Dispatcher.Send(new CreatePersonCommand(
                 Id, string.IsNullOrWhiteSpace(_personName) ? null : _personName.Trim(), _personUnidentified,
-                string.IsNullOrWhiteSpace(_personRole) ? null : _personRole.Trim(), _personNotes));
+                string.IsNullOrWhiteSpace(_personRole) ? null : _personRole.Trim(), _personNotes,
+                _personKind, _personQuestionnaire.ToQuestionnaire()));
             if (!response.Status)
             {
                 _personError = response.StatusMessage;
@@ -885,6 +965,16 @@ else
 
     // --- Подписи ---
     private string DivisionName(int id) => _divisions.FirstOrDefault(d => d.Id == id)?.Name ?? $"№ {id}";
+
+    // «ФИО · звание · должность» инициатора задания; незаполненные части пропускаются.
+    private string InitiatorLabel(TaskRequisites task)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(task.InitiatorName)) { parts.Add(task.InitiatorName); }
+        if (task.InitiatorRankId is not null) { parts.Add(ReferenceLookup.Name(_references, task.InitiatorRankId)); }
+        if (task.InitiatorPositionId is not null) { parts.Add(ReferenceLookup.Name(_references, task.InitiatorPositionId)); }
+        return parts.Count == 0 ? "—" : string.Join(" · ", parts);
+    }
 
     private string UserName(int? id)
     {

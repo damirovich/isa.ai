@@ -11,7 +11,8 @@ namespace ISC.AI.Profile.Investigation.Application.Features.Cases;
 
 /// <summary>
 /// Изменить реквизиты дела (ТФ-ДЕЛ-01). Гриф и подразделение НЕ меняются: их уже унаследовали носители,
-/// фигуранты и шаблоны (ТБ-070) — иначе производные разошлись бы с делом.
+/// фигуранты и шаблоны (ТБ-070) — иначе производные разошлись бы с делом. Реквизиты задания
+/// (<paramref name="TaskRequisites"/>, ТФ-ДЕЛ-05) заменяются целиком; при смене вида с задания — очищаются.
 /// </summary>
 public sealed record UpdateCaseCommand(
     int CaseId,
@@ -19,15 +20,18 @@ public sealed record UpdateCaseCommand(
     CaseKind Kind,
     DateOnly OpenedAt,
     int? InvestigatorUserId,
-    string? Basis = null)
+    string? Basis = null,
+    TaskRequisites? TaskRequisites = null)
     : IRequest<ResponseDto<bool>>, IAuditableRequest
 {
     /// <inheritdoc />
     public AuditAction AuditAction => AuditAction.Modify;
 
     /// <inheritdoc />
+    /// <remarks>Из реквизитов задания в сводку идёт только идентификатор ГУ-инициатора (ТБ-032).</remarks>
     public string? AuditSummary =>
-        $"investigation:case:{CaseId}:update:kind={Kind};investigator={InvestigatorUserId?.ToString(CultureInfo.InvariantCulture) ?? "-"}";
+        $"investigation:case:{CaseId}:update:kind={Kind};investigator={InvestigatorUserId?.ToString(CultureInfo.InvariantCulture) ?? "-"}"
+        + (TaskRequisites is { } task ? $";initiator={task.InitiatorUnitId.ToString(CultureInfo.InvariantCulture)}" : string.Empty);
 
     /// <inheritdoc cref="UpdateCaseCommand" />
     public sealed class Handler(
@@ -48,7 +52,7 @@ public sealed record UpdateCaseCommand(
             var result = await cases.UpdateAsync(
                 command.CaseId, command.Title.Trim(), command.Kind, command.OpenedAt, command.InvestigatorUserId,
                 string.IsNullOrWhiteSpace(command.Basis) ? null : command.Basis.Trim(),
-                access, cancellationToken);
+                command.TaskRequisites, access, cancellationToken);
             return CaseGuard.ToResponse(result);
         }
     }

@@ -11,6 +11,8 @@ namespace ISC.AI.Profile.Investigation.Application.Features.Cases;
 /// <summary>
 /// Завести дело (ТФ-ДЕЛ-01). Гриф и подразделение обязательны и БЕЗ умолчаний (ТБ-024): их наследуют
 /// носители, фигуранты и шаблоны лиц (ТБ-070). Заводят Следователь, Руководитель, Администратор.
+/// У задания по объекту обязательны реквизиты задания (<paramref name="TaskRequisites"/>, ТФ-ДЕЛ-05),
+/// у остальных видов их нет.
 /// </summary>
 public sealed record CreateCaseCommand(
     string Number,
@@ -20,16 +22,21 @@ public sealed record CreateCaseCommand(
     int? InvestigatorUserId,
     int DivisionId,
     short Classification,
-    string? Basis = null)
+    string? Basis = null,
+    TaskRequisites? TaskRequisites = null)
     : IRequest<ResponseDto<int>>, IAuditableRequest
 {
     /// <inheritdoc />
     public AuditAction AuditAction => AuditAction.Modify;
 
     /// <inheritdoc />
-    /// <remarks>Номер и реквизиты дела — режимные сведения: в сводку идут только вид, подразделение и гриф (ТБ-032).</remarks>
+    /// <remarks>
+    /// Номер и реквизиты дела — режимные сведения: в сводку идут только вид, подразделение, гриф и
+    /// идентификатор ГУ-инициатора из справочника (ТБ-032); № задания, обоснование и данные инициатора — нет.
+    /// </remarks>
     public string? AuditSummary =>
-        $"investigation:case:create:kind={Kind};division={DivisionId};grif={Classification}";
+        $"investigation:case:create:kind={Kind};division={DivisionId};grif={Classification}"
+        + (TaskRequisites is { } task ? $";initiator={task.InitiatorUnitId}" : string.Empty);
 
     /// <inheritdoc />
     /// <remarks>Запись журнала — не ниже грифа заводимого дела (ТБ-032).</remarks>
@@ -59,7 +66,8 @@ public sealed record CreateCaseCommand(
                 command.Number.Trim(), command.Title.Trim(), command.Kind, command.OpenedAt,
                 command.InvestigatorUserId, command.DivisionId, command.Classification,
                 string.IsNullOrWhiteSpace(command.Basis) ? null : command.Basis.Trim(),
-                access.NumericSubjectId);
+                access.NumericSubjectId,
+                command.TaskRequisites);
 
             var (result, caseId) = await cases.CreateAsync(draft, access, cancellationToken);
             return result switch
@@ -67,6 +75,7 @@ public sealed record CreateCaseCommand(
                 CaseWriteResult.Ok => ResponseDto<int>.Ok(caseId),
                 CaseWriteResult.DuplicateNumber => ResponseDto<int>.Conflict(CaseGuard.DuplicateNumber),
                 CaseWriteResult.OutsideClearance => ResponseDto<int>.BadRequest(CaseGuard.OutsideClearance),
+                CaseWriteResult.InvalidTask => ResponseDto<int>.BadRequest(CaseGuard.InvalidTask),
                 _ => ResponseDto<int>.NotFound(CaseGuard.NotFound),
             };
         }

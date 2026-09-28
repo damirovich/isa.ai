@@ -1,5 +1,6 @@
 using ISC.AI.Abstractions.Entities;
 using ISC.AI.Abstractions.Security;
+using ISC.AI.Profile.Investigation.Domain.Enums;
 
 namespace ISC.AI.Profile.Investigation.Domain.Entities;
 
@@ -24,8 +25,36 @@ public class Person : AuditableEntity, IClassified
     /// <summary>Порядковый номер неустановленного лица в деле.</summary>
     public int? UnidentifiedNumber { get; set; }
 
-    /// <summary>Роль в деле (подозреваемый, свидетель, потерпевший и т.п. — свободный текст по практике).</summary>
+    /// <summary>Роль в деле по перечню: объект, связь или иная (ТФ-ПЕР-01).</summary>
+    public PersonRole Role { get; set; } = PersonRole.Other;
+
+    /// <summary>Уточнение роли свободным текстом (подозреваемый, свидетель, «брат объекта» и т. п.).</summary>
     public string? RoleInCase { get; set; }
+
+    // --- Анкета (ТФ-ПЕР-05). Все поля необязательны: объект часто известен лишь частично. Поля —
+    // параметры будущего точного поиска и пересечений (ТФ-ПСК-01, ТФ-ПЕР-07), поэтому хранятся
+    // раздельно, а не одним текстом.
+
+    /// <summary>Дата рождения, если известна полностью.</summary>
+    public DateOnly? BirthDate { get; set; }
+
+    /// <summary>Год рождения; при известной дате всегда равен её году (держит хранилище).</summary>
+    public int? BirthYear { get; set; }
+
+    /// <summary>Место рождения.</summary>
+    public string? BirthPlace { get; set; }
+
+    /// <summary>Место работы.</summary>
+    public string? WorkPlace { get; set; }
+
+    /// <summary>Место жительства.</summary>
+    public string? Residence { get; set; }
+
+    /// <summary>Пол; <see langword="null"/> — неизвестен.</summary>
+    public PersonSex? Sex { get; set; }
+
+    /// <summary>Псевдоним (оперативная кличка) объекта.</summary>
+    public string? Alias { get; set; }
 
     /// <summary>Примечания следователя.</summary>
     public string? Notes { get; set; }

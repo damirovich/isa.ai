@@ -32,7 +32,7 @@
 }
 else
 {
-    <PageHeader Title="@_person.DisplayName" Subtitle="@(_person.RoleInCase is null ? "Фигурант дела" : $"Фигурант дела · {_person.RoleInCase}")"
+    <PageHeader Title="@_person.DisplayName" Subtitle="@Subtitle(_person)"
                 Icon="@Icons.Material.Filled.Person">
         @if (_person.IsUnidentified)
         {
@@ -57,12 +57,19 @@ else
         </div>
         <MudSimpleTable Dense="true" Elevation="0">
             <tbody>
-                <tr><td class="mud-text-secondary">Имя</td><td>@_person.DisplayName</td></tr>
+                <tr><td class="mud-text-secondary">ФИО</td><td>@_person.DisplayName</td></tr>
                 @if (_person.UnidentifiedNumber is { } number)
                 {
                     <tr><td class="mud-text-secondary">Номер неустановленного лица</td><td>№ @number</td></tr>
                 }
-                <tr><td class="mud-text-secondary">Роль в деле</td><td>@(_person.RoleInCase ?? "—")</td></tr>
+                <tr><td class="mud-text-secondary">Роль в деле</td><td>@_person.Role.Label()@(_person.RoleInCase is { } roleText ? $" · {roleText}" : string.Empty)</td></tr>
+                @* Анкета (ТФ-ПЕР-05). Фотография объекта — актуальный эталон на вкладке «Эталоны» (ТБ-077). *@
+                <tr><td class="mud-text-secondary">Псевдоним</td><td>@QuestionnaireLabels.OrDash(Q.Alias)</td></tr>
+                <tr><td class="mud-text-secondary">Пол</td><td>@(Q.Sex?.Label() ?? "—")</td></tr>
+                <tr><td class="mud-text-secondary">Дата (год) рождения</td><td>@QuestionnaireLabels.Birth(Q)</td></tr>
+                <tr><td class="mud-text-secondary">Место рождения</td><td>@QuestionnaireLabels.OrDash(Q.BirthPlace)</td></tr>
+                <tr><td class="mud-text-secondary">Место работы</td><td>@QuestionnaireLabels.OrDash(Q.WorkPlace)</td></tr>
+                <tr><td class="mud-text-secondary">Место жительства</td><td>@QuestionnaireLabels.OrDash(Q.Residence)</td></tr>
                 <tr><td class="mud-text-secondary">Примечания</td><td style="white-space:pre-wrap;">@(string.IsNullOrWhiteSpace(_person.Notes) ? "—" : _person.Notes)</td></tr>
                 <tr><td class="mud-text-secondary">Эталонов / появлений</td><td>@_person.ReferencePhotoCount / @_person.AppearanceCount</td></tr>
             </tbody>
@@ -199,11 +206,22 @@ else
                 <MudCheckBox T="bool" @bind-Value="_editUnidentified" Label="Личность не установлена" />
             </MudItem>
             <MudItem xs="12">
-                <MudTextField @bind-Value="_editName" Label="@(_editUnidentified ? "Имя (необязательно)" : "Имя *")" Variant="Variant.Outlined" MaxLength="300" />
+                <MudTextField @bind-Value="_editName" Label="@(_editUnidentified ? "ФИО (необязательно)" : "ФИО *")" Variant="Variant.Outlined" MaxLength="300" />
             </MudItem>
             <MudItem xs="12" sm="6">
-                <MudTextField @bind-Value="_editRole" Label="Роль в деле" Variant="Variant.Outlined" MaxLength="200" />
+                <MudSelect T="PersonRole" @bind-Value="_editKind" Label="Роль *" Variant="Variant.Outlined" Dense="true">
+                    @foreach (var role in Enum.GetValues<PersonRole>())
+                    {
+                        <MudSelectItem T="PersonRole" Value="@role">@role.Label()</MudSelectItem>
+                    }
+                </MudSelect>
             </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_editRole" Label="Уточнение роли" Variant="Variant.Outlined" MaxLength="200" />
+            </MudItem>
+        </MudGrid>
+        <PersonQuestionnaireFields Model="_editQuestionnaire" />
+        <MudGrid Spacing="2" Class="mt-1">
             <MudItem xs="12">
                 <MudTextField @bind-Value="_editNotes" Label="Примечания" Variant="Variant.Outlined" Lines="3" MaxLength="4000" />
             </MudItem>
@@ -283,8 +301,13 @@ else
     private string? _editName;
     private bool _editUnidentified;
     private string? _editRole;
+    private PersonRole _editKind = PersonRole.Other;
+    private PersonQuestionnaireForm _editQuestionnaire = new();
     private string? _editNotes;
     private bool EditValid => _editUnidentified || !string.IsNullOrWhiteSpace(_editName);
+
+    // Анкета фигуранта для показа (пустая, если строка пришла без неё).
+    private PersonQuestionnaire Q => _person?.Questionnaire ?? PersonQuestionnaire.Empty;
 
     // --- Новый эталон ---
     private bool _photoOpen;
@@ -365,6 +388,8 @@ else
         _editName = p.IsUnidentified ? null : p.DisplayName;
         _editUnidentified = p.IsUnidentified;
         _editRole = p.RoleInCase;
+        _editKind = p.Role;
+        _editQuestionnaire = PersonQuestionnaireForm.From(p.Questionnaire);
         _editNotes = p.Notes;
         _editOpen = true;
     }
@@ -377,6 +402,7 @@ else
         {
             var response = await Dispatcher.Send(new UpdatePersonCommand(
                 Id, string.IsNullOrWhiteSpace(_editName) ? null : _editName.Trim(), _editUnidentified,
+                _editKind, _editQuestionnaire.ToQuestionnaire(),
                 string.IsNullOrWhiteSpace(_editRole) ? null : _editRole.Trim(), _editNotes));
             if (!response.Status)
             {
@@ -437,6 +463,13 @@ else
     }
 
     // --- Подписи ---
+
+    // «Объект · «Шторм»» — роль по перечню и псевдоним, если есть.
+    private static string Subtitle(PersonRow person) =>
+        person.Questionnaire?.Alias is { } alias
+            ? $"{person.Role.Label()} · «{alias}»"
+            : $"Фигурант дела · {person.Role.Label()}";
+
     private string UserName(int? id)
     {
         if (id is not { } userId) { return "—"; }
