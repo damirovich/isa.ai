@@ -18,7 +18,7 @@
    (ТБ-077). Носители и сессии пакета «Медиа» — по URL (/media/...). Гриф и подразделение фигуранта —
    с дела (решётка ТБ-020: недоступный фигурант неотличим от несуществующего). Связи объекта (ТФ-ПЕР-06) —
    фигуранты того же дела с ролью «связь»; адреса и автотранспорт — отдельные строки под той же решёткой,
-   по их нормализованным значениям (ТО-мат-11) ищутся пересечения (ТФ-ПЕР-07). *@
+   по их нормализованным значениям (ТО-мат-11) ищутся пересечения с другими делами (ТФ-ПЕР-07, ADR-0029). *@
 
 @if (_person is null)
 {
@@ -98,6 +98,76 @@ else
             </tbody>
         </MudSimpleTable>
     </MudPaper>
+
+    @* --- Пересечения (ТФ-ПЕР-07, ТБ-084, ADR-0029): совпадения госномера, адреса, ФИО + даты рождения с ДРУГИМИ
+       делами в пределах допуска. Показываются без действий пользователя (ЦС-06); чужое дело — номер, вид, реквизит
+       и ответственный, ссылка на карточку — только если дело доступно и по роли (ТФ-ДЕЛ-03). Пересечение —
+       подсказка, а не вывод (§2.7 ТЗ): решение человека фиксируется, связей между делами система не создаёт. *@
+    @if (_intersectionsError is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _intersectionsError = null)">@_intersectionsError</MudAlert>
+    }
+    @if (_intersections.Count > 0)
+    {
+        <MudPaper Outlined="true" Class="pa-4 mb-3" Style="border-color: var(--mud-palette-warning);">
+            <div class="d-flex align-center mb-2" style="gap:8px;">
+                <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" />
+                <MudText Typo="Typo.subtitle1"><b>Пересечения с другими делами: @_intersections.Count</b></MudText>
+            </div>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
+                Совпадение реквизитов — подсказка, а не вывод: проверьте и отметьте решение. Показаны только дела в пределах вашего допуска.
+            </MudText>
+            <MudTable T="IntersectionRow" Items="_intersections" Dense="true" Hover="true" Elevation="0" Loading="_busy">
+                <HeaderContent>
+                    <MudTh>Реквизит</MudTh>
+                    <MudTh>Здесь</MudTh>
+                    <MudTh>В другом деле</MudTh>
+                    <MudTh>Дело</MudTh>
+                    <MudTh>Ответственный</MudTh>
+                    <MudTh>Решение</MudTh>
+                    <MudTh Style="width:230px;">Действия</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Реквизит">@context.Kind.Label()</MudTd>
+                    <MudTd DataLabel="Здесь">@context.OwnValue</MudTd>
+                    <MudTd DataLabel="В другом деле">@context.OtherValue</MudTd>
+                    <MudTd DataLabel="Дело">
+                        @if (context.CanOpenCase)
+                        {
+                            <MudLink Href="@($"/cases/{context.OtherCaseId}")">№ @context.OtherCaseNumber</MudLink>
+                        }
+                        else
+                        {
+                            <span>№ @context.OtherCaseNumber</span>
+                        }
+                        <span class="mud-text-secondary"> · @context.OtherCaseKind.Label() · @context.OtherCaseStatus.Label()</span>
+                    </MudTd>
+                    <MudTd DataLabel="Ответственный">@UserName(context.ResponsibleUserId)</MudTd>
+                    <MudTd DataLabel="Решение">
+                        @if (context.Decision is { } decision)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                     Color="@(decision == IntersectionDecision.Confirmed ? Color.Warning : Color.Default)">@decision.Label()</MudChip>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                                @UserName(context.DecidedByUserId)@(context.DecidedAt is { } at ? $", {at.ToLocalTime():dd.MM.yyyy HH:mm}" : string.Empty)
+                            </MudText>
+                        }
+                        else
+                        {
+                            <span class="mud-text-secondary">не рассмотрено</span>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Действия">
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" Disabled="_busy"
+                                   OnClick="@(() => ReviewIntersectionAsync(context, IntersectionDecision.Confirmed))">Подтвердить</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="_busy"
+                                   OnClick="@(() => ReviewIntersectionAsync(context, IntersectionDecision.Rejected))">Отклонить</MudButton>
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        </MudPaper>
+    }
 
     <MudTabs Elevation="0" Border="true" Rounded="true">
     @* --- Связи (ТФ-ПЕР-06): фигуранты этого дела, чьей связью указан этот фигурант --- *@
@@ -571,6 +641,10 @@ else
     private readonly List<PersonVehicleRow> _vehicles = [];
     private string? _casePersonsError;
     private string? _requisitesError;
+
+    // --- Пересечения (ТФ-ПЕР-07) ---
+    private readonly List<IntersectionRow> _intersections = [];
+    private string? _intersectionsError;
     private int? _editLinkedTo;
     private int? _editLinkType;
 
@@ -706,6 +780,44 @@ else
         else
         {
             _requisitesError = requisites.StatusMessage;
+        }
+
+        // Пересечения пересчитываются после каждой правки реквизитов (ТФ-ПЕР-07 «при сохранении связи»).
+        await LoadIntersectionsAsync();
+    }
+
+    private async Task LoadIntersectionsAsync()
+    {
+        _intersectionsError = null;
+        var intersections = await Dispatcher.Send(new GetPersonIntersectionsQuery(Id));
+        _intersections.Clear();
+        if (intersections is { Status: true, Data: { } rows })
+        {
+            _intersections.AddRange(rows);
+        }
+        else
+        {
+            _intersectionsError = intersections.StatusMessage;
+        }
+    }
+
+    private async Task ReviewIntersectionAsync(IntersectionRow row, IntersectionDecision decision)
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ReviewIntersectionCommand(Id, row.Kind, row.Key, row.OtherCaseId, decision));
+            if (!response.Status)
+            {
+                _intersectionsError = response.StatusMessage;
+                return;
+            }
+
+            await LoadIntersectionsAsync();
+        }
+        finally
+        {
+            _busy = false;
         }
     }
 

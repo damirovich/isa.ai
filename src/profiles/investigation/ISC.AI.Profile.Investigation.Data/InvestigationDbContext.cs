@@ -34,6 +34,9 @@ public class InvestigationDbContext(DbContextOptions<InvestigationDbContext> opt
     /// <summary>Автотранспорт фигурантов (ТФ-ПЕР-06).</summary>
     public DbSet<PersonVehicle> PersonVehicles { get; set; } = null!;
 
+    /// <summary>Решения по пересечениям между делами (ТФ-ПЕР-07, ADR-0029).</summary>
+    public DbSet<IntersectionReview> IntersectionReviews { get; set; } = null!;
+
     /// <summary>Эталонные изображения фигурантов (ТБ-077).</summary>
     public DbSet<ReferencePhoto> ReferencePhotos { get; set; } = null!;
 
