@@ -1,0 +1,64 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@using ISC.AI.Profile.Investigation.Domain.Enums
+@using ISC.AI.Profile.Investigation.Domain.Services
+
+@* Поля связи фигуранта (ТФ-ПЕР-06): «чья связь» — другой фигурант ЭТОГО дела (объекты — первыми), «кем
+   приходится» — справочник «Типы связей» (ТФ-АДМ-07; выключенная запись остаётся в списке, если уже стоит).
+   Показываются только у роли «связь»; окончательную проверку (то же дело, не сам себе, вид записи
+   справочника) делает хранилище. Общие для заведения фигуранта (CaseCard) и правки/новой связи (PersonCard). *@
+
+<MudGrid Spacing="2">
+    <MudItem xs="12" sm="6">
+        <MudSelect T="int?" Value="LinkedToPersonId" ValueChanged="OnLinkedChanged" Label="Чья связь"
+                   Variant="Variant.Outlined" Dense="true" Clearable="true" Placeholder="Не указано">
+            @foreach (var person in Candidates)
+            {
+                <MudSelectItem T="int?" Value="@person.Id">@($"{person.DisplayName} · {person.Role.Label()}")</MudSelectItem>
+            }
+        </MudSelect>
+    </MudItem>
+    <MudItem xs="12" sm="6">
+        <MudSelect T="int?" Value="LinkTypeId" ValueChanged="OnTypeChanged" Label="Кем приходится"
+                   Variant="Variant.Outlined" Dense="true" Clearable="true" Placeholder="Из справочника «Типы связей»">
+            @foreach (var item in ReferenceLookup.Options(References, ReferenceKind.LinkType, LinkTypeId, InitialLinkTypeId))
+            {
+                <MudSelectItem T="int?" Value="@item.Id">@item.Name</MudSelectItem>
+            }
+        </MudSelect>
+    </MudItem>
+</MudGrid>
+
+@code {
+    /// <summary>Фигуранты дела — кандидаты в «чья связь».</summary>
+    [Parameter] public IReadOnlyList<PersonRow> Persons { get; set; } = [];
+
+    /// <summary>Фигурант, которого нельзя выбрать (сам редактируемый).</summary>
+    [Parameter] public int? ExcludePersonId { get; set; }
+
+    /// <summary>Записи справочников профиля (все виды).</summary>
+    [Parameter] public IReadOnlyList<ReferenceItemRow> References { get; set; } = [];
+
+    /// <summary>Чья связь.</summary>
+    [Parameter] public int? LinkedToPersonId { get; set; }
+
+    /// <summary>Изменение «чья связь».</summary>
+    [Parameter] public EventCallback<int?> LinkedToPersonIdChanged { get; set; }
+
+    /// <summary>Кем приходится.</summary>
+    [Parameter] public int? LinkTypeId { get; set; }
+
+    /// <summary>Изменение «кем приходится».</summary>
+    [Parameter] public EventCallback<int?> LinkTypeIdChanged { get; set; }
+
+    /// <summary>Тип связи, стоявший при открытии формы (остаётся в списке, даже если выключен).</summary>
+    [Parameter] public int? InitialLinkTypeId { get; set; }
+
+    private IEnumerable<PersonRow> Candidates =>
+        Persons.Where(p => p.Id != ExcludePersonId)
+            .OrderBy(p => p.Role == PersonRole.Target ? 0 : 1)
+            .ThenBy(p => p.DisplayName, StringComparer.CurrentCulture);
+
+    private Task OnLinkedChanged(int? value) => LinkedToPersonIdChanged.InvokeAsync(value);
+
+    private Task OnTypeChanged(int? value) => LinkTypeIdChanged.InvokeAsync(value);
+}

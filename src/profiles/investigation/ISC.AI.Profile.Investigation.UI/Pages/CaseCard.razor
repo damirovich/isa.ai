@@ -216,6 +216,13 @@ else
                     <MudTd DataLabel="Роль в деле">
                         <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
                                  Color="@(context.Role == PersonRole.Target ? Color.Primary : Color.Default)">@context.Role.Label()</MudChip>
+                        @if (context.Role == PersonRole.Link && context.LinkedToPersonId is { } linkedId)
+                        {
+                            @* Связь объекта (ТФ-ПЕР-06): кем приходится и чья связь. *@
+                            <span class="mud-text-secondary">
+                                @(context.LinkTypeId is not null ? ReferenceLookup.Name(_references, context.LinkTypeId) + " · " : string.Empty)@(_persons.FirstOrDefault(p => p.Id == linkedId)?.DisplayName ?? $"фигурант № {linkedId}")
+                            </span>
+                        }
                         @if (context.RoleInCase is { } roleText)
                         {
                             <span class="mud-text-secondary">@roleText</span>
@@ -505,6 +512,11 @@ else
                               HelperText="Подозреваемый, свидетель, брат объекта…" />
             </MudItem>
         </MudGrid>
+        @if (_personKind == PersonRole.Link)
+        {
+            <PersonLinkFields Persons="_persons" References="_references"
+                              @bind-LinkedToPersonId="_personLinkedTo" @bind-LinkTypeId="_personLinkType" />
+        }
         <PersonQuestionnaireFields Model="_personQuestionnaire" />
         <MudGrid Spacing="2" Class="mt-1">
             <MudItem xs="12">
@@ -655,6 +667,8 @@ else
     private string? _personRole;
     private PersonRole _personKind = PersonRole.Other;
     private PersonQuestionnaireForm _personQuestionnaire = new();
+    private int? _personLinkedTo;
+    private int? _personLinkType;
     private string? _personNotes;
     private bool PersonValid => _personUnidentified || !string.IsNullOrWhiteSpace(_personName);
 
@@ -897,6 +911,10 @@ else
         _personKind = _case?.Kind == CaseKind.ObjectTask
             ? (_persons.Any(p => p.Role == PersonRole.Target) ? PersonRole.Link : PersonRole.Target)
             : PersonRole.Other;
+
+        // Связь по умолчанию — с первым объектом дела (ТФ-ПЕР-06); оператор может выбрать другого.
+        _personLinkedTo = _persons.FirstOrDefault(p => p.Role == PersonRole.Target)?.Id;
+        _personLinkType = null;
         _personOpen = true;
     }
 
@@ -909,7 +927,10 @@ else
             var response = await Dispatcher.Send(new CreatePersonCommand(
                 Id, string.IsNullOrWhiteSpace(_personName) ? null : _personName.Trim(), _personUnidentified,
                 string.IsNullOrWhiteSpace(_personRole) ? null : _personRole.Trim(), _personNotes,
-                _personKind, _personQuestionnaire.ToQuestionnaire()));
+                _personKind, _personQuestionnaire.ToQuestionnaire(),
+                // Поля связи — только у роли «связь» (ТФ-ПЕР-06).
+                _personKind == PersonRole.Link ? _personLinkedTo : null,
+                _personKind == PersonRole.Link ? _personLinkType : null));
             if (!response.Status)
             {
                 _personError = response.StatusMessage;

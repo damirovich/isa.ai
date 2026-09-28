@@ -69,6 +69,13 @@ public sealed class PersonStore(
             return (PersonWriteResult.NotFound, 0);
         }
 
+        // ТФ-ПЕР-06: связь — с фигурантом ЭТОГО дела и типом из справочника. Проверка после доступа к делу:
+        // по отказу нельзя узнать ничего о чужих делах (фигурант другого дела неотличим от несуществующего).
+        if (!await IsLinkConsistentAsync(db, caseFile.Id, selfId: null, draft, current: null, cancellationToken))
+        {
+            return (PersonWriteResult.InvalidLink, 0);
+        }
+
         var entity = new Person
         {
             CaseId = caseFile.Id,
@@ -82,6 +89,7 @@ public sealed class PersonStore(
             DivisionId = caseFile.DivisionId,
         };
         ApplyQuestionnaire(entity, draft.Questionnaire);
+        ApplyLink(entity, draft);
 
         // Номер и запись — в одной транзакции под блокировкой дела: два одновременных «неустановленных»
         // в одном деле получают разные номера, а не 23505 на уникальном индексе.
@@ -93,6 +101,7 @@ public sealed class PersonStore(
         }
 
         entity.DisplayName = ResolveDisplayName(draft.DisplayName, entity.IsUnidentified, entity.UnidentifiedNumber);
+        entity.NameNormalized = NormalizedName(entity);
 
         db.Persons.Add(entity);
         await db.SaveChangesAsync(cancellationToken);
@@ -117,6 +126,11 @@ public sealed class PersonStore(
             return PersonWriteResult.NotFound;
         }
 
+        if (!await IsLinkConsistentAsync(db, entity.CaseId, entity.Id, edit, entity, cancellationToken))
+        {
+            return PersonWriteResult.InvalidLink;
+        }
+
         // Номер неустановленного лица выдаётся один раз и при установлении личности сохраняется:
         // «неустановленное лицо № 3» в материалах дела остаётся ссылкой на этого же человека.
         // Выдача — в транзакции под блокировкой дела (см. NextUnidentifiedNumberAsync).
@@ -133,6 +147,8 @@ public sealed class PersonStore(
         entity.RoleInCase = Clean(edit.RoleInCase);
         entity.Notes = Clean(edit.Notes);
         ApplyQuestionnaire(entity, edit.Questionnaire);
+        ApplyLink(entity, edit);
+        entity.NameNormalized = NormalizedName(entity);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return PersonWriteResult.Ok;
@@ -308,24 +324,10 @@ public sealed class PersonStore(
         return (PersonWriteResult.Ok, photo.Id);
     }
 
-    /// <summary>Фигуранты под решёткой: floor и политика на самом фигуранте, роль/владение — через дело.</summary>
-    /// <remarks>
-    /// Подзапрос по делам НАРОЧНО без <c>AsNoTracking()</c>: EF Core применяет <c>AsNoTracking</c>, встреченный
-    /// в любом месте дерева выражения, ко ВСЕМУ запросу — и отслеживаемая правка фигуранта в
-    /// <see cref="UpdateAsync"/> молча терялась. Дела внутри <c>Any</c> не материализуются, отслеживать нечего;
-    /// режим отслеживания задаётся только на корне (фигуранты).
-    /// </remarks>
+    /// <summary>Фигуранты под решёткой — общее правило <see cref="PersonAccess"/> (то же у адресов и транспорта).</summary>
     private IQueryable<Person> AccessiblePersons(
-        InvestigationDbContext db, AccessContext access, InvestigationRole? role, bool tracking = false)
-    {
-        var cases = CaseAccessRule.Apply(db.Cases, access, policy, role);
-        var persons = tracking ? db.Persons : db.Persons.AsNoTracking();
-
-        return persons
-            .Where(BaselineAccess.Filter<Person>(access))
-            .Where(policy.BuildFilter<Person>(access))
-            .Where(p => cases.Any(c => c.Id == p.CaseId));
-    }
+        InvestigationDbContext db, AccessContext access, InvestigationRole? role, bool tracking = false) =>
+        PersonAccess.Accessible(db, access, policy, role, tracking);
 
     private static IQueryable<PersonRow> ProjectRows(IQueryable<Person> persons, InvestigationDbContext db) =>
         persons
@@ -336,7 +338,60 @@ public sealed class PersonStore(
                 db.ReferencePhotos.Count(r => r.PersonId == p.Id),
                 db.Appearances.Count(a => a.PersonId == p.Id),
                 p.Role,
-                new PersonQuestionnaire(p.BirthDate, p.BirthYear, p.BirthPlace, p.WorkPlace, p.Residence, p.Sex, p.Alias)));
+                new PersonQuestionnaire(p.BirthDate, p.BirthYear, p.BirthPlace, p.WorkPlace, p.Residence, p.Sex, p.Alias),
+                p.LinkedToPersonId,
+                p.LinkTypeId));
+
+    /// <summary>
+    /// Согласована ли связь (ТФ-ПЕР-06): поля связи — только у роли «связь»; «чья связь» — другой фигурант
+    /// ТОГО ЖЕ дела; «кем приходится» — запись справочника вида «тип связи», действующая либо уже стоящая у
+    /// этого фигуранта (<paramref name="current"/>). Дело к этому моменту уже проверено на доступ, поэтому
+    /// фигуранты этого дела видны вызывающему — отказ ничего не сообщает о чужих делах.
+    /// </summary>
+    private static async Task<bool> IsLinkConsistentAsync(
+        InvestigationDbContext db, int caseId, int? selfId, PersonDraft draft, Person? current, CancellationToken cancellationToken)
+    {
+        if (draft.Role != PersonRole.Link)
+        {
+            return draft.LinkedToPersonId is null && draft.LinkTypeId is null;
+        }
+
+        if (draft.LinkedToPersonId is { } targetId
+            && (targetId == selfId
+                || !await db.Persons.AsNoTracking().AnyAsync(p => p.Id == targetId && p.CaseId == caseId, cancellationToken)))
+        {
+            return false;
+        }
+
+        if (draft.LinkTypeId is { } typeId)
+        {
+            var item = await db.ReferenceItems.AsNoTracking()
+                .Where(i => i.Id == typeId)
+                .Select(i => new { i.Kind, i.IsActive })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (item is null || item.Kind != ReferenceKind.LinkType || (!item.IsActive && current?.LinkTypeId != typeId))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>Поля связи — из черновика у роли «связь», у остальных ролей очищаются.</summary>
+    private static void ApplyLink(Person entity, PersonDraft draft)
+    {
+        var isLink = draft.Role == PersonRole.Link;
+        entity.LinkedToPersonId = isLink ? draft.LinkedToPersonId : null;
+        entity.LinkTypeId = isLink ? draft.LinkTypeId : null;
+    }
+
+    /// <summary>
+    /// Нормализованное ФИО для пересечений (ТО-мат-11): только у установленного лица — «Неустановленное лицо
+    /// № 3» совпадало бы с одноимённой строкой любого другого дела.
+    /// </summary>
+    private static string? NormalizedName(Person entity) =>
+        entity.IsUnidentified ? null : RequisiteNormalizer.PersonName(entity.DisplayName);
 
     /// <summary>
     /// Переносит анкету (ТФ-ПЕР-05) в сущность целиком; <see langword="null"/> — пустая анкета. При известной
@@ -352,6 +407,7 @@ public sealed class PersonStore(
         entity.Residence = Clean(q.Residence);
         entity.Sex = q.Sex;
         entity.Alias = Clean(q.Alias);
+        entity.ResidenceNormalized = RequisiteNormalizer.Address(entity.Residence);
     }
 
     /// <summary>

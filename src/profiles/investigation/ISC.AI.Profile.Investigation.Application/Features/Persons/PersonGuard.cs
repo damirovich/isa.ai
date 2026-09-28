@@ -15,10 +15,15 @@ public static class PersonGuard
     /// </summary>
     public const string ReferenceNotFound = "Фигурант, носитель или лицо не найдены либо недоступны.";
 
+    /// <summary>Отказ по связи (ТФ-ПЕР-06): связь с фигурантом другого дела или с самим собой, неверный тип связи.</summary>
+    public const string InvalidLink =
+        "Связь не согласована: выберите фигуранта этого дела и действующий тип связи из справочника (ТФ-ПЕР-06).";
+
     /// <summary>Перевод исхода записи в конверт ответа для команд без полезной нагрузки.</summary>
     public static ResponseDto<bool> ToResponse(PersonWriteResult result) => result switch
     {
         PersonWriteResult.Ok => ResponseDto<bool>.Ok(true),
+        PersonWriteResult.InvalidLink => ResponseDto<bool>.BadRequest(InvalidLink),
         _ => ResponseDto<bool>.NotFound(NotFound),
     };
 }
