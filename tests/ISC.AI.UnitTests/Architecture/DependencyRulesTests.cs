@@ -44,8 +44,8 @@ public sealed class DependencyRulesTests
     /// <summary>Имя свойства MSBuild, выбирающего профиль поставки (ТС-004).</summary>
     private const string ProfileProperty = "IscProfile";
 
-    /// <summary>Профиль поставки по умолчанию — «ИнспекторAI».</summary>
-    private const string DefaultProfile = "inspector";
+    /// <summary>Профиль поставки по умолчанию — «Следствие» (решение Заказчика, коммит 0c55370).</summary>
+    private const string DefaultProfile = "investigation";
 
     /// <summary>
     /// Проекты-библиотеки ядра (без хоста <c>Web</c>): им запрещено ссылаться на профиль. Список НЕ
@@ -66,7 +66,7 @@ public sealed class DependencyRulesTests
         @"\$\((?<name>[A-Za-z_][A-Za-z0-9_]*)\)",
         RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture);
 
-    /// <summary>Граф ссылок в конфигурации по умолчанию (<c>IscProfile=inspector</c>).</summary>
+    /// <summary>Граф ссылок в конфигурации по умолчанию (<c>IscProfile=investigation</c>).</summary>
     private static readonly IReadOnlyDictionary<string, string[]> Graph = LoadProjectGraph();
 
     // Ядровые библиотеки — все *.csproj из src/core, кроме хоста Web (хосту профиль подключать МОЖНО).
@@ -132,12 +132,12 @@ public sealed class DependencyRulesTests
     }
 
     /// <summary>
-    /// Поставка по умолчанию — «ИнспекторAI»: без явного свойства (обычный <c>dotnet build</c>, Visual Studio
-    /// без переменной окружения) хост обязан подключать <c>inspector</c>. Проверяется сам csproj хоста:
+    /// Поставка по умолчанию — «Следствие»: без явного свойства (обычный <c>dotnet build</c>, Visual Studio
+    /// без переменной окружения) хост обязан подключать <c>investigation</c>. Проверяется сам csproj хоста:
     /// свойство объявлено с условием «если не задано» и значением по умолчанию.
     /// </summary>
-    [Fact(DisplayName = "По умолчанию (без свойства IscProfile) хост подключает inspector")]
-    public void Host_profile_defaults_to_inspector()
+    [Fact(DisplayName = "По умолчанию (без свойства IscProfile) хост подключает investigation")]
+    public void Host_profile_defaults_to_investigation()
     {
         var hostProject = Directory
             .GetFiles(Path.Combine(FindRepoRoot(), "src", "core"), $"{Host}.csproj", SearchOption.AllDirectories)
@@ -158,14 +158,14 @@ public sealed class DependencyRulesTests
             $"Свойство {ProfileProperty} должно объявляться с условием «если не задано», иначе его нельзя переопределить снаружи.");
         EvaluateCondition(condition, iscProfile: string.Empty).ShouldBeTrue(
             $"Условие «{condition}» должно срабатывать при НЕ заданном {ProfileProperty}.");
-        EvaluateCondition(condition, iscProfile: "investigation").ShouldBeFalse(
+        EvaluateCondition(condition, iscProfile: "inspector").ShouldBeFalse(
             $"Условие «{condition}» не должно перекрывать значение, заданное снаружи.");
 
         declaration.Value.Trim().ShouldBe(DefaultProfile,
             $"Профиль поставки по умолчанию должен быть «{DefaultProfile}» (ТС-004).");
 
-        // И граф по умолчанию (без явного значения) действительно содержит только Inspector.
-        Graph[Host].Where(IsProfileManifest).ShouldBe(["ISC.AI.Profile.Inspector"]);
+        // И граф по умолчанию (без явного значения) действительно содержит только «Следствие».
+        Graph[Host].Where(IsProfileManifest).ShouldBe(["ISC.AI.Profile.Investigation"]);
     }
 
     [Fact(DisplayName = "Профиль зависит внутрь; на Persistence ссылается только <Профиль>.Data")]
