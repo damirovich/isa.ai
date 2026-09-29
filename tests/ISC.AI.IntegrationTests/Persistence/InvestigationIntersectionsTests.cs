@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using ISC.AI.Profile.Investigation.Data;
+using ISC.AI.Profile.Investigation.Domain.Entities;
 using ISC.AI.Profile.Investigation.Domain.Enums;
 using ISC.AI.Profile.Investigation.Domain.Services;
 using Microsoft.EntityFrameworkCore;
@@ -118,6 +119,95 @@ public sealed class InvestigationIntersectionsTests : IAsyncLifetime
             (await db.Cases.CountAsync(c => c.Id == scene.ColleagueCase)).ShouldBe(1);
         }
     }
+
+    [Fact(DisplayName = "Пересечение по лицу: объект на материале чужого дела и то же лицо у чужого фигуранта; выше допуска, чужое подразделение и своё дело — ничего")]
+    public async Task Face_intersections_respect_clearance_and_own_case()
+    {
+        var kit = await ArrangeAsync();
+        var owner = InvestigationTestKit.Access(Owner, 9, 5);
+        var colleague = InvestigationTestKit.Access(Colleague, 9, 5, 6);
+
+        var ownCase = (await kit.Cases.CreateAsync(InvestigationTestKit.Draft("А-1/26", 5, 2, Owner), owner)).CaseId;
+        var colleagueCase = (await kit.Cases.CreateAsync(InvestigationTestKit.Draft("Б-19/26", 5, 2, Colleague), colleague)).CaseId;
+        var secretCase = (await kit.Cases.CreateAsync(InvestigationTestKit.Draft("С-7/26", 5, 4, Colleague), colleague)).CaseId;
+        var otherDivisionCase = (await kit.Cases.CreateAsync(InvestigationTestKit.Draft("Д-3/26", 6, 2, Colleague), colleague)).CaseId;
+
+        var target = await CreatePersonAsync(kit, owner, ownCase, "Объект", null);
+        var sameCaseLink = await CreatePersonAsync(kit, owner, ownCase, "Связь", null);
+        var colleaguePerson = await CreatePersonAsync(kit, colleague, colleagueCase, "Шторм", null);
+        var secretPerson = await CreatePersonAsync(kit, colleague, secretCase, "Скрытый", null);
+        var otherDivisionPerson = await CreatePersonAsync(kit, colleague, otherDivisionCase, "Чужой", null);
+
+        const int SharedAsset = 500, OwnOnlyAsset = 501;
+        const int SharedFace = 900, OwnOnlyFace = 901;
+        await using (var db = kit.Factory.CreateDbContext())
+        {
+            // Носитель 500 — в своём деле и (после дедупликации) в делах коллеги, секретном и чужого подразделения.
+            foreach (var caseId in new[] { ownCase, colleagueCase, secretCase, otherDivisionCase })
+            {
+                db.CaseMediaLinks.Add(new CaseMediaLink { CaseId = caseId, MediaAssetId = SharedAsset });
+            }
+
+            db.CaseMediaLinks.Add(new CaseMediaLink { CaseId = ownCase, MediaAssetId = OwnOnlyAsset });
+
+            var candidate = 1;
+            db.Appearances.AddRange(
+                Appearance(target, ownCase, SharedAsset, SharedFace, candidate++, 2, 5, new DateTime(2026, 9, 20, 10, 0, 0, DateTimeKind.Utc)),
+                Appearance(target, ownCase, OwnOnlyAsset, OwnOnlyFace, candidate++, 2, 5, new DateTime(2026, 9, 21, 10, 0, 0, DateTimeKind.Utc)),
+                // То же лицо: у связи СВОЕГО дела (не пересечение), у фигуранта коллеги, у скрытых.
+                Appearance(sameCaseLink, ownCase, SharedAsset, SharedFace, candidate++, 2, 5, DateTime.UtcNow),
+                Appearance(colleaguePerson, colleagueCase, SharedAsset, SharedFace, candidate++, 2, 5, DateTime.UtcNow),
+                Appearance(secretPerson, secretCase, SharedAsset, SharedFace, candidate++, 4, 5, DateTime.UtcNow),
+                Appearance(otherDivisionPerson, otherDivisionCase, SharedAsset, SharedFace, candidate++, 2, 6, DateTime.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        var viewer = InvestigationTestKit.Access(Owner, 3, 5);
+        var rows = (await kit.Intersections.FindForPersonAsync(target, viewer)).ShouldNotBeNull()
+            .Where(r => r.Kind == IntersectionKind.Face).ToList();
+
+        rows.Select(r => r.OtherCaseId).Distinct().ShouldBe([colleagueCase]);
+        rows.Select(r => r.Key).Order().ShouldBe(["face:material", "face:shared"]);
+        rows.Single(r => r.Key == "face:material").OtherValue.ShouldContain("появлений 1, последнее 20.09.2026");
+        rows.Single(r => r.Key == "face:shared").OtherValue.ShouldContain("совпавших появлений объекта 1");
+        rows.ShouldAllBe(r => r.OwnValue.StartsWith("лицо объекта") && r.ResponsibleUserId == Colleague && !r.CanOpenCase);
+        rows.ShouldAllBe(r => !r.OtherValue.Contains("Шторм")); // имя чужого фигуранта не раскрывается (ТБ-084)
+
+        // С допуском 4 и подразделениями 5, 6 проявляются и скрытые дела — значит, скрывал именно floor.
+        var wide = (await kit.Intersections.FindForPersonAsync(target, InvestigationTestKit.Access(Owner, 4, 5, 6))).ShouldNotBeNull()
+            .Where(r => r.Kind == IntersectionKind.Face).Select(r => r.OtherCaseId).Distinct().Order();
+        wide.ShouldBe(new[] { colleagueCase, secretCase, otherDivisionCase }.Order());
+
+        // Решение по пересечению по лицу — как по остальным; по невидимому делу — «не найдено».
+        (await kit.Intersections.ReviewAsync(target, IntersectionKind.Face, "face:shared", colleagueCase, IntersectionDecision.Confirmed, viewer))
+            .ShouldBe(PersonWriteResult.Ok);
+        (await kit.Intersections.ReviewAsync(target, IntersectionKind.Face, "face:shared", secretCase, IntersectionDecision.Confirmed, viewer))
+            .ShouldBe(PersonWriteResult.NotFound);
+        (await kit.Intersections.FindForPersonAsync(target, viewer)).ShouldNotBeNull()
+            .Single(r => r.Kind == IntersectionKind.Face && r.Key == "face:shared").Decision.ShouldBe(IntersectionDecision.Confirmed);
+
+        // Со стороны фигуранта коллеги — зеркальное пересечение с делом объекта.
+        var mirrored = (await kit.Intersections.FindForPersonAsync(colleaguePerson, InvestigationTestKit.Access(Colleague, 3, 5))).ShouldNotBeNull()
+            .Where(r => r.Kind == IntersectionKind.Face).ToList();
+        mirrored.ShouldContain(r => r.Key == "face:shared" && r.OtherCaseId == ownCase);
+    }
+
+    private static Appearance Appearance(
+        int personId, int caseId, int assetId, int faceId, int candidateId, short classification, int divisionId, DateTime confirmedAtUtc) => new()
+    {
+        PersonId = personId,
+        CaseId = caseId,
+        MediaAssetId = assetId,
+        MediaFaceId = faceId,
+        SearchSessionId = 1,
+        CandidateId = candidateId,
+        Similarity = 0.8,
+        ConfirmedAtUtc = confirmedAtUtc,
+        ExpertUserId = 1,
+        VerifierUserId = 2,
+        Classification = classification,
+        DivisionId = divisionId,
+    };
 
     private static async Task<Scene> SeedAsync(Kit kit)
     {
