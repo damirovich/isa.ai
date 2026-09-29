@@ -169,6 +169,37 @@ public sealed class MediaCatalog(
         return await hits.Take(limit).ToListAsync(cancellationToken);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Обе стороны пары — под <see cref="MediaAccessFilters.VisibleTo{T}"/> в одном SQL-запросе (ТБ-020/021): копия
+    /// выше допуска субъекта в выдачу не попадает, состав запроса от неё не зависит. Хеш остаётся в БД.
+    /// </remarks>
+    public async Task<IReadOnlyList<MediaContentTwin>> ListContentTwinsAsync(
+        IReadOnlyCollection<int> assetIds, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        if (access is null)
+        {
+            throw new AccessContextRequiredException();
+        }
+
+        ArgumentNullException.ThrowIfNull(assetIds);
+        if (assetIds.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = assetIds as int[] ?? assetIds.ToArray();
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var twins =
+            from a in db.Assets.AsNoTracking().VisibleTo(access, accessPolicy)
+            join t in db.Assets.AsNoTracking().VisibleTo(access, accessPolicy) on a.ContentHash equals t.ContentHash
+            where ids.Contains(a.Id) && t.Id != a.Id
+            orderby a.Id, t.Id
+            select new MediaContentTwin(a.Id, t.Id);
+
+        return await twins.ToListAsync(cancellationToken);
+    }
+
     /// <summary>Экранирует метасимволы LIKE (<c>\</c>, <c>%</c>, <c>_</c>): ввод — буквальная подстрока.</summary>
     internal static string EscapeLikePattern(string value) =>
         value.Replace(LikeEscape, LikeEscape + LikeEscape, StringComparison.Ordinal)

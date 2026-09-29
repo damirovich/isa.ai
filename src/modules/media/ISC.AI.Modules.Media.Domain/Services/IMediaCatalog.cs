@@ -102,4 +102,28 @@ public interface IMediaCatalog
         int limit,
         AccessContext access,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Копии тех же файлов по содержимому (одинаковый SHA-256) — для пересечения «объект на материале другого дела»
+    /// (ТФ-ПЕР-07, ADR-0029 п. 3а). Один файл, загруженный в дела с разным грифом или подразделением, хранится
+    /// отдельными носителями (ключ дедупликации — подразделение, гриф, хеш; ТБ-070), и без этого метода такое
+    /// совпадение терялось бы.
+    /// </summary>
+    /// <remarks>
+    /// ИНВАРИАНТ (ТБ-020/021): и исходный носитель, и копия проходят floor ядра и политику профиля на стороне БД;
+    /// копия выше допуска субъекта не возвращается и ничем не выдаёт своего существования. Хеш наружу не отдаётся.
+    /// </remarks>
+    /// <param name="assetIds">Исходные носители.</param>
+    /// <param name="access">Контекст доступа субъекта.</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    /// <returns>Пары «исходный носитель → другой носитель с тем же содержимым»; сам исходный в копии не входит.</returns>
+    Task<IReadOnlyList<MediaContentTwin>> ListContentTwinsAsync(
+        IReadOnlyCollection<int> assetIds,
+        AccessContext access,
+        CancellationToken cancellationToken = default);
 }
+
+/// <summary>Другой носитель с тем же содержимым файла, что и исходный (см. <see cref="IMediaCatalog.ListContentTwinsAsync"/>).</summary>
+/// <param name="AssetId">Исходный носитель.</param>
+/// <param name="TwinAssetId">Носитель-копия (тот же SHA-256, другой гриф или подразделение).</param>
+public sealed record MediaContentTwin(int AssetId, int TwinAssetId);

@@ -81,6 +81,44 @@ public sealed class MediaCatalogTests : IAsyncLifetime
         await Should.ThrowAsync<AccessContextRequiredException>(() => catalog.GetTemplateAsync(openFace, null!));
     }
 
+    [Fact(DisplayName = "Копии файла по содержимому: находятся в пределах допуска; выше допуска и чужое подразделение — нет")]
+    public async Task Content_twins_are_returned_only_within_access()
+    {
+        var factory = new MediaContextFactory(_postgres.GetConnectionString());
+        int open, secret, twinOpen, twinSecret, twinForeign, other;
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+            (open, _) = await SeedAsync(db, classification: 1, divisionId: 7, faces: 0);
+            (secret, _) = await SeedAsync(db, classification: 3, divisionId: 7, faces: 0);
+            (twinOpen, _) = await SeedAsync(db, classification: 2, divisionId: 7, faces: 0);
+            (twinSecret, _) = await SeedAsync(db, classification: 3, divisionId: 9, faces: 0);
+            (twinForeign, _) = await SeedAsync(db, classification: 1, divisionId: 8, faces: 0);
+            (other, _) = await SeedAsync(db, classification: 1, divisionId: 7, faces: 0);
+
+            // Один и тот же файл загружен в дела разного грифа и подразделения — отдельные носители с одним хешем.
+            await db.Assets.Where(a => a.Id == open || a.Id == secret || a.Id == twinOpen || a.Id == twinSecret || a.Id == twinForeign)
+                .ExecuteUpdateAsync(u => u.SetProperty(a => a.ContentHash, "SAMEHASH"));
+        }
+
+        var catalog = new MediaCatalog(factory, new AllowAllAccessPolicy());
+        var access = new AccessContext("u1", MaxClassification: 2, AllowedDivisions: [7]);
+
+        // Копия с грифом 3 и копия чужого подразделения скрыты; сам исходный носитель в копии не входит.
+        (await catalog.ListContentTwinsAsync([open, other], access)).ShouldBe([new(open, twinOpen)]);
+
+        // Исходный носитель выше допуска — пусто, как будто его нет.
+        (await catalog.ListContentTwinsAsync([secret], access)).ShouldBeEmpty();
+        (await catalog.ListContentTwinsAsync([], access)).ShouldBeEmpty();
+
+        // Широкий допуск открывает все копии.
+        var wide = new AccessContext("u1", MaxClassification: 3, AllowedDivisions: [7, 8, 9]);
+        (await catalog.ListContentTwinsAsync([open], wide)).Select(t => t.TwinAssetId)
+            .ShouldBe(new[] { secret, twinOpen, twinSecret, twinForeign }.Order());
+
+        await Should.ThrowAsync<AccessContextRequiredException>(() => catalog.ListContentTwinsAsync([open], null!));
+    }
+
     // Видео с N кадрами; на каждом — лицо с вырезкой и шаблоном [1,0,...]. Возвращает (носитель, первое лицо).
     private static async Task<(int AssetId, int FirstFaceId)> SeedAsync(MediaDbContext db, short classification, int divisionId, int faces)
     {

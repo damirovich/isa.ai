@@ -1,6 +1,9 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using ISC.AI.Modules.Media.Data;
+using ISC.AI.Modules.Media.Data.Entities;
+using ISC.AI.Modules.Media.Domain.Model;
 using ISC.AI.Profile.Investigation.Data;
 using ISC.AI.Profile.Investigation.Domain.Entities;
 using ISC.AI.Profile.Investigation.Domain.Enums;
@@ -192,6 +195,78 @@ public sealed class InvestigationIntersectionsTests : IAsyncLifetime
         mirrored.ShouldContain(r => r.Key == "face:shared" && r.OtherCaseId == ownCase);
     }
 
+    [Fact(DisplayName = "Пересечение по лицу: тот же файл в деле с другим грифом (отдельный носитель, тот же хеш) — находится в пределах допуска")]
+    public async Task Face_intersection_finds_same_file_uploaded_under_other_classification()
+    {
+        var kit = await ArrangeAsync();
+        var owner = InvestigationTestKit.Access(Owner, 9, 5);
+        var colleague = InvestigationTestKit.Access(Colleague, 9, 5);
+
+        // Своё дело — ДСП (1), дело коллеги — «Секретно» (3), скрытое — выше допуска просмотра (4).
+        var ownCase = (await kit.Cases.CreateAsync(InvestigationTestKit.Draft("978", 5, 1, Owner), owner)).CaseId;
+        var secretCase = (await kit.Cases.CreateAsync(InvestigationTestKit.Draft("312312312", 5, 3, Colleague), colleague)).CaseId;
+        var hiddenCase = (await kit.Cases.CreateAsync(InvestigationTestKit.Draft("ОВ-1/26", 5, 4, Colleague), colleague)).CaseId;
+        var target = await CreatePersonAsync(kit, owner, ownCase, "Объект", null);
+
+        // Один снимок, загруженный в три дела разного грифа, — три носителя с одинаковым хешем (ТБ-070).
+        var ownAsset = await MediaAssetAsync(kit, "SAMEPHOTO", 1, 5);
+        var secretCopy = await MediaAssetAsync(kit, "SAMEPHOTO", 3, 5);
+        var hiddenCopy = await MediaAssetAsync(kit, "SAMEPHOTO", 4, 5);
+        var unrelated = await MediaAssetAsync(kit, "OTHERPHOTO", 3, 5);
+        await using (var db = kit.Factory.CreateDbContext())
+        {
+            db.CaseMediaLinks.AddRange(
+                new CaseMediaLink { CaseId = ownCase, MediaAssetId = ownAsset },
+                new CaseMediaLink { CaseId = secretCase, MediaAssetId = secretCopy },
+                new CaseMediaLink { CaseId = secretCase, MediaAssetId = unrelated },
+                new CaseMediaLink { CaseId = hiddenCase, MediaAssetId = hiddenCopy });
+            db.Appearances.Add(Appearance(target, ownCase, ownAsset, 900, 1, 1, 5, new DateTime(2026, 9, 18, 10, 0, 0, DateTimeKind.Utc)));
+            await db.SaveChangesAsync();
+        }
+
+        // Допуск 3: копия в секретном деле видна — пересечение есть; дело с грифом 4 не проявляется.
+        var viewer = InvestigationTestKit.Access(Owner, 3, 5);
+        var rows = (await kit.Intersections.FindForPersonAsync(target, viewer)).ShouldNotBeNull()
+            .Where(r => r.Kind == IntersectionKind.Face).ToList();
+        var row = rows.ShouldHaveSingleItem();
+        row.Key.ShouldBe("face:material");
+        row.OtherCaseId.ShouldBe(secretCase);
+        row.OtherValue.ShouldContain("появлений 1, последнее 18.09.2026");
+
+        // Допуск 1: копия и дело «Секретно» вне допуска — ничего, как будто их нет.
+        (await kit.Intersections.FindForPersonAsync(target, InvestigationTestKit.Access(Owner, 1, 5))).ShouldNotBeNull()
+            .ShouldNotContain(r => r.Kind == IntersectionKind.Face);
+
+        // Допуск 4 открывает и скрытое дело — значит, скрывал именно floor.
+        (await kit.Intersections.FindForPersonAsync(target, InvestigationTestKit.Access(Owner, 4, 5))).ShouldNotBeNull()
+            .Where(r => r.Kind == IntersectionKind.Face).Select(r => r.OtherCaseId).Order()
+            .ShouldBe(new[] { secretCase, hiddenCase }.Order());
+
+        // Решение по такому пересечению принимается, как по остальным.
+        (await kit.Intersections.ReviewAsync(target, IntersectionKind.Face, "face:material", secretCase, IntersectionDecision.Confirmed, viewer))
+            .ShouldBe(PersonWriteResult.Ok);
+    }
+
+    private static async Task<int> MediaAssetAsync(Kit kit, string hash, short classification, int divisionId)
+    {
+        await using var db = kit.Media.CreateDbContext();
+        var asset = new MediaAsset
+        {
+            Kind = MediaKind.Image,
+            OriginalFileName = "photo.jpg",
+            StoredFileName = Guid.NewGuid().ToString("N") + ".jpg",
+            ContentType = "image/jpeg",
+            ContentHash = hash,
+            ByteSize = 1,
+            Classification = classification,
+            DivisionId = divisionId,
+            IndexStatus = MediaIndexStatus.Indexed,
+        };
+        db.Assets.Add(asset);
+        await db.SaveChangesAsync();
+        return asset.Id;
+    }
+
     private static Appearance Appearance(
         int personId, int caseId, int assetId, int faceId, int candidateId, short classification, int divisionId, DateTime confirmedAtUtc) => new()
     {
@@ -267,20 +342,28 @@ public sealed class InvestigationIntersectionsTests : IAsyncLifetime
         await InvestigationTestKit.MigrateAsync(factory);
         await InvestigationTestKit.AssignRolesAsync(factory,
             (Owner, InvestigationRole.Investigator), (Colleague, InvestigationRole.Investigator), (Head, InvestigationRole.Head));
+        var media = new MediaContextFactory(_postgres.GetConnectionString());
+        await using (var mediaDb = media.CreateDbContext())
+        {
+            await mediaDb.Database.MigrateAsync();
+        }
+
         var policy = new InvestigationAccessPolicy(factory);
         var roles = new UserRoleStore(core, factory);
         return new Kit(
             factory,
+            media,
             InvestigationTestKit.CreateCaseStore(factory, core),
             InvestigationTestKit.CreatePersonStore(factory, core),
             new PersonRequisiteStore(factory, policy, roles),
-            new IntersectionStore(factory, policy, roles));
+            new IntersectionStore(factory, policy, roles, new MediaCatalog(media, policy)));
     }
 
     private sealed record Scene(int OwnCase, int ColleagueCase, int SecretCase, int OtherDivisionCase, int Target);
 
     private sealed record Kit(
         InvestigationContextFactory Factory,
+        MediaContextFactory Media,
         CaseStore Cases,
         PersonStore Persons,
         PersonRequisiteStore Requisites,
