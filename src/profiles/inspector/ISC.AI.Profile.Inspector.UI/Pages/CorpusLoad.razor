@@ -52,7 +52,7 @@
                 @for (short level = 0; level <= SelectableClassificationLimit; level++)
                 {
                     var value = level;
-                    <MudSelectItem T="short?" Value="@value">@(value == 0 ? "0 — открытый" : value.ToString())</MudSelectItem>
+                    <MudSelectItem T="short?" Value="@value">@ClassificationLevels.Label(value)</MudSelectItem>
                 }
             </MudSelect>
         </MudItem>
@@ -250,7 +250,7 @@
                 @for (short level = 0; level <= SelectableClassificationLimit; level++)
                 {
                     var value = level;
-                    <MudSelectItem T="short?" Value="@value">@(value == 0 ? "0 — открытый" : value.ToString())</MudSelectItem>
+                    <MudSelectItem T="short?" Value="@value">@ClassificationLevels.Label(value)</MudSelectItem>
                 }
             </MudSelect>
         </MudItem>
@@ -258,7 +258,7 @@
     <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
         Подразделение и гриф перекрывают записанные в пакете: сборщик работает вне контура,
         справочника и режима не видит. Для общих НПА (законы, кодексы) — обычно «Главная инспекция»,
-        гриф «0 — открытый».
+        гриф «Без грифа».
     </MudText>
     <MudButton Class="mt-2" Variant="Variant.Filled" Color="Color.Secondary"
                StartIcon="@Icons.Material.Filled.Archive" OnClick="ImportBundleAsync"
@@ -274,7 +274,7 @@
 @code {
     // Потолок шкалы в интерфейсе — как в регистрации документа (0..9): ошибочный допуск в БД
     // (скажем, 1000) не должен превращать список в тысячу строк.
-    private const short MaxSelectableClassification = 9;
+    private const short MaxSelectableClassification = ClassificationLevels.Max;
 
     // Тип файлов — БЕЗ умолчания, как и гриф: оператор называет его сам (валидатор не пропустит пустой).
     private string _docType = string.Empty;

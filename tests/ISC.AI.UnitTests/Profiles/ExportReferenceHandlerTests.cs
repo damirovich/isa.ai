@@ -12,7 +12,7 @@ namespace ISC.AI.UnitTests.Profiles;
 /// </summary>
 public sealed class ExportReferenceHandlerTests
 {
-    [Fact(DisplayName = "Экспорт: гриф 1 → «ДСП» для экспортёра; на выходе .docx")]
+    [Fact(DisplayName = "Экспорт: гриф 1 → «ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ» для экспортёра; на выходе .docx")]
     public async Task Maps_marking_and_returns_docx()
     {
         DocumentExportRequest? captured = null;
@@ -27,9 +27,9 @@ public sealed class ExportReferenceHandlerTests
         var response = await new ExportReferenceCommand.Handler(exporter, accessProvider)
             .Handle(new ExportReferenceCommand("Справка по режиму", "тело справки", Classification: 1), CancellationToken.None);
 
-        // Гриф 1 → маркировка «ДСП», заголовок проброшен, исполнитель = текущий субъект (ТБ-033).
+        // Гриф 1 → маркировка «ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ» (ADR-0030), заголовок проброшен, исполнитель = текущий субъект (ТБ-033).
         captured.ShouldNotBeNull();
-        captured!.ClassificationMarking.ShouldBe("ДСП");
+        captured!.ClassificationMarking.ShouldBe("ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ");
         captured.Title.ShouldBe("Справка по режиму");
         captured.Executor.ShouldBe("insp-42");
 

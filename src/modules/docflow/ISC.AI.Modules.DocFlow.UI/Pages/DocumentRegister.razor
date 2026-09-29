@@ -4,6 +4,7 @@
 @page "/docflow/documents/new"
 @rendermode InteractiveServer
 @inject NavigationManager Navigation
+@using ISC.AI.Abstractions.Security
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Modules.DocFlow.Application.Features.Documents
 @using ISC.AI.Modules.DocFlow.Application.Features.Assignments
@@ -71,7 +72,7 @@
             @for (short level = 0; level <= SelectableClassificationLimit; level++)
             {
                 var value = level;
-                <MudSelectItem T="short?" Value="@value">@(value == 0 ? "0 — открытый" : value.ToString())</MudSelectItem>
+                <MudSelectItem T="short?" Value="@value">@ClassificationLevels.Label(value)</MudSelectItem>
             }
         </MudSelect>
         <MudSelect T="int?" @bind-Value="_divisionId" Label="Подразделение-владелец *" Variant="Variant.Outlined"
@@ -84,11 +85,11 @@
     </div>
 
     @* Подпись показывает ФАКТИЧЕСКИЙ потолок списка, а не «сырой» допуск: при допуске выше шкалы
-       (ошибочная строка в core.clearance) подпись «до 12» противоречила бы списку 0..9. *@
+       (ошибочная строка в core.clearance) подпись противоречила бы списку уровней шкалы (ADR-0030). *@
     @if (SelectableClassificationLimit >= 0)
     {
         <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1 d-block">
-            Ваш допуск: гриф до @SelectableClassificationLimit включительно;
+            Ваш допуск: до «@ClassificationLevels.Label((short)SelectableClassificationLimit)» включительно;
             подразделений-владельцев доступно: @_ownerDivisions.Count.
         </MudText>
     }
@@ -217,7 +218,7 @@
 
     // Потолок шкалы в интерфейсе — как было до сужения (0..9). Нужен, чтобы ошибочно выставленный
     // в БД допуск (скажем, 1000) не превратил выпадающий список в тысячу строк.
-    private const short MaxSelectableClassification = 9;
+    private const short MaxSelectableClassification = ClassificationLevels.Max;
 
     // null = пределы допуска не получены; форма в этом состоянии НИЧЕГО не предлагает (fail-closed).
     private short? _maxClassification;

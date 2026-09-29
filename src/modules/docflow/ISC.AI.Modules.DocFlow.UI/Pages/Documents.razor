@@ -4,6 +4,7 @@
 @page "/docflow/documents"
 @rendermode InteractiveServer
 @inject NavigationManager Navigation
+@using ISC.AI.Abstractions.Security
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Modules.DocFlow.Application.Features.Documents
 @using ISC.AI.Modules.DocFlow.Application.Features.Assignments
@@ -137,7 +138,7 @@
         <MudTd DataLabel="Гриф">
             @if (context.Classification > 0)
             {
-                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text">@context.Classification</MudChip>
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text">@ClassificationLevels.Label(context.Classification)</MudChip>
             }
             else
             {

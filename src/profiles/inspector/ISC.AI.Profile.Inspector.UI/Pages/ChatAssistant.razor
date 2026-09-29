@@ -5,6 +5,7 @@
 @page "/chat"
 @rendermode InteractiveServer
 @implements IDisposable
+@using ISC.AI.Abstractions.Security
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Abstractions.Conversations
 @using ISC.AI.Abstractions.Enums
@@ -46,7 +47,7 @@
                     @if (conversation.Classification > 0)
                     {
                         <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text"
-                                 Class="ma-0 pa-0">гриф @conversation.Classification</MudChip>
+                                 Class="ma-0 pa-0">@ClassificationLevels.Label(conversation.Classification)</MudChip>
                     }
                 </MudPaper>
             }

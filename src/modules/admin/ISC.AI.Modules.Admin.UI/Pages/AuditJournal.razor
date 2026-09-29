@@ -5,6 +5,7 @@
    (IPlatformAdministration.CanViewAuditAsync — ТБ-030/032), отказ показывается текстом. *@
 @page "/admin/audit"
 @rendermode InteractiveServer
+@using ISC.AI.Abstractions.Security
 @using System.Globalization
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Abstractions.Audit
@@ -81,7 +82,7 @@
             </MudText>
         </MudTd>
         <MudTd DataLabel="Гриф">
-            @(context.Classification == 0 ? "открыто" : $"ДСП · {context.Classification}")
+            @ClassificationLevels.Label(context.Classification)
         </MudTd>
         <MudTd DataLabel="Подразделение">
             @(context.DivisionId?.ToString(CultureInfo.InvariantCulture) ?? "—")

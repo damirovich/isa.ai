@@ -3,6 +3,7 @@
    примечание несут пометку «сформировано ИИ»; регистрация — акт принятия ЧЕЛОВЕКОМ, поэтому
    вызывающая страница допускает её только при полностью подтверждённой грунтовке (GATE-2) —
    иначе непроверенные ссылки ушли бы в реестр документов и, через индексацию, в поисковый корпус. *@
+@using ISC.AI.Abstractions.Security
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Abstractions.Grounding
 @using ISC.AI.Modules.DocFlow.Application.Features.Documents
@@ -24,7 +25,7 @@
         }
         <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
             Документ будет зарегистрирован с пометкой «сформировано ИИ» в источнике и примечании.
-            Гриф — унаследован от генерации: @Classification.
+            Гриф — унаследован от генерации: «@ClassificationLevels.Label(Classification)».
         </MudAlert>
 
         <MudGrid Spacing="2">

@@ -46,6 +46,24 @@ public sealed class AuditReaderTests : IAsyncLifetime
         full.TotalCount.ShouldBe(4);
     }
 
+    [Fact(DisplayName = "Записи прежней шкалы (гриф 9) и «вне шкалы» (32767) видит высший допуск «Особой важности», но не ниже (ADR-0030)")]
+    public async Task Legacy_classifications_are_read_as_top_level()
+    {
+        var (writer, reader) = await BuildAsync();
+
+        // Журнал неизменяем: записи, сделанные до ADR-0030 при допуске 9 и при неизвестном допуске,
+        // остаются с этими числами навсегда.
+        await writer.WriteAsync(new AuditEntry(AuditAction.View, 9, 7, "legacy:9", DivisionId: 5));
+        await writer.WriteAsync(new AuditEntry(AuditAction.View, short.MaxValue, 7, "legacy:max", DivisionId: 5));
+        await writer.WriteAsync(new AuditEntry(AuditAction.View, ClassificationLevels.TopSecret, 7, "top-secret", DivisionId: 5));
+
+        var top = await reader.QueryAsync(new AuditFilter(), new AccessContext("42", ClassificationLevels.Max, [5]));
+        top.Rows.Select(r => r.ObjectRef).ShouldBe(["legacy:9", "legacy:max", "top-secret"], ignoreOrder: true);
+
+        var belowTop = await reader.QueryAsync(new AuditFilter(), new AccessContext("43", ClassificationLevels.TopSecret, [5]));
+        belowTop.Rows.ShouldHaveSingleItem().ObjectRef.ShouldBe("top-secret");
+    }
+
     [Fact(DisplayName = "Журнал фильтруется по действию, субъекту и объекту")]
     public async Task Reader_applies_filters()
     {

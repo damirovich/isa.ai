@@ -1,17 +1,27 @@
 @namespace ISC.AI.Modules.Media.UI
+@using ISC.AI.Abstractions.Security
 @* Гриф на карточках/строках — чипом (образец Documents.razor документооборота). Показывается всегда,
-   где есть режимный материал (ТБ-073): пользователь должен видеть, с чем работает. *@
+   где есть режимный материал (ТБ-073): пользователь должен видеть, с чем работает. Название и пояснение
+   уровня — единая шкала платформы (ADR-0030); цвет растёт с уровнем: ДСП — синий, «Секретно» — жёлтый,
+   «Совершенно секретно» и «Особой важности» — красный. *@
 
-@if (Classification > 0)
-{
-    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text">гриф @Classification</MudChip>
-}
-else
-{
-    <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Text">0 — открытый</MudChip>
-}
+<MudTooltip Text="@ClassificationLevels.Description(Classification)">
+    <MudChip T="string" Size="Size.Small" Color="@ChipColor" Variant="@ChipVariant">@ClassificationLevels.Label(Classification)</MudChip>
+</MudTooltip>
 
 @code {
-    /// <summary>Гриф (0 — открытый).</summary>
+    /// <summary>Гриф по шкале платформы (0 — без грифа … 4 — особой важности).</summary>
     [Parameter, EditorRequired] public short Classification { get; set; }
+
+    private Color ChipColor => ClassificationLevels.Normalize(Classification) switch
+    {
+        ClassificationLevels.Unclassified => Color.Default,
+        ClassificationLevels.ForOfficialUse => Color.Info,
+        ClassificationLevels.Secret => Color.Warning,
+        _ => Color.Error,
+    };
+
+    // «Особой важности» — залитый чип: высший уровень должен бросаться в глаза.
+    private Variant ChipVariant =>
+        ClassificationLevels.Normalize(Classification) == ClassificationLevels.SpecialImportance ? Variant.Filled : Variant.Text;
 }

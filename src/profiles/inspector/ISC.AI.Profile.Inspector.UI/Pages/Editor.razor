@@ -1,6 +1,7 @@
 @namespace ISC.AI.Profile.Inspector.UI
 @page "/editor"
 @rendermode InteractiveServer
+@using ISC.AI.Abstractions.Security
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Abstractions.Grounding
 @using ISC.AI.Profile.Inspector.Application.Features.Editor
@@ -72,7 +73,7 @@
             else
             {
                 <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3">
-                    ПРЕДЛОЖЕННАЯ РЕДАКЦИЯ — принимает человек (HITL, ТБ-042). Гриф: @Result.ResultClassification.
+                    ПРЕДЛОЖЕННАЯ РЕДАКЦИЯ — принимает человек (HITL, ТБ-042). Гриф: «@ClassificationLevels.Label(Result.ResultClassification)».
                 </MudAlert>
 
                 @if (!Result.AllCitationsConfirmed)

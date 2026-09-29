@@ -1,4 +1,5 @@
 using FluentValidation;
+using ISC.AI.Abstractions.Security;
 using ISC.AI.Profile.Investigation.Domain.Enums;
 
 namespace ISC.AI.Profile.Investigation.Application.Features.Cases;
@@ -11,8 +12,8 @@ namespace ISC.AI.Profile.Investigation.Application.Features.Cases;
 /// </remarks>
 public sealed class CreateCaseValidator : AbstractValidator<CreateCaseCommand>
 {
-    /// <summary>Верхняя граница шкалы грифов в интерфейсе (та же, что у допусков).</summary>
-    public const short MaxClassification = 9;
+    /// <summary>Верхняя граница шкалы грифов — единая шкала платформы (ADR-0030, <see cref="ClassificationLevels"/>).</summary>
+    public const short MaxClassification = ClassificationLevels.Max;
 
     /// <summary>Предел длины номера дела.</summary>
     public const int MaxNumberLength = 100;
@@ -31,7 +32,7 @@ public sealed class CreateCaseValidator : AbstractValidator<CreateCaseCommand>
         RuleFor(c => c.Kind).IsInEnum().WithMessage("Неизвестный вид дела.");
         RuleFor(c => c.Classification)
             .InclusiveBetween((short)0, MaxClassification)
-            .WithMessage($"Гриф дела — от 0 до {MaxClassification}.");
+            .WithMessage("Гриф дела — от «Без грифа» до «Особой важности».");
         RuleFor(c => c.DivisionId).GreaterThan(0).WithMessage("Укажите подразделение дела (ТБ-024).");
         RuleFor(c => c.InvestigatorUserId).GreaterThan(0).When(c => c.InvestigatorUserId is not null);
         RuleFor(c => c.Basis).MaximumLength(MaxBasisLength);

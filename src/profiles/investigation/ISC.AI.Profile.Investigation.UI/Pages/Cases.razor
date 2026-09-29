@@ -158,7 +158,7 @@
                     @for (short level = 0; level <= SelectableClassificationLimit; level++)
                     {
                         var value = level;
-                        <MudSelectItem T="short?" Value="@value">@(value == 0 ? "0 — открытый" : value.ToString())</MudSelectItem>
+                        <MudSelectItem T="short?" Value="@value">@ClassificationLevels.Label(value)</MudSelectItem>
                     }
                 </MudSelect>
             </MudItem>

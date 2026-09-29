@@ -1,4 +1,5 @@
 using System.Globalization;
+using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 
 namespace ISC.AI.Modules.DocFlow.Domain.Services;
@@ -63,9 +64,9 @@ public static class ReportViewBuilder
             Totals(data.Rows));
     }
 
-    // Гриф в тексте документа (ТБ-033). Ноль — «открыто»: писать «гриф 0» бессмысленно.
-    private static string Marking(short classification) =>
-        classification == 0 ? "Открыто" : $"ДСП. Гриф: {classification.ToString(CultureInfo.InvariantCulture)}";
+    // Гриф в тексте документа (ТБ-033): маркировка единой шкалы платформы (ADR-0030) — «НЕСЕКРЕТНО»,
+    // «ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ», «СЕКРЕТНО», «СОВЕРШЕННО СЕКРЕТНО», «ОСОБОЙ ВАЖНОСТИ».
+    private static string Marking(short classification) => ClassificationLevels.Marking(classification);
 
     private static string GroupTitle(ReportKind kind, ReportRow row, ReportNames names) => kind switch
     {

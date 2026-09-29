@@ -112,7 +112,7 @@ public sealed class AuditBehaviorTests
             .Handle(new FakeAuditable(), Ok(), CancellationToken.None);
 
         await writer.Received(1).WriteAsync(
-            Arg.Is<AuditEntry>(e => e.SubjectId == 7 && e.Classification == short.MaxValue),
+            Arg.Is<AuditEntry>(e => e.SubjectId == 7 && e.Classification == ClassificationLevels.Max),
             Arg.Any<CancellationToken>());
     }
 

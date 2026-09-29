@@ -6,6 +6,7 @@
    полагаемся — запрос можно отправить и без кнопки. *@
 @page "/admin/clearances"
 @rendermode InteractiveServer
+@using ISC.AI.Abstractions.Security
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Modules.Admin.Application.Features.Clearances
 
@@ -69,11 +70,11 @@
             <MudSelect T="short?" Value="@Draft(context).MaxClassification"
                        ValueChanged="@(value => { Draft(context).MaxClassification = value; })"
                        Variant="Variant.Outlined" Dense="true" Margin="Margin.Dense"
-                       Placeholder="Не выдан" Style="min-width:140px;">
+                       Placeholder="Не выдан" Style="min-width:200px;">
                 @for (short level = 0; level <= SetUserClearanceValidator.MaxClassification; level++)
                 {
                     var value = level;
-                    <MudSelectItem T="short?" Value="@value">@(value == 0 ? "0 — открытый" : value.ToString())</MudSelectItem>
+                    <MudSelectItem T="short?" Value="@value">@ClassificationLevels.Label(value)</MudSelectItem>
                 }
             </MudSelect>
         </MudTd>
@@ -150,7 +151,8 @@
             // нельзя, а тихо сохранить обратно — значит увековечить поломку. Об удалении предупреждаем.
             draft = new ClearanceDraft
             {
-                MaxClassification = row.MaxClassification,
+                // Допуск прежней шкалы 0–9 (выше «Особой важности») показывается высшим уровнем (ADR-0030).
+                MaxClassification = row.MaxClassification is { } max ? ClassificationLevels.Normalize(max) : null,
                 Divisions = [.. row.Divisions.Where(d => d.IsKnown).Select(d => d.Id)],
             };
             _drafts[row.UserId] = draft;

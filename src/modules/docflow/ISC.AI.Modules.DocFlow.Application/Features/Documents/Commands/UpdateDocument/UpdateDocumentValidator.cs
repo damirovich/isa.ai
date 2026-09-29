@@ -1,4 +1,5 @@
 using FluentValidation;
+using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.DocFlow.Domain.Services;
 
 namespace ISC.AI.Modules.DocFlow.Application.Features.Documents;
@@ -34,7 +35,7 @@ public sealed class UpdateDocumentValidator : AbstractValidator<UpdateDocumentCo
         RuleFor(c => c.Direction).IsInEnum();
         RuleFor(c => c.Priority).IsInEnum().When(c => c.Priority.HasValue);
 
-        RuleFor(c => c.Classification).GreaterThanOrEqualTo((short)0)
+        RuleFor(c => c.Classification).InclusiveBetween(ClassificationLevels.Unclassified, ClassificationLevels.Max)
             .WithMessage("Укажите гриф документа.");
         RuleFor(c => c.DivisionId).GreaterThan(0)
             .WithMessage("Укажите подразделение-владельца документа.");

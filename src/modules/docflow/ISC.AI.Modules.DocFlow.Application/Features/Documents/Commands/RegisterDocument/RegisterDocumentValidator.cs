@@ -1,4 +1,5 @@
 using FluentValidation;
+using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.DocFlow.Domain.Services;
 
 namespace ISC.AI.Modules.DocFlow.Application.Features.Documents;
@@ -30,7 +31,7 @@ public sealed class RegisterDocumentValidator : AbstractValidator<RegisterDocume
         RuleFor(c => c.Priority).IsInEnum().When(c => c.Priority.HasValue);
 
         // Решётка доступа (ADR-0017 п.5): без грифа и подразделения документ не регистрируется.
-        RuleFor(c => c.Classification).GreaterThanOrEqualTo((short)0)
+        RuleFor(c => c.Classification).InclusiveBetween(ClassificationLevels.Unclassified, ClassificationLevels.Max)
             .WithMessage("Укажите гриф документа.");
         RuleFor(c => c.DivisionId).GreaterThan(0)
             .WithMessage("Укажите подразделение-владельца документа.");
