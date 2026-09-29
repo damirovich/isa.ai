@@ -121,7 +121,9 @@ public sealed record AddReferencePhotoCommand(
             }
 
             // Лицо (если указано) — под контекстом доступа и именно с этого носителя: ссылка «носитель A,
-            // лицо с носителя B» дала бы эталон с чужой вырезкой.
+            // лицо с носителя B» дала бы эталон с чужой вырезкой. Оценка качества при этом берётся с самого лица
+            // (её считает конвейер «Медиа»), а не из команды: клиент не может приписать эталону чужую оценку.
+            var qualityScore = command.QualityScore;
             if (command.MediaFaceId is { } faceId)
             {
                 var face = await catalog.GetFaceAsync(faceId, access, cancellationToken);
@@ -129,10 +131,12 @@ public sealed record AddReferencePhotoCommand(
                 {
                     return ResponseDto<int>.NotFound(PersonGuard.ReferenceNotFound);
                 }
+
+                qualityScore = face.QualityScore;
             }
 
             var draft = new ReferencePhotoDraft(
-                command.PersonId, command.MediaAssetId, command.MediaFaceId, command.QualityScore,
+                command.PersonId, command.MediaAssetId, command.MediaFaceId, qualityScore,
                 string.IsNullOrWhiteSpace(command.Source) ? null : command.Source.Trim(),
                 string.IsNullOrWhiteSpace(command.LegalBasis) ? null : command.LegalBasis.Trim(),
                 command.ReviewDueAt, access.NumericSubjectId);

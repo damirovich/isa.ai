@@ -70,6 +70,17 @@ public sealed class AddReferencePhotoScenarioTests
             null, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact(DisplayName = "Оценка качества эталона — с самого лица (конвейер «Медиа»), а не из команды")]
+    public async Task Quality_score_is_taken_from_face_not_from_command()
+    {
+        var response = await HandleAsync(new AddReferencePhotoCommand(PersonId, AssetId, FaceId, QualityScore: 0.99f));
+
+        response.Status.ShouldBeTrue();
+        await _persons.Received(1).AddReferencePhotoAsync(
+            Arg.Is<ReferencePhotoDraft>(d => d.QualityScore == 0.8f),
+            null, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact(DisplayName = "Без лица: каталог лиц не опрашивается, эталон по носителю добавлен")]
     public async Task Without_face_catalog_is_not_consulted()
     {

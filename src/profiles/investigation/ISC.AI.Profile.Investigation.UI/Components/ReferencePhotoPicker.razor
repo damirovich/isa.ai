@@ -1,0 +1,464 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@implements IAsyncDisposable
+@* Выбор эталона мышкой (ТБ-077) вместо ввода номеров: носитель — из материалов ДЕЛА фигуранта либо новое фото,
+   загружаемое прямо отсюда в материалы дела (фото 3×4, скан документа); лицо — щелчком по вырезке, найденной
+   конвейером на этом носителе. Окончательные проверки (носитель из дела и в допуске, фото/видео, лицо на носителе)
+   делает сервер в AddReferencePhotoCommand — здесь только подсказка. Картинки раздаются защищённым эндпоинтом
+   пакета «Медиа»: недоступное — единый 404 (ТБ-020/021). *@
+@using ISC.AI.Modules.Media.Application.Features.Assets
+@using ISC.AI.Modules.Media.Domain.Model
+@using ISC.AI.Modules.Media.Domain.Services
+@using Microsoft.AspNetCore.Components.Forms
+
+<MudTabs @bind-ActivePanelIndex="_tab" Outlined="true" Elevation="0" PanelClass="pa-3" Class="mb-3">
+    <MudTabPanel Text="Из материалов дела" Icon="@Icons.Material.Filled.PhotoLibrary">
+        @if (_listError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true">@_listError</MudAlert>
+        }
+        else if (_assets is null)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (_assets.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                В материалах дела нет фото и видео. Загрузите фото на вкладке «Загрузить новое фото».
+            </MudText>
+        }
+        else
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
+                Щёлкните по снимку — ниже появятся найденные на нём лица.
+            </MudText>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px;max-height:300px;overflow-y:auto;">
+                @foreach (var asset in _assets)
+                {
+                    var item = asset; // копия для замыкания
+                    var selected = _asset?.Id == item.Id;
+                    <div @onclick="@(() => SelectAssetAsync(item.Id))" title="@item.OriginalFileName"
+                         class="rounded mud-elevation-1 pa-1"
+                         style="@($"cursor:pointer;{(selected ? "outline:3px solid var(--mud-palette-primary);" : string.Empty)}")">
+                        <div style="height:96px;display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:4px;background:var(--mud-palette-background-gray);">
+                            @if (item.Kind == MediaKind.Image)
+                            {
+                                <img src="@MediaFileRoutes.Build(MediaFileCategories.Originals, item.Id, item.StoredFileName)" alt="@item.OriginalFileName"
+                                     loading="lazy" style="width:100%;height:96px;object-fit:cover;display:block;" />
+                            }
+                            else
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" Class="mud-text-secondary" />
+                            }
+                        </div>
+                        <MudText Typo="Typo.caption" Class="d-block mt-1" Style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">@item.OriginalFileName</MudText>
+                        <MudText Typo="Typo.caption" Class="d-block mud-text-secondary">
+                            @CaseMediaLabels.Kind(item.Kind) · @(item.IndexStatus == MediaIndexStatus.Indexed ? $"лиц: {item.FaceCount}" : CaseMediaLabels.Index(item.IndexStatus).ToLowerInvariant())
+                        </MudText>
+                    </div>
+                }
+            </div>
+        }
+    </MudTabPanel>
+
+    <MudTabPanel Text="Загрузить новое фото" Icon="@Icons.Material.Filled.CloudUpload">
+        @* Файл ложится в материалы дела фигуранта обычной загрузкой (UploadMediaCommand: гриф и подразделение —
+           с дела, дедупликация, аудит), затем конвейер ищет на нём лица. Дата съёмки обязательна (ТФ-МЕД-17):
+           из метаданных, если есть, иначе вводится вручную. *@
+        @if (_uploadError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-2">@_uploadError</MudAlert>
+        }
+        <div class="d-flex align-center gap-3 flex-wrap">
+            <MudFileUpload T="IBrowserFile" FilesChanged="OnFileSelectedAsync" Accept="@ReferencePickerRules.UploadAccept" Disabled="_uploading">
+                <CustomContent Context="upload">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="_uploading" StartIcon="@Icons.Material.Filled.AttachFile"
+                               OnClick="@(() => upload.OpenFilePickerAsync())">Выбрать фото…</MudButton>
+                </CustomContent>
+            </MudFileUpload>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                Фото 3×4, снимок или скан документа: .jpg, .png, .bmp, .webp, до @(ReferencePickerRules.MaxUploadBytes / 1024 / 1024) МБ.
+                Файл попадёт и в материалы дела.
+            </MudText>
+        </div>
+
+        @if (_file is not null)
+        {
+            <div class="d-flex gap-3 mt-3 flex-wrap align-start">
+                <div style="width:120px;height:160px;border-radius:4px;overflow:hidden;background:var(--mud-palette-background-gray);display:flex;align-items:center;justify-content:center;">
+                    @if (_filePreview is not null)
+                    {
+                        <img src="@_filePreview" alt="@_file.Name" style="width:120px;height:160px;object-fit:cover;display:block;" />
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.Image" Class="mud-text-secondary" />
+                    }
+                </div>
+                <div style="min-width:260px;flex:1;">
+                    <MudText Typo="Typo.body2" Class="mb-2">@_file.Name</MudText>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <div style="width:190px;">
+                            <MudDatePicker @bind-Date="_capturedDate" Label="Дата съёмки *" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                           DateFormat="dd.MM.yyyy" Disabled="_uploading" Error="@(_capturedDate is null)" Placeholder="дд.мм.гггг" />
+                        </div>
+                        <div style="width:140px;">
+                            <MudTimePicker @bind-Time="_capturedTime" Label="Время *" Variant="Variant.Outlined" Margin="Margin.Dense" AmPm="false"
+                                           Disabled="_uploading" Error="@(_capturedTime is null)" Placeholder="чч:мм" />
+                        </div>
+                    </div>
+                    <MudText Typo="Typo.caption" Class="@(_dateFromMetadata ? "mud-text-secondary" : "mud-error-text")">
+                        @(_dateFromMetadata
+                            ? "Дата взята из метаданных файла — проверьте."
+                            : "В файле даты нет — укажите, когда сделан снимок (если неизвестно — дату получения фото).")
+                    </MudText>
+                    <div class="mt-2">
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CloudUpload"
+                                   Disabled="@(_uploading || _capturedDate is null || _capturedTime is null)" OnClick="UploadAsync">
+                            @(_uploading ? "Загружаю…" : "Загрузить и найти лицо")
+                        </MudButton>
+                    </div>
+                </div>
+            </div>
+        }
+    </MudTabPanel>
+</MudTabs>
+
+@* --- Лица выбранного снимка --- *@
+@if (_assetError is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_assetError</MudAlert>
+}
+else if (_asset is { } current)
+{
+    <MudPaper Outlined="true" Class="pa-3 mb-3">
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Лицо на снимке «@current.OriginalFileName»</MudText>
+        @if (current.IndexStatus is MediaIndexStatus.Uploaded or MediaIndexStatus.Processing)
+        {
+            <MudText Typo="Typo.body2" Class="mb-2">Система ищет лица на снимке — обычно это несколько секунд…</MudText>
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (current.IndexStatus == MediaIndexStatus.Failed)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true">
+                Снимок не удалось обработать@(string.IsNullOrWhiteSpace(current.IndexError) ? "." : $": {current.IndexError}") Выберите другой.
+            </MudAlert>
+        }
+        else if (_faces.Count == 0)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+                На этом снимке лицо не найдено. Выберите другой снимок или загрузите фото, где лицо видно крупно и анфас.
+            </MudAlert>
+        }
+        else
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
+                @(_faces.Count == 1 ? "Лицо найдено одно." : $"Найдено лиц: {_faces.Count} — щёлкните по нужному.")
+                Непригодные для сравнения (размыто, мелко, в профиль) выбрать нельзя: по ним не будет работать поиск.
+            </MudText>
+            <div class="d-flex flex-wrap gap-3" style="max-height:260px;overflow-y:auto;">
+                @foreach (var face in _faces)
+                {
+                    var item = face; // копия для замыкания
+                    var pickable = ReferencePickerRules.CanPick(item);
+                    var picked = _pickedFaceId == item.Id;
+                    <div @onclick="@(() => PickFaceAsync(item))" class="d-flex flex-column align-center"
+                         style="@($"width:104px;cursor:{(pickable ? "pointer" : "not-allowed")};opacity:{(pickable ? "1" : "0.45")};")"
+                         title="@(pickable ? "Выбрать это лицо" : $"Непригодно: {item.QualityReason ?? "низкое качество"}")">
+                        <div class="rounded mud-elevation-1 overflow-hidden"
+                             style="@($"width:96px;height:96px;{(picked ? "outline:3px solid var(--mud-palette-primary);outline-offset:1px;" : string.Empty)}")">
+                            @if (item.CropStoredFileName is { } crop)
+                            {
+                                <img src="@MediaFileRoutes.Build(MediaFileCategories.FaceCrops, item.AssetId, crop)" alt="лицо № @item.Id"
+                                     style="width:96px;height:96px;object-fit:cover;display:block;" />
+                            }
+                        </div>
+                        <MudText Typo="Typo.caption" Class="mt-1 text-center">
+                            лицо № @item.Id@(item.FrameTimestampMs is { } ms ? $" · {TimeSpan.FromMilliseconds(ms):mm\\:ss}" : string.Empty)
+                        </MudText>
+                        @if (picked)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text" Icon="@Icons.Material.Filled.Check">выбрано</MudChip>
+                        }
+                        else if (!pickable)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text">непригодно</MudChip>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </MudPaper>
+}
+
+@code {
+    // Опрос состояния только что загруженного снимка: пока конвейер ищет лица. Каждый тик — GetMediaAssetQuery
+    // (аудируется, ТБ-030), поэтому опрос идёт лишь пока снимок в обработке, редко и не дольше предела.
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(3);
+    private const int MaxPolls = 100; // ~5 минут: дальше человек нажмёт на снимок сам
+
+    // Предпросмотр держится в разметке строкой data:-URL — только для небольших файлов.
+    private const long MaxPreviewBytes = 3L * 1024 * 1024;
+
+    /// <summary>Дело фигуранта: из его материалов берётся эталон, туда же загружается новое фото.</summary>
+    [Parameter, EditorRequired] public int CaseId { get; set; }
+
+    /// <summary>Подпись «откуда файл» для загружаемого фото (поле «Источник» окна эталона).</summary>
+    [Parameter] public string? UploadSource { get; set; }
+
+    /// <summary>Выбранные носитель и лицо; <see langword="null"/> — выбор снят.</summary>
+    [Parameter] public EventCallback<ReferencePick?> SelectionChanged { get; set; }
+
+    private int _tab;
+    private List<MediaAssetRow>? _assets;
+    private string? _listError;
+
+    private MediaAssetRow? _asset;
+    private int? _selectedId; // последний выбранный снимок: ответы по прежнему выбору отбрасываются
+    private readonly List<FaceRow> _faces = [];
+    private string? _assetError;
+    private int? _pickedFaceId;
+    private CancellationTokenSource? _pollCts;
+
+    private IBrowserFile? _file;
+    private byte[]? _fileBytes;
+    private string? _filePreview;
+    private DateTime? _capturedDate;
+    private TimeSpan? _capturedTime;
+    private bool _dateFromMetadata;
+    private bool _uploading;
+    private string? _uploadError;
+
+    protected override Task OnInitializedAsync() =>
+        // ТБ-030 «одно открытие — одна запись»: на предрендере не грузим.
+        RendererInfo.IsInteractive ? LoadAssetsAsync() : Task.CompletedTask;
+
+    private async Task LoadAssetsAsync()
+    {
+        var response = await Dispatcher.Send(new ListCaseMediaQuery(CaseId));
+        if (response is { Status: true, Data: { } rows })
+        {
+            _assets = ReferencePickerRules.SourceAssets(rows).ToList();
+            _listError = null;
+        }
+        else
+        {
+            _assets = [];
+            _listError = response.StatusMessage;
+        }
+    }
+
+    private async Task SelectAssetAsync(int assetId)
+    {
+        await StopPollingAsync();
+        _selectedId = assetId;
+        _pickedFaceId = null;
+        await SelectionChanged.InvokeAsync(null);
+
+        await RefreshAssetAsync(assetId);
+        if (_asset is { } asset && IsInProgress(asset.IndexStatus))
+        {
+            StartPolling(assetId);
+        }
+    }
+
+    // Перечитывает носитель и его лица; единственное пригодное лицо выбирается само.
+    private async Task RefreshAssetAsync(int assetId)
+    {
+        var response = await Dispatcher.Send(new GetMediaAssetQuery(assetId));
+        if (_selectedId != assetId)
+        {
+            return; // пока шёл запрос, выбран другой снимок
+        }
+
+        _faces.Clear();
+        if (response is { Status: true, Data: { } details })
+        {
+            _asset = details.Asset;
+            _assetError = null;
+            if (details.Asset.IndexStatus == MediaIndexStatus.Indexed)
+            {
+                _faces.AddRange(details.Faces);
+                if (_pickedFaceId is null && ReferencePickerRules.AutoPick(_faces) is { } only)
+                {
+                    await PickFaceAsync(only);
+                }
+            }
+        }
+        else
+        {
+            _asset = null;
+            _assetError = response.StatusMessage;
+        }
+    }
+
+    private async Task PickFaceAsync(FaceRow face)
+    {
+        if (!ReferencePickerRules.CanPick(face) || _asset is null)
+        {
+            return;
+        }
+
+        _pickedFaceId = face.Id;
+        await SelectionChanged.InvokeAsync(new ReferencePick(_asset.Id, face.Id));
+    }
+
+    private async Task OnFileSelectedAsync(IBrowserFile? file)
+    {
+        _uploadError = null;
+        _file = null;
+        _fileBytes = null;
+        _filePreview = null;
+        _capturedDate = null;
+        _capturedTime = null;
+        _dateFromMetadata = false;
+        if (file is null)
+        {
+            return;
+        }
+
+        try
+        {
+            using var buffer = new MemoryStream();
+            await using (var stream = file.OpenReadStream(ReferencePickerRules.MaxUploadBytes))
+            {
+                await stream.CopyToAsync(buffer);
+            }
+
+            _fileBytes = buffer.ToArray();
+        }
+        catch (IOException)
+        {
+            // Blazor бросает IOException при превышении maxAllowedSize.
+            _uploadError = $"Файл больше {ReferencePickerRules.MaxUploadBytes / 1024 / 1024} МБ или не прочитан.";
+            return;
+        }
+
+        _file = file;
+        var contentType = ContentTypeOf(file);
+        if (_fileBytes.Length <= MaxPreviewBytes)
+        {
+            _filePreview = $"data:{contentType};base64,{Convert.ToBase64String(_fileBytes)}";
+        }
+
+        var head = _fileBytes.AsSpan(0, (int)Math.Min(_fileBytes.Length, CaptureTimeProbe.HeadBytes));
+        if (CaptureTimeProbe.TryRead(head, TimeZoneInfo.Local, DateTimeOffset.UtcNow) is { } found)
+        {
+            var local = found.ToLocalTime().DateTime;
+            _capturedDate = local.Date;
+            _capturedTime = new TimeSpan(local.Hour, local.Minute, 0);
+            _dateFromMetadata = true;
+        }
+    }
+
+    private async Task UploadAsync()
+    {
+        if (_file is null || _fileBytes is null || _capturedDate is not { } date || _capturedTime is not { } time)
+        {
+            return;
+        }
+
+        _uploading = true;
+        _uploadError = null;
+        try
+        {
+            // Столбец captured_at — timestamptz: местные дата и время → UTC (как в медиатеке дела).
+            var capturedAt = new DateTimeOffset(DateTime.SpecifyKind(date.Date + time, DateTimeKind.Local)).ToUniversalTime();
+            var source = string.IsNullOrWhiteSpace(UploadSource) ? "Эталонное фото" : UploadSource.Trim();
+            var response = await Dispatcher.Send(new UploadMediaCommand(
+                CaseId, _file.Name, ContentTypeOf(_file), _fileBytes, source, capturedAt));
+            if (response is not { Status: true, Data: { } receipt })
+            {
+                _uploadError = response.StatusMessage;
+                return;
+            }
+
+            _file = null;
+            _fileBytes = null;
+            _filePreview = null;
+            await LoadAssetsAsync();
+            _tab = 0; // снимок уже в материалах дела — показываем его выбранным там
+            await SelectAssetAsync(receipt.AssetId);
+        }
+        finally
+        {
+            _uploading = false;
+        }
+    }
+
+    private void StartPolling(int assetId)
+    {
+        var cts = new CancellationTokenSource();
+        _pollCts = cts;
+        var token = cts.Token;
+
+        // Цикл живёт, пока снимок в обработке, выбран этот же снимок и компонент жив; исключения внутри
+        // не выпускаются наружу — упавшая фоновая задача роняла бы весь circuit.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var timer = new PeriodicTimer(PollInterval);
+                for (var i = 0; i < MaxPolls && await timer.WaitForNextTickAsync(token); i++)
+                {
+                    var done = false;
+                    await InvokeAsync(async () =>
+                    {
+                        if (token.IsCancellationRequested || _selectedId != assetId)
+                        {
+                            done = true;
+                            return;
+                        }
+
+                        await RefreshAssetAsync(assetId);
+                        done = _asset is not { } fresh || !IsInProgress(fresh.IndexStatus);
+                        if (done)
+                        {
+                            await LoadAssetsAsync(); // обновить «лиц: N» в списке
+                        }
+
+                        StateHasChanged();
+                    });
+                    if (done)
+                    {
+                        return;
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Выбран другой снимок или окно закрыто — штатно.
+            }
+            catch (ObjectDisposedException)
+            {
+                // Гонка закрытия окна: рендерер уже уничтожен.
+            }
+        }, token);
+    }
+
+    private async Task StopPollingAsync()
+    {
+        if (_pollCts is { } cts)
+        {
+            _pollCts = null;
+            await cts.CancelAsync();
+            cts.Dispose();
+        }
+    }
+
+    private static bool IsInProgress(MediaIndexStatus status) => status is MediaIndexStatus.Uploaded or MediaIndexStatus.Processing;
+
+    // Тип — от браузера; пустой — по расширению (сервер всё равно проверяет семейство по байтам, ТС-010).
+    private static string ContentTypeOf(IBrowserFile file) =>
+        !string.IsNullOrWhiteSpace(file.ContentType)
+            ? file.ContentType
+            : Path.GetExtension(file.Name).ToLowerInvariant() switch
+            {
+                ".png" => "image/png",
+                ".bmp" => "image/bmp",
+                ".webp" => "image/webp",
+                _ => "image/jpeg",
+            };
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync() => await StopPollingAsync();
+}
