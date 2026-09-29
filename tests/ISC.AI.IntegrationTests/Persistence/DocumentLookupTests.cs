@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.DocFlow.Data;
@@ -49,6 +50,27 @@ public sealed class DocumentLookupTests : IAsyncLifetime
 
         // Пустой вход — пустой словарь без обращения к БД по существу.
         (await lookup.ResolveByRegNumbersAsync([], limited)).ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Карточки по идентификаторам (документы дела): та же решётка — недоступные и несуществующие отсутствуют")]
+    public async Task Lookup_by_ids_never_exceeds_the_visible_set()
+    {
+        var lookup = await BuildAsync();
+        int[] ids;
+        await using (var db = new DocFlowContextFactory(_postgres.GetConnectionString()).CreateDbContext())
+        {
+            ids = await db.Documents.AsNoTracking().OrderBy(d => d.RegNumber).Select(d => d.Id).ToArrayAsync();
+        }
+
+        var limited = new AccessContext("42", 0, [5]);
+        var cards = await lookup.ResolveByIdsAsync([.. ids, 999_999], limited);
+        var card = cards.ShouldHaveSingleItem().Value;
+        card.RegNumber.ShouldBe("СП-1");
+        card.TypeName.ShouldBe("Справка");
+        card.ShortContent.ShouldBe("Справка по итогам проверки");
+
+        (await lookup.ResolveByIdsAsync(ids, new AccessContext("42", 9, [5, 9]))).Count.ShouldBe(3);
+        (await lookup.ResolveByIdsAsync([], limited)).ShouldBeEmpty();
     }
 
     private async Task<DocumentLookup> BuildAsync()

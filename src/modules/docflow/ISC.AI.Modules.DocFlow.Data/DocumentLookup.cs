@@ -62,4 +62,28 @@ public sealed class DocumentLookup(
                 r.Id, r.RegNumber, r.RegDate, r.TypeName, r.InspectorUserId, r.AggregatedStatus, r.DivisionId),
             StringComparer.Ordinal);
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, DocumentBrief>> ResolveByIdsAsync(
+        IReadOnlyCollection<int> ids, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        ArgumentNullException.ThrowIfNull(access);
+
+        var wanted = ids.Where(id => id > 0).Distinct().Take(MaxBatch).ToList();
+        if (wanted.Count == 0)
+        {
+            return new Dictionary<int, DocumentBrief>();
+        }
+
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Решётка — тем же предикатом, что список документов: недоступный документ в ответ не попадает (ТБ-021).
+        return await db.Documents.AsNoTracking()
+            .VisibleTo(access, accessPolicy)
+            .Where(d => wanted.Contains(d.Id))
+            .Select(d => new DocumentBrief(
+                d.Id, d.RegNumber, d.RegDate, d.Type!.Name, d.ShortContent, d.InspectorUserId, d.AggregatedStatus, d.Classification))
+            .ToDictionaryAsync(d => d.Id, cancellationToken);
+    }
 }

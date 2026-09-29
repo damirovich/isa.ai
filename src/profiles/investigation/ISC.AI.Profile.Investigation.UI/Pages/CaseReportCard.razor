@@ -4,6 +4,9 @@
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Abstractions.Security
 @using ISC.AI.Profile.Investigation.Application.Features.Directory
+@using ISC.AI.Modules.DocFlow.Application.Features.DocumentTypes
+@using ISC.AI.Modules.DocFlow.Domain.Services
+@using ISC.AI.Profile.Investigation.Application.Features.CaseDocuments
 @using ISC.AI.Profile.Investigation.Application.Features.Reports
 @using ISC.AI.Profile.Investigation.Domain.Enums
 @using ISC.AI.Profile.Investigation.Domain.Services
@@ -59,6 +62,9 @@ else
                    Disabled="@(_busy || !_details.CanEditNow)" OnClick="SaveAsync">Сохранить редакцию</MudButton>
         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FileDownload" Disabled="_busy"
                    OnClick="@(() => ExportAsync(null))">Выгрузить .docx</MudButton>
+        @* ТФ-ДДЛ-01: выгрузка регистрируется в документообороте и сразу прикрепляется к делу (вкладка «Документы»). *@
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.AppRegistration" Disabled="_busy"
+                   OnClick="OpenRegisterAsync">Зарегистрировать в документообороте</MudButton>
         @if (report.State == CaseReportState.Archived && !_details.CanEditNow && _details.MyPermit is not { Status: ReportEditPermitStatus.Pending })
         {
             <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.LockOpen"
@@ -165,6 +171,31 @@ else
     </MudPaper>
 }
 
+<MudDialog @bind-Visible="_registerOpen" Options="DialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Регистрация в документообороте</MudText></TitleContent>
+    <DialogContent>
+        @if (_registerError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_registerError</MudAlert>
+        }
+        <MudText Typo="Typo.body2" Class="mb-2">
+            Актуальная редакция выгрузится в .docx и зарегистрируется как внутренний документ с грифом дела; номер присвоится автоматически.
+            Документ сразу появится на вкладке «Документы» дела.
+        </MudText>
+        <MudSelect T="int?" @bind-Value="_registerTypeId" Label="Вид документа *" Variant="Variant.Outlined">
+            @foreach (var type in _documentTypes)
+            {
+                <MudSelectItem T="int?" Value="@type.Id">@type.Name</MudSelectItem>
+            }
+        </MudSelect>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _registerOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_busy || _registerTypeId is null)"
+                   OnClick="RegisterAsync">Зарегистрировать</MudButton>
+    </DialogActions>
+</MudDialog>
+
 <MudDialog @bind-Visible="_permitOpen" Options="DialogOptions">
     <TitleContent><MudText Typo="Typo.h6">Разрешение на правку архивного документа</MudText></TitleContent>
     <DialogContent>
@@ -238,6 +269,11 @@ else
     private bool _permitOpen;
     private string? _permitReason;
     private string? _permitError;
+
+    private bool _registerOpen;
+    private string? _registerError;
+    private int? _registerTypeId;
+    private readonly List<DocumentTypeItem> _documentTypes = [];
 
     private bool _revisionOpen;
     private int _revisionNumber;
@@ -348,6 +384,43 @@ else
         }
 
         await ReloadAsync();
+    }
+
+    private async Task OpenRegisterAsync()
+    {
+        _registerError = null;
+        _registerTypeId = null;
+        if (_documentTypes.Count == 0)
+        {
+            var types = await Dispatcher.Send(new ListDocumentTypesQuery(IsActive: true));
+            if (types is { Status: true, Data: { } items }) { _documentTypes.AddRange(items.OrderBy(t => t.Name)); }
+            else { _registerError = types.StatusMessage; }
+        }
+
+        _registerOpen = true;
+    }
+
+    private async Task RegisterAsync()
+    {
+        if (_registerTypeId is not { } typeId) { return; }
+        _busy = true;
+        _registerError = null;
+        try
+        {
+            var response = await Dispatcher.Send(new RegisterCaseReportDocumentCommand(Id, typeId));
+            if (response is not { Status: true, Data: var documentId })
+            {
+                _registerError = response.StatusMessage;
+                return;
+            }
+
+            _registerOpen = false;
+            _notice = $"Зарегистрировано в документообороте (документ № {documentId}) и прикреплено к делу — вкладка «Документы».";
+        }
+        finally
+        {
+            _busy = false;
+        }
     }
 
     private void OpenPermit()
