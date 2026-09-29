@@ -52,6 +52,9 @@ public static class InvestigationPersistenceServiceCollectionExtensions
         // TimeProvider (подменяются в тестах), выгрузка .docx — отрисовщиком профиля.
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<ICaseReportStore, CaseReportStore>();
+
+        // Документы дела (ТФ-ДЕЛ-02): привязки к документам документооборота по значению.
+        services.AddScoped<ICaseDocumentStore, CaseDocumentStore>();
         services.AddSingleton<ICaseReportRenderer, Reports.CaseReportDocxRenderer>();
 
         // Дозаполнение нормализованных реквизитов прежних фигурантов при старте (ТО-мат-11).

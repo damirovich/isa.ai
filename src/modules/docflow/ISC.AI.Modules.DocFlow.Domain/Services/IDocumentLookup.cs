@@ -14,6 +14,20 @@ public sealed record DocumentRefCard(
     int DivisionId);
 
 /// <summary>
+/// Краткая карточка документа для чужого реестра, хранящего идентификатор документа по значению (например,
+/// документы дела профиля, ТФ-ДЕЛ-02): номер, дата, вид, краткое содержание, гриф и статус — без текста и файлов.
+/// </summary>
+public sealed record DocumentBrief(
+    int Id,
+    string? RegNumber,
+    DateOnly RegDate,
+    string TypeName,
+    string ShortContent,
+    int? InspectorUserId,
+    DocumentAggregatedStatus AggregatedStatus,
+    short Classification);
+
+/// <summary>
 /// Разрешение слабых ссылок «по значению» на документы модуля: другой модуль (например, учёт
 /// нарушений профиля — поле «справка-проверка») хранит RegNumber строкой без FK через границу схем
 /// (ТО-инф-06) и через этот порт обогащает свои карточки метаданными документа.
@@ -33,4 +47,11 @@ public interface IDocumentLookup
     /// </summary>
     Task<IReadOnlyDictionary<string, DocumentRefCard>> ResolveByRegNumbersAsync(
         IReadOnlyCollection<string> regNumbers, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Краткие карточки документов по идентификаторам под той же решёткой видимости: недоступные и
+    /// несуществующие в словаре отсутствуют (ТБ-021). Идентификаторы сверх предела партии игнорируются.
+    /// </summary>
+    Task<IReadOnlyDictionary<int, DocumentBrief>> ResolveByIdsAsync(
+        IReadOnlyCollection<int> ids, AccessContext access, CancellationToken cancellationToken = default);
 }

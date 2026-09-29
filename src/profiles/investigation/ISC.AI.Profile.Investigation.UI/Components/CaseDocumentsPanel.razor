@@ -1,0 +1,221 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@* Вкладка «Документы» карточки дела (ТФ-ДЕЛ-02, ТФ-ДДЛ-01): документы документооборота, прикреплённые к делу.
+   Документ, недоступный по правилам документооборота, не показывается вовсе (ТБ-021). «Прикрепить» ищет среди
+   документов, которые сотрудник и так видит в документообороте; «Открепить» снимает только привязку — сам
+   документ остаётся. Номер ведёт на карточку документа модуля. Компонент создаётся при первом открытии вкладки. *@
+@using ISC.AI.Abstractions.Security
+@using ISC.AI.Modules.DocFlow.Application.Features.Documents
+@using ISC.AI.Modules.DocFlow.Domain.Services
+@using ISC.AI.Modules.DocFlow.UI
+@using ISC.AI.Profile.Investigation.Application.Features.CaseDocuments
+
+<div class="pt-3">
+    <div class="d-flex justify-end mb-2">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.AttachFile"
+                   Disabled="_busy" OnClick="OpenAttach">Прикрепить документ</MudButton>
+    </div>
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+    }
+
+    <MudTable T="CaseDocumentRow" Items="_rows" Hover="true" Dense="true" Outlined="true" Loading="_busy">
+        <HeaderContent>
+            <MudTh>Номер</MudTh>
+            <MudTh>Дата</MudTh>
+            <MudTh>Вид</MudTh>
+            <MudTh>Краткое содержание</MudTh>
+            <MudTh>Статус</MudTh>
+            <MudTh>Гриф</MudTh>
+            <MudTh>Прикрепил</MudTh>
+            <MudTh Style="width:130px;"></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Номер">
+                <MudLink Href="@($"/docflow/documents/{context.Document.Id}")">@(context.Document.RegNumber ?? $"№ {context.Document.Id}")</MudLink>
+            </MudTd>
+            <MudTd DataLabel="Дата">@context.Document.RegDate.ToString("dd.MM.yyyy")</MudTd>
+            <MudTd DataLabel="Вид">@context.Document.TypeName</MudTd>
+            <MudTd DataLabel="Краткое содержание">@context.Document.ShortContent</MudTd>
+            <MudTd DataLabel="Статус">@context.Document.AggregatedStatus.Label()</MudTd>
+            <MudTd DataLabel="Гриф"><ClassificationChip Value="@context.Document.Classification" /></MudTd>
+            <MudTd DataLabel="Прикрепил">@UserName(context.LinkedByUserId), @context.LinkedAt.ToLocalTime().ToString("dd.MM.yyyy")</MudTd>
+            <MudTd>
+                <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" Disabled="_busy"
+                           OnClick="@(() => DetachAsync(context.Document.Id))">Открепить</MudButton>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                Документов нет либо они вне вашего допуска. Прикрепите зарегистрированный документ или зарегистрируйте сводку со страницы сводки.
+            </MudText>
+        </NoRecordsContent>
+    </MudTable>
+</div>
+
+<MudDialog @bind-Visible="_attachOpen" Options="DialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Прикрепить документ к делу</MudText></TitleContent>
+    <DialogContent>
+        @if (_attachError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_attachError</MudAlert>
+        }
+        <div class="d-flex gap-2 align-center mb-2">
+            <MudTextField T="string" @bind-Value="_search" Placeholder="Номер или текст краткого содержания" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Immediate="true" OnKeyDown="@(e => e.Key == "Enter" ? SearchAsync() : Task.CompletedTask)" />
+            <MudButton Variant="Variant.Outlined" Disabled="_busy" OnClick="SearchAsync">Найти</MudButton>
+        </div>
+        <MudTable T="DocumentListItem" Items="_found" Dense="true" Hover="true" Elevation="0" Loading="_busy">
+            <HeaderContent>
+                <MudTh>Номер</MudTh>
+                <MudTh>Дата</MudTh>
+                <MudTh>Вид</MudTh>
+                <MudTh>Краткое содержание</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@(context.RegNumber ?? $"№ {context.Id}")</MudTd>
+                <MudTd>@context.RegDate.ToString("dd.MM.yyyy")</MudTd>
+                <MudTd>@context.TypeName</MudTd>
+                <MudTd>@context.ShortContent</MudTd>
+                <MudTd>
+                    @if (_rows.Any(r => r.Document.Id == context.Id))
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">уже в деле</MudText>
+                    }
+                    else
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy"
+                                   OnClick="@(() => AttachAsync(context.Id))">Прикрепить</MudButton>
+                    }
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary pa-2">Введите номер или слова из краткого содержания и нажмите «Найти».</MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _attachOpen = false)">Закрыть</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly DialogOptions DialogOptions = new() { MaxWidth = MaxWidth.Large, FullWidth = true, CloseOnEscapeKey = true };
+
+    // Поиск в диалоге — первая страница документооборота; больше за раз не просматривают, уточняют запрос.
+    private const int SearchPageSize = 20;
+
+    /// <summary>Дело.</summary>
+    [Parameter, EditorRequired] public int CaseId { get; set; }
+
+    /// <summary>Справочник сотрудников — для подписи «кто прикрепил».</summary>
+    [Parameter] public IReadOnlyList<UserAccountRow> Accounts { get; set; } = [];
+
+    private readonly List<CaseDocumentRow> _rows = [];
+    private readonly List<DocumentListItem> _found = [];
+    private bool _busy;
+    private string? _error;
+    private bool _attachOpen;
+    private string? _attachError;
+    private string? _search;
+
+    protected override Task OnInitializedAsync() =>
+        // ТБ-030 «одно открытие — одна запись»: на предрендере не грузим.
+        RendererInfo.IsInteractive ? LoadAsync() : Task.CompletedTask;
+
+    private async Task LoadAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new ListCaseDocumentsQuery(CaseId));
+            _rows.Clear();
+            if (response is { Status: true, Data: { } rows }) { _rows.AddRange(rows); }
+            else { _error = response.StatusMessage; }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void OpenAttach()
+    {
+        _attachError = null;
+        _search = null;
+        _found.Clear();
+        _attachOpen = true;
+    }
+
+    private async Task SearchAsync()
+    {
+        _busy = true;
+        _attachError = null;
+        try
+        {
+            var text = string.IsNullOrWhiteSpace(_search) ? null : _search.Trim();
+            var response = await Dispatcher.Send(new ListDocumentsQuery(Text: text, Page: 1, PageSize: SearchPageSize));
+            _found.Clear();
+            if (response is { Status: true, Data: { } page }) { _found.AddRange(page.Rows); }
+            else { _attachError = response.StatusMessage; }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task AttachAsync(int documentId)
+    {
+        _busy = true;
+        _attachError = null;
+        try
+        {
+            var response = await Dispatcher.Send(new AttachCaseDocumentCommand(CaseId, documentId));
+            if (!response.Status)
+            {
+                _attachError = response.StatusMessage;
+                return;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await LoadAsync();
+    }
+
+    private async Task DetachAsync(int documentId)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new DetachCaseDocumentCommand(CaseId, documentId));
+            if (!response.Status)
+            {
+                _error = response.StatusMessage;
+                return;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await LoadAsync();
+    }
+
+    private string UserName(int? id)
+    {
+        if (id is not { } userId) { return "—"; }
+        var account = Accounts.FirstOrDefault(a => a.UserId == userId);
+        if (account is null) { return $"пользователь № {userId}"; }
+        return string.IsNullOrWhiteSpace(account.DisplayName) ? account.UserName : account.DisplayName;
+    }
+}
