@@ -38,8 +38,8 @@
 </MudTabs>
 
 @code {
-    /// <summary>Размеры страницы на выбор; по умолчанию — <see cref="ListVerificationQueueQuery.DefaultPageSize"/>.</summary>
-    private static readonly int[] PageSizes = [12, 24, 48, 96];
+    /// <summary>Размеры страницы на выбор — кратны 6 (столбцов сетки на широком экране), чтобы ряды были полными; по умолчанию — <see cref="ListVerificationQueueQuery.DefaultPageSize"/>.</summary>
+    private static readonly int[] PageSizes = [12, 18, 36, 60, 96];
 
     private int _activeTab;
     private int _pageSize = ListVerificationQueueQuery.DefaultPageSize;
@@ -197,12 +197,13 @@
                     }
                 </MudSelect>
             </div>
-            <div class="d-flex flex-wrap gap-3 pa-2">
+            @* Сетка: столбцы тянутся на всю ширину (6 на широком экране), на узком — меньше, без горизонтальной прокрутки. *@
+            <div class="pa-2" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(228px, 1fr)); gap:12px;">
                 @foreach (var item in items)
                 {
                     var current = item;
-                    <MudPaper @key="current.CandidateId" Outlined="true" Class="pa-3 d-flex flex-column align-center gap-1" Style="width:300px;">
-                        <CandidatePair Item="@current" Size="96" ShowLinks="false" ProbeFaces="@probeFaces" />
+                    <MudPaper @key="current.CandidateId" Outlined="true" Class="pa-2 d-flex flex-column align-center gap-1">
+                        <CandidatePair Item="@current" Size="88" ShowLinks="false" ProbeFaces="@probeFaces" />
                         <SimilarityChip Similarity="@current.Similarity" />
                         <div class="d-flex align-center gap-1 flex-wrap justify-center">
                             <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@current.Status.ChipColor()">@current.Status.Label()</MudChip>
