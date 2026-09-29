@@ -37,6 +37,15 @@ public class InvestigationDbContext(DbContextOptions<InvestigationDbContext> opt
     /// <summary>Решения по пересечениям между делами (ТФ-ПЕР-07, ADR-0029).</summary>
     public DbSet<IntersectionReview> IntersectionReviews { get; set; } = null!;
 
+    /// <summary>Сводки и справки по бланку (ТФ-ДДЛ-04, ADR-0031).</summary>
+    public DbSet<CaseReport> CaseReports { get; set; } = null!;
+
+    /// <summary>Редакции сводок и справок — только добавляются (ТФ-ДДЛ-05).</summary>
+    public DbSet<CaseReportRevision> CaseReportRevisions { get; set; } = null!;
+
+    /// <summary>Запросы на правку архивных документов и решения Администратора (ТФ-АДМ-06).</summary>
+    public DbSet<CaseReportPermit> CaseReportPermits { get; set; } = null!;
+
     /// <summary>Эталонные изображения фигурантов (ТБ-077).</summary>
     public DbSet<ReferencePhoto> ReferencePhotos { get; set; } = null!;
 

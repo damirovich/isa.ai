@@ -25,7 +25,19 @@ public static class InvestigationApplicationServiceCollectionExtensions
             bool.TryParse(configuration[InvestigationRetentionOptions.PurgeOnClosureKey], out var parsed) && parsed;
 
         services.AddSingleton(new InvestigationRetentionOptions(purgeOnClosure));
+
+        // Окно редактирования сводок и срок разрешения на правку (ТФ-ДДЛ-05, ADR-0031): по умолчанию 48 и 24 часа;
+        // неположительное или нечисловое значение в конфигурации — умолчание, а не «окно 0 часов».
+        services.AddSingleton(new CaseReportOptions(
+            PositiveOr(configuration[CaseReportOptions.EditWindowKey], 48),
+            PositiveOr(configuration[CaseReportOptions.PermitHoursKey], 24)));
+
         services.AddValidatorsFromAssembly(typeof(InvestigationApplicationServiceCollectionExtensions).Assembly);
         return services;
     }
+
+    private static int PositiveOr(string? value, int fallback) =>
+        int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var hours) && hours > 0
+            ? hours
+            : fallback;
 }

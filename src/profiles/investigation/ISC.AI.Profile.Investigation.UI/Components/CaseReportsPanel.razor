@@ -1,0 +1,216 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@* Вкладка «Сводки и справки» карточки дела (ТФ-ДДЛ-04, ADR-0031): документы по бланку, сгруппированные по дате
+   («папка даты» — группировка списка, не отдельная сущность), поиск подстрокой по полям (ТО-мат-11) и создание
+   нового документа. Состояние «редактируется / архивный / неактивный» вычислено сервером на момент чтения.
+   Компонент создаётся при первом открытии вкладки (MudTabs не держит неактивные вкладки) — список грузится тогда же. *@
+@using ISC.AI.Abstractions.Security
+@using ISC.AI.Profile.Investigation.Application.Features.Reports
+@using ISC.AI.Profile.Investigation.Domain.Enums
+@using ISC.AI.Profile.Investigation.Domain.Services
+@inject NavigationManager Navigation
+
+<div class="pt-3">
+    <div class="d-flex align-center flex-wrap gap-2 mb-3">
+        <MudTextField T="string" @bind-Value="_text" Placeholder="Поиск по тексту сводок и справок" Variant="Variant.Outlined"
+                      Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                      Clearable="true" OnClearButtonClick="@(() => SearchAsync(null))" Style="max-width:420px;"
+                      OnKeyDown="@(e => e.Key == "Enter" ? SearchAsync(_text) : Task.CompletedTask)" Immediate="true" />
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="_busy" OnClick="@(() => SearchAsync(_text))">Найти</MudButton>
+        <MudSpacer />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.NoteAdd"
+                   Disabled="_busy" OnClick="OpenCreate">Новая сводка / справка</MudButton>
+    </div>
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+    }
+
+    @if (_busy && _rows.Count == 0)
+    {
+        <MudProgressLinear Indeterminate="true" Class="my-3" />
+    }
+    else if (_rows.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+            @(string.IsNullOrWhiteSpace(_applied)
+                ? "Сводок и справок по делу нет либо они вне вашего допуска."
+                : "По этому запросу ничего не найдено.")
+        </MudText>
+    }
+    else
+    {
+        @foreach (var group in _rows.GroupBy(r => r.ReportDate))
+        {
+            <div class="d-flex align-center gap-2 mt-3 mb-1">
+                <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Small" Color="Color.Warning" />
+                <MudText Typo="Typo.subtitle2">@group.Key.ToString("dd.MM.yyyy")</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">· документов: @group.Count()</MudText>
+            </div>
+            <MudTable T="CaseReportRow" Items="group" Hover="true" Dense="true" Outlined="true" Class="mb-2"
+                      OnRowClick="@(row => Navigation.NavigateTo($"/reports/{row.Item!.Id}"))" RowClass="cursor-pointer">
+                <HeaderContent>
+                    <MudTh>Вид</MudTh>
+                    <MudTh>Объект</MudTh>
+                    <MudTh>Состояние</MudTh>
+                    <MudTh>Создан</MudTh>
+                    <MudTh>Автор</MudTh>
+                    <MudTh Style="text-align:right;">Редакция</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Вид">@context.Kind.Label()</MudTd>
+                    <MudTd DataLabel="Объект">@(context.PersonName ?? "—")</MudTd>
+                    <MudTd DataLabel="Состояние">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@StateColor(context.State)">@context.State.Label()</MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="Создан">@context.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudTd>
+                    <MudTd DataLabel="Автор">@UserName(context.CreatedByUserId)</MudTd>
+                    <MudTd DataLabel="Редакция" Style="text-align:right;">@context.CurrentRevision</MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+    }
+</div>
+
+<MudDialog @bind-Visible="_createOpen" Options="DialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Новая сводка / справка</MudText></TitleContent>
+    <DialogContent>
+        @if (_createError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_createError</MudAlert>
+        }
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="6">
+                <MudSelect T="CaseReportKind" @bind-Value="_kind" Label="Вид документа *" Variant="Variant.Outlined">
+                    <MudSelectItem T="CaseReportKind" Value="CaseReportKind.SummaryOn">@CaseReportKind.SummaryOn.Label()</MudSelectItem>
+                    <MudSelectItem T="CaseReportKind" Value="CaseReportKind.ReferenceUn">@CaseReportKind.ReferenceUn.Label()</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudDatePicker @bind-Date="_date" Label="Дата документа *" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudSelect T="int?" @bind-Value="_personId" Label="Объект" Variant="Variant.Outlined" Clearable="true"
+                           Placeholder="Не указан">
+                    @foreach (var person in Persons)
+                    {
+                        <MudSelectItem T="int?" Value="@person.Id">@person.DisplayName · @person.Role.Label()</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+        </MudGrid>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+            Поля бланка заполняются на странице документа. Свободная правка — в течение окна редактирования после создания.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _createOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_busy || _date is null)" OnClick="CreateAsync">Создать</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly DialogOptions DialogOptions =
+        new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true };
+
+    /// <summary>Дело.</summary>
+    [Parameter, EditorRequired] public int CaseId { get; set; }
+
+    /// <summary>Фигуранты дела — для выбора объекта.</summary>
+    [Parameter] public IReadOnlyList<PersonRow> Persons { get; set; } = [];
+
+    /// <summary>Справочник сотрудников — для подписи автора.</summary>
+    [Parameter] public IReadOnlyList<UserAccountRow> Accounts { get; set; } = [];
+
+    private readonly List<CaseReportRow> _rows = [];
+    private bool _busy;
+    private string? _error;
+    private string? _text;
+    private string? _applied;
+
+    private bool _createOpen;
+    private string? _createError;
+    private CaseReportKind _kind = CaseReportKind.SummaryOn;
+    private DateTime? _date;
+    private int? _personId;
+
+    protected override Task OnInitializedAsync()
+    {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере не грузим.
+        return RendererInfo.IsInteractive ? LoadAsync() : Task.CompletedTask;
+    }
+
+    private Task SearchAsync(string? text)
+    {
+        _text = text;
+        _applied = string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+        return LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new ListCaseReportsQuery(CaseId, _applied));
+            _rows.Clear();
+            if (response is { Status: true, Data: { } rows }) { _rows.AddRange(rows); }
+            else { _error = response.StatusMessage; }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void OpenCreate()
+    {
+        _createError = null;
+        _kind = CaseReportKind.SummaryOn;
+        _date = DateTime.Today;
+        _personId = Persons.FirstOrDefault(p => p.Role == PersonRole.Target)?.Id;
+        _createOpen = true;
+    }
+
+    private async Task CreateAsync()
+    {
+        if (_date is not { } date) { return; }
+        _busy = true;
+        _createError = null;
+        try
+        {
+            var response = await Dispatcher.Send(new CreateCaseReportCommand(
+                CaseId, _kind, DateOnly.FromDateTime(date), _personId, CaseReportContent.Empty));
+            if (response is { Status: true, Data: var id })
+            {
+                _createOpen = false;
+                Navigation.NavigateTo($"/reports/{id}");
+                return;
+            }
+
+            _createError = response.StatusMessage;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>Цвет чипа состояния документа.</summary>
+    public static Color StateColor(CaseReportState state) => state switch
+    {
+        CaseReportState.Editable => Color.Success,
+        CaseReportState.Archived => Color.Default,
+        _ => Color.Error,
+    };
+
+    private string UserName(int? id)
+    {
+        if (id is not { } userId) { return "—"; }
+        var account = Accounts.FirstOrDefault(a => a.UserId == userId);
+        if (account is null) { return $"пользователь № {userId}"; }
+        return string.IsNullOrWhiteSpace(account.DisplayName) ? account.UserName : account.DisplayName;
+    }
+}
