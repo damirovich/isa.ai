@@ -24,8 +24,8 @@ namespace ISC.AI.Modules.Media.Application.Features.Verification;
 public sealed record ListVerificationQueueQuery(VerificationStage Stage, int Page = 1, int PageSize = ListVerificationQueueQuery.DefaultPageSize)
     : IRequest<ResponseDto<IReadOnlyList<VerificationQueueItem>>>, IAuditableRequest
 {
-    /// <summary>Размер страницы по умолчанию.</summary>
-    public const int DefaultPageSize = 24;
+    /// <summary>Размер страницы по умолчанию: три полных ряда по 6 карточек.</summary>
+    public const int DefaultPageSize = 18;
 
     /// <summary>Наибольший размер страницы: очередь целиком за один запрос не отдаётся.</summary>
     public const int MaxPageSize = 100;
