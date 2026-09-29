@@ -36,6 +36,25 @@ public interface ISearchSessionStore
     /// </summary>
     Task<IReadOnlyList<SearchCandidateRow>> ListQueueAsync(VerificationStage stage, IReadOnlyCollection<int> caseIds, AccessContext access, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Одна страница очереди стадии (те же правила отбора, что у <see cref="ListQueueAsync"/>) и общее число
+    /// кандидатов в очереди в пределах допуска. Порядок устойчивый — сессия, ранг, идентификатор, — чтобы страницы
+    /// не перекрывались и не теряли строк между запросами.
+    /// </summary>
+    /// <param name="stage">Стадия верификации.</param>
+    /// <param name="caseIds">Область дел субъекта (ТБ-071); пустая — пустая очередь.</param>
+    /// <param name="skip">Сколько строк пропустить (≥ 0).</param>
+    /// <param name="take">Сколько строк взять (≥ 1).</param>
+    /// <param name="access">Контекст допуска.</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    Task<VerificationQueuePage> ListQueuePageAsync(
+        VerificationStage stage, IReadOnlyCollection<int> caseIds, int skip, int take, AccessContext access, CancellationToken cancellationToken = default);
+
     /// <summary>Записать решение и новый статус атомарно; привязка к фигуранту (<paramref name="personRef"/>) — если указана.</summary>
     Task RecordDecisionAsync(int candidateId, VerificationDecision decision, CandidateStatus newStatus, int? personRef, CancellationToken cancellationToken = default);
 }
+
+/// <summary>Страница очереди верификации: строки страницы и общее число кандидатов в очереди.</summary>
+/// <param name="Rows">Кандидаты страницы.</param>
+/// <param name="Total">Всего кандидатов в очереди стадии в пределах допуска и области дел.</param>
+public sealed record VerificationQueuePage(IReadOnlyList<SearchCandidateRow> Rows, int Total);
