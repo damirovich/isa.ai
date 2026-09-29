@@ -441,8 +441,8 @@ else
     </DialogActions>
 </MudDialog>
 
-@* --- Новый эталон (AddReferencePhotoCommand): носитель и лицо — идентификаторы пакета «Медиа»
-       (берутся со страницы носителя /media/assets/{id}); прежний эталон не удаляется (ТБ-077) --- *@
+@* --- Новый эталон (AddReferencePhotoCommand): снимок и лицо выбираются мышкой из материалов дела либо
+       загружается новое фото (ReferencePhotoPicker); прежний эталон не удаляется (ТБ-077) --- *@
 <MudDialog @bind-Visible="_photoOpen" Options="FormDialogOptions">
     <TitleContent><MudText Typo="Typo.h6">Новый эталон</MudText></TitleContent>
     <DialogContent>
@@ -450,15 +450,12 @@ else
         {
             <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_photoError</MudAlert>
         }
+        @if (_photoOpen && _person is { } owner)
+        {
+            <ReferencePhotoPicker CaseId="owner.CaseId" UploadSource="@_photoSource"
+                                  SelectionChanged="@(pick => _photoPick = pick)" />
+        }
         <MudGrid Spacing="2">
-            <MudItem xs="12" sm="6">
-                <MudNumericField T="int?" @bind-Value="_photoAssetId" Label="Носитель № *" Variant="Variant.Outlined" Min="1"
-                                 HelperText="Идентификатор фото или видео из медиатеки дела (аудиозапись эталоном быть не может)" />
-            </MudItem>
-            <MudItem xs="12" sm="6">
-                <MudNumericField T="int?" @bind-Value="_photoFaceId" Label="Лицо №" Variant="Variant.Outlined" Min="1"
-                                 HelperText="Идентификатор лица на носителе (если выбрано)" />
-            </MudItem>
             <MudItem xs="12" sm="6">
                 <MudTextField @bind-Value="_photoSource" Label="Источник" Variant="Variant.Outlined" MaxLength="300" />
             </MudItem>
@@ -483,6 +480,10 @@ else
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _photoOpen = false)">Отмена</MudButton>
+        @if (!PhotoValid)
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary mr-2">Выберите снимок и лицо</MudText>
+        }
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!PhotoValid || _busy)" OnClick="SavePhotoAsync">Добавить</MudButton>
     </DialogActions>
 </MudDialog>
@@ -681,13 +682,12 @@ else
     // --- Новый эталон ---
     private bool _photoOpen;
     private string? _photoError;
-    private int? _photoAssetId;
-    private int? _photoFaceId;
+    private ReferencePick? _photoPick;
     private string? _photoSource;
     private string? _photoLegalBasis;
     private DateTime? _photoReviewDueAt;
     private int? _photoSupersedesId;
-    private bool PhotoValid => _photoAssetId is > 0;
+    private bool PhotoValid => _photoPick is not null;
 
     protected override async Task OnInitializedAsync()
     {
@@ -1023,8 +1023,7 @@ else
     private void OpenAddPhoto()
     {
         _photoError = null;
-        _photoAssetId = null;
-        _photoFaceId = null;
+        _photoPick = null;
         _photoSource = null;
         _photoLegalBasis = null;
         _photoReviewDueAt = null;
@@ -1034,14 +1033,14 @@ else
 
     private async Task SavePhotoAsync()
     {
-        if (_photoAssetId is not { } assetId) { return; }
+        if (_photoPick is not { } pick) { return; }
         _busy = true;
         _photoError = null;
         try
         {
-            // Оценка качества (QualityScore) — от пакета «Медиа»; здесь её нет, передаём null.
+            // Оценку качества сервер берёт с выбранного лица (конвейер «Медиа»).
             var response = await Dispatcher.Send(new AddReferencePhotoCommand(
-                Id, assetId, _photoFaceId,
+                Id, pick.AssetId, pick.FaceId,
                 string.IsNullOrWhiteSpace(_photoSource) ? null : _photoSource.Trim(),
                 string.IsNullOrWhiteSpace(_photoLegalBasis) ? null : _photoLegalBasis.Trim(),
                 _photoReviewDueAt is { } due ? DateOnly.FromDateTime(due) : null,
