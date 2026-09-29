@@ -76,6 +76,13 @@ public interface IMediaStore
     Task<bool> ReclassifyAsAudioAsync(int assetId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Записать подтверждённую или исправленную оператором дату и время съёмки носителя (ТФ-МЕД-17). Право и
+    /// доступ к носителю проверяет вызывающий; значение хранится в UTC.
+    /// </summary>
+    /// <returns><see langword="true"/> — записано; <see langword="false"/> — носителя нет.</returns>
+    Task<bool> SetCapturedAtAsync(int assetId, DateTimeOffset capturedAt, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Восстановление при старте хоста: очередь фоновых задач живёт в памяти и при перезапуске теряется, поэтому
     /// носители, оставшиеся «в очереди» или «в работе», навсегда висели бы в этом статусе. Одним обновлением на
     /// конвейер: расшифровка <see cref="TranscriptStatus.Pending"/>/<see cref="TranscriptStatus.Processing"/> и

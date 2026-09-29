@@ -180,4 +180,15 @@ public sealed partial class MediaStore(
                 .SetProperty(a => a.IndexError, (string?)null), cancellationToken);
         return updated > 0;
     }
+
+    /// <inheritdoc />
+    public async Task<bool> SetCapturedAtAsync(int assetId, DateTimeOffset capturedAt, CancellationToken cancellationToken = default)
+    {
+        // Столбец timestamptz: Npgsql принимает DateTimeOffset только со смещением 0.
+        var utc = capturedAt.ToUniversalTime();
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var updated = await db.Assets.Where(a => a.Id == assetId)
+            .ExecuteUpdateAsync(s => s.SetProperty(a => a.CapturedAt, (DateTimeOffset?)utc), cancellationToken);
+        return updated > 0;
+    }
 }
