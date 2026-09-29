@@ -189,6 +189,61 @@ public sealed class IntersectionStore(
             matches.AddRange(nameMatches.Select(m => new Match(IntersectionKind.PersonName, key, NameValue(m.DisplayName, m.BirthDate!.Value), m.CaseId)));
         }
 
+        // Лицо (ТФ-ПЕР-07, ADR-0029 п. 3а) — ТОЛЬКО подтверждённые появления: «появление» записывается после двух
+        // независимых «подтверждён» разных сотрудников (ТБ-073), сырые кандидаты поиска сюда не попадают никогда.
+        // Своя сторона — появления объекта под floor'ом строки появления; счётчики строятся ТОЛЬКО по ним (их субъект
+        // и так видит в карточке объекта), о чужих фигурантах наружу не идёт ни имя, ни число.
+        var ownAppearances = await db.Appearances.AsNoTracking()
+            .Where(BaselineAccess.Filter<Appearance>(access))
+            .Where(policy.BuildFilter<Appearance>(access))
+            .Where(a => a.PersonId == own.Id)
+            .Select(a => new { a.MediaAssetId, a.MediaFaceId, a.ConfirmedAtUtc })
+            .ToListAsync(cancellationToken);
+        var ownAssetIds = ownAppearances.Select(a => a.MediaAssetId).Distinct().ToList();
+        var ownFaceIds = ownAppearances.Select(a => a.MediaFaceId).Distinct().ToList();
+
+        // Вид 1: объект подтверждён на материале, привязанном к ДРУГОМУ делу (тот же носитель в нескольких делах —
+        // дедупликация по хешу, ТНД-002). Дело — под floor'ом (otherCases), своё дело исключено.
+        var materialLinks = await db.CaseMediaLinks.AsNoTracking()
+            .Where(l => ownAssetIds.Contains(l.MediaAssetId) && otherCases.Any(c => c.Id == l.CaseId))
+            .Select(l => new { l.MediaAssetId, l.CaseId })
+            .ToListAsync(cancellationToken);
+        foreach (var group in materialLinks.GroupBy(l => l.CaseId))
+        {
+            var assets = group.Select(l => l.MediaAssetId).ToHashSet();
+            var onCase = ownAppearances.Where(a => assets.Contains(a.MediaAssetId)).ToList();
+            var last = onCase.Max(a => a.ConfirmedAtUtc);
+            matches.Add(new Match(IntersectionKind.Face, FaceOnMaterialKey,
+                string.Create(CultureInfo.InvariantCulture,
+                    $"объект подтверждён на материалах этого дела: появлений {onCase.Count}, последнее {last:dd.MM.yyyy}"),
+                group.Key));
+        }
+
+        // Вид 2: то же лицо (та же детекция на том же кадре) подтверждено у фигуранта ДРУГОГО дела — один человек
+        // в двух делах. Чужое появление, чужой фигурант и его дело — каждый под floor'ом (otherPersons → otherCases).
+        var sameFace = await db.Appearances.AsNoTracking()
+            .Where(BaselineAccess.Filter<Appearance>(access))
+            .Where(policy.BuildFilter<Appearance>(access))
+            .Where(a => ownFaceIds.Contains(a.MediaFaceId) && a.PersonId != own.Id)
+            .Join(otherPersons, a => a.PersonId, p => p.Id, (a, p) => new { a.MediaFaceId, p.CaseId })
+            .ToListAsync(cancellationToken);
+        foreach (var group in sameFace.GroupBy(f => f.CaseId))
+        {
+            var faces = group.Select(f => f.MediaFaceId).ToHashSet();
+            var shared = ownAppearances.Count(a => faces.Contains(a.MediaFaceId));
+            matches.Add(new Match(IntersectionKind.Face, FaceSharedKey,
+                string.Create(CultureInfo.InvariantCulture,
+                    $"то же лицо подтверждено у фигуранта этого дела: совпавших появлений объекта {shared}"),
+                group.Key));
+        }
+
+        if (ownAppearances.Count > 0)
+        {
+            const string OwnFace = "лицо объекта (подтверждено двумя сотрудниками)";
+            ownValues.TryAdd((IntersectionKind.Face, FaceOnMaterialKey), OwnFace);
+            ownValues.TryAdd((IntersectionKind.Face, FaceSharedKey), OwnFace);
+        }
+
         var caseIds = matches.Select(m => m.CaseId).Distinct().ToList();
 
         var cases = await db.Cases.AsNoTracking()
@@ -241,7 +296,11 @@ public sealed class IntersectionStore(
         return (own, rows);
     }
 
-    // Ключ пересечения по лицу: нормализованное ФИО и дата рождения в инвариантном виде.
+    // Ключи пересечения по лицу (решение по ним — на своей стороне, как у остальных видов, ADR-0029 п. 6).
+    private const string FaceOnMaterialKey = "face:material";
+    private const string FaceSharedKey = "face:shared";
+
+    // Ключ пересечения по ФИО: нормализованное ФИО и дата рождения в инвариантном виде.
     private static string NameKey(string nameNormalized, DateOnly birthDate) =>
         $"{nameNormalized}|{birthDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}";
 

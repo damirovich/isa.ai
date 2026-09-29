@@ -11,6 +11,12 @@ public enum IntersectionKind
 
     /// <summary>ФИО и дата рождения.</summary>
     PersonName = 3,
+
+    /// <summary>
+    /// Лицо: подтверждённое двумя сотрудниками появление объекта (ТБ-073) — на материале другого дела или на том же
+    /// лице, что подтверждено у фигуранта другого дела (ТФ-ПЕР-07, ADR-0029 п. 3а).
+    /// </summary>
+    Face = 4,
 }
 
 /// <summary>Решение человека по пересечению (ТФ-ПЕР-07): система связей между делами сама не создаёт.</summary>
@@ -32,6 +38,7 @@ public static class IntersectionLabels
         IntersectionKind.Vehicle => "Автотранспорт",
         IntersectionKind.Address => "Адрес",
         IntersectionKind.PersonName => "ФИО и дата рождения",
+        IntersectionKind.Face => "Лицо",
         _ => kind.ToString(),
     };
 
