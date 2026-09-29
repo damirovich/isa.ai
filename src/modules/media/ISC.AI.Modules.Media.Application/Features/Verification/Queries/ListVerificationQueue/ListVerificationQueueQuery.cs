@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using FluentValidation;
 using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.Security;
@@ -13,16 +14,27 @@ namespace ISC.AI.Modules.Media.Application.Features.Verification;
 
 /// <summary>
 /// Очередь стадии верификации (ТФ-ВЕР-01/02): кандидаты, ждущие решения субъекта на этой стадии, по делам,
-/// доступным ему. Выдача — слепая проекция <see cref="VerificationQueueItem"/> (без чужих решений и фигуранта).
+/// доступным ему. Выдача — слепая проекция <see cref="VerificationQueueItem"/> (без чужих решений и фигуранта),
+/// ПОСТРАНИЧНО: в ответе строки страницы <paramref name="Page"/>, а в <c>TotalCount</c> — сколько всего
+/// кандидатов в очереди стадии в пределах допуска.
 /// </summary>
-public sealed record ListVerificationQueueQuery(VerificationStage Stage)
+/// <param name="Stage">Стадия верификации.</param>
+/// <param name="Page">Номер страницы, с 1.</param>
+/// <param name="PageSize">Размер страницы, 1..<see cref="MaxPageSize"/>.</param>
+public sealed record ListVerificationQueueQuery(VerificationStage Stage, int Page = 1, int PageSize = ListVerificationQueueQuery.DefaultPageSize)
     : IRequest<ResponseDto<IReadOnlyList<VerificationQueueItem>>>, IAuditableRequest
 {
+    /// <summary>Размер страницы по умолчанию.</summary>
+    public const int DefaultPageSize = 24;
+
+    /// <summary>Наибольший размер страницы: очередь целиком за один запрос не отдаётся.</summary>
+    public const int MaxPageSize = 100;
+
     /// <inheritdoc />
     public AuditAction AuditAction => AuditAction.View;
 
     /// <inheritdoc />
-    public string? AuditSummary => $"media:verification:queue:{Stage}";
+    public string? AuditSummary => $"media:verification:queue:{Stage}:page:{Page}";
 
     /// <inheritdoc cref="ListVerificationQueueQuery" />
     public sealed class Handler(
@@ -65,12 +77,16 @@ public sealed record ListVerificationQueueQuery(VerificationStage Stage)
                 return ResponseDto<IReadOnlyList<VerificationQueueItem>>.Ok([], 0);
             }
 
-            var candidates = await store.ListQueueAsync(query.Stage, caseIds, access, cancellationToken);
+            // Страница — на стороне БД; границы зажимаются и здесь (валидатор — первый рубеж, этот — последний).
+            var pageSize = Math.Clamp(query.PageSize, 1, MaxPageSize);
+            var skip = (long)(Math.Max(query.Page, 1) - 1) * pageSize;
+            var page = await store.ListQueuePageAsync(
+                query.Stage, caseIds, (int)Math.Min(skip, int.MaxValue), pageSize, access, cancellationToken);
 
-            // Проба (вырезка/хеш) — из сессии; сессии кэшируем: в очереди много кандидатов одной сессии.
+            // Проба (вырезка/хеш) — из сессии; сессии кэшируем: на странице много кандидатов одной сессии.
             var sessions = new Dictionary<int, SearchSessionRow?>();
-            var items = new List<VerificationQueueItem>(candidates.Count);
-            foreach (var candidate in candidates)
+            var items = new List<VerificationQueueItem>(page.Rows.Count);
+            foreach (var candidate in page.Rows)
             {
                 if (!sessions.TryGetValue(candidate.SessionId, out var session))
                 {
@@ -86,7 +102,19 @@ public sealed record ListVerificationQueueQuery(VerificationStage Stage)
                 items.Add(VerificationQueueItem.From(candidate, session, subjectId));
             }
 
-            return ResponseDto<IReadOnlyList<VerificationQueueItem>>.Ok(items, items.Count);
+            return ResponseDto<IReadOnlyList<VerificationQueueItem>>.Ok(items, page.Total);
         }
+    }
+}
+
+/// <summary>Границы страницы очереди верификации.</summary>
+public sealed class ListVerificationQueueValidator : AbstractValidator<ListVerificationQueueQuery>
+{
+    /// <inheritdoc cref="ListVerificationQueueValidator" />
+    public ListVerificationQueueValidator()
+    {
+        RuleFor(q => q.Stage).IsInEnum();
+        RuleFor(q => q.Page).GreaterThanOrEqualTo(1);
+        RuleFor(q => q.PageSize).InclusiveBetween(1, ListVerificationQueueQuery.MaxPageSize);
     }
 }

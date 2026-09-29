@@ -120,6 +120,55 @@ public sealed class MediaSearchSessionStoreTests : IAsyncLifetime
         (await store.ListQueueAsync(VerificationStage.Expert, [100], cleared)).Count.ShouldBe(3);
     }
 
+    [Fact(DisplayName = "Страница очереди: устойчивый порядок без перекрытий, итог — вся очередь в допуске; за концом — пусто с тем же итогом")]
+    public async Task Queue_page_is_stable_and_counts_only_visible()
+    {
+        var factory = new MediaContextFactory(_postgres.GetConnectionString());
+        var faces = new List<int>();
+        int secretFace;
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+            for (var i = 0; i < 7; i++)
+            {
+                faces.Add(await SeedFaceAsync(db, classification: 1, divisionId: 7, crop: null));
+            }
+
+            secretFace = await SeedFaceAsync(db, classification: 2, divisionId: 7, crop: null);
+        }
+
+        var store = new SearchSessionStore(factory, new AllowAllAccessPolicy());
+        // Две сессии: 4 + 3 открытых кандидата и один кандидат выше допуска.
+        await store.CreateAsync(Draft(caseId: 100, caseIds: [100]),
+            [Candidate(faces[0], 0.1), Candidate(faces[1], 0.2), Candidate(secretFace, 0.25, classification: 2), Candidate(faces[2], 0.3), Candidate(faces[3], 0.4)]);
+        await store.CreateAsync(Draft(caseId: 100, caseIds: [100]),
+            [Candidate(faces[4], 0.1), Candidate(faces[5], 0.2), Candidate(faces[6], 0.3)]);
+
+        var full = await store.ListQueueAsync(VerificationStage.Expert, [100], Insider);
+        full.Count.ShouldBe(7);
+
+        var pages = new List<SearchCandidateRow>();
+        for (var skip = 0; skip < 9; skip += 3)
+        {
+            var page = await store.ListQueuePageAsync(VerificationStage.Expert, [100], skip, 3, Insider);
+            page.Total.ShouldBe(7); // кандидат выше допуска не входит ни в страницу, ни в итог (ТБ-021)
+            pages.AddRange(page.Rows);
+        }
+
+        // Страницы подряд дают ту же очередь в том же порядке — без пропусков и повторов.
+        pages.Select(r => r.Id).ShouldBe(full.Select(r => r.Id));
+
+        var beyond = await store.ListQueuePageAsync(VerificationStage.Expert, [100], 50, 3, Insider);
+        beyond.Rows.ShouldBeEmpty();
+        beyond.Total.ShouldBe(7);
+
+        (await store.ListQueuePageAsync(VerificationStage.Expert, [], 0, 3, Insider)).Total.ShouldBe(0);
+        (await store.ListQueuePageAsync(VerificationStage.Expert, [100], 0, 3, Outsider)).Total.ShouldBe(0);
+        (await store.ListQueuePageAsync(VerificationStage.Expert, [100], 0, 50, Insider with { MaxClassification = 2 })).Total.ShouldBe(8);
+        await Should.ThrowAsync<ArgumentOutOfRangeException>(() => store.ListQueuePageAsync(VerificationStage.Expert, [100], -1, 3, Insider));
+        await Should.ThrowAsync<ArgumentOutOfRangeException>(() => store.ListQueuePageAsync(VerificationStage.Expert, [100], 0, 0, Insider));
+    }
+
     [Fact(DisplayName = "ТБ-073: очередь по стадиям; решение и статус меняются одной транзакцией; повтор стадии отклоняется без следа")]
     public async Task Queue_and_decisions_follow_two_person_rule()
     {

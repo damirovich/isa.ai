@@ -2,7 +2,9 @@
 @* Очередь двойной верификации (ТФ-ВЕР-01/02, ТБ-073): две вкладки — стадия эксперта и стадия
    верификатора. Каждая — СЛЕПАЯ проекция: без чужих решений и без фигуранта. Кнопки/вкладки по ролям
    не прячем — право проверяет обработчик, отказ показываем текстом (StatusMessage). Мини-пара
-   «проба ↔ кандидат» в равном масштабе, балл — с предупреждением (ТЭ-006), формулировки — ТЭ-005. *@
+   «проба ↔ кандидат» в равном масштабе, балл — с предупреждением (ТЭ-006), формулировки — ТЭ-005.
+   Очередь листается ПОСТРАНИЧНО: сервер отдаёт одну страницу и общее число, лицо пробы запрашивается один раз
+   на страницу (ProbeFaceCache) — открытие не замедляется с ростом очереди. *@
 @page "/media/verification"
 @rendermode InteractiveServer
 @using ISC.AI.Modules.Media.Application.Features.Verification
@@ -36,10 +38,17 @@
 </MudTabs>
 
 @code {
+    /// <summary>Размеры страницы на выбор; по умолчанию — <see cref="ListVerificationQueueQuery.DefaultPageSize"/>.</summary>
+    private static readonly int[] PageSizes = [12, 24, 48, 96];
+
     private int _activeTab;
     private bool _busy;
+    private int _pageSize = ListVerificationQueueQuery.DefaultPageSize;
     private readonly Dictionary<VerificationStage, IReadOnlyList<VerificationQueueItem>> _items = [];
     private readonly Dictionary<VerificationStage, string?> _denied = [];
+    private readonly Dictionary<VerificationStage, int> _pages = [];
+    private readonly Dictionary<VerificationStage, int> _totals = [];
+    private readonly Dictionary<VerificationStage, ProbeFaceCache> _probeFaces = [];
 
     private VerificationStage ActiveStage => _activeTab == 1 ? VerificationStage.Verifier : VerificationStage.Expert;
 
@@ -60,21 +69,51 @@
 
     private Task ReloadAsync() => LoadAsync(ActiveStage);
 
-    /// <summary>Очередь стадии; отказ по роли/допуску — текстом на вкладке, а не скрытой вкладкой.</summary>
+    private Task GoToPageAsync(VerificationStage stage, int page)
+    {
+        _pages[stage] = page;
+        return LoadAsync(stage);
+    }
+
+    private Task OnPageSizeChangedAsync(int size)
+    {
+        _pageSize = size;
+        // Смена размера меняет границы страниц — начинаем с первой на обеих стадиях.
+        _pages.Clear();
+        return LoadAsync(ActiveStage);
+    }
+
+    private int CurrentPage(VerificationStage stage) => _pages.GetValueOrDefault(stage, 1);
+
+    private int PageCount(VerificationStage stage) =>
+        Math.Max(1, (int)Math.Ceiling(_totals.GetValueOrDefault(stage) / (double)_pageSize));
+
+    /// <summary>Страница очереди стадии; отказ по роли/допуску — текстом на вкладке, а не скрытой вкладкой.</summary>
     private async Task LoadAsync(VerificationStage stage)
     {
         _busy = true;
         try
         {
-            var response = await Dispatcher.Send(new ListVerificationQueueQuery(stage));
+            var response = await FetchAsync(stage);
+
+            // Кандидатов разобрали, и текущей страницы больше нет — показываем последнюю существующую
+            // (один повтор: общее число уже известно из первого ответа).
+            if (response is { Status: true, Data.Count: 0, TotalCount: > 0 } && CurrentPage(stage) > 1)
+            {
+                _pages[stage] = Math.Max(1, (int)Math.Ceiling(response.TotalCount.Value / (double)_pageSize));
+                response = await FetchAsync(stage);
+            }
+
             if (response is { Status: true, Data: { } list })
             {
                 _items[stage] = list;
+                _totals[stage] = response.TotalCount ?? list.Count;
                 _denied[stage] = null;
             }
             else
             {
                 _items[stage] = [];
+                _totals[stage] = 0;
                 _denied[stage] = response.StatusMessage;
             }
         }
@@ -84,13 +123,23 @@
         }
     }
 
+    private Task<Abstractions.Application.ResponseDto<IReadOnlyList<VerificationQueueItem>>> FetchAsync(VerificationStage stage)
+    {
+        // Новый кэш лиц проб на каждую загрузку: допуск мог измениться, открытие аудируется заново (ТБ-030).
+        _probeFaces[stage] = new ProbeFaceCache();
+        return Dispatcher.Send(new ListVerificationQueueQuery(stage, CurrentPage(stage), _pageSize)).AsTask();
+    }
+
     private RenderFragment RenderQueue(VerificationStage stage) => __builder =>
     {
         var denied = _denied.GetValueOrDefault(stage);
         var items = _items.GetValueOrDefault(stage) ?? [];
+        var total = _totals.GetValueOrDefault(stage);
+        var page = CurrentPage(stage);
+        var probeFaces = _probeFaces.GetValueOrDefault(stage);
         var stageName = stage.ToString();
 
-        @if (_busy && !_items.ContainsKey(stage))
+        @if (_busy)
         {
             <MudProgressLinear Indeterminate="true" Class="my-3" />
         }
@@ -100,19 +149,36 @@
         }
         else if (items.Count == 0)
         {
-            @* Текст НЕ утверждает «пусто»: кандидаты могут быть вне допуска (ТБ-020/021). *@
-            <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
-                Очередь пуста: кандидатов, ждущих вашего решения на этой стадии, нет либо они вне вашего допуска.
-            </MudText>
+            @if (_items.ContainsKey(stage))
+            {
+                @* Текст НЕ утверждает «пусто»: кандидаты могут быть вне допуска (ТБ-020/021). *@
+                <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                    Очередь пуста: кандидатов, ждущих вашего решения на этой стадии, нет либо они вне вашего допуска.
+                </MudText>
+            }
         }
         else
         {
+            var first = (page - 1) * _pageSize + 1;
+            var last = first + items.Count - 1;
+            <div class="d-flex align-center justify-space-between flex-wrap gap-2 px-2 pt-2">
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    В очереди: @total · показаны @first–@last
+                </MudText>
+                <MudSelect T="int" Value="_pageSize" ValueChanged="OnPageSizeChangedAsync" Label="На странице"
+                           Dense="true" Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:140px;" Disabled="_busy">
+                    @foreach (var size in PageSizes)
+                    {
+                        <MudSelectItem T="int" Value="@size">@size</MudSelectItem>
+                    }
+                </MudSelect>
+            </div>
             <div class="d-flex flex-wrap gap-3 pa-2">
                 @foreach (var item in items)
                 {
                     var current = item;
-                    <MudPaper Outlined="true" Class="pa-3 d-flex flex-column align-center gap-1" Style="width:300px;">
-                        <CandidatePair Item="@current" Size="96" ShowLinks="false" />
+                    <MudPaper @key="current.CandidateId" Outlined="true" Class="pa-3 d-flex flex-column align-center gap-1" Style="width:300px;">
+                        <CandidatePair Item="@current" Size="96" ShowLinks="false" ProbeFaces="@probeFaces" />
                         <SimilarityChip Similarity="@current.Similarity" />
                         <div class="d-flex align-center gap-1 flex-wrap justify-center">
                             <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@current.Status.ChipColor()">@current.Status.Label()</MudChip>
@@ -132,6 +198,14 @@
                     </MudPaper>
                 }
             </div>
+            @* Навигация — только когда есть что листать. *@
+            @if (PageCount(stage) > 1)
+            {
+                <div class="d-flex justify-center pa-2">
+                    <MudPagination Count="@PageCount(stage)" Selected="page" SelectedChanged="@(p => GoToPageAsync(stage, p))"
+                                   Color="Color.Primary" Size="Size.Small" Disabled="_busy" />
+                </div>
+            }
         }
     };
 }

@@ -166,21 +166,38 @@ public sealed class SearchSessionStore(
             return []; // область дел пуста — очередь пуста, а не «все дела» (ТБ-071)
         }
 
-        var status = stage switch
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        return await MaterializeAsync(db, OrderedQueue(QueueCandidates(db, stage, caseIds, access)), cancellationToken);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Страница и общее число считаются по ОДНОМУ и тому же отбору (<see cref="QueueCandidates"/>) — под той же
+    /// решёткой (ТБ-020/021), что и полная очередь: число не включает недоступных кандидатов и ничего о них не
+    /// сообщает. Решения читаются только для строк страницы — очередь из тысяч кандидатов не материализуется.
+    /// </remarks>
+    public async Task<VerificationQueuePage> ListQueuePageAsync(
+        VerificationStage stage, IReadOnlyCollection<int> caseIds, int skip, int take, AccessContext access,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(caseIds);
+        ArgumentOutOfRangeException.ThrowIfNegative(skip);
+        ArgumentOutOfRangeException.ThrowIfLessThan(take, 1);
+        if (caseIds.Count == 0)
         {
-            VerificationStage.Expert => CandidateStatus.Candidate,
-            VerificationStage.Verifier => CandidateStatus.PendingVerifier,
-            _ => throw new ArgumentOutOfRangeException(nameof(stage), stage, "Неизвестная стадия верификации."),
-        };
-        var ids = caseIds as int[] ?? caseIds.ToArray();
+            return new VerificationQueuePage([], 0); // область дел пуста — очередь пуста (ТБ-071)
+        }
 
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-        return await MaterializeAsync(
-            db,
-            VisibleCandidates(db, access)
-                .Where(c => c.Status == status && ids.Contains(c.Session!.CaseId))
-                .OrderBy(c => c.SessionId).ThenBy(c => c.Rank),
-            cancellationToken);
+        var queue = QueueCandidates(db, stage, caseIds, access);
+        var total = await queue.CountAsync(cancellationToken);
+        if (total <= skip)
+        {
+            return new VerificationQueuePage([], total);
+        }
+
+        var rows = await MaterializeAsync(db, OrderedQueue(queue).Skip(skip).Take(take), cancellationToken);
+        return new VerificationQueuePage(rows, total);
     }
 
     /// <inheritdoc />
@@ -228,6 +245,27 @@ public sealed class SearchSessionStore(
         }
         await transaction.CommitAsync(cancellationToken);
     }
+
+    // --- очередь верификации: общий отбор для полной очереди и для страницы ---
+
+    private IQueryable<SearchCandidate> QueueCandidates(
+        MediaDbContext db, VerificationStage stage, IReadOnlyCollection<int> caseIds, AccessContext access)
+    {
+        var status = stage switch
+        {
+            VerificationStage.Expert => CandidateStatus.Candidate,
+            VerificationStage.Verifier => CandidateStatus.PendingVerifier,
+            _ => throw new ArgumentOutOfRangeException(nameof(stage), stage, "Неизвестная стадия верификации."),
+        };
+        var ids = caseIds as int[] ?? caseIds.ToArray();
+
+        return VisibleCandidates(db, access)
+            .Where(c => c.Status == status && ids.Contains(c.Session!.CaseId));
+    }
+
+    // Устойчивый порядок: идентификатор замыкает сортировку, чтобы страницы не перекрывались.
+    private static IQueryable<SearchCandidate> OrderedQueue(IQueryable<SearchCandidate> queue) =>
+        queue.OrderBy(c => c.SessionId).ThenBy(c => c.Rank).ThenBy(c => c.Id);
 
     // --- решётка: сессия и кандидат — обе режимные сущности (ТБ-020/070) ---
 

@@ -36,6 +36,12 @@
     /// <summary>Показывать ссылки «открыть носитель» под плитками.</summary>
     [Parameter] public bool ShowLinks { get; set; } = true;
 
+    /// <summary>
+    /// Общий кэш лиц проб страницы (очередь верификации): карточки одной сессии делят один запрос лица пробы.
+    /// Без кэша (одиночная карточка) пара запрашивает лицо сама.
+    /// </summary>
+    [Parameter] public ProbeFaceCache? ProbeFaces { get; set; }
+
     private int Gap => Size >= 200 ? 24 : 8;
 
     private FaceRow? _probeFace;
@@ -75,7 +81,9 @@
 
         _resolvedProbeFaceId = probeFaceId;
         _probeUnavailable = false;
-        var response = await Dispatcher.Send(new GetFaceQuery(probeFaceId));
+        var response = ProbeFaces is { } cache
+            ? await cache.GetAsync(probeFaceId, Dispatcher)
+            : await Dispatcher.Send(new GetFaceQuery(probeFaceId));
         if (response is { Status: true, Data: { } face })
         {
             _probeFace = face;
