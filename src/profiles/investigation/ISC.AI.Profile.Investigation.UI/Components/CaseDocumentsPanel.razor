@@ -10,10 +10,21 @@
 @using ISC.AI.Profile.Investigation.Application.Features.CaseDocuments
 
 <div class="pt-3">
-    <div class="d-flex justify-end mb-2">
+    <div class="d-flex justify-end gap-2 mb-2">
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.NoteAdd"
+                   Disabled="_busy" OnClick="@(() => { _notice = null; _registerOpen = true; })">Зарегистрировать новый</MudButton>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.AttachFile"
                    Disabled="_busy" OnClick="OpenAttach">Прикрепить документ</MudButton>
     </div>
+
+    @if (_notice is { } notice)
+    {
+        <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _notice = null)">
+            @notice.Text
+            <MudLink Href="@($"/docflow/documents/{notice.DocumentId}")" Class="ml-2">Открыть документ, чтобы приложить файл</MudLink>
+        </MudAlert>
+    }
 
     @if (_error is not null)
     {
@@ -54,6 +65,19 @@
         </NoRecordsContent>
     </MudTable>
 </div>
+
+@* Регистрация нового документа — та же форма документооборота, встроенная в окно: гриф и подразделение
+   подставлены из дела (в пределах допуска), после сохранения документ сразу прикрепляется к делу. *@
+<MudDialog @bind-Visible="_registerOpen" Options="DialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Новый документ дела</MudText></TitleContent>
+    <DialogContent>
+        @if (_registerOpen)
+        {
+            <DocumentRegister InitialClassification="@CaseClassification" InitialDivisionId="@CaseDivisionId"
+                              OnRegistered="OnRegisteredAsync" OnCancel="@(() => _registerOpen = false)" />
+        }
+    </DialogContent>
+</MudDialog>
 
 <MudDialog @bind-Visible="_attachOpen" Options="DialogOptions">
     <TitleContent><MudText Typo="Typo.h6">Прикрепить документ к делу</MudText></TitleContent>
@@ -111,6 +135,12 @@
     /// <summary>Дело.</summary>
     [Parameter, EditorRequired] public int CaseId { get; set; }
 
+    /// <summary>Гриф дела — подставляется в форму нового документа.</summary>
+    [Parameter] public short? CaseClassification { get; set; }
+
+    /// <summary>Подразделение дела — подставляется в форму нового документа.</summary>
+    [Parameter] public int? CaseDivisionId { get; set; }
+
     /// <summary>Справочник сотрудников — для подписи «кто прикрепил».</summary>
     [Parameter] public IReadOnlyList<UserAccountRow> Accounts { get; set; } = [];
 
@@ -121,6 +151,19 @@
     private bool _attachOpen;
     private string? _attachError;
     private string? _search;
+    private bool _registerOpen;
+    private (string Text, int DocumentId)? _notice;
+
+    // Документ зарегистрирован формой документооборота — прикрепляем к делу и показываем в списке.
+    private async Task OnRegisteredAsync(int documentId)
+    {
+        _registerOpen = false;
+        var response = await Dispatcher.Send(new AttachCaseDocumentCommand(CaseId, documentId));
+        _notice = response.Status
+            ? ($"Документ № {documentId} зарегистрирован и прикреплён к делу.", documentId)
+            : ($"Документ № {documentId} зарегистрирован, но не прикреплён: {response.StatusMessage}", documentId);
+        await LoadAsync();
+    }
 
     protected override Task OnInitializedAsync() =>
         // ТБ-030 «одно открытие — одна запись»: на предрендере не грузим.

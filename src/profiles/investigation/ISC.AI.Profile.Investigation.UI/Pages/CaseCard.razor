@@ -378,7 +378,7 @@ else
 
     @* --- Документы документооборота, прикреплённые к делу (ТФ-ДЕЛ-02): компонент грузит список сам --- *@
     <MudTabPanel Text="Документы" Icon="@Icons.Material.Filled.FolderCopy">
-        <CaseDocumentsPanel CaseId="@_case.Id" Accounts="@_accounts" />
+        <CaseDocumentsPanel CaseId="@_case.Id" Accounts="@_accounts" CaseClassification="@_case.Classification" CaseDivisionId="@_case.DivisionId" />
     </MudTabPanel>
 
     @* --- Сводки и справки по бланку (ТФ-ДДЛ-04/05, ADR-0031): компонент грузит список сам при первом открытии --- *@
