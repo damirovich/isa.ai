@@ -45,7 +45,7 @@ else
             </MudChip>
             @if (_details.Classification > 0)
             {
-                <MudChip T="string" Color="Color.Warning" Variant="Variant.Text">гриф @_details.Classification</MudChip>
+                <MudChip T="string" Color="Color.Warning" Variant="Variant.Text">@ClassificationLevels.Label(_details.Classification)</MudChip>
             }
             @* Этап 7 Э4-35: документ в корпусе ИИ — чат может отвечать по нему (грунтованный режим). *@
             @if (_details.IndexedAt is { } indexedAt)

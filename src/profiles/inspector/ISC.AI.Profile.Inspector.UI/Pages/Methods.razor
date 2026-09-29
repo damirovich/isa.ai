@@ -1,6 +1,7 @@
 @namespace ISC.AI.Profile.Inspector.UI
 @page "/methods"
 @rendermode InteractiveServer
+@using ISC.AI.Abstractions.Security
 @using System.Text.Json
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Abstractions.Grounding
@@ -201,7 +202,7 @@
         @if (Plan is { } plan)
         {
             <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3">
-                ПРОЕКТ — утверждает человек (ТБ-042). Гриф: @plan.ResultClassification.
+                ПРОЕКТ — утверждает человек (ТБ-042). Гриф: «@ClassificationLevels.Label(plan.ResultClassification)».
             </MudAlert>
             @if (_planSavedId is { } planSavedId)
             {
@@ -328,7 +329,7 @@
                          Color="@(card.Status == MethodDocumentStatus.Approved ? Color.Success : Color.Default)">
                     @card.Status.Label()
                 </MudChip>
-                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">гриф @card.Classification</MudChip>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@ClassificationLevels.Label(card.Classification)</MudChip>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">
                     @card.InspectionType · сохранена @card.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
                     @(card.CreatedByName is { } author ? $" · {author}" : string.Empty)

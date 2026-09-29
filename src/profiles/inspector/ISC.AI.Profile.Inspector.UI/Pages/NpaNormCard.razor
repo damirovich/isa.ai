@@ -5,6 +5,7 @@
 @page "/norms/{NormId:int}"
 @rendermode InteractiveServer
 @inject NavigationManager Navigation
+@using ISC.AI.Abstractions.Security
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Profile.Inspector.Application.Features.Norms
 @using ISC.AI.Profile.Inspector.Domain.Enums
@@ -135,7 +136,7 @@ else
                 <MudTd DataLabel="Тип">@(context.DocType ?? "—")</MudTd>
                 <MudTd DataLabel="Дата">@(context.DocDate?.ToString("dd.MM.yyyy") ?? "—")</MudTd>
                 <MudTd DataLabel="Гриф">
-                    @(context.Classification is { } grif ? grif == 0 ? "открыто" : $"ДСП · {grif}" : "—")
+                    @(context.Classification is { } grif ? ClassificationLevels.Label(grif) : "—")
                 </MudTd>
             </RowTemplate>
             <NoRecordsContent>
@@ -215,7 +216,7 @@ else
                     <MudText Typo="Typo.caption" Class="mud-text-secondary">
                         @candidate.DocType
                         · @(candidate.DocDate?.ToString("dd.MM.yyyy") ?? "без даты")
-                        · @(candidate.Classification == 0 ? "открыто" : $"ДСП · {candidate.Classification}")
+                        · @ClassificationLevels.Label(candidate.Classification)
                     </MudText>
                 </MudPaper>
             }

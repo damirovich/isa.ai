@@ -8,6 +8,7 @@
 @page "/npa"
 @rendermode InteractiveServer
 @inject NavigationManager Navigation
+@using ISC.AI.Abstractions.Security
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Profile.Inspector.Application.Features.Catalog
 @using ISC.AI.Profile.Inspector.Application.Features.Search
@@ -143,7 +144,7 @@
         </MudTd>
         <MudTd DataLabel="Вид акта">@context.DocType</MudTd>
         <MudTd DataLabel="Дата">@(context.DocDate?.ToString("dd.MM.yyyy") ?? "—")</MudTd>
-        <MudTd DataLabel="Гриф">@(context.Classification == 0 ? "открыто" : $"ДСП · {context.Classification}")</MudTd>
+        <MudTd DataLabel="Гриф">@ClassificationLevels.Label(context.Classification)</MudTd>
         <MudTd DataLabel="Фрагментов">@context.ChunkCount</MudTd>
     </RowTemplate>
     <NoRecordsContent>

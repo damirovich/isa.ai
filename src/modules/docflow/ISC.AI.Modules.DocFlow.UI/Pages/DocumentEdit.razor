@@ -6,6 +6,7 @@
 @page "/docflow/documents/{Id:int}/edit"
 @rendermode InteractiveServer
 @inject NavigationManager Navigation
+@using ISC.AI.Abstractions.Security
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Modules.DocFlow.Application.Features.Documents
 @using ISC.AI.Modules.DocFlow.Application.Features.Assignments
@@ -304,7 +305,7 @@ else
         }
     }
 
-    // Тот же текст грифа, что в карточке и списке: 0 — «Открыто», иначе номер уровня.
+    // Тот же текст грифа, что в карточке и списке: название уровня единой шкалы (ADR-0030).
     private static string ClassificationLabel(short level) =>
-        level == 0 ? "Открыто" : $"ДСП · уровень {level.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        ClassificationLevels.Label(level);
 }

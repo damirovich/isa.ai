@@ -34,8 +34,10 @@ public sealed class AuditBehavior<TMessage, TResponse>(
     where TResponse : IResponseDto
 {
     // При недоступном контексте доступа — наиболее ограничительный гриф (не 0!): запись остаётся под
-    // максимальной решёткой, пока допуск неизвестен.
-    private const short RestrictedClassificationOnUnknownAccess = short.MaxValue;
+    // максимальной решёткой, пока допуск неизвестен. Это ВЫСШИЙ уровень шкалы («Особой важности», ADR-0030),
+    // а не число за её пределами: запись журнала, которую не может прочитать никто, не выполняет ТБ-030 —
+    // её обязан видеть хотя бы Офицер ИБ с высшим допуском.
+    private const short RestrictedClassificationOnUnknownAccess = ClassificationLevels.Max;
 
     /// <inheritdoc />
     public async ValueTask<TResponse> Handle(

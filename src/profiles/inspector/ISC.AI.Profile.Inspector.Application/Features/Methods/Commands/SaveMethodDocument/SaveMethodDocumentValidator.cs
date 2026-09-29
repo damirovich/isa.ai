@@ -1,4 +1,5 @@
 using FluentValidation;
+using ISC.AI.Abstractions.Security;
 
 namespace ISC.AI.Profile.Inspector.Application.Features.Methods;
 
@@ -12,6 +13,6 @@ public sealed class SaveMethodDocumentValidator : AbstractValidator<SaveMethodDo
         RuleFor(c => c.InspectionType).NotEmpty().MaximumLength(200);
         RuleFor(c => c.Scope).NotEmpty().MaximumLength(300);
         RuleFor(c => c.Body).NotEmpty().WithMessage("Пустой текст сохранять не во что.");
-        RuleFor(c => c.Classification).GreaterThanOrEqualTo((short)0);
+        RuleFor(c => c.Classification).InclusiveBetween(ClassificationLevels.Unclassified, ClassificationLevels.Max);
     }
 }

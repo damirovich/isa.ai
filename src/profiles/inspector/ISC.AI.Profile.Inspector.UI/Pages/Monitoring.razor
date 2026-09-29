@@ -1,6 +1,7 @@
 @namespace ISC.AI.Profile.Inspector.UI
 @page "/monitoring"
 @rendermode InteractiveServer
+@using ISC.AI.Abstractions.Security
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Abstractions.Grounding
 @using ISC.AI.Profile.Inspector.Application.Features.Generation
@@ -140,7 +141,7 @@
         @if (Report is { } report)
         {
             <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3">
-                ПРОЕКТ — подписывает человек (ТБ-042). Гриф: @report.ResultClassification.
+                ПРОЕКТ — подписывает человек (ТБ-042). Гриф: «@ClassificationLevels.Label(report.ResultClassification)».
                 Числа отчёта — детерминированный расчёт системы, ИИ писал только текст.
             </MudAlert>
             @if (_registeredId is { } registeredId)

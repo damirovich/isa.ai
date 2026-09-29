@@ -24,8 +24,12 @@ public sealed class AuditReader(IDbContextFactory<CoreDbContext> contextFactory)
         // РЕШЁТКА В ЗАПРОСЕ (ТБ-032). Записи БЕЗ подразделения (вход в систему, общесистемные
         // действия) отсекаются только грифом: у них нет владельца-подразделения, и требовать
         // попадания в список разрешённых значило бы не показывать их вообще никому.
+        // Журнал неизменяем, поэтому в нём остались записи прежней шкалы 0–9 и записи с грифом «вне шкалы»
+        // (32767 — при неизвестном допуске). По шкале ADR-0030 всё, что выше «Особой важности», и есть
+        // «Особой важности»: такие записи видит высший допуск, а не никто (иначе журнал терял бы их для ТБ-030).
         var query = db.AuditRecords.AsNoTracking()
-            .Where(r => r.Classification <= access.MaxClassification)
+            .Where(r => (r.Classification > ClassificationLevels.Max ? ClassificationLevels.Max : r.Classification)
+                <= access.MaxClassification)
             .Where(r => r.DivisionId == null || allowedDivisions.Contains(r.DivisionId.Value));
 
         if (filter.From is { } from)

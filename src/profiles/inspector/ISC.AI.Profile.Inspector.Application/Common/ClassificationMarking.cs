@@ -1,16 +1,17 @@
+using ISC.AI.Abstractions.Security;
+
 namespace ISC.AI.Profile.Inspector.Application.Common;
 
 /// <summary>
-/// Маркировка грифа для профиля «Инспектор»: числовой гриф ядра → текст на документе (режимная схема
-/// грифов — на стороне профиля; ядро держит нейтральный числовой <c>Classification</c>).
+/// Маркировка грифа для профиля «Инспектор»: числовой гриф ядра → текст на документе. Названия уровней —
+/// единая шкала платформы (ADR-0030, <see cref="ClassificationLevels"/>), чтобы экспорт «Инспектора» и отчёты
+/// документооборота маркировали один и тот же гриф одинаково.
 /// </summary>
 public static class ClassificationMarking
 {
-    /// <summary>Возвращает текстовую маркировку по числовому грифу (0 — открыто, 1 — ДСП, далее — общий).</summary>
-    public static string For(short classification) => classification switch
-    {
-        <= 0 => "ОТКРЫТО",
-        1 => "ДСП",
-        _ => $"ГРИФ {classification}",
-    };
+    /// <summary>
+    /// Текстовая маркировка по числовому грифу: «НЕСЕКРЕТНО», «ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ», «СЕКРЕТНО»,
+    /// «СОВЕРШЕННО СЕКРЕТНО», «ОСОБОЙ ВАЖНОСТИ».
+    /// </summary>
+    public static string For(short classification) => ClassificationLevels.Marking(classification);
 }

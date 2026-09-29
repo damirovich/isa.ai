@@ -1,6 +1,7 @@
 @namespace ISC.AI.Profile.Inspector.UI
 @page "/analysis"
 @rendermode InteractiveServer
+@using ISC.AI.Abstractions.Security
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Abstractions.Grounding
 @using ISC.AI.Profile.Inspector.Application.Features.Analysis
@@ -174,7 +175,7 @@
             else
             {
                 <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3">
-                    ВЫВОДЫ ИИ — проект для проверки человеком (ТБ-042). Гриф: @Result.ResultClassification.
+                    ВЫВОДЫ ИИ — проект для проверки человеком (ТБ-042). Гриф: «@ClassificationLevels.Label(Result.ResultClassification)».
                 </MudAlert>
 
                 @if (!Result.AllCitationsConfirmed)

@@ -1,6 +1,7 @@
 @namespace ISC.AI.Profile.Inspector.UI
 @page "/risks"
 @rendermode InteractiveServer
+@using ISC.AI.Abstractions.Security
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Abstractions.Grounding
 @using ISC.AI.Profile.Inspector.Application.Features.Generation
@@ -129,7 +130,7 @@
                     @if (Rules is { } rules)
                     {
                         <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="my-3">
-                            ПРОЕКТ — утверждает человек (ТБ-042). Гриф: @rules.ResultClassification.
+                            ПРОЕКТ — утверждает человек (ТБ-042). Гриф: «@ClassificationLevels.Label(rules.ResultClassification)».
                         </MudAlert>
                         @if (_savedMethodId is { } savedId)
                         {

@@ -1,6 +1,7 @@
 @namespace ISC.AI.Profile.Inspector.UI
 @page "/collegium"
 @rendermode InteractiveServer
+@using ISC.AI.Abstractions.Security
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Abstractions.Grounding
 @using ISC.AI.Profile.Inspector.Application.Features.Collegium
@@ -61,7 +62,7 @@
 @if (Result is { } result)
 {
     <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3">
-        ПРОЕКТ — подписывает человек (ТБ-042). Гриф: @result.ResultClassification.
+        ПРОЕКТ — подписывает человек (ТБ-042). Гриф: «@ClassificationLevels.Label(result.ResultClassification)».
         Числа материала — детерминированный расчёт системы, ИИ писал только текст.
     </MudAlert>
     @if (_registeredId is { } registeredId)

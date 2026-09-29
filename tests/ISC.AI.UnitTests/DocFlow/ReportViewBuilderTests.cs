@@ -88,9 +88,12 @@ public sealed class ReportViewBuilderTests
     /// ИНВАРИАНТ ТБ-033: сводка по документам ДСП сама является ДСП — маркировка обязана попасть
     /// в файл, и она берётся по МАКСИМАЛЬНОМУ грифу выданных строк, а не по среднему или первому.
     /// </summary>
-    [Theory(DisplayName = "Маркировка грифа: 0 — «Открыто», иначе ДСП с номером")]
-    [InlineData((short)0, "Открыто")]
-    [InlineData((short)2, "ДСП. Гриф: 2")]
+    [Theory(DisplayName = "Маркировка грифа по шкале ADR-0030: название уровня прописными, выше шкалы — «ОСОБОЙ ВАЖНОСТИ»")]
+    [InlineData((short)0, "НЕСЕКРЕТНО")]
+    [InlineData((short)1, "ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ")]
+    [InlineData((short)2, "СЕКРЕТНО")]
+    [InlineData((short)4, "ОСОБОЙ ВАЖНОСТИ")]
+    [InlineData((short)9, "ОСОБОЙ ВАЖНОСТИ")]
     public void Marking_follows_max_classification(short classification, string expected)
     {
         var data = new ReportData([Row(assignmentId: 1, assignee: 1)], classification);
