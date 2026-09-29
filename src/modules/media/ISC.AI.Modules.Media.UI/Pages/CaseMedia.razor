@@ -70,19 +70,12 @@ else
             видео) — выполняется фоном после загрузки.
         </MudText>
         <MudGrid Spacing="2">
-            <MudItem xs="12" sm="5">
+            <MudItem xs="12" sm="6">
                 @* Пределы длин — из валидатора команды, не дублируются числом (иначе клиент пропускает, сервер отбивает). *@
                 <MudTextField @bind-Value="_source" Label="Источник" Variant="Variant.Outlined" MaxLength="@UploadMediaValidator.MaxSourceLength"
                               HelperText="откуда получена запись — общее для всех выбранных файлов" />
             </MudItem>
-            <MudItem xs="6" sm="3">
-                @* Ширина пикера даты — ОБЁРТКОЙ div, не Style (MudBlazor копирует Style на календарь). *@
-                <div style="width:100%;">
-                    <MudDatePicker @bind-Date="_capturedAt" Label="Дата съёмки" Variant="Variant.Outlined"
-                                   DateFormat="dd.MM.yyyy" Clearable="true" />
-                </div>
-            </MudItem>
-            <MudItem xs="6" sm="4">
+            <MudItem xs="12" sm="6">
                 <MudTextField @bind-Value="_place" Label="Место" Variant="Variant.Outlined" MaxLength="@UploadMediaValidator.MaxPlaceLength" />
             </MudItem>
         </MudGrid>
@@ -114,21 +107,54 @@ else
 
         @if (_pendingFiles.Count > 0)
         {
-            <div class="mt-2 d-flex align-center gap-2 flex-wrap">
-                @foreach (var file in _pendingFiles)
-                {
-                    var pending = file; // копия для замыкания OnClose
-                    <MudChip T="string" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Description"
-                             OnClose="@(() => _pendingFiles.Remove(pending))" Disabled="_busy">
-                        @pending.Name · @MediaLabels.FormatSize(pending.Size)
-                    </MudChip>
-                }
-            </div>
+            @* ТФ-МЕД-17: у фото и видео дата и время съёмки обязательны. Значение из метаданных файла подставлено
+               заранее — оператор его проверяет; если в файле даты нет — вводит. Загрузка — только когда у всех
+               фото и видео дата и время заполнены. Время — местное, в базе хранится в UTC. *@
+            <MudSimpleTable Dense="true" Elevation="0" Class="mt-2">
+                <thead>
+                    <tr><th>Файл</th><th style="width:170px;">Дата съёмки</th><th style="width:130px;">Время</th><th>Откуда дата</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var file in _pendingFiles)
+                    {
+                        var pending = file; // копия для замыканий
+                        <tr>
+                            <td>@pending.File.Name · @MediaLabels.FormatSize(pending.File.Size)</td>
+                            <td>
+                                <div style="width:100%;">
+                                    <MudDatePicker @bind-Date="pending.Date" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                   DateFormat="dd.MM.yyyy" Disabled="_busy" Clearable="@(!pending.Required)"
+                                                   Error="@(pending.Required && pending.Date is null)" Placeholder="дд.мм.гггг" />
+                                </div>
+                            </td>
+                            <td>
+                                <MudTimePicker @bind-Time="pending.Time" Variant="Variant.Outlined" Margin="Margin.Dense" AmPm="false"
+                                               Disabled="_busy" Error="@(pending.Required && pending.Time is null)" Placeholder="чч:мм" />
+                            </td>
+                            <td>
+                                <MudText Typo="Typo.caption" Class="@(pending.FromMetadata ? "mud-text-secondary" : (pending.Required ? "mud-error-text" : "mud-text-secondary"))">
+                                    @(pending.FromMetadata
+                                        ? "из метаданных файла — проверьте"
+                                        : pending.Required ? "в файле даты нет — укажите" : "для аудио — по желанию")
+                                </MudText>
+                            </td>
+                            <td>
+                                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" Disabled="_busy"
+                                               OnClick="@(() => _pendingFiles.Remove(pending))" aria-label="Убрать из списка" />
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
             <div class="mt-2 d-flex align-center gap-3 flex-wrap">
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy"
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_busy || MissingCaptureTime > 0)"
                            StartIcon="@Icons.Material.Filled.CloudUpload" OnClick="UploadFilesAsync">
                     @(_busy ? "Загружаю…" : $"Загрузить {FileCountLabel(_pendingFiles.Count)}")
                 </MudButton>
+                @if (MissingCaptureTime > 0)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-error-text">Укажите дату и время съёмки у фото и видео (без них: @MissingCaptureTime).</MudText>
+                }
                 <MudButton Variant="Variant.Text" OnClick="@(() => _pendingFiles.Clear())" Disabled="_busy">Очистить список</MudButton>
             </div>
         }
@@ -256,7 +282,7 @@ else
             <MudTd DataLabel="Файл">
                 @context.OriginalFileName
                 <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
-                    @MediaLabels.FormatSize(context.ByteSize)@(context.CapturedAt is { } captured ? $" · съёмка {captured.ToLocalTime():dd.MM.yyyy}" : string.Empty)
+                    @MediaLabels.FormatSize(context.ByteSize)@(context.CapturedAt is { } captured ? $" · съёмка {captured.ToLocalTime():dd.MM.yyyy HH:mm}" : " · дата съёмки не указана")
                 </MudText>
             </MudTd>
             <MudTd DataLabel="Вид">
@@ -335,7 +361,7 @@ else
     private sealed record UploadOutcome(string FileName, bool Ok, bool Duplicate, string Message, int? AssetId);
 
     private readonly List<MediaAssetRow> _rows = [];
-    private readonly List<IBrowserFile> _pendingFiles = [];
+    private readonly List<PendingUpload> _pendingFiles = [];
     private readonly List<UploadOutcome> _uploadResults = [];
     private readonly ComponentPoller _poller = new(TimeSpan.FromSeconds(5));
 
@@ -345,7 +371,6 @@ else
     private bool _loading;
     private string? _error;
     private string? _source;
-    private DateTime? _capturedAt;
     private string? _place;
     private bool _purgeOpen;
     private MediaAssetRow? _purgeTarget;
@@ -428,7 +453,32 @@ else
         }
     }
 
-    private void OnFilesSelected(IReadOnlyList<IBrowserFile>? files)
+    /// <summary>Выбранный файл и его дата/время съёмки (ТФ-МЕД-17).</summary>
+    private sealed class PendingUpload(IBrowserFile file, bool required)
+    {
+        public IBrowserFile File { get; } = file;
+
+        /// <summary>Фото или видео: дата и время обязательны.</summary>
+        public bool Required { get; } = required;
+
+        /// <summary>Дата и время подставлены из метаданных файла.</summary>
+        public bool FromMetadata { get; set; }
+
+        public DateTime? Date { get; set; }
+
+        public TimeSpan? Time { get; set; }
+
+        /// <summary>Местные дата и время → UTC; не заполнено — <see langword="null"/>.</summary>
+        public DateTimeOffset? CapturedAtUtc =>
+            Date is { } date && Time is { } time
+                ? new DateTimeOffset(DateTime.SpecifyKind(date.Date + time, DateTimeKind.Local)).ToUniversalTime()
+                : null;
+    }
+
+    /// <summary>Сколько фото и видео в списке ещё без даты или времени съёмки.</summary>
+    private int MissingCaptureTime => _pendingFiles.Count(p => p.Required && p.CapturedAtUtc is null);
+
+    private async Task OnFilesSelected(IReadOnlyList<IBrowserFile>? files)
     {
         if (files is null)
         {
@@ -437,10 +487,41 @@ else
 
         foreach (var file in files)
         {
-            if (!_pendingFiles.Any(p => p.Name == file.Name && p.Size == file.Size))
+            if (_pendingFiles.Any(p => p.File.Name == file.Name && p.File.Size == file.Size))
             {
-                _pendingFiles.Add(file);
+                continue;
             }
+
+            var kind = MediaFileRules.KindOf(MediaUploadTypes.Resolve(file.Name, file.ContentType));
+            var pending = new PendingUpload(file, kind is MediaKind.Image or MediaKind.Video);
+            if (pending.Required && await ReadCaptureTimeAsync(file) is { } found)
+            {
+                var local = found.ToLocalTime().DateTime;
+                pending.Date = local.Date;
+                pending.Time = new TimeSpan(local.Hour, local.Minute, 0);
+                pending.FromMetadata = true;
+            }
+
+            _pendingFiles.Add(pending);
+        }
+    }
+
+    /// <summary>
+    /// Дата съёмки из метаданных — по началу файла (EXIF фото, заголовок MP4/MOV), без чтения всего файла.
+    /// Нечитаемый файл — «даты нет»: оператор введёт вручную, загрузка скажет о проблеме сама.
+    /// </summary>
+    private static async Task<DateTimeOffset?> ReadCaptureTimeAsync(IBrowserFile file)
+    {
+        try
+        {
+            var head = new byte[(int)Math.Min(CaptureTimeProbe.HeadBytes, file.Size)];
+            await using var stream = file.OpenReadStream(MediaFileRules.MaxFileBytes);
+            var read = await stream.ReadAtLeastAsync(head, head.Length, throwOnEndOfStream: false);
+            return CaptureTimeProbe.TryRead(head.AsSpan(0, read), TimeZoneInfo.Local, DateTimeOffset.UtcNow);
+        }
+        catch (IOException)
+        {
+            return null;
         }
     }
 
@@ -463,15 +544,14 @@ else
         _busy = true;
         _error = null;
         _uploadResults.Clear();
-        // Столбец captured_at — timestamptz: Npgsql принимает DateTimeOffset ТОЛЬКО со смещением 0. Дата из пикера —
-        // местная полночь; нормализуем в UTC (ToUniversalTime), чтобы при показе ToLocalTime вернул ту же дату.
-        var capturedAt = _capturedAt is { } d
-            ? new DateTimeOffset(DateTime.SpecifyKind(d, DateTimeKind.Local)).ToUniversalTime()
-            : (DateTimeOffset?)null;
         try
         {
-            foreach (var file in _pendingFiles.ToList())
+            foreach (var pending in _pendingFiles.ToList())
             {
+                var file = pending.File;
+                // Столбец captured_at — timestamptz: Npgsql принимает DateTimeOffset ТОЛЬКО со смещением 0 —
+                // местные дата и время переводятся в UTC (PendingUpload.CapturedAtUtc), показ — ToLocalTime.
+                var capturedAt = pending.CapturedAtUtc;
                 try
                 {
                     // Предел размера — из правил пакета; OpenReadStream без maxAllowedSize ограничен 512 КБ.
@@ -495,7 +575,7 @@ else
                     {
                         _uploadResults.Add(new UploadOutcome(file.Name, true, receipt.Duplicate,
                             receipt.Duplicate ? "такой файл уже есть в деле" : "поставлен в обработку", receipt.AssetId));
-                        _pendingFiles.Remove(file);
+                        _pendingFiles.Remove(pending);
                     }
                     else
                     {

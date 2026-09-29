@@ -137,10 +137,11 @@ else
                 }
             </MudText>
             <MudText Typo="Typo.caption" Class="mud-text-secondary">Тип: @asset.ContentType</MudText>
-            @if (asset.CapturedAt is { } captured)
-            {
-                <MudText Typo="Typo.caption" Class="mud-text-secondary">Съёмка: @captured.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudText>
-            }
+            @* ТФ-МЕД-17: дату съёмки оператор подтверждает или исправляет; у фото и видео без неё — предупреждение. *@
+            <MudText Typo="Typo.caption" Class="@(asset.CapturedAt is null && asset.Kind != MediaKind.Audio ? "mud-error-text" : "mud-text-secondary")">
+                Съёмка: @(asset.CapturedAt is { } captured ? captured.ToLocalTime().ToString("dd.MM.yyyy HH:mm") : "не указана")
+                <MudLink Typo="Typo.caption" Class="ml-1" OnClick="OpenCapturedAt" Disabled="_busy">@(asset.CapturedAt is null ? "указать" : "изменить")</MudLink>
+            </MudText>
             @if (!string.IsNullOrWhiteSpace(asset.Source))
             {
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">Источник: @asset.Source</MudText>
@@ -314,6 +315,28 @@ else
 }
 
 @* --- Подтверждение гарантированного удаления (ТБ-064/075, GATE-6) --- *@
+<MudDialog @bind-Visible="_capturedOpen" Options="DialogOptionsSmall">
+    <TitleContent><MudText Typo="Typo.h6">Дата и время съёмки</MudText></TitleContent>
+    <DialogContent>
+        @if (_capturedError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_capturedError</MudAlert>
+        }
+        <MudText Typo="Typo.body2" Class="mb-2">Местное время. Изменение записывается в журнал аудита.</MudText>
+        <div class="d-flex gap-2">
+            <div style="width:100%;">
+                <MudDatePicker @bind-Date="_capturedDate" Label="Дата *" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" />
+            </div>
+            <MudTimePicker @bind-Time="_capturedTime" Label="Время *" Variant="Variant.Outlined" AmPm="false" />
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _capturedOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_busy || _capturedDate is null || _capturedTime is null)"
+                   OnClick="SaveCapturedAtAsync">Сохранить</MudButton>
+    </DialogActions>
+</MudDialog>
+
 <MudDialog @bind-Visible="_purgeOpen" Options="DialogOptionsSmall">
     <TitleContent><MudText Typo="Typo.h6">Удалить носитель?</MudText></TitleContent>
     <DialogContent>
@@ -564,6 +587,46 @@ else
         _linkAuthorizationId = null;
         _linkPersonRef = null;
         _linkError = null;
+    }
+
+    // --- Дата съёмки (ТФ-МЕД-17) ---
+    private bool _capturedOpen;
+    private string? _capturedError;
+    private DateTime? _capturedDate;
+    private TimeSpan? _capturedTime;
+
+    private void OpenCapturedAt()
+    {
+        var local = _details?.Asset.CapturedAt?.ToLocalTime().DateTime;
+        _capturedDate = local?.Date;
+        _capturedTime = local is { } t ? new TimeSpan(t.Hour, t.Minute, 0) : null;
+        _capturedError = null;
+        _capturedOpen = true;
+    }
+
+    private async Task SaveCapturedAtAsync()
+    {
+        if (_capturedDate is not { } date || _capturedTime is not { } time) { return; }
+        _busy = true;
+        _capturedError = null;
+        try
+        {
+            var local = new DateTimeOffset(DateTime.SpecifyKind(date.Date + time, DateTimeKind.Local));
+            var response = await Dispatcher.Send(new SetAssetCapturedAtCommand(Id, local.ToUniversalTime()));
+            if (!response.Status)
+            {
+                _capturedError = response.StatusMessage;
+                return;
+            }
+
+            _capturedOpen = false;
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
     }
 
     private async Task ReloadAsync()

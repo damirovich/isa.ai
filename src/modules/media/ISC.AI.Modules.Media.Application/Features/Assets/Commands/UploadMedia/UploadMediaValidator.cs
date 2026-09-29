@@ -1,4 +1,5 @@
 using FluentValidation;
+using ISC.AI.Modules.Media.Domain.Model;
 
 namespace ISC.AI.Modules.Media.Application.Features.Assets;
 
@@ -24,6 +25,15 @@ public sealed class UploadMediaValidator : AbstractValidator<UploadMediaCommand>
         RuleFor(c => c.Content)
             .Must(content => content is { LongLength: > 0 and <= MediaFileRules.MaxFileBytes })
             .WithMessage("Файл пуст или больше 200 МБ.");
+        // ТФ-МЕД-17: у фото и видео дата и время съёмки ОБЯЗАТЕЛЬНЫ (оператор подтверждает значение из метаданных
+        // или вводит вручную); у аудио — по желанию. Дата из будущего — ошибка ввода (сутки — запас на пояса).
+        RuleFor(c => c.CapturedAt)
+            .NotNull()
+            .When(c => MediaFileRules.KindOf(c.ContentType) is MediaKind.Image or MediaKind.Video)
+            .WithMessage("Укажите дату и время съёмки: для фото и видео они обязательны (ТФ-МЕД-17).");
+        RuleFor(c => c.CapturedAt)
+            .Must(value => value is null || value.Value <= DateTimeOffset.UtcNow.AddDays(1))
+            .WithMessage("Дата съёмки не может быть в будущем.");
         RuleFor(c => c.Source).MaximumLength(MaxSourceLength);
         RuleFor(c => c.Place).MaximumLength(MaxPlaceLength);
     }

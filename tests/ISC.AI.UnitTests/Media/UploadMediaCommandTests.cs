@@ -51,7 +51,7 @@ public sealed class UploadMediaCommandTests
     [InlineData("image/jpeg", 0, false)]
     public void Validator_enforces_allowlist_and_size(string contentType, int size, bool expected)
     {
-        var result = new UploadMediaValidator().Validate(new UploadMediaCommand(3, "a.bin", contentType, new byte[size]));
+        var result = new UploadMediaValidator().Validate(new UploadMediaCommand(3, "a.bin", contentType, new byte[size], CapturedAt: DateTimeOffset.UtcNow.AddHours(-1)));
         result.IsValid.ShouldBe(expected);
     }
 
@@ -164,7 +164,7 @@ public sealed class UploadMediaCommandTests
     public void Validator_limits_source_and_place_length()
     {
         var validator = new UploadMediaValidator();
-        validator.Validate(new UploadMediaCommand(3, "a.jpg", "image/jpeg", Jpeg, Source: new string('и', UploadMediaValidator.MaxSourceLength))).IsValid.ShouldBeTrue();
+        validator.Validate(new UploadMediaCommand(3, "a.jpg", "image/jpeg", Jpeg, Source: new string('и', UploadMediaValidator.MaxSourceLength), CapturedAt: DateTimeOffset.UtcNow.AddHours(-1))).IsValid.ShouldBeTrue();
         validator.Validate(new UploadMediaCommand(3, "a.jpg", "image/jpeg", Jpeg, Source: new string('и', UploadMediaValidator.MaxSourceLength + 1))).IsValid.ShouldBeFalse();
         validator.Validate(new UploadMediaCommand(3, "a.jpg", "image/jpeg", Jpeg, Place: new string('м', UploadMediaValidator.MaxPlaceLength + 1))).IsValid.ShouldBeFalse();
     }

@@ -142,6 +142,30 @@ public sealed class MediaStoreStatusTests(MediaTranscriptFixture fixture) : ICla
         results.Count(accepted => accepted).ShouldBe(1);
     }
 
+    [Fact(DisplayName = "ТФ-МЕД-17: дата съёмки записывается в UTC и перезаписывается исправлением; носителя нет — false")]
+    public async Task Captured_at_is_stored_in_utc()
+    {
+        var store = new MediaStore(fixture.Media, new RecordingFileStorage());
+        var photo = await SeedAsync(MediaKind.Image, TranscriptStatus.NotApplicable, MediaIndexStatus.Uploaded);
+        var local = new DateTimeOffset(2026, 9, 28, 14, 30, 0, TimeSpan.FromHours(6));
+
+        (await store.SetCapturedAtAsync(photo, local)).ShouldBeTrue();
+        (await store.SetCapturedAtAsync(999_999, local)).ShouldBeFalse();
+
+        await using (var db = await fixture.Media.CreateDbContextAsync())
+        {
+            var stored = (await db.Assets.AsNoTracking().SingleAsync(a => a.Id == photo)).CapturedAt.ShouldNotBeNull();
+            stored.Offset.ShouldBe(TimeSpan.Zero);
+            stored.ShouldBe(local); // тот же момент времени
+        }
+
+        (await store.SetCapturedAtAsync(photo, local.AddHours(1))).ShouldBeTrue();
+        await using (var db = await fixture.Media.CreateDbContextAsync())
+        {
+            (await db.Assets.AsNoTracking().SingleAsync(a => a.Id == photo)).CapturedAt.ShouldBe(local.AddHours(1));
+        }
+    }
+
     private async Task<int> SeedAsync(
         MediaKind kind,
         TranscriptStatus transcriptStatus,
