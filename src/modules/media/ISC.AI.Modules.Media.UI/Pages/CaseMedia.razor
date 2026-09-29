@@ -112,24 +112,41 @@ else
                фото и видео дата и время заполнены. Время — местное, в базе хранится в UTC. *@
             <MudSimpleTable Dense="true" Elevation="0" Class="mt-2">
                 <thead>
-                    <tr><th>Файл</th><th style="width:170px;">Дата съёмки</th><th style="width:130px;">Время</th><th>Откуда дата</th><th></th></tr>
+                    <tr><th style="width:150px;">Просмотр</th><th>Файл</th><th style="width:210px;">Дата съёмки</th><th style="width:160px;">Время</th><th>Откуда дата</th><th></th></tr>
                 </thead>
                 <tbody>
                     @foreach (var file in _pendingFiles)
                     {
                         var pending = file; // копия для замыканий
                         <tr>
+                            <td>
+                                @if (pending.PreviewUrl is { } preview && pending.Kind == MediaKind.Image)
+                                {
+                                    <img src="@preview" alt="@pending.File.Name" style="width:140px;height:96px;object-fit:cover;border-radius:4px;display:block;" />
+                                }
+                                else if (pending.PreviewUrl is { } clip && pending.Kind == MediaKind.Video)
+                                {
+                                    @* Браузер сам играет только mp4/webm; mkv/avi/mov покажут пустой кадр — дата вводится так же. *@
+                                    <video src="@clip" muted controls preload="metadata" style="width:140px;height:96px;border-radius:4px;background:#000;display:block;"></video>
+                                }
+                                else
+                                {
+                                    <MudIcon Icon="@(pending.Kind == MediaKind.Audio ? Icons.Material.Filled.Audiotrack : Icons.Material.Filled.InsertDriveFile)" Class="mud-text-secondary" />
+                                }
+                            </td>
                             <td>@pending.File.Name · @MediaLabels.FormatSize(pending.File.Size)</td>
                             <td>
-                                <div style="width:100%;">
+                                <div style="min-width:190px;">
                                     <MudDatePicker @bind-Date="pending.Date" Variant="Variant.Outlined" Margin="Margin.Dense"
                                                    DateFormat="dd.MM.yyyy" Disabled="_busy" Clearable="@(!pending.Required)"
                                                    Error="@(pending.Required && pending.Date is null)" Placeholder="дд.мм.гггг" />
                                 </div>
                             </td>
                             <td>
-                                <MudTimePicker @bind-Time="pending.Time" Variant="Variant.Outlined" Margin="Margin.Dense" AmPm="false"
-                                               Disabled="_busy" Error="@(pending.Required && pending.Time is null)" Placeholder="чч:мм" />
+                                <div style="min-width:140px;">
+                                    <MudTimePicker @bind-Time="pending.Time" Variant="Variant.Outlined" Margin="Margin.Dense" AmPm="false"
+                                                   Disabled="_busy" Error="@(pending.Required && pending.Time is null)" Placeholder="чч:мм" />
+                                </div>
                             </td>
                             <td>
                                 <MudText Typo="Typo.caption" Class="@(pending.FromMetadata ? "mud-text-secondary" : (pending.Required ? "mud-error-text" : "mud-text-secondary"))">
@@ -140,7 +157,7 @@ else
                             </td>
                             <td>
                                 <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" Disabled="_busy"
-                                               OnClick="@(() => _pendingFiles.Remove(pending))" aria-label="Убрать из списка" />
+                                               OnClick="@(() => RemovePendingAsync(pending))" aria-label="Убрать из списка" />
                             </td>
                         </tr>
                     }
@@ -155,7 +172,7 @@ else
                 {
                     <MudText Typo="Typo.caption" Class="mud-error-text">Укажите дату и время съёмки у фото и видео (без них: @MissingCaptureTime).</MudText>
                 }
-                <MudButton Variant="Variant.Text" OnClick="@(() => _pendingFiles.Clear())" Disabled="_busy">Очистить список</MudButton>
+                <MudButton Variant="Variant.Text" OnClick="ClearPendingAsync" Disabled="_busy">Очистить список</MudButton>
             </div>
         }
 
@@ -454,12 +471,18 @@ else
     }
 
     /// <summary>Выбранный файл и его дата/время съёмки (ТФ-МЕД-17).</summary>
-    private sealed class PendingUpload(IBrowserFile file, bool required)
+    private sealed class PendingUpload(IBrowserFile file, MediaKind? kind)
     {
         public IBrowserFile File { get; } = file;
 
+        /// <summary>Семейство файла по типу (для предпросмотра и обязательности даты).</summary>
+        public MediaKind? Kind { get; } = kind;
+
         /// <summary>Фото или видео: дата и время обязательны.</summary>
-        public bool Required { get; } = required;
+        public bool Required => Kind is MediaKind.Image or MediaKind.Video;
+
+        /// <summary>blob-URL файла в браузере для предпросмотра; нет — значок.</summary>
+        public string? PreviewUrl { get; set; }
 
         /// <summary>Дата и время подставлены из метаданных файла.</summary>
         public bool FromMetadata { get; set; }
@@ -493,7 +516,12 @@ else
             }
 
             var kind = MediaFileRules.KindOf(MediaUploadTypes.Resolve(file.Name, file.ContentType));
-            var pending = new PendingUpload(file, kind is MediaKind.Image or MediaKind.Video);
+            var pending = new PendingUpload(file, kind);
+            if (_mediaModule is not null && kind is MediaKind.Image or MediaKind.Video)
+            {
+                pending.PreviewUrl = await _mediaModule.InvokeAsync<string?>("uploadPreviewUrl", file.Name, file.Size);
+            }
+
             if (pending.Required && await ReadCaptureTimeAsync(file) is { } found)
             {
                 var local = found.ToLocalTime().DateTime;
@@ -575,7 +603,7 @@ else
                     {
                         _uploadResults.Add(new UploadOutcome(file.Name, true, receipt.Duplicate,
                             receipt.Duplicate ? "такой файл уже есть в деле" : "поставлен в обработку", receipt.AssetId));
-                        _pendingFiles.Remove(pending);
+                        await RemovePendingAsync(pending);
                     }
                     else
                     {
@@ -689,5 +717,50 @@ else
 
     private void Open(MediaAssetRow asset) => Navigation.NavigateTo($"/media/assets/{asset.Id}");
 
-    public ValueTask DisposeAsync() => _poller.DisposeAsync();
+    private const string MediaModulePath = "./_content/ISC.AI.Modules.Media.UI/js/media.js";
+    private IJSObjectReference? _mediaModule;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Предпросмотр выбранных файлов: слушатель выбора ставится один раз, до первого выбора (JS — только после интерактива).
+        if (firstRender && RendererInfo.IsInteractive)
+        {
+            _mediaModule = await JS.InvokeAsync<IJSObjectReference>("import", MediaModulePath);
+            await _mediaModule.InvokeVoidAsync("bindUploadPreviews");
+        }
+    }
+
+    private async Task RemovePendingAsync(PendingUpload pending)
+    {
+        _pendingFiles.Remove(pending);
+        if (_mediaModule is not null)
+        {
+            await _mediaModule.InvokeVoidAsync("releaseUploadPreview", pending.File.Name, pending.File.Size);
+        }
+    }
+
+    private async Task ClearPendingAsync()
+    {
+        foreach (var pending in _pendingFiles.ToList())
+        {
+            await RemovePendingAsync(pending);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _poller.DisposeAsync();
+        if (_mediaModule is not null)
+        {
+            try
+            {
+                await _mediaModule.InvokeVoidAsync("releaseAllUploadPreviews");
+                await _mediaModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Вкладка закрыта — браузер освободит blob-URL сам.
+            }
+        }
+    }
 }
