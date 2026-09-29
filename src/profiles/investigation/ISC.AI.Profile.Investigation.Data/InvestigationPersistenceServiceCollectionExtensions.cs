@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Persistence;
 using ISC.AI.Profile.Investigation.Domain.Services;
@@ -46,6 +47,12 @@ public static class InvestigationPersistenceServiceCollectionExtensions
 
         // Пересечения между делами (ТФ-ПЕР-07, ТБ-084, ADR-0029): floor допуска без сужения по роли.
         services.AddScoped<IIntersectionStore, IntersectionStore>();
+
+        // Сводки и справки по бланку (ТФ-ДДЛ-04/05, ADR-0031): окно редактирования считается по часам
+        // TimeProvider (подменяются в тестах), выгрузка .docx — отрисовщиком профиля.
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<ICaseReportStore, CaseReportStore>();
+        services.AddSingleton<ICaseReportRenderer, Reports.CaseReportDocxRenderer>();
 
         // Дозаполнение нормализованных реквизитов прежних фигурантов при старте (ТО-мат-11).
         services.AddHostedService<InvestigationStartupMaintenance>();

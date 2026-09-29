@@ -1,0 +1,136 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@page "/admin/report-permits"
+@rendermode InteractiveServer
+@using ISC.AI.Abstractions.Security
+@using ISC.AI.Profile.Investigation.Application.Features.Directory
+@using ISC.AI.Profile.Investigation.Application.Features.Reports
+@using ISC.AI.Profile.Investigation.Domain.Enums
+@using ISC.AI.Profile.Investigation.Domain.Services
+
+@* Очередь запросов на правку архивных сводок и справок (ТФ-АДМ-06, ТФ-ДДЛ-05, ADR-0031 п. 5). Администратор
+   видит ТОЛЬКО метаданные: вид и дату документа, номер дела, кто и когда просит, причину — без полей бланка и
+   объекта (ТБ-079). Разрешение действует ограниченное время (настройка, по умолчанию 24 ч) и только для
+   того, кто просил; собственный запрос решает другой Администратор. Право проверяет обработчик. *@
+
+<PageHeader Title="Запросы на правку сводок" Subtitle="Разрешение на правку архивных сводок и справок · решает Администратор"
+            Icon="@Icons.Material.Filled.LockOpen">
+    <MudSwitch T="bool" Value="_pendingOnly" ValueChanged="OnPendingOnlyChangedAsync" Color="Color.Primary" Label="Только ждущие решения" />
+    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Disabled="_busy" OnClick="ReloadAsync">Обновить</MudButton>
+</PageHeader>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+<MudTable T="CaseReportPermitRow" Items="_rows" Hover="true" Dense="true" Outlined="true" Loading="_busy">
+    <HeaderContent>
+        <MudTh>Запрос</MudTh>
+        <MudTh>Документ</MudTh>
+        <MudTh>Дело</MudTh>
+        <MudTh>Кто просит</MudTh>
+        <MudTh>Причина</MudTh>
+        <MudTh>Статус</MudTh>
+        <MudTh Style="width:220px;">Решение</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Запрос">№ @context.Id · @context.RequestedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudTd>
+        <MudTd DataLabel="Документ">@context.ReportKind.Label() за @context.ReportDate.ToString("dd.MM.yyyy") (№ @context.ReportId)</MudTd>
+        <MudTd DataLabel="Дело">@context.CaseNumber</MudTd>
+        <MudTd DataLabel="Кто просит">@UserName(context.RequestedByUserId)</MudTd>
+        <MudTd DataLabel="Причина" Style="white-space:pre-wrap;">@context.Reason</MudTd>
+        <MudTd DataLabel="Статус">
+            @context.Status.Label()
+            @if (context.DecidedAt is { } decided)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                    @UserName(context.DecidedByUserId), @decided.ToLocalTime().ToString("dd.MM.yyyy HH:mm")@(context.ExpiresAt is { } until ? $" · до {until.ToLocalTime():dd.MM.yyyy HH:mm}" : string.Empty)
+                </MudText>
+            }
+        </MudTd>
+        <MudTd DataLabel="Решение">
+            @if (context.Status == ReportEditPermitStatus.Pending)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy"
+                           OnClick="@(() => DecideAsync(context.Id, true))">Разрешить</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" Disabled="_busy"
+                           OnClick="@(() => DecideAsync(context.Id, false))">Отказать</MudButton>
+            }
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Запросов нет.</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    private readonly List<CaseReportPermitRow> _rows = [];
+    private readonly List<UserAccountRow> _accounts = [];
+    private bool _pendingOnly = true;
+    private bool _busy;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере не грузим.
+        if (!RendererInfo.IsInteractive) { return; }
+
+        var accounts = await Dispatcher.Send(new ListUserDirectoryQuery());
+        if (accounts is { Status: true, Data: { } rows }) { _accounts.AddRange(rows); }
+
+        await ReloadAsync();
+    }
+
+    private Task OnPendingOnlyChangedAsync(bool value)
+    {
+        _pendingOnly = value;
+        return ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new ListCaseReportPermitsQuery(_pendingOnly));
+            _rows.Clear();
+            if (response is { Status: true, Data: { } rows }) { _rows.AddRange(rows); }
+            else { _error = response.StatusMessage; }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DecideAsync(int permitId, bool approve)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new DecideCaseReportPermitCommand(permitId, approve));
+            if (!response.Status)
+            {
+                _error = response.StatusMessage;
+                return;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    private string UserName(int? id)
+    {
+        if (id is not { } userId) { return "—"; }
+        var account = _accounts.FirstOrDefault(a => a.UserId == userId);
+        if (account is null) { return $"пользователь № {userId}"; }
+        return string.IsNullOrWhiteSpace(account.DisplayName) ? account.UserName : account.DisplayName;
+    }
+}

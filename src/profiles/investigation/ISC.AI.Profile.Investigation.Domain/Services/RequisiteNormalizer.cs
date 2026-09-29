@@ -85,6 +85,41 @@ public static class RequisiteNormalizer
     }
 
     /// <summary>
+    /// Текст для поиска подстрокой (ТФ-ДДЛ-04, ТО-мат-11): нижний регистр, «ё» → «е», пробельные символы
+    /// сжаты до одного пробела; знаки препинания и киргизские ө/ү/ң сохраняются. Запрос нормализуется тем же
+    /// правилом, поэтому «Ёлкин» находит «елкин». Пусто — пустая строка.
+    /// </summary>
+    public static string SearchText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var builder = new System.Text.StringBuilder(value.Length);
+        var pendingSpace = false;
+        foreach (var ch in value)
+        {
+            if (char.IsWhiteSpace(ch))
+            {
+                pendingSpace = builder.Length > 0;
+                continue;
+            }
+
+            if (pendingSpace)
+            {
+                builder.Append(' ');
+                pendingSpace = false;
+            }
+
+            var lower = char.ToLowerInvariant(ch);
+            builder.Append(lower == 'ё' ? 'е' : lower);
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>
     /// Адрес: слова в нижнем регистре, «ё» → «е», дефисы внутри слов снимаются («Кара-Балта» = «Карабалта»),
     /// прочие знаки — разделители, кроме «/» (номер «5/1» сохраняется); типы объектов сокращаются к одному
     /// виду («улица» = «ул.»), метки города и дома выбрасываются. Порядок слов сохраняется: в адресе он

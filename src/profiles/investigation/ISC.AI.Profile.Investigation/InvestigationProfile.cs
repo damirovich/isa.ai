@@ -98,6 +98,10 @@ public sealed class InvestigationProfile : IProfile
         // категории материалов — словарь реквизитов заданий, ведёт Администратор.
         new ModuleDescriptor("admin-references", "/admin/references", "Справочники",
             Icons.Material.Filled.MenuBook, typeof(References), ReadPolicy, GroupAdmin),
+
+        // Запросы на правку архивных сводок и справок (ТФ-АДМ-06, ADR-0031): решает Администратор по метаданным.
+        new ModuleDescriptor("admin-report-permits", "/admin/report-permits", "Запросы на правку сводок",
+            Icons.Material.Filled.LockOpen, typeof(ReportPermits), ReadPolicy, GroupAdmin),
     ];
 
     /// <inheritdoc />

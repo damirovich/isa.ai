@@ -1,0 +1,498 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@page "/reports/{Id:int}"
+@rendermode InteractiveServer
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Abstractions.Security
+@using ISC.AI.Profile.Investigation.Application.Features.Directory
+@using ISC.AI.Profile.Investigation.Application.Features.Reports
+@using ISC.AI.Profile.Investigation.Domain.Enums
+@using ISC.AI.Profile.Investigation.Domain.Services
+
+@* Карточка сводки/справки по бланку (ТФ-ДДЛ-04/05, ADR-0031): поля бланка актуальной редакции, окно
+   редактирования с оставшимся временем, история редакций (прежние — «неактуальные», открываются только для
+   чтения), выгрузка .docx с грифом (ТБ-033), пометка «неактивный» вместо удаления. После окна правка —
+   только по разрешению Администратора с причиной: запрос подаётся здесь, решение — на странице очереди.
+   Каждое сохранение — новая редакция; сохранение от устаревшей редакции сервер отклоняет, чужая правка не
+   затирается (ADR-0031 п. 6). Состояние и право правки считает СЕРВЕР — страница только показывает. *@
+
+@if (_details is null)
+{
+    <PageHeader Title="Сводка / справка" Icon="@Icons.Material.Filled.Description" />
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_error</MudAlert>
+        <MudButton Href="/cases" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack">К списку дел</MudButton>
+    }
+    else
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-4" />
+    }
+}
+else
+{
+    var report = _details.Report;
+    <PageHeader Title="@($"{report.Kind.Label()} за {report.ReportDate:dd.MM.yyyy}")"
+                Subtitle="@($"Дело {_details.CaseNumber}{(report.PersonName is { } name ? $" · объект: {name}" : string.Empty)} · редакция № {report.CurrentRevision}")"
+                Icon="@Icons.Material.Filled.Description">
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@CaseReportsPanel.StateColor(report.State)">@report.State.Label()</MudChip>
+        <ClassificationChip Value="@_details.Classification" Prefix="гриф " />
+        <MudButton Href="@($"/cases/{report.CaseId}")" Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.ArrowBack">К делу</MudButton>
+    </PageHeader>
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+    }
+    @if (_notice is not null)
+    {
+        <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _notice = null)">@_notice</MudAlert>
+    }
+
+    <MudAlert Severity="@(report.State == CaseReportState.Editable ? Severity.Info : Severity.Normal)" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+        @WindowText()
+    </MudAlert>
+
+    <div class="d-flex flex-wrap gap-2 mb-3">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                   Disabled="@(_busy || !_details.CanEditNow)" OnClick="SaveAsync">Сохранить редакцию</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FileDownload" Disabled="_busy"
+                   OnClick="@(() => ExportAsync(null))">Выгрузить .docx</MudButton>
+        @if (report.State == CaseReportState.Archived && !_details.CanEditNow && _details.MyPermit is not { Status: ReportEditPermitStatus.Pending })
+        {
+            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.LockOpen"
+                       Disabled="_busy" OnClick="OpenPermit">Запросить разрешение на правку</MudButton>
+        }
+        <MudSpacer />
+        @if (report.State == CaseReportState.Inactive)
+        {
+            <MudButton Variant="Variant.Text" Disabled="_busy" OnClick="@(() => SetActiveAsync(true))">Вернуть в активные</MudButton>
+        }
+        else
+        {
+            <MudButton Variant="Variant.Text" Color="Color.Error" Disabled="_busy" OnClick="@(() => SetActiveAsync(false))">Пометить неактивным</MudButton>
+        }
+    </div>
+
+    <MudPaper Outlined="true" Class="pa-4 mb-3">
+        @if (report.Kind == CaseReportKind.SummaryOn)
+        {
+            <div class="d-flex align-center justify-space-between mb-2">
+                <MudText Typo="Typo.subtitle1">Хронология событий</MudText>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add"
+                           Disabled="@(!_details.CanEditNow)" OnClick="AddEvent">Добавить строку</MudButton>
+            </div>
+            @if (_events.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary pa-2">Событий пока нет.</MudText>
+            }
+            @for (var i = 0; i < _events.Count; i++)
+            {
+                var row = _events[i];
+                var index = i;
+                <MudGrid Spacing="1" Class="mb-2 align-center">
+                    <MudItem xs="12" sm="1"><MudText Typo="Typo.caption" Class="mud-text-secondary">№ @(index + 1)</MudText></MudItem>
+                    <MudItem xs="12" sm="1">
+                        <MudTextField @bind-Value="row.Time" Label="Время" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="@(!_details.CanEditNow)" MaxLength="100" />
+                    </MudItem>
+                    <MudItem xs="12" sm="2">
+                        <MudTextField @bind-Value="row.Place" Label="Место / адрес" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="@(!_details.CanEditNow)" />
+                    </MudItem>
+                    <MudItem xs="12" sm="4">
+                        <MudTextField @bind-Value="row.Description" Label="Событие, маршрут" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="@(!_details.CanEditNow)" />
+                    </MudItem>
+                    <MudItem xs="12" sm="2">
+                        <MudTextField @bind-Value="row.Persons" Label="Лица" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="@(!_details.CanEditNow)" />
+                    </MudItem>
+                    <MudItem xs="11" sm="1">
+                        <MudTextField @bind-Value="row.Vehicles" Label="Транспорт" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="@(!_details.CanEditNow)" />
+                    </MudItem>
+                    <MudItem xs="1" sm="1">
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       Disabled="@(!_details.CanEditNow)" OnClick="@(() => _events.RemoveAt(index))" aria-label="Удалить строку" />
+                    </MudItem>
+                </MudGrid>
+            }
+        }
+        else
+        {
+            <MudText Typo="Typo.subtitle1" Class="mb-2">Разделы справки</MudText>
+            <MudTextField @bind-Value="_form.Identity" Label="Установочные данные" Variant="Variant.Outlined" Lines="3" Class="mb-2" ReadOnly="@(!_details.CanEditNow)" />
+            <MudTextField @bind-Value="_form.Addresses" Label="Адреса проживания и пребывания" Variant="Variant.Outlined" Lines="2" Class="mb-2" ReadOnly="@(!_details.CanEditNow)" />
+            <MudTextField @bind-Value="_form.Occupation" Label="Род занятий, место работы" Variant="Variant.Outlined" Lines="2" Class="mb-2" ReadOnly="@(!_details.CanEditNow)" />
+            <MudTextField @bind-Value="_form.Family" Label="Семейные и иные связи" Variant="Variant.Outlined" Lines="2" Class="mb-2" ReadOnly="@(!_details.CanEditNow)" />
+            <MudTextField @bind-Value="_form.Characterizing" Label="Характеризующие материалы" Variant="Variant.Outlined" Lines="3" Class="mb-2" ReadOnly="@(!_details.CanEditNow)" />
+        }
+        <MudTextField @bind-Value="_form.Conclusion" Label="Вывод / примечание" Variant="Variant.Outlined" Lines="2" Class="mt-2" ReadOnly="@(!_details.CanEditNow)" />
+    </MudPaper>
+
+    <MudPaper Outlined="true" Class="pa-4 mb-3">
+        <MudText Typo="Typo.subtitle1" Class="mb-2">История редакций</MudText>
+        <MudTable T="CaseReportRevisionRow" Items="_details.Revisions" Dense="true" Hover="true" Elevation="0">
+            <HeaderContent>
+                <MudTh>№</MudTh>
+                <MudTh>Когда</MudTh>
+                <MudTh>Автор</MudTh>
+                <MudTh>Состояние</MudTh>
+                <MudTh>Причина правки после окна</MudTh>
+                <MudTh Style="width:220px;">Действия</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="№">@context.Number</MudTd>
+                <MudTd DataLabel="Когда">@context.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudTd>
+                <MudTd DataLabel="Автор">@UserName(context.AuthorUserId)</MudTd>
+                <MudTd DataLabel="Состояние">
+                    @if (context.Number == report.CurrentRevision)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Success">актуальная</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text">неактуальная</MudChip>
+                    }
+                </MudTd>
+                <MudTd DataLabel="Причина">@(context.EditReason ?? "—")</MudTd>
+                <MudTd DataLabel="Действия">
+                    @if (context.Number != report.CurrentRevision)
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="_busy" OnClick="@(() => OpenRevisionAsync(context.Number))">Открыть</MudButton>
+                    }
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="_busy" OnClick="@(() => ExportAsync(context.Number))">.docx</MudButton>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudPaper>
+}
+
+<MudDialog @bind-Visible="_permitOpen" Options="DialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Разрешение на правку архивного документа</MudText></TitleContent>
+    <DialogContent>
+        @if (_permitError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_permitError</MudAlert>
+        }
+        <MudText Typo="Typo.body2" Class="mb-2">
+            Окно редактирования закрыто. Запрос уйдёт Администратору: он увидит номер документа, дату, автора запроса и причину — но не содержание.
+        </MudText>
+        <MudTextField @bind-Value="_permitReason" Label="Причина правки *" Variant="Variant.Outlined" Lines="3"
+                      MaxLength="@CaseReportGuard.MaxReasonLength" Immediate="true" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _permitOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_busy || string.IsNullOrWhiteSpace(_permitReason))"
+                   OnClick="RequestPermitAsync">Отправить запрос</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_revisionOpen" Options="WideDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Редакция № @_revisionNumber (неактуальная, только чтение)</MudText></TitleContent>
+    <DialogContent>
+        @if (_revision is { } revision && _details is { } details)
+        {
+            @if (details.Report.Kind == CaseReportKind.SummaryOn)
+            {
+                <MudSimpleTable Dense="true" Bordered="true">
+                    <thead><tr><th>№</th><th>Время</th><th>Место / адрес</th><th>Событие, маршрут</th><th>Лица</th><th>Транспорт</th></tr></thead>
+                    <tbody>
+                        @{ var n = 0; }
+                        @foreach (var e in revision.EventRows)
+                        {
+                            n++;
+                            <tr><td>@n</td><td>@e.Time</td><td>@e.Place</td><td style="white-space:pre-wrap;">@e.Description</td><td>@e.Persons</td><td>@e.Vehicles</td></tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            }
+            else
+            {
+                @ReadOnlySection("Установочные данные", revision.Identity)
+                @ReadOnlySection("Адреса", revision.Addresses)
+                @ReadOnlySection("Род занятий", revision.Occupation)
+                @ReadOnlySection("Семейные и иные связи", revision.Family)
+                @ReadOnlySection("Характеризующие материалы", revision.Characterizing)
+            }
+            @ReadOnlySection("Вывод", revision.Conclusion)
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _revisionOpen = false)">Закрыть</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly DialogOptions DialogOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true };
+    private static readonly DialogOptions WideDialogOptions = new() { MaxWidth = MaxWidth.Large, FullWidth = true, CloseOnEscapeKey = true };
+
+    /// <summary>Документ из маршрута.</summary>
+    [Parameter] public int Id { get; set; }
+
+    private CaseReportDetails? _details;
+    private readonly List<UserAccountRow> _accounts = [];
+    private readonly List<EventForm> _events = [];
+    private SectionForm _form = new();
+    private bool _busy;
+    private string? _error;
+    private string? _notice;
+
+    private bool _permitOpen;
+    private string? _permitReason;
+    private string? _permitError;
+
+    private bool _revisionOpen;
+    private int _revisionNumber;
+    private CaseReportContent? _revision;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере не грузим.
+        if (!RendererInfo.IsInteractive) { return; }
+
+        var accounts = await Dispatcher.Send(new ListUserDirectoryQuery());
+        if (accounts is { Status: true, Data: { } rows }) { _accounts.AddRange(rows); }
+
+        await ReloadAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!RendererInfo.IsInteractive) { return; }
+        if (_details is { } current && current.Report.Id != Id) { await ReloadAsync(); }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new GetCaseReportQuery(Id));
+            if (response is not { Status: true, Data: { } details })
+            {
+                _details = null;
+                _error = response.StatusMessage;
+                return;
+            }
+
+            _details = details;
+            var content = details.Content;
+            _events.Clear();
+            _events.AddRange(content.EventRows.Select(EventForm.From));
+            _form = new SectionForm
+            {
+                Identity = content.Identity,
+                Addresses = content.Addresses,
+                Occupation = content.Occupation,
+                Family = content.Family,
+                Characterizing = content.Characterizing,
+                Conclusion = content.Conclusion,
+            };
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void AddEvent() => _events.Add(new EventForm());
+
+    private CaseReportContent BuildContent() => new(
+        Events: _events.Select(e => new SummaryEvent(e.Time, e.Place, e.Description, e.Persons, e.Vehicles)).ToList(),
+        Identity: _form.Identity,
+        Addresses: _form.Addresses,
+        Occupation: _form.Occupation,
+        Family: _form.Family,
+        Characterizing: _form.Characterizing,
+        Conclusion: _form.Conclusion);
+
+    private async Task SaveAsync()
+    {
+        if (_details is not { } details) { return; }
+        _busy = true;
+        _error = null;
+        _notice = null;
+        try
+        {
+            var response = await Dispatcher.Send(new UpdateCaseReportCommand(Id, details.Report.CurrentRevision, BuildContent()));
+            if (!response.Status)
+            {
+                _error = response.StatusMessage;
+                return;
+            }
+
+            _notice = "Сохранено.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task SetActiveAsync(bool active)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new SetCaseReportActiveCommand(Id, active));
+            if (!response.Status)
+            {
+                _error = response.StatusMessage;
+                return;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    private void OpenPermit()
+    {
+        _permitError = null;
+        _permitReason = null;
+        _permitOpen = true;
+    }
+
+    private async Task RequestPermitAsync()
+    {
+        _busy = true;
+        _permitError = null;
+        try
+        {
+            var response = await Dispatcher.Send(new RequestCaseReportPermitCommand(Id, _permitReason ?? string.Empty));
+            if (!response.Status)
+            {
+                _permitError = response.StatusMessage;
+                return;
+            }
+
+            _permitOpen = false;
+            _notice = "Запрос отправлен Администратору.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task OpenRevisionAsync(int number)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new GetCaseReportRevisionQuery(Id, number));
+            if (response is not { Status: true, Data: { } content })
+            {
+                _error = response.StatusMessage;
+                return;
+            }
+
+            _revision = content;
+            _revisionNumber = number;
+            _revisionOpen = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ExportAsync(int? revision)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new ExportCaseReportCommand(Id, revision));
+            if (response is not { Status: true, Data: { } file })
+            {
+                _error = response.StatusMessage;
+                return;
+            }
+
+            using var streamReference = new DotNetStreamReference(new MemoryStream(file.Content));
+            await JS.InvokeVoidAsync("downloadFileFromStream", file.FileName, streamReference);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    // Окно: «осталось N ч M мин» / «архивный с …» / статус запроса на правку. Время — по часам сервера на момент загрузки.
+    private string WindowText()
+    {
+        if (_details is not { } details) { return string.Empty; }
+        var report = details.Report;
+        var until = details.EditableUntil.ToLocalTime();
+
+        if (report.State == CaseReportState.Inactive)
+        {
+            return "Документ неактивен: он хранится, но не правится. Верните его в активные, чтобы продолжить работу.";
+        }
+
+        if (report.State == CaseReportState.Editable)
+        {
+            var left = details.EditableUntil - DateTime.UtcNow;
+            if (left < TimeSpan.Zero) { left = TimeSpan.Zero; }
+            return $"Окно редактирования открыто до {until:dd.MM.yyyy HH:mm} (осталось {(int)left.TotalHours} ч {left.Minutes} мин). После — документ архивный, правка только по разрешению Администратора.";
+        }
+
+        var permit = details.MyPermit;
+        return permit switch
+        {
+            { Status: ReportEditPermitStatus.Approved, ExpiresAt: { } expires } when details.CanEditNow =>
+                $"Документ архивный с {until:dd.MM.yyyy HH:mm}. Правка разрешена Администратором до {expires.ToLocalTime():dd.MM.yyyy HH:mm}; причина будет записана в редакцию: «{permit.Reason}».",
+            { Status: ReportEditPermitStatus.Pending } =>
+                $"Документ архивный с {until:dd.MM.yyyy HH:mm}. Ваш запрос на правку от {permit.RequestedAt.ToLocalTime():dd.MM.yyyy HH:mm} ждёт решения Администратора.",
+            { Status: ReportEditPermitStatus.Rejected } =>
+                $"Документ архивный с {until:dd.MM.yyyy HH:mm}. В последнем запросе на правку отказано — можно подать новый с уточнённой причиной.",
+            _ => $"Документ архивный с {until:dd.MM.yyyy HH:mm}: правка только по разрешению Администратора с указанием причины.",
+        };
+    }
+
+    private RenderFragment ReadOnlySection(string title, string? text) => __builder =>
+    {
+        if (string.IsNullOrWhiteSpace(text)) { return; }
+        <MudText Typo="Typo.subtitle2" Class="mt-2">@title</MudText>
+        <MudText Typo="Typo.body2" Style="white-space:pre-wrap;">@text</MudText>
+    };
+
+    private string UserName(int? id)
+    {
+        if (id is not { } userId) { return "—"; }
+        var account = _accounts.FirstOrDefault(a => a.UserId == userId);
+        if (account is null) { return $"пользователь № {userId}"; }
+        return string.IsNullOrWhiteSpace(account.DisplayName) ? account.UserName : account.DisplayName;
+    }
+
+    // Изменяемые формы для привязки полей: доменные записи неизменяемы.
+    private sealed class EventForm
+    {
+        public string? Time { get; set; }
+        public string? Place { get; set; }
+        public string? Description { get; set; }
+        public string? Persons { get; set; }
+        public string? Vehicles { get; set; }
+
+        public static EventForm From(SummaryEvent e) =>
+            new() { Time = e.Time, Place = e.Place, Description = e.Description, Persons = e.Persons, Vehicles = e.Vehicles };
+    }
+
+    private sealed class SectionForm
+    {
+        public string? Identity { get; set; }
+        public string? Addresses { get; set; }
+        public string? Occupation { get; set; }
+        public string? Family { get; set; }
+        public string? Characterizing { get; set; }
+        public string? Conclusion { get; set; }
+    }
+}
