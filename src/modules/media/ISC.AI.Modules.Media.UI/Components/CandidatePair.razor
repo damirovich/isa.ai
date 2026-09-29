@@ -47,6 +47,7 @@
     private FaceRow? _probeFace;
     private string? _probeUrl;
     private int? _resolvedProbeFaceId;
+    private ProbeFaceCache? _resolvedWith;
     private bool _probeUnavailable;
 
     private string? CandidateUrl => Item.CropStoredFileName is { } crop ? MediaFileUrl.FaceCrop(Item.AssetId, crop) : null;
@@ -74,12 +75,15 @@
             return;
         }
 
-        if (_resolvedProbeFaceId == probeFaceId)
+        // Повторно не запрашиваем то же лицо в ту же загрузку; новый кэш страницы («Обновить», другая
+        // страница) — новая загрузка: допуск перепроверяется и открытие снова попадает в журнал (ТБ-030).
+        if (_resolvedProbeFaceId == probeFaceId && ReferenceEquals(_resolvedWith, ProbeFaces))
         {
             return;
         }
 
         _resolvedProbeFaceId = probeFaceId;
+        _resolvedWith = ProbeFaces;
         _probeUnavailable = false;
         var response = ProbeFaces is { } cache
             ? await cache.GetAsync(probeFaceId, Dispatcher)
