@@ -1,5 +1,6 @@
 using System.Globalization;
 using ISC.AI.Abstractions.Security;
+using ISC.AI.Modules.Media.Domain.Services;
 using ISC.AI.Profile.Investigation.Domain.Entities;
 using ISC.AI.Profile.Investigation.Domain.Enums;
 using ISC.AI.Profile.Investigation.Domain.Services;
@@ -29,7 +30,8 @@ namespace ISC.AI.Profile.Investigation.Data;
 public sealed class IntersectionStore(
     IDbContextFactory<InvestigationDbContext> contextFactory,
     IAccessPolicy policy,
-    IUserRoleStore roles) : IIntersectionStore
+    IUserRoleStore roles,
+    IMediaCatalog mediaCatalog) : IIntersectionStore
 {
     /// <inheritdoc />
     public async Task<IReadOnlyList<IntersectionRow>?> FindForPersonAsync(
@@ -202,15 +204,31 @@ public sealed class IntersectionStore(
         var ownAssetIds = ownAppearances.Select(a => a.MediaAssetId).Distinct().ToList();
         var ownFaceIds = ownAppearances.Select(a => a.MediaFaceId).Distinct().ToList();
 
-        // Вид 1: объект подтверждён на материале, привязанном к ДРУГОМУ делу (тот же носитель в нескольких делах —
-        // дедупликация по хешу, ТНД-002). Дело — под floor'ом (otherCases), своё дело исключено.
+        // Вид 1: объект подтверждён на материале, который есть и в ДРУГОМ деле. Материал — тот же носитель (одна
+        // загрузка привязана к нескольким делам, ТНД-002) ЛИБО его копия по содержимому: тот же файл в деле с другим
+        // грифом или подразделением хранится отдельным носителем (ключ дедупликации — подразделение, гриф, хеш;
+        // ТБ-070). Копии — под floor'ом модуля «Медиа» (IMediaCatalog), дело — под floor'ом (otherCases), своё
+        // дело исключено. sourceOf: носитель в чужом деле → свои носители с тем же содержимым (для счётчиков).
+        var twins = await mediaCatalog.ListContentTwinsAsync(ownAssetIds, access, cancellationToken);
+        var sourceOf = ownAssetIds.ToDictionary(id => id, id => new HashSet<int> { id });
+        foreach (var twin in twins)
+        {
+            if (!sourceOf.TryGetValue(twin.TwinAssetId, out var sources))
+            {
+                sourceOf[twin.TwinAssetId] = sources = [];
+            }
+
+            sources.Add(twin.AssetId);
+        }
+
+        var materialAssetIds = sourceOf.Keys.ToList();
         var materialLinks = await db.CaseMediaLinks.AsNoTracking()
-            .Where(l => ownAssetIds.Contains(l.MediaAssetId) && otherCases.Any(c => c.Id == l.CaseId))
+            .Where(l => materialAssetIds.Contains(l.MediaAssetId) && otherCases.Any(c => c.Id == l.CaseId))
             .Select(l => new { l.MediaAssetId, l.CaseId })
             .ToListAsync(cancellationToken);
         foreach (var group in materialLinks.GroupBy(l => l.CaseId))
         {
-            var assets = group.Select(l => l.MediaAssetId).ToHashSet();
+            var assets = group.SelectMany(l => sourceOf[l.MediaAssetId]).ToHashSet();
             var onCase = ownAppearances.Where(a => assets.Contains(a.MediaAssetId)).ToList();
             var last = onCase.Max(a => a.ConfirmedAtUtc);
             matches.Add(new Match(IntersectionKind.Face, FaceOnMaterialKey,
