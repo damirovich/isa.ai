@@ -217,5 +217,58 @@ function isTextInput(target) {
     return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable === true;
 }
 
+// --- Предпросмотр выбранных файлов ДО загрузки (ТФ-МЕД-17: оператор видит, какому снимку ставит дату) ---
+// Файл показывается прямо с диска пользователя через blob-URL: на сервер ради предпросмотра ничего не уходит.
+// Слушатель change — на фазе перехвата у document: он срабатывает раньше, чем Blazor передаст выбор серверу,
+// поэтому к моменту запроса URL уже есть. Ключ — имя и размер (так же страница отличает файлы в списке).
+const uploadPreviews = new Map();
+let uploadPreviewsBound = false;
+
+function previewKey(name, size) {
+    return name + '|' + size;
+}
+
+export function bindUploadPreviews() {
+    if (uploadPreviewsBound) {
+        return;
+    }
+
+    uploadPreviewsBound = true;
+    document.addEventListener('change', e => {
+        const input = e.target;
+        if (!(input instanceof HTMLInputElement) || input.type !== 'file' || !input.files) {
+            return;
+        }
+
+        for (const file of input.files) {
+            const key = previewKey(file.name, file.size);
+            if (!uploadPreviews.has(key)) {
+                uploadPreviews.set(key, URL.createObjectURL(file));
+            }
+        }
+    }, true);
+}
+
+export function uploadPreviewUrl(name, size) {
+    return uploadPreviews.get(previewKey(name, size)) ?? null;
+}
+
+export function releaseUploadPreview(name, size) {
+    const key = previewKey(name, size);
+    const url = uploadPreviews.get(key);
+    if (url) {
+        URL.revokeObjectURL(url);
+        uploadPreviews.delete(key);
+    }
+}
+
+export function releaseAllUploadPreviews() {
+    for (const url of uploadPreviews.values()) {
+        URL.revokeObjectURL(url);
+    }
+
+    uploadPreviews.clear();
+}
+
 // Глобальный алиас для отладки из консоли; страницы используют экспорт модуля.
 window.iscaiMedia = { seek, reveal, measure, currentTime, stepFrame, bindFrameKeys, unbindFrameKeys };
