@@ -1,6 +1,9 @@
 @namespace ISC.AI.Modules.DocFlow.UI
 @* Регистрация документа (ТЗ СКИД §3.2): тип определяет группу; для «Исполнения» обязательны приоритет,
-   инспектор и назначения (единый срок §4.1). Гриф и подразделение ОБЯЗАТЕЛЬНЫ (ADR-0017 п.5). *@
+   инспектор и назначения (единый срок §4.1). Гриф и подразделение ОБЯЗАТЕЛЬНЫ (ADR-0017 п.5).
+   Форму можно встроить в чужой экран (например, вкладку «Документы» дела профиля): тогда вызывающий передаёт
+   начальные гриф и подразделение (подставляются, только если входят в допуск субъекта) и получает номер
+   созданного документа через OnRegistered вместо перехода на карточку. О «деле» модуль при этом не знает. *@
 @page "/docflow/documents/new"
 @rendermode InteractiveServer
 @inject NavigationManager Navigation
@@ -177,10 +180,33 @@
 <div class="d-flex gap-2">
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
                Disabled="_busy || !CanRegister" OnClick="SubmitAsync">Зарегистрировать</MudButton>
-    <MudButton Variant="Variant.Text" OnClick="@(() => Navigation.NavigateTo("/docflow/documents"))">Отмена</MudButton>
+    <MudButton Variant="Variant.Text" OnClick="CancelAsync">Отмена</MudButton>
 </div>
 
 @code {
+    /// <summary>Встраивание: вызывается с идентификатором созданного документа вместо перехода на его карточку.</summary>
+    [Parameter] public EventCallback<int> OnRegistered { get; set; }
+
+    /// <summary>Встраивание: вызывается по «Отмена» вместо перехода к реестру.</summary>
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    /// <summary>Начальный гриф (подставляется, только если не выше допуска субъекта).</summary>
+    [Parameter] public short? InitialClassification { get; set; }
+
+    /// <summary>Начальное подразделение-владелец (подставляется, только если оно среди разрешённых субъекту).</summary>
+    [Parameter] public int? InitialDivisionId { get; set; }
+
+    private Task CancelAsync()
+    {
+        if (OnCancel.HasDelegate)
+        {
+            return OnCancel.InvokeAsync();
+        }
+
+        Navigation.NavigateTo("/docflow/documents");
+        return Task.CompletedTask;
+    }
+
     private sealed class AssignmentRow
     {
         public int? DivisionId { get; set; }
@@ -298,6 +324,19 @@
         // Своё подразделение подставляется ПО УМОЛЧАНИЮ (решение заказчика 2026-08-25): список
         // владельцев — уже пересечение с допуском субъекта, первый пункт и есть «его» подразделение.
         // Это дефолт, не запрет: канцелярия может выбрать другое из своего допуска.
+        // Встраивание передаёт подразделение и гриф контекста (дела) — только в пределах допуска субъекта:
+        // подставить недоступное значит предложить заведомо отказной вариант (сервер всё равно проверит).
+        if (InitialDivisionId is { } initialDivision && _ownerDivisions.Any(d => d.Id == initialDivision))
+        {
+            _divisionId = initialDivision;
+        }
+
+        if (InitialClassification is { } initialClassification && initialClassification >= 0
+            && initialClassification <= SelectableClassificationLimit)
+        {
+            _classification = initialClassification;
+        }
+
         _divisionId ??= _ownerDivisions.Count > 0 ? _ownerDivisions[0].Id : null;
 
         _scopeError = (_ownerDivisions.Count, _divisionsLoaded, _divisions.Count) switch
@@ -367,7 +406,14 @@
 
             if (response is { Status: true })
             {
-                Navigation.NavigateTo($"/docflow/documents/{response.Data}");
+                if (OnRegistered.HasDelegate)
+                {
+                    await OnRegistered.InvokeAsync(response.Data);
+                }
+                else
+                {
+                    Navigation.NavigateTo($"/docflow/documents/{response.Data}");
+                }
             }
             else
             {
