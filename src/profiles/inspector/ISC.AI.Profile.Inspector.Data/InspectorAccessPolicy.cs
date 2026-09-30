@@ -2,6 +2,7 @@ using System.Linq.Expressions;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.DocFlow.Domain.Entities;
 using ISC.AI.Profile.Inspector.Domain.Enums;
+using ISC.AI.Profile.Inspector.Domain.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace ISC.AI.Profile.Inspector.Data;
@@ -23,6 +24,7 @@ namespace ISC.AI.Profile.Inspector.Data;
 /// проверившей <c>typeof(T) == typeof(Document)</c> — в момент выполнения фактический тип выражения
 /// уже <c>Expression&lt;Func&lt;Document, bool&gt;&gt;</c>.
 ///
+/// Роль с закрытым правом «Документы и отчёты» матрицы доступа (ADR-0033) приравнивается к «без роли».
 /// Без назначенной роли (новая JIT-учётка после первого входа, ролью ещё никто не наделил) — DEFAULT-DENY
 /// (ТБ-012, тот же принцип, что у грифа): документов не видно, пока администратор явно не назначит роль.
 /// </remarks>
@@ -70,9 +72,26 @@ public sealed class InspectorAccessPolicy(IDbContextFactory<InspectorDbContext> 
         }
 
         using var db = contextFactory.CreateDbContext();
-        return db.UserRoleAssignments.AsNoTracking()
+        var role = db.UserRoleAssignments.AsNoTracking()
             .Where(r => r.UserId == userId)
             .Select(r => (UserRole?)r.Role)
             .FirstOrDefault();
+
+        if (role is not { } assigned)
+        {
+            return null;
+        }
+
+        // Право «Документы и отчёты» матрицы доступа (ADR-0033): закрыто — роль считается отсутствующей, документов
+        // нет (default-deny). То же правило, что у PermissionRule, но синхронно — контракт BuildFilter синхронный.
+        var permission = InspectorPermissions.Get(InspectorPermissions.DocFlowView);
+        var stored = InspectorPermissions.LockReason(permission, assigned) is null
+            ? db.RolePermissions.AsNoTracking()
+                .Where(p => p.Role == assigned && p.Permission == permission.Key)
+                .Select(p => (bool?)p.IsGranted)
+                .FirstOrDefault()
+            : null;
+
+        return InspectorPermissions.IsGranted(permission, assigned, stored) ? assigned : null;
     }
 }

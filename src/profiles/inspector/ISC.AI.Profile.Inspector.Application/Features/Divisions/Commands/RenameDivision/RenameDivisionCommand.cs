@@ -1,6 +1,7 @@
 using FluentValidation;
 using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Audit;
+using ISC.AI.Abstractions.Security;
 using ISC.AI.Profile.Inspector.Domain.Services;
 using Mediator;
 
@@ -19,13 +20,19 @@ public sealed record RenameDivisionCommand(
     public string? AuditSummary => $"inspector:division:rename:{Id}";
 
     /// <inheritdoc cref="RenameDivisionCommand" />
-    public sealed class Handler(IDivisionAdminStore store) : IRequestHandler<RenameDivisionCommand, ResponseDto<bool>>
+    public sealed class Handler(IDivisionAdminStore store, IUserRoleStore roles, ISubjectProvider subjectProvider) : IRequestHandler<RenameDivisionCommand, ResponseDto<bool>>
     {
         /// <inheritdoc />
         public async ValueTask<ResponseDto<bool>> Handle(
             RenameDivisionCommand command, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(command);
+
+            // Право «Подразделения: ведение» матрицы доступа (ADR-0033) — до любого обращения к справочнику (ТБ-012).
+            if (!await PermissionRule.CallerHasAsync(roles, subjectProvider, InspectorPermissions.DivisionsManage, cancellationToken))
+            {
+                return ResponseDto<bool>.BadRequest(PermissionRule.Denied(InspectorPermissions.DivisionsManage));
+            }
             var found = await store.RenameAsync(
                 command.Id, command.Name, command.Code, command.Kind, cancellationToken);
             return found ? ResponseDto<bool>.Ok(true) : ResponseDto<bool>.NotFound("Подразделение не найдено.");

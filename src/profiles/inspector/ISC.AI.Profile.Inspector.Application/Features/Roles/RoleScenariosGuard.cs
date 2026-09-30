@@ -1,5 +1,4 @@
 using ISC.AI.Abstractions.Security;
-using ISC.AI.Profile.Inspector.Domain.Enums;
 using ISC.AI.Profile.Inspector.Domain.Services;
 
 namespace ISC.AI.Profile.Inspector.Application.Features.Roles;
@@ -26,19 +25,7 @@ internal static class RoleScenariosGuard
     /// которая видит все документы) — Администратора нет, окно закрыто, управление ролями потеряно
     /// навсегда. Текущее правило самовосстанавливающееся: не стало Администратора — окно открылось.
     /// </remarks>
-    public static async Task<bool> CallerCanManageRolesAsync(
-        IUserRoleStore store, ISubjectProvider subjectProvider, CancellationToken cancellationToken)
-    {
-        if (await subjectProvider.GetCurrentUserIdAsync(cancellationToken) is not { } callerId)
-        {
-            return false;
-        }
-
-        if (await store.GetRoleAsync(callerId, cancellationToken) == UserRole.Administrator)
-        {
-            return true;
-        }
-
-        return !await store.AnyAdministratorAsync(cancellationToken);
-    }
+    public static Task<bool> CallerCanManageRolesAsync(
+        IUserRoleStore store, ISubjectProvider subjectProvider, CancellationToken cancellationToken) =>
+        AdministrationRule.CallerCanManageAsync(store, subjectProvider, cancellationToken);
 }
