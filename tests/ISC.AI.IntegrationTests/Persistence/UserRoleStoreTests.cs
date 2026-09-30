@@ -1,7 +1,11 @@
+using ISC.AI.Abstractions.Security;
+using ISC.AI.Modules.DocFlow.Domain.Entities;
 using ISC.AI.Persistence;
 using ISC.AI.Persistence.Entities;
 using ISC.AI.Profile.Inspector.Data;
+using ISC.AI.Profile.Inspector.Domain.Entities;
 using ISC.AI.Profile.Inspector.Domain.Enums;
+using ISC.AI.Profile.Inspector.Domain.Services;
 using Microsoft.EntityFrameworkCore;
 using Pgvector.EntityFrameworkCore;
 using Shouldly;
@@ -79,5 +83,63 @@ public sealed class UserRoleStoreTests : IAsyncLifetime
         await store.SetRoleAsync(userId, null);
         (await store.GetRoleAsync(userId)).ShouldBeNull();
         (await store.AnyAdministratorAsync()).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Матрица доступа Инспектора (ADR-0033): отличие — одна строка на ячейку, null — к умолчанию; журнал и документы отвечают по БД сразу")]
+    public async Task Access_matrix_is_stored_and_applied_immediately()
+    {
+        var coreFactory = new CoreContextFactory(_postgres.GetConnectionString());
+        var inspectorFactory = new InspectorContextFactory(_postgres.GetConnectionString());
+        await using (var db = coreFactory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+        }
+
+        await using (var db = inspectorFactory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+            db.UserRoleAssignments.AddRange(
+                new UserRoleAssignment { UserId = 10, Role = UserRole.Manager },
+                new UserRoleAssignment { UserId = 20, Role = UserRole.Performer },
+                new UserRoleAssignment { UserId = 30, Role = UserRole.Administrator });
+            await db.SaveChangesAsync();
+        }
+
+        var store = new UserRoleStore(coreFactory, inspectorFactory);
+        var managerAdmin = new InspectorPlatformAdministration(store, new FixedSubjectProvider(10));
+        var policy = new InspectorAccessPolicy(inspectorFactory);
+        var managersDocument = new Document { ShortContent = "Справка" };
+        bool ManagerSeesDocument() => policy.BuildFilter<Document>(new AccessContext("10", 0, [1])).Compile()(managersDocument);
+
+        (await managerAdmin.CanViewAuditAsync()).ShouldBeFalse();
+        ManagerSeesDocument().ShouldBeTrue();
+
+        await store.ApplyPermissionChangesAsync(
+        [
+            new(UserRole.Manager, InspectorPermissions.AdminAudit, true),
+            new(UserRole.Manager, InspectorPermissions.DocFlowView, false),
+        ], changedByUserId: 30);
+
+        // Действует со следующего же запроса — без кэша (ТБ-016).
+        (await managerAdmin.CanViewAuditAsync()).ShouldBeTrue();
+        ManagerSeesDocument().ShouldBeFalse();
+
+        // Повторное сохранение правит ту же строку.
+        await store.ApplyPermissionChangesAsync([new(UserRole.Manager, InspectorPermissions.AdminAudit, false)], changedByUserId: 30);
+        await using (var db = inspectorFactory.CreateDbContext())
+        {
+            var rows = await db.RolePermissions.Where(p => p.Role == UserRole.Manager && p.Permission == InspectorPermissions.AdminAudit).ToListAsync();
+            rows.Count.ShouldBe(1);
+            rows[0].IsGranted.ShouldBeFalse();
+            rows[0].UpdatedByUserId.ShouldBe(30);
+        }
+
+        var stored = await store.ListPermissionOverridesAsync();
+        stored.Count.ShouldBe(2);
+
+        // null — вернуть к умолчанию.
+        await store.ApplyPermissionChangesAsync([.. stored.Select(o => new RolePermissionChange(o.Role, o.Permission, null))], changedByUserId: 30);
+        (await store.ListPermissionOverridesAsync()).ShouldBeEmpty();
+        ManagerSeesDocument().ShouldBeTrue();
     }
 }

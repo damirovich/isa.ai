@@ -25,7 +25,7 @@ public sealed record DeleteViolationCategoryCommand(int CategoryId) : IRequest<R
         {
             ArgumentNullException.ThrowIfNull(command);
 
-            if (!await AdministrationRule.CallerCanManageAsync(roles, subjectProvider, cancellationToken))
+            if (!await PermissionRule.CallerHasAsync(roles, subjectProvider, InspectorPermissions.AdminDirectories, cancellationToken))
             {
                 return ResponseDto<bool>.BadRequest(SaveViolationCategoryCommand.Handler.Denied);
             }

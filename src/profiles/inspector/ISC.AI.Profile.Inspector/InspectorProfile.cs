@@ -124,6 +124,11 @@ public sealed class InspectorProfile : IProfile
         // Секция у страниц пакета та же — AdminModule.MenuGroup, значение GroupAdmin.
         .. AdminModule.Modules,
 
+        // Матрица доступа (§2.1 ТЗ СКИД, ADR-0033): Администратор решает, какие действия и разделы открыты каждой роли;
+        // сервер и это же меню проверяют права по ней.
+        new ModuleDescriptor("admin-access-matrix", "/admin/access", "Матрица доступа",
+            Icons.Material.Filled.GridOn, typeof(AccessMatrix), ReadPolicy, GroupAdmin),
+
         // Классификатор видов нарушений (Э5-01): справочник «сфера → вид», ведёт Администратор.
         new ModuleDescriptor("admin-violation-categories", "/admin/violation-categories", "Виды нарушений",
             Icons.Material.Filled.Category, typeof(ViolationCategories), ReadPolicy, GroupAdmin),

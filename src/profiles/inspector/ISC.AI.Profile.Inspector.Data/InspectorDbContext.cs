@@ -33,6 +33,9 @@ public class InspectorDbContext(DbContextOptions<InspectorDbContext> options) : 
     // Роли пользователей (§2.1 ТЗ СКИД, этап 6 Э4-35) — построчный доступ к докфлоу-документам.
     public DbSet<UserRoleAssignment> UserRoleAssignments { get; set; } = null!;
 
+    /// <summary>Матрица доступа: отличия ячеек «роль × право» от умолчаний (ADR-0033).</summary>
+    public DbSet<RolePermission> RolePermissions { get; set; } = null!;
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

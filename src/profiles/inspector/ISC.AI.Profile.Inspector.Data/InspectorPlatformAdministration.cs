@@ -18,8 +18,8 @@ public sealed class InspectorPlatformAdministration(IUserRoleStore roles, ISubje
 {
     /// <inheritdoc />
     /// <remarks>
-    /// Правило ОДНО со справочниками профиля и настройками документооборота
-    /// (<see cref="AdministrationRule"/>): Администратор — всегда; любой вошедший — только пока
+    /// Право «Пользователи, роли и допуски» матрицы доступа, закреплённое за Администратором
+    /// (<see cref="AdministrationRule"/>, ADR-0033): Администратор — всегда; любой вошедший — только пока
     /// Администратора в системе нет. Вторая половина не послабление, а выход из «замка без ключа»
     /// (6.4.1): после чистого развёртывания роль назначить некому, потому что назначение роли само
     /// требует роли.
@@ -29,13 +29,13 @@ public sealed class InspectorPlatformAdministration(IUserRoleStore roles, ISubje
 
     /// <inheritdoc />
     /// <remarks>
-    /// У «ИнспекторAI» журнал читает ТОТ ЖЕ Администратор: отдельной роли офицера ИБ в профиле нет
-    /// (§2.1 ТЗ СКИД — четыре роли), и выдумывать её здесь нельзя. Порт разделяет два вопроса ради
-    /// профиля «Следствие», где читатель журнала — отдельная роль (ТП-004); для инспекции ответ
-    /// совпадает, и это записано явно, а не оставлено на догадку читателя.
+    /// Отдельное право «Журнал аудита» матрицы доступа (ADR-0033). По умолчанию у «ИнспекторAI» журнал читает ТОТ
+    /// ЖЕ Администратор: отдельной роли офицера ИБ в профиле нет (§2.1 ТЗ СКИД — четыре роли); Администратор может
+    /// открыть журнал, например, Руководителю. Режим первичной настройки у права есть. Что именно субъект увидит,
+    /// решает решётка гриф/подразделение в <c>IAuditReader</c> (ТБ-032).
     /// </remarks>
     public Task<bool> CanViewAuditAsync(CancellationToken cancellationToken = default) =>
-        AdministrationRule.CallerCanManageAsync(roles, subjectProvider, cancellationToken);
+        PermissionRule.CallerHasAsync(roles, subjectProvider, InspectorPermissions.AdminAudit, cancellationToken);
 
     /// <inheritdoc />
     /// <remarks>Тот же признак, что открывает <see cref="AdministrationRule"/> любому вошедшему: Администратора нет ни одного.</remarks>

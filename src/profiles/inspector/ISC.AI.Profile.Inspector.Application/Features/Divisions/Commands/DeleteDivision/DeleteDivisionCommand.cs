@@ -1,6 +1,7 @@
 using FluentValidation;
 using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Audit;
+using ISC.AI.Abstractions.Security;
 using ISC.AI.Profile.Inspector.Domain.Services;
 using Mediator;
 
@@ -18,7 +19,7 @@ public sealed record DeleteDivisionCommand(int Id) : IRequest<ResponseDto<bool>>
     public string? AuditSummary => $"inspector:division:delete:{Id}";
 
     /// <inheritdoc cref="DeleteDivisionCommand" />
-    public sealed class Handler(IDivisionAdminStore store)
+    public sealed class Handler(IDivisionAdminStore store, IUserRoleStore roles, ISubjectProvider subjectProvider)
         : IRequestHandler<DeleteDivisionCommand, ResponseDto<bool>>
     {
         /// <inheritdoc />
@@ -26,6 +27,12 @@ public sealed record DeleteDivisionCommand(int Id) : IRequest<ResponseDto<bool>>
             DeleteDivisionCommand command, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(command);
+
+            // Право «Подразделения: ведение» матрицы доступа (ADR-0033) — до любого обращения к справочнику (ТБ-012).
+            if (!await PermissionRule.CallerHasAsync(roles, subjectProvider, InspectorPermissions.DivisionsManage, cancellationToken))
+            {
+                return ResponseDto<bool>.BadRequest(PermissionRule.Denied(InspectorPermissions.DivisionsManage));
+            }
 
             return await store.DeleteAsync(command.Id, cancellationToken) switch
             {

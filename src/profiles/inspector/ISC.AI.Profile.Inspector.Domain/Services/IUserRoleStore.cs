@@ -33,4 +33,20 @@ public interface IUserRoleStore
 
     /// <summary>Назначает роль; <paramref name="role"/> = <see langword="null"/> — снимает назначение.</summary>
     Task SetRoleAsync(int userId, UserRole? role, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Сохранённое отличие ячейки матрицы доступа от умолчания (ADR-0033); нет отличия — <see langword="null"/>
+    /// (действует умолчание <see cref="InspectorPermissions"/>).
+    /// </summary>
+    Task<bool?> GetPermissionOverrideAsync(UserRole role, string permission, CancellationToken cancellationToken = default);
+
+    /// <summary>Все сохранённые отличия матрицы доступа от умолчаний.</summary>
+    Task<IReadOnlyList<RolePermissionOverride>> ListPermissionOverridesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Применить изменения ячеек одной транзакцией: значение — записать отличие, <see langword="null"/> — удалить (вернуть
+    /// к умолчанию). Проверку замков и права делает сценарий, хранилище пишет как велено.
+    /// </summary>
+    Task ApplyPermissionChangesAsync(
+        IReadOnlyCollection<RolePermissionChange> changes, int? changedByUserId, CancellationToken cancellationToken = default);
 }

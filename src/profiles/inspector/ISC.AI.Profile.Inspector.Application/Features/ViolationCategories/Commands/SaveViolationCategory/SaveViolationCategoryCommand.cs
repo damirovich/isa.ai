@@ -26,8 +26,8 @@ public sealed record SaveViolationCategoryCommand(int? CategoryId, string Name, 
     public sealed class Handler(IViolationCategoryStore store, IUserRoleStore roles, ISubjectProvider subjectProvider)
         : IRequestHandler<SaveViolationCategoryCommand, ResponseDto<int>>
     {
-        /// <summary>Единый текст отказа (правило — AdministrationRule, как у справочника подразделений).</summary>
-        public const string Denied = "Классификатор видов нарушений ведёт Администратор.";
+        /// <summary>Единый текст отказа (право «Виды нарушений» матрицы доступа, ADR-0033).</summary>
+        public static readonly string Denied = PermissionRule.Denied(InspectorPermissions.AdminDirectories);
 
         /// <inheritdoc />
         public async ValueTask<ResponseDto<int>> Handle(
@@ -35,7 +35,7 @@ public sealed record SaveViolationCategoryCommand(int? CategoryId, string Name, 
         {
             ArgumentNullException.ThrowIfNull(command);
 
-            if (!await AdministrationRule.CallerCanManageAsync(roles, subjectProvider, cancellationToken))
+            if (!await PermissionRule.CallerHasAsync(roles, subjectProvider, InspectorPermissions.AdminDirectories, cancellationToken))
             {
                 return ResponseDto<int>.BadRequest(Denied);
             }

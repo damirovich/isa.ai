@@ -21,13 +21,14 @@ namespace ISC.AI.Profile.Inspector.Data;
 public sealed class InspectorUserRoleCatalog(IUserRoleStore roles) : IUserRoleCatalog
 {
     /// <inheritdoc />
-    public Task<IReadOnlyList<RoleOption>> ListRolesAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<RoleOption>> ListRolesAsync(CancellationToken cancellationToken = default)
     {
-        IReadOnlyList<RoleOption> options = Enum.GetValues<UserRole>()
-            .Select(role => new RoleOption(role.ToString(), role.Label(), Describe(role)))
+        // Описание строится по ДЕЙСТВУЮЩЕЙ матрице доступа (ADR-0033): после правки галочек карточка сотрудника
+        // говорит правду о том, что даёт роль, а не пересказывает умолчания поставки.
+        var overrides = await roles.ListPermissionOverridesAsync(cancellationToken) ?? [];
+        return Enum.GetValues<UserRole>()
+            .Select(role => new RoleOption(role.ToString(), role.Label(), Describe(role, overrides)))
             .ToList();
-
-        return Task.FromResult(options);
     }
 
     /// <inheritdoc />
@@ -68,13 +69,32 @@ public sealed class InspectorUserRoleCatalog(IUserRoleStore roles) : IUserRoleCa
         return RoleAssignmentResult.Ok;
     }
 
-    /// <summary>Что даёт роль — по построчному доступу к документам (§2.1 ТЗ СКИД).</summary>
-    public static string Describe(UserRole role) => role switch
+    /// <summary>
+    /// Что даёт роль — по правам матрицы доступа, которые проверяет сервер (ADR-0033), и по неизменяемому правилу
+    /// видимости документов (<see cref="InspectorAccessPolicy"/>, §2.1 ТЗ СКИД).
+    /// </summary>
+    public static string Describe(UserRole role, IReadOnlyCollection<RolePermissionOverride> overrides)
     {
-        UserRole.Administrator => "Пользователи, справочники и журнал действий; видит все документы.",
-        UserRole.Manager => "Видит все документы системы; единственный, кто снимает документ с контроля.",
-        UserRole.Inspector => "Только документы, где сам назначен инспектором, включая отчёты и дашборд.",
-        UserRole.Performer => "Только документы, где у него есть хотя бы одно поручение.",
-        _ => role.Label(),
-    };
+        ArgumentNullException.ThrowIfNull(overrides);
+
+        var open = InspectorPermissions.All
+            .Where(p => InspectorPermissions.IsGranted(p, role, overrides))
+            .Select(p => char.ToLowerInvariant(p.Label[0]) + p.Label[1..])
+            .ToList();
+
+        var granted = open.Count == 0
+            ? "В матрице доступа роли ничего не открыто."
+            : "Открыто: " + string.Join(", ", open) + ".";
+
+        // Какие именно документы видит роль, матрицей не настраивается (§2.1 ТЗ СКИД).
+        var scope = role switch
+        {
+            UserRole.Administrator or UserRole.Manager => "Документы — все в пределах допуска.",
+            UserRole.Inspector => "Документы — только те, где он назначен инспектором.",
+            UserRole.Performer => "Документы — только те, где у него есть поручение.",
+            _ => string.Empty,
+        };
+
+        return $"{granted} {scope}".TrimEnd();
+    }
 }

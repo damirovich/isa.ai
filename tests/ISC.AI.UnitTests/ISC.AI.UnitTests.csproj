@@ -22,6 +22,10 @@
     <ProjectReference Include="..\..\src\profiles\inspector\ISC.AI.Profile.Inspector.Application\ISC.AI.Profile.Inspector.Application.csproj" />
     <ProjectReference Include="..\..\src\profiles\inspector\ISC.AI.Profile.Inspector.Domain\ISC.AI.Profile.Inspector.Domain.csproj" />
     <ProjectReference Include="..\..\src\profiles\inspector\ISC.AI.Profile.Inspector.UI\ISC.AI.Profile.Inspector.UI.csproj" />
+    <!-- Матрица доступа «ИнспекторAI» (ADR-0033): порты и меню слоя данных, манифест — явно, а не транзитивно через хост:
+         иначе при сборке с -p:IscProfile=investigation тесты «Инспектора» не компилировались бы. -->
+    <ProjectReference Include="..\..\src\profiles\inspector\ISC.AI.Profile.Inspector.Data\ISC.AI.Profile.Inspector.Data.csproj" />
+    <ProjectReference Include="..\..\src\profiles\inspector\ISC.AI.Profile.Inspector\ISC.AI.Profile.Inspector.csproj" />
     <!-- Пакет модулей документооборота (Э4-35): валидаторы сценариев. -->
     <ProjectReference Include="..\..\src\modules\docflow\ISC.AI.Modules.DocFlow.Application\ISC.AI.Modules.DocFlow.Application.csproj" />
     <!-- Профиль «Следствие» (ЭС2): домен пакета «Медиа» и интеграция распознавания — чистая математика

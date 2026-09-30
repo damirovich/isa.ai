@@ -98,6 +98,10 @@ public static class InspectorPersistenceServiceCollectionExtensions
         // Роли для колонки и фильтра на экране учётных записей. Назначает роли страница профиля.
         services.AddScoped<ISC.AI.Modules.Admin.Domain.Services.IUserRoleCatalog, InspectorUserRoleCatalog>();
 
+        // Разделы меню по матрице доступа (ADR-0033): хост прячет то, где роли право закрыто; права проверяет сервер
+        // по той же таблице (ТБ-012).
+        services.AddScoped<ISC.AI.Abstractions.Modules.IModuleVisibility, InspectorModuleVisibility>();
+
         // Переопределяет AllowAllAccessPolicy ядра (AddCoreRetrieval регистрируется РАНЬШЕ — Program.cs)
         // тем же приёмом, что и ICitationExtractor/ICitationNormalizer: явная замена дефолта повторной
         // регистрацией, не вторая параллельная. Singleton — как у дефолта; IDbContextFactory сам по себе
