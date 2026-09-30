@@ -43,6 +43,23 @@ else
             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">личность не установлена</MudChip>
         }
         <ClassificationChip Value="@_person.Classification" Prefix="гриф " />
+        @* Поиск по фигуранту одной кнопкой (ТФ-ПЛ-01/03/05): лучший эталон, все доступные дела, основание дела.
+           Неактивна — причина видна тут же. *@
+        @{ var plan = SearchPlan; }
+        <div class="d-flex flex-column align-end">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.ImageSearch"
+                       Disabled="@(_busy || plan.Url is null)" Href="@plan.Url">Искать по материалам</MudButton>
+            @if (plan.Blocker is { } blocker)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1" Style="max-width:320px;text-align:right;">@blocker</MudText>
+            }
+            else if (plan.Probe is { } probe)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1">
+                    Эталон № @probe.Id · все доступные дела@(_searchContext is { Authorizations.Count: > 1 } ? " · основание выберете на странице поиска" : string.Empty)
+                </MudText>
+            }
+        </div>
         <MudButton Href="@($"/cases/{_person.CaseId}")" Variant="Variant.Text" Size="Size.Small"
                    StartIcon="@Icons.Material.Filled.ArrowBack">К делу</MudButton>
     </PageHeader>
@@ -700,6 +717,13 @@ else
     private string? _appearancesError;
     private string? _photosError;
 
+    // --- Поиск по фигуранту одной кнопкой ---
+    private PersonSearchContext? _searchContext;
+
+    private PersonSearchPlan SearchPlan => _person is null
+        ? new PersonSearchPlan(null, null, null)
+        : PersonSearchRules.Plan(_person.CaseId, _photos, _appearances, _searchContext);
+
     // --- Отзыв появления (ADR-0034) ---
     private AppearanceRevokeRight? _revokeRight;
     private bool _revokeOpen;
@@ -890,6 +914,11 @@ else
             _photos.Clear();
             if (photos is { Status: true, Data: { } p }) { _photos.AddRange(p); }
             else { _photosError = photos.StatusMessage; }
+
+            if (await Dispatcher.Send(new GetPersonSearchContextQuery(person.CaseId)) is { Status: true, Data: { } searchContext })
+            {
+                _searchContext = searchContext;
+            }
 
             // Фигуранты дела — для вкладки «Связи», имени «Связь с» и выбора «чья связь» (ТФ-ПЕР-06).
             _casePersonsError = null;
