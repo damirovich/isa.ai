@@ -50,9 +50,14 @@ public sealed class TaskRequisitesForm
     public int? InitialPositionId { get; private init; }
 
     /// <summary>Заполнены ли обязательные реквизиты (№, ГУ, обоснование, цель) — для доступности кнопки сохранения.</summary>
-    public bool IsComplete =>
-        !string.IsNullOrWhiteSpace(TaskNumber) && InitiatorUnitId is > 0
-        && !string.IsNullOrWhiteSpace(Justification) && !string.IsNullOrWhiteSpace(Purpose);
+    public bool IsComplete => MissingHint is null;
+
+    /// <summary>Каких обязательных реквизитов задания не хватает — подсказка у неактивной кнопки; всё есть — <see langword="null"/>.</summary>
+    public string? MissingHint => FormHints.Missing(
+        (string.IsNullOrWhiteSpace(TaskNumber), "№ задания"),
+        (InitiatorUnitId is not > 0, "подразделение-инициатор"),
+        (string.IsNullOrWhiteSpace(Justification), "обоснование"),
+        (string.IsNullOrWhiteSpace(Purpose), "цель"));
 
     /// <summary>Модель по реквизитам дела (пустая — для нового задания).</summary>
     public static TaskRequisitesForm From(TaskRequisites? task) => task is null

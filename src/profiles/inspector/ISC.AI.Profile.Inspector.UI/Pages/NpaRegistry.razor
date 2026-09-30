@@ -47,6 +47,10 @@
         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
                    Disabled="@(_busy || string.IsNullOrWhiteSpace(_newIdentifier) || string.IsNullOrWhiteSpace(_newTitle))"
                    OnClick="CreateAsync">Создать</MudButton>
+        @if (!_busy && (string.IsNullOrWhiteSpace(_newIdentifier) || string.IsNullOrWhiteSpace(_newTitle)))
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="">@(string.IsNullOrWhiteSpace(_newIdentifier) ? "Заполните: номер НПА" : "Заполните: название")</MudText>
+        }
     </div>
 </MudPaper>
 

@@ -184,8 +184,8 @@
                    Disabled="@(!CanSearch)" OnClick="SearchAsync">@(_busy ? "Ищу…" : "Искать")</MudButton>
         @if (!CanSearch && !_busy)
         {
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                @(_probeFace is { QualityAcceptable: false } ? "Проба непригодна для поиска — выберите другое лицо или изображение." : "Для поиска нужны дело, основание и пригодная проба.")
+            <MudText Typo="Typo.caption" Color="Color.Warning">
+                @SearchHint
             </MudText>
         }
     </div>
@@ -317,6 +317,15 @@
     private string? _error;
 
     /// <summary>Проба задана и пригодна: лицо носителя — только с шаблоном (ТО-мат-07), либо загруженное изображение.</summary>
+    // Почему «Искать» неактивна — конкретно, по первому незаполненному шагу формы.
+    private string SearchHint =>
+        _probeFace is { QualityAcceptable: false } ? "Проба непригодна для поиска — выберите другое лицо или изображение."
+        : _caseId is null ? "Выберите дело."
+        : _authorizationId is null ? "Выберите основание поиска (добавляется в карточке дела, вкладка «Основания поиска»)."
+        : !HasProbe ? "Выберите изображение с лицом или лицо на носителе (проба)."
+        : _scope == SearchScopeKind.SelectedCases && _selectedCaseIds.Count == 0 ? "Отметьте хотя бы одно дело в области поиска."
+        : string.Empty;
+
     private bool HasProbe => _probeFace is { QualityAcceptable: true } || _probeBytes is not null;
 
     private bool CanSearch => !_busy && _caseId is not null && _authorizationId is not null && HasProbe

@@ -63,7 +63,7 @@
         }
         <MudGrid Spacing="2">
             <MudItem xs="12" sm="8">
-                <MudTextField @bind-Value="_formName" Label="Наименование *" Variant="Variant.Outlined" MaxLength="300" />
+                <MudTextField @bind-Value="_formName" Label="Наименование *" Variant="Variant.Outlined" MaxLength="300" Immediate="true" />
             </MudItem>
             <MudItem xs="12" sm="4">
                 <MudTextField @bind-Value="_formCode" Label="Код" Variant="Variant.Outlined" MaxLength="50" />
@@ -81,6 +81,10 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _formOpen = false)">Отмена</MudButton>
+        @if (!_busy && string.IsNullOrWhiteSpace(_formName))
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">Заполните: наименование</MudText>
+        }
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(string.IsNullOrWhiteSpace(_formName) || _busy)" OnClick="SaveAsync">Сохранить</MudButton>
     </DialogActions>
 </MudDialog>

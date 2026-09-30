@@ -48,6 +48,10 @@
                                OnClick="CompareAsync" Disabled="@(_busy || string.IsNullOrWhiteSpace(_topic))">
                         @(_busy ? "Сравниваю…" : "Сравнить нормы")
                     </MudButton>
+                    @if (!_busy && string.IsNullOrWhiteSpace(_topic))
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-1">Введите тему для сравнения норм</MudText>
+                    }
                     <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2 d-block">
                         Вдумчивый режим: анализ занимает несколько минут.
                     </MudText>
@@ -77,6 +81,10 @@
                                OnClick="AnalyzeAsync" Disabled="@(_busy || string.IsNullOrWhiteSpace(_documentText))">
                         @(_busy ? "Анализирую…" : "Проанализировать")
                     </MudButton>
+                    @if (!_busy && string.IsNullOrWhiteSpace(_documentText))
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-1">Вставьте текст документа</MudText>
+                    }
                     <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2 d-block">
                         Вдумчивый режим: анализ занимает несколько минут.
                     </MudText>
@@ -108,6 +116,10 @@
                                OnClick="CheckDraftAsync" Disabled="@(_busy || string.IsNullOrWhiteSpace(_draftText))">
                         @(_busy ? "Сверяю…" : "Сверить с базой")
                     </MudButton>
+                    @if (!_busy && string.IsNullOrWhiteSpace(_draftText))
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-1">Вставьте текст проекта</MudText>
+                    }
                     <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2 d-block">
                         Вдумчивый режим с расширенным извлечением: сверка занимает несколько минут.
                     </MudText>

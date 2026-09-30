@@ -400,7 +400,7 @@ else
         <MudGrid Spacing="2">
             <MudItem xs="12">
                 @* Пределы длин — из валидатора (единственный источник), а не числом в разметке. *@
-                <MudTextField @bind-Value="_editTitle" Label="Название *" Variant="Variant.Outlined" MaxLength="@CreateCaseValidator.MaxTitleLength" />
+                <MudTextField @bind-Value="_editTitle" Label="Название *" Variant="Variant.Outlined" MaxLength="@CreateCaseValidator.MaxTitleLength" Immediate="true" />
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudSelect T="CaseKind?" @bind-Value="_editKind" Label="Вид *" Variant="Variant.Outlined" Dense="true">
@@ -442,6 +442,10 @@ else
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _editOpen = false)">Отмена</MudButton>
+        @if (!_busy && EditHint is { } hint)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">@hint</MudText>
+        }
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!EditValid || _busy)" OnClick="SaveEditAsync">Сохранить</MudButton>
     </DialogActions>
 </MudDialog>
@@ -463,11 +467,15 @@ else
         <MudTextField T="string" @bind-Value="_purgeNumber" Label="@($"Введите номер дела: {_case?.Number}")"
                       Variant="Variant.Outlined" Immediate="true" Disabled="_busy" Class="mb-2" />
         <MudTextField T="string" @bind-Value="_purgeReason" Label="Основание уничтожения *" Lines="2"
-                      HelperText="Реквизиты решения или истечение срока хранения — попадут в акт."
+                      HelperText="@($"Реквизиты решения или истечение срока хранения — попадут в акт. Не короче {PurgeCaseValidator.MinReasonLength} символов.")"
                       Variant="Variant.Outlined" Immediate="true" Disabled="_busy" />
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _purgeOpen = false)">Отмена</MudButton>
+        @if (!_busy && PurgeHint is { } hint)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">@hint</MudText>
+        }
         <MudButton Color="Color.Error" Variant="Variant.Filled" Disabled="@(_busy || !PurgeReady)" OnClick="ConfirmPurgeAsync">
             Уничтожить
         </MudButton>
@@ -508,7 +516,7 @@ else
             </MudItem>
             <MudItem xs="12">
                 <MudTextField @bind-Value="_personName" Label="@(_personUnidentified ? "ФИО (необязательно)" : "ФИО *")"
-                              Variant="Variant.Outlined" MaxLength="300" />
+                              Variant="Variant.Outlined" MaxLength="300" Immediate="true" />
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudSelect T="PersonRole" @bind-Value="_personKind" Label="Роль *" Variant="Variant.Outlined" Dense="true">
@@ -537,6 +545,10 @@ else
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _personOpen = false)">Отмена</MudButton>
+        @if (!_busy && !PersonValid)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">Укажите ФИО или отметьте «Личность не установлена»</MudText>
+        }
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!PersonValid || _busy)" OnClick="SavePersonAsync">Добавить</MudButton>
     </DialogActions>
 </MudDialog>
@@ -559,7 +571,7 @@ else
                 </MudSelect>
             </MudItem>
             <MudItem xs="12" sm="6">
-                <MudTextField @bind-Value="_authReference" Label="Реквизиты (номер, кем выдано) *" Variant="Variant.Outlined" MaxLength="300" />
+                <MudTextField @bind-Value="_authReference" Label="Реквизиты (номер, кем выдано) *" Variant="Variant.Outlined" MaxLength="300" Immediate="true" />
             </MudItem>
             <MudItem xs="12" sm="6">
                 <div>
@@ -578,6 +590,10 @@ else
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _authOpen = false)">Отмена</MudButton>
+        @if (!_busy && AuthHint is { } hint)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">@hint</MudText>
+        }
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!AuthValid || _busy)" OnClick="SaveAuthorizationAsync">Добавить</MudButton>
     </DialogActions>
 </MudDialog>
@@ -617,8 +633,15 @@ else
     private int? _editInvestigatorId;
     private string? _editBasis;
     private TaskRequisitesForm _editTask = new();
-    private bool EditValid => !string.IsNullOrWhiteSpace(_editTitle) && _editKind is not null && _editOpenedAt is not null
-        && (_editKind != CaseKind.ObjectTask || _editTask.IsComplete);
+    private bool EditValid => EditHint is null;
+
+    // Чего не хватает для «Сохранить» — показывается у неактивной кнопки.
+    private string? EditHint => FormHints.First(
+        FormHints.Missing(
+            (string.IsNullOrWhiteSpace(_editTitle), "название"),
+            (_editKind is null, "вид"),
+            (_editOpenedAt is null, "дата открытия")),
+        _editKind == CaseKind.ObjectTask ? _editTask.MissingHint : null);
 
     // --- Закрытие ---
     private bool _closeConfirmOpen;
@@ -634,10 +657,27 @@ else
 
     // Кнопка активна, только когда номер введён ТОЧНО и основание осмысленное: сервер проверяет то же
     // самое, но оператору незачем узнавать о лишнем пробеле через отказ.
-    private bool PurgeReady =>
-        _case is not null
-        && string.Equals(_purgeNumber?.Trim(), _case.Number, StringComparison.Ordinal)
-        && (_purgeReason?.Trim().Length ?? 0) >= PurgeCaseValidator.MinReasonLength;
+    private bool PurgeReady => _case is not null && PurgeHint is null;
+
+    // Почему «Уничтожить» неактивна — показывается рядом с кнопкой, чтобы оператор не гадал.
+    private string? PurgeHint
+    {
+        get
+        {
+            if (_case is null) { return null; }
+            if (!string.Equals(_purgeNumber?.Trim(), _case.Number, StringComparison.Ordinal))
+            {
+                return string.IsNullOrWhiteSpace(_purgeNumber)
+                    ? $"Введите номер дела: {_case.Number}"
+                    : $"Номер не совпадает — нужно точно {_case.Number}";
+            }
+
+            var length = _purgeReason?.Trim().Length ?? 0;
+            return length < PurgeCaseValidator.MinReasonLength
+                ? $"Основание — не короче {PurgeCaseValidator.MinReasonLength} символов (сейчас {length})"
+                : null;
+        }
+    }
 
     private void OpenPurge()
     {
@@ -691,7 +731,12 @@ else
     private DateTime? _authIssuedAt;
     private DateTime? _authValidUntil;
     private string? _authNotes;
-    private bool AuthValid => _authKind is not null && !string.IsNullOrWhiteSpace(_authReference) && _authIssuedAt is not null;
+    private bool AuthValid => AuthHint is null;
+
+    private string? AuthHint => FormHints.Missing(
+        (_authKind is null, "вид"),
+        (string.IsNullOrWhiteSpace(_authReference), "реквизиты"),
+        (_authIssuedAt is null, "дата выдачи"));
 
     protected override async Task OnInitializedAsync()
     {

@@ -109,6 +109,10 @@
                        Disabled="@(_busy || string.IsNullOrWhiteSpace(_docType) || _divisionId is null || _classification is null)">
                 @(_busy ? "Загружаю…" : $"Загрузить {FileCountLabel(_pendingFiles.Count)}")
             </MudButton>
+            @if (!_busy && UploadHint is { } uploadHint)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Warning" Class="">@uploadHint</MudText>
+            }
             <MudButton Variant="Variant.Text" OnClick="@(() => _pendingFiles.Clear())" Disabled="_busy">
                 Очистить список
             </MudButton>
@@ -231,7 +235,7 @@
 @* ================= Импорт пакета сборщика ================= *@
 <MudPaper Class="pa-4 mt-4" Outlined="true">
     <SectionCaption Text="Импорт пакета сборщика (Harvester)" Class="mb-2" />
-    <MudTextField @bind-Value="_manifestPath" Label="Путь к manifest.json пакета" Variant="Variant.Outlined" />
+    <MudTextField @bind-Value="_manifestPath" Label="Путь к manifest.json пакета" Variant="Variant.Outlined" Immediate="true" />
     <MudGrid Spacing="2" Class="mt-1">
         <MudItem xs="12" sm="6">
             <MudSelect T="int?" @bind-Value="_bundleDivisionId" Label="Подразделение для всего пакета *"
@@ -265,6 +269,10 @@
                Disabled="@(_busy || string.IsNullOrWhiteSpace(_manifestPath) || _bundleDivisionId is null || _bundleClassification is null)">
         Импортировать пакет
     </MudButton>
+    @if (!_busy && BundleHint is { } bundleHint)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-1">@bundleHint</MudText>
+    }
     @if (_bundleStatus is not null)
     {
         <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Class="mt-2">@_bundleStatus</MudAlert>
@@ -272,6 +280,23 @@
 </MudPaper>
 
 @code {
+    // Почему «Загрузить» и «Импортировать пакет» неактивны — показывается рядом с кнопками.
+    private string? UploadHint => MissingHint(
+        (string.IsNullOrWhiteSpace(_docType), "тип документа"),
+        (_divisionId is null, "подразделение"),
+        (_classification is null, "гриф"));
+
+    private string? BundleHint => MissingHint(
+        (string.IsNullOrWhiteSpace(_manifestPath), "путь к manifest.json"),
+        (_bundleDivisionId is null, "подразделение для пакета"),
+        (_bundleClassification is null, "гриф для пакета"));
+
+    private static string? MissingHint(params (bool IsMissing, string Name)[] fields)
+    {
+        var names = fields.Where(f => f.IsMissing).Select(f => f.Name).ToList();
+        return names.Count == 0 ? null : "Заполните: " + string.Join(", ", names);
+    }
+
     // Потолок шкалы в интерфейсе — как в регистрации документа (0..9): ошибочный допуск в БД
     // (скажем, 1000) не должен превращать список в тысячу строк.
     private const short MaxSelectableClassification = ClassificationLevels.Max;

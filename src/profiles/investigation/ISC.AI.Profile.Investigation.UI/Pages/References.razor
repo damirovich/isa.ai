@@ -85,6 +85,10 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _formOpen = false)">Отмена</MudButton>
+        @if (!_busy && string.IsNullOrWhiteSpace(_formName))
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">Заполните: наименование</MudText>
+        }
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(string.IsNullOrWhiteSpace(_formName) || _busy)" OnClick="SaveAsync">Сохранить</MudButton>
     </DialogActions>
 </MudDialog>

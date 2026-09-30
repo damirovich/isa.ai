@@ -332,6 +332,10 @@ else
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _capturedOpen = false)">Отмена</MudButton>
+        @if (!_busy && (_capturedDate is null || _capturedTime is null))
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">Укажите и дату, и время съёмки</MudText>
+        }
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_busy || _capturedDate is null || _capturedTime is null)"
                    OnClick="SaveCapturedAtAsync">Сохранить</MudButton>
     </DialogActions>
@@ -393,6 +397,10 @@ else
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _linkOpen = false)" Disabled="_busy">Отмена</MudButton>
+        @if (!_busy && !_linkLoading && LinkHint is { } linkHint)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">@linkHint</MudText>
+        }
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!CanLink)" OnClick="LinkAsync">
             @(_busy ? "Создаю кандидата…" : "Создать кандидата")
         </MudButton>
@@ -500,7 +508,13 @@ else
         BrowserPlayableAudioTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase)
         || BrowserPlayableVideoTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase);
 
-    private bool CanLink => !_busy && !_linkLoading && _linkFace is not null && _linkAuthorizationId is not null && _linkPersonRef is not null;
+    private bool CanLink => !_busy && !_linkLoading && _linkFace is not null && LinkHint is null;
+
+    private string? LinkHint =>
+        _linkAuthorizationId is null && _linkPersonRef is null ? "Выберите основание и фигуранта"
+        : _linkAuthorizationId is null ? "Выберите основание"
+        : _linkPersonRef is null ? "Выберите фигуранта дела"
+        : null;
 
     private static bool IsBrowserPlayable(string contentType) =>
         BrowserPlayableVideoTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase);

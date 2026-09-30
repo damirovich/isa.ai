@@ -60,6 +60,10 @@ else
     <div class="d-flex flex-wrap gap-2 mb-3">
         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
                    Disabled="@(_busy || !_details.CanEditNow)" OnClick="SaveAsync">Сохранить редакцию</MudButton>
+        @if (!_details.CanEditNow)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="align-self-center">Править нельзя: окно редактирования закрыто (подробнее — выше)</MudText>
+        }
         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FileDownload" Disabled="_busy"
                    OnClick="@(() => ExportAsync(null))">Выгрузить .docx</MudButton>
         @* ТФ-ДДЛ-01: выгрузка регистрируется в документообороте и сразу прикрепляется к делу (вкладка «Документы»). *@
@@ -191,6 +195,10 @@ else
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _registerOpen = false)">Отмена</MudButton>
+        @if (!_busy && _registerTypeId is null)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">Выберите вид документа</MudText>
+        }
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_busy || _registerTypeId is null)"
                    OnClick="RegisterAsync">Зарегистрировать</MudButton>
     </DialogActions>
@@ -211,6 +219,10 @@ else
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _permitOpen = false)">Отмена</MudButton>
+        @if (!_busy && string.IsNullOrWhiteSpace(_permitReason))
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">Заполните: причина правки</MudText>
+        }
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_busy || string.IsNullOrWhiteSpace(_permitReason))"
                    OnClick="RequestPermitAsync">Отправить запрос</MudButton>
     </DialogActions>

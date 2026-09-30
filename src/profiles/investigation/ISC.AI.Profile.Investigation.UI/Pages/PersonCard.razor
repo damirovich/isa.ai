@@ -408,7 +408,7 @@ else
                 <MudCheckBox T="bool" @bind-Value="_editUnidentified" Label="Личность не установлена" />
             </MudItem>
             <MudItem xs="12">
-                <MudTextField @bind-Value="_editName" Label="@(_editUnidentified ? "ФИО (необязательно)" : "ФИО *")" Variant="Variant.Outlined" MaxLength="300" />
+                <MudTextField @bind-Value="_editName" Label="@(_editUnidentified ? "ФИО (необязательно)" : "ФИО *")" Variant="Variant.Outlined" MaxLength="300" Immediate="true" />
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudSelect T="PersonRole" @bind-Value="_editKind" Label="Роль *" Variant="Variant.Outlined" Dense="true">
@@ -437,6 +437,10 @@ else
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _editOpen = false)">Отмена</MudButton>
+        @if (!_busy && !EditValid)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">Укажите ФИО или отметьте «Личность не установлена»</MudText>
+        }
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!EditValid || _busy)" OnClick="SaveEditAsync">Сохранить</MudButton>
     </DialogActions>
 </MudDialog>
@@ -480,9 +484,9 @@ else
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _photoOpen = false)">Отмена</MudButton>
-        @if (!PhotoValid)
+        @if (!_busy && !PhotoValid)
         {
-            <MudText Typo="Typo.caption" Class="mud-text-secondary mr-2">Выберите снимок и лицо</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">Выберите снимок и лицо на нём</MudText>
         }
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!PhotoValid || _busy)" OnClick="SavePhotoAsync">Добавить</MudButton>
     </DialogActions>
@@ -527,6 +531,10 @@ else
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _linkOpen = false)">Отмена</MudButton>
+        @if (!_busy && (!_linkUnidentified && string.IsNullOrWhiteSpace(_linkName)))
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">Укажите ФИО или отметьте «Личность не установлена»</MudText>
+        }
         <MudButton Color="Color.Primary" Variant="Variant.Filled"
                    Disabled="@(_busy || (!_linkUnidentified && string.IsNullOrWhiteSpace(_linkName)))" OnClick="SaveLinkAsync">Добавить</MudButton>
     </DialogActions>
@@ -561,6 +569,10 @@ else
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _addressOpen = false)">Отмена</MudButton>
+        @if (!_busy && string.IsNullOrWhiteSpace(_addressText))
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">Заполните: адрес</MudText>
+        }
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_busy || string.IsNullOrWhiteSpace(_addressText))"
                    OnClick="SaveAddressAsync">Сохранить</MudButton>
     </DialogActions>
@@ -599,6 +611,10 @@ else
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _vehicleOpen = false)">Отмена</MudButton>
+        @if (!_busy && (string.IsNullOrWhiteSpace(_vehiclePlate) && string.IsNullOrWhiteSpace(_vehicleMake)))
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">Укажите госномер или марку</MudText>
+        }
         <MudButton Color="Color.Primary" Variant="Variant.Filled"
                    Disabled="@(_busy || (string.IsNullOrWhiteSpace(_vehiclePlate) && string.IsNullOrWhiteSpace(_vehicleMake)))"
                    OnClick="SaveVehicleAsync">Сохранить</MudButton>

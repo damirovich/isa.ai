@@ -11,7 +11,7 @@
     </TitleContent>
     <DialogContent>
         <MudDatePicker @bind-Date="_date" Label="Новый срок *" Variant="Variant.Outlined" Class="mb-2" />
-        <MudTextField @bind-Value="_reason" Label="Основание продления *" Variant="Variant.Outlined"
+        <MudTextField @bind-Value="_reason" Label="Основание продления *" Variant="Variant.Outlined" Immediate="true"
                       MaxLength="2000" Lines="2" AutoGrow="true" Class="mb-2" />
         <MudFileUpload T="IReadOnlyList<IBrowserFile>" FilesChanged="@(files => _files = files)">
             <ActivatorContent>
@@ -23,6 +23,10 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _open = false)">Отмена</MudButton>
+        @if (ExtendHint is { } hint)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">@hint</MudText>
+        }
         <MudButton Color="Color.Primary" Variant="Variant.Filled"
                    Disabled="@(_date is null || string.IsNullOrWhiteSpace(_reason))"
                    OnClick="ConfirmAsync">Продлить</MudButton>
@@ -42,6 +46,15 @@
     private AssignmentDetails? _target;
     private DateTime? _date;
     private string? _reason;
+
+    // Почему «Продлить» неактивна — показывается рядом с кнопкой.
+    private string? ExtendHint => (_date is null, string.IsNullOrWhiteSpace(_reason)) switch
+    {
+        (true, true) => "Заполните: новый срок, основание продления",
+        (true, false) => "Заполните: новый срок",
+        (false, true) => "Заполните: основание продления",
+        _ => null,
+    };
     private IReadOnlyList<IBrowserFile>? _files;
 
     /// <summary>Открывает диалог продления срока конкретного назначения.</summary>
