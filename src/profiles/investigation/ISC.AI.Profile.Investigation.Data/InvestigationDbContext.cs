@@ -70,6 +70,9 @@ public class InvestigationDbContext(DbContextOptions<InvestigationDbContext> opt
     /// <summary>Роли пользователей (ТП-004).</summary>
     public DbSet<UserRoleAssignment> UserRoleAssignments { get; set; } = null!;
 
+    /// <summary>Матрица доступа: отличия ячеек «роль × право» от умолчаний (ADR-0032).</summary>
+    public DbSet<RolePermission> RolePermissions { get; set; } = null!;
+
     /// <summary>Справочники профиля: инициаторы, звания, должности, типы связей, категории (ТФ-АДМ-07).</summary>
     public DbSet<ReferenceItem> ReferenceItems { get; set; } = null!;
 

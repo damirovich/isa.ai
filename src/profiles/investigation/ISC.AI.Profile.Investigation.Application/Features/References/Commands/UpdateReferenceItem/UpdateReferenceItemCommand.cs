@@ -34,9 +34,9 @@ public sealed record UpdateReferenceItemCommand(int Id, string Name, string? Cod
         {
             ArgumentNullException.ThrowIfNull(command);
 
-            if (!await RoleGuard.CallerCanManageAsync(roles, subjectProvider, cancellationToken))
+            if (!await RoleGuard.CallerCanManageDirectoriesAsync(roles, subjectProvider, cancellationToken))
             {
-                return ResponseDto<bool>.BadRequest(RoleGuard.AdminDenied);
+                return ResponseDto<bool>.BadRequest(RoleGuard.DirectoriesDenied);
             }
 
             var result = await store.UpdateAsync(

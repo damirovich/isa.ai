@@ -11,7 +11,7 @@ namespace ISC.AI.Profile.Investigation.Application.Features.Divisions;
 /// </summary>
 /// <remarks>
 /// Чтение открыто любому вошедшему: наименования подразделений нужны карточкам дел и фильтрам, а режимных
-/// сведений в них нет. Запись (создание/переименование/выключение) — только Администратору.
+/// сведений в них нет. Запись (создание/переименование/выключение) — по праву «Подразделения и справочники» (ADR-0032).
 /// </remarks>
 public sealed record ListDivisionsQuery : IRequest<ResponseDto<IReadOnlyList<DivisionNode>>>
 {

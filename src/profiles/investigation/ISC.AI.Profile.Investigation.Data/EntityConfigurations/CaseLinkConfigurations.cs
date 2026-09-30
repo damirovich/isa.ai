@@ -100,6 +100,21 @@ public class UserRoleAssignmentConfiguration : IEntityTypeConfiguration<UserRole
     }
 }
 
+/// <summary>Конфигурация матрицы доступа (<c>investigation.role_permission</c>, ADR-0032).</summary>
+public class RolePermissionConfiguration : IEntityTypeConfiguration<RolePermission>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<RolePermission> builder)
+    {
+        builder.ToTable("role_permission", InvestigationDbContext.Schema);
+        builder.HasKey(e => e.Id);
+        builder.Property(e => e.Permission).HasMaxLength(64).IsRequired();
+
+        // Одна ячейка — одна строка: повторное сохранение правит ту же запись, а не добавляет вторую.
+        builder.HasIndex(e => new { e.Role, e.Permission }).IsUnique();
+    }
+}
+
 /// <summary>
 /// Конфигурация акта об удалении шаблонов (<c>investigation.case_closure_act</c>, ТФ-ДЕЛ-04, ТБ-074).
 /// </summary>

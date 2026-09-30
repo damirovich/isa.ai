@@ -475,8 +475,8 @@ public sealed class CaseReportStore(
         _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
     };
 
-    private async Task<InvestigationRole?> ResolveRoleAsync(AccessContext access, CancellationToken cancellationToken) =>
-        access.NumericSubjectId is { } userId
-            ? await roles.GetRoleAsync(userId, cancellationToken)
-            : null;
+    // Роль для правила видимости дел: без права «Дашборд и реестр дел» (матрица доступа, ADR-0032) — null, и
+    // CaseAccessRule вернёт пусто (ТБ-012/021).
+    private Task<InvestigationRole?> ResolveRoleAsync(AccessContext access, CancellationToken cancellationToken) =>
+        PermissionRule.ResolveCaseViewerAsync(roles, access.NumericSubjectId, cancellationToken);
 }

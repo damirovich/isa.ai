@@ -9,7 +9,7 @@ using Mediator;
 
 namespace ISC.AI.Profile.Investigation.Application.Features.References;
 
-/// <summary>Добавить запись в справочник профиля (ТФ-АДМ-07). Ведёт Администратор, изменение — в журнале аудита.</summary>
+/// <summary>Добавить запись в справочник профиля (ТФ-АДМ-07). Ведёт роль с правом «Подразделения и справочники» (ADR-0032), изменение — в журнале аудита.</summary>
 /// <param name="Kind">Вид справочника.</param>
 /// <param name="Name">Наименование.</param>
 /// <param name="Code">Код.</param>
@@ -33,10 +33,10 @@ public sealed record CreateReferenceItemCommand(ReferenceKind Kind, string Name,
         {
             ArgumentNullException.ThrowIfNull(command);
 
-            // Справочники — словарь заданий всех дел: правит только Администратор (ТФ-АДМ-07, ТП-004).
-            if (!await RoleGuard.CallerCanManageAsync(roles, subjectProvider, cancellationToken))
+            // Справочники — словарь заданий всех дел: правит роль с правом «Подразделения и справочники» (ТФ-АДМ-07, ADR-0032).
+            if (!await RoleGuard.CallerCanManageDirectoriesAsync(roles, subjectProvider, cancellationToken))
             {
-                return ResponseDto<int>.BadRequest(RoleGuard.AdminDenied);
+                return ResponseDto<int>.BadRequest(RoleGuard.DirectoriesDenied);
             }
 
             var (result, id) = await store.CreateAsync(

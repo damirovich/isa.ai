@@ -16,8 +16,8 @@ public sealed class InvestigationPlatformAdministration(IUserRoleStore roles, IS
 {
     /// <inheritdoc />
     /// <remarks>
-    /// ИНВАРИАНТ (ТБ-012): правило ОДНО с ведением ролей, справочников и настроек документооборота
-    /// (<see cref="AdministrationRule"/>): Администратор — всегда; любой вошедший — только пока
+    /// ИНВАРИАНТ (ТБ-012): право «Пользователи, роли и допуски» матрицы доступа (<see cref="AdministrationRule"/>),
+    /// закреплённое за Администратором (ADR-0032): Администратор — всегда; любой вошедший — только пока
     /// Администратора нет ни одного (режим первичной настройки, иначе на чистом контуре «замок без
     /// ключа»: роль назначить некому, потому что назначение роли само требует роли).
     /// </remarks>
@@ -26,24 +26,16 @@ public sealed class InvestigationPlatformAdministration(IUserRoleStore roles, IS
 
     /// <inheritdoc />
     /// <remarks>
-    /// ИНВАРИАНТ (ТБ-030/032, ТП-004): журнал читает Администратор И Офицер ИБ — роль, которая
-    /// учётными записями и допусками НЕ распоряжается. Поэтому право на журнал шире права на ведение
-    /// и спрашивается отдельно. Режим первичной настройки унаследован от <see cref="CanManageAsync"/>:
-    /// пока Администратора нет, журнал доступен любому вошедшему — иначе на чистом контуре нельзя было
+    /// ИНВАРИАНТ (ТБ-030/032, ТП-004): журнал — отдельное право матрицы доступа «Журнал аудита» (ADR-0032), по
+    /// умолчанию у Администратора И Офицера ИБ — роли, которая учётными записями и допусками НЕ распоряжается.
+    /// Поэтому право на журнал шире права на ведение и спрашивается отдельно. Режим первичной настройки у права
+    /// есть: пока Администратора нет, журнал доступен любому вошедшему — иначе на чистом контуре нельзя было
     /// бы проверить даже собственные действия по настройке. Что именно субъект увидит в журнале,
     /// решает решётка гриф/подразделение в <c>IAuditReader</c> (ТБ-032): право даёт ОТКРЫТЬ журнал,
     /// а не видеть в нём всё.
     /// </remarks>
-    public async Task<bool> CanViewAuditAsync(CancellationToken cancellationToken = default)
-    {
-        if (await AdministrationRule.CallerHasRoleAsync(
-            roles, subjectProvider, cancellationToken, InvestigationRole.SecurityOfficer))
-        {
-            return true;
-        }
-
-        return await CanManageAsync(cancellationToken);
-    }
+    public Task<bool> CanViewAuditAsync(CancellationToken cancellationToken = default) =>
+        PermissionRule.CallerHasAsync(roles, subjectProvider, InvestigationPermissions.AdminAudit, cancellationToken);
 
     /// <inheritdoc />
     /// <remarks>Тот же признак, что открывает <see cref="AdministrationRule"/> любому вошедшему: Администратора нет ни одного.</remarks>
@@ -96,21 +88,22 @@ public sealed class InvestigationDivisionCatalog(IDbContextFactory<Investigation
 /// <remarks>
 /// Ключ роли — <c>InvestigationRole.ToString()</c>: пакету он непрозрачен, профиль разбирает его обратно при
 /// назначении. Инвариант «последнего Администратора снять нельзя» — общий со сценарием профиля
-/// (<see cref="RoleAssignmentRule"/>). Описания повторяют права, которые проверяет сервер (ТП-004, ADR-0022 п. 8),
-/// — Администратор выбирает роль по тому, что она даёт.
+/// (<see cref="RoleAssignmentRule"/>). Описания строятся по действующей матрице доступа, которую проверяет сервер
+/// (ТП-004, ADR-0032), — Администратор выбирает роль по тому, что она даёт.
 /// </remarks>
 public sealed class InvestigationUserRoleCatalog(IUserRoleStore roles) : IUserRoleCatalog
 {
     /// <inheritdoc />
-    public Task<IReadOnlyList<RoleOption>> ListRolesAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<RoleOption>> ListRolesAsync(CancellationToken cancellationToken = default)
     {
-        IReadOnlyList<RoleOption> options =
+        // Описание строится по ДЕЙСТВУЮЩЕЙ матрице доступа (ADR-0032): после правки галочек карточка сотрудника
+        // говорит правду о том, что даёт роль, а не пересказывает умолчания поставки.
+        var overrides = await roles.ListPermissionOverridesAsync(cancellationToken) ?? [];
+        return
         [
             .. Enum.GetValues<InvestigationRole>()
-                .Select(role => new RoleOption(role.ToString(), role.Label(), Describe(role))),
+                .Select(role => new RoleOption(role.ToString(), role.Label(), Describe(role, overrides))),
         ];
-
-        return Task.FromResult(options);
     }
 
     /// <inheritdoc />
@@ -155,21 +148,28 @@ public sealed class InvestigationUserRoleCatalog(IUserRoleStore roles) : IUserRo
         return RoleAssignmentResult.Ok;
     }
 
-    /// <summary>Что даёт роль — по правам, которые проверяет сервер (ТП-004).</summary>
-    public static string Describe(InvestigationRole role) => role switch
+    /// <summary>
+    /// Что даёт роль — по правам матрицы доступа, которые проверяет сервер (ТП-004, ADR-0032), и по неизменяемому
+    /// правилу видимости дел (<see cref="CaseAccessRule"/>).
+    /// </summary>
+    public static string Describe(InvestigationRole role, IReadOnlyCollection<RolePermissionOverride> overrides)
     {
-        InvestigationRole.Administrator =>
-            "Пользователи, роли, допуски, справочники и настройки. Открыт весь функционал профиля; дела — в пределах собственного допуска.",
-        InvestigationRole.Head =>
-            "Все дела своего подразделения, организационное утверждение результатов. Поиск по лицу не запускает.",
-        InvestigationRole.Investigator =>
-            "Ведёт свои дела: фигуранты, материалы, основания поиска, поиск по лицу, сводки и справки.",
-        InvestigationRole.FaceExpert =>
-            "Поиск по лицу и первая подпись при верификации: привязывает найденное лицо к фигуранту.",
-        InvestigationRole.Verifier =>
-            "Вторая, независимая подпись при верификации — вслепую, без решения эксперта.",
-        InvestigationRole.SecurityOfficer =>
-            "Читает журнал аудита. Пользователями, ролями и допусками не распоряжается.",
-        _ => role.Label(),
-    };
+        ArgumentNullException.ThrowIfNull(overrides);
+
+        var open = InvestigationPermissions.All
+            .Where(p => InvestigationPermissions.IsGranted(p, role, overrides))
+            .Select(p => char.ToLowerInvariant(p.Label[0]) + p.Label[1..])
+            .ToList();
+
+        var granted = open.Count == 0
+            ? "В матрице доступа роли ничего не открыто."
+            : "Открыто: " + string.Join(", ", open) + ".";
+
+        // Сужение по делам матрицей не настраивается (ТБ-071): Следователь видит только свои дела.
+        var scope = role == InvestigationRole.Investigator
+            ? "Дела — только свои (ведущий или автор) и в пределах допуска."
+            : "Дела — в пределах допуска.";
+
+        return $"{granted} {scope}";
+    }
 }

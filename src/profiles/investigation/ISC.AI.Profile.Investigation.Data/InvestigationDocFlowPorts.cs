@@ -51,11 +51,11 @@ public sealed class InvestigationDocFlowAdministration(IUserRoleStore roles, ISu
 {
     /// <inheritdoc />
     /// <remarks>
-    /// Правило ОДНО с ведением учётных записей (<see cref="AdministrationRule"/>): Администратор — всегда;
-    /// любой вошедший — только пока Администратора нет (иначе на чистом контуре «замок без ключа»).
+    /// Право «Типы документов и настройки» матрицы доступа (ADR-0032): по умолчанию Администратор; любой вошедший —
+    /// только пока Администратора нет (иначе на чистом контуре «замок без ключа»).
     /// </remarks>
     public Task<bool> CanManageAsync(CancellationToken cancellationToken = default) =>
-        AdministrationRule.CallerCanManageAsync(roles, subjectProvider, cancellationToken);
+        PermissionRule.CallerHasAsync(roles, subjectProvider, InvestigationPermissions.DocFlowSettings, cancellationToken);
 }
 
 /// <summary>

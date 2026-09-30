@@ -13,8 +13,9 @@ namespace ISC.AI.Profile.Investigation.Data;
 /// поверх них, а не вместо.
 /// </summary>
 /// <remarks>
-/// МАТРИЦА (ADR-0022, п. 8): загрузка — Следователь и <b>Администратор</b>; поиск по лицу — Следователь,
-/// Эксперт по лицам и <b>Администратор</b>; гарантированное удаление — Администратор и Руководитель.
+/// МАТРИЦА (ADR-0022, п. 8; с ADR-0032 — настраиваемая Администратором, <see cref="InvestigationPermissions"/>):
+/// по умолчанию загрузка — Следователь и <b>Администратор</b>; поиск по лицу — Следователь, Эксперт по лицам и
+/// <b>Администратор</b>; гарантированное удаление — Администратор и Руководитель.
 ///
 /// ОТКЛОНЕНИЕ ОТ ТП-004 по решению заказчика (2026-09-18): в ТЗ Администратор ведёт учётные записи,
 /// допуски, справочники и модели, а материалами дел не работает. Заказчик распорядился открыть
@@ -32,36 +33,31 @@ namespace ISC.AI.Profile.Investigation.Data;
 /// сохранено полностью: <see cref="TwoPersonRule"/> живёт в модуле и профилем не переопределяется, и
 /// даже с полными правами один и тот же субъект не может закрыть обе стадии верификации.
 ///
-/// БЕЗ режима первичной настройки (в отличие от <see cref="AdministrationRule.CallerCanManageAsync"/>):
-/// операции с материалами дел — не настройка контура, и «пока Администратора нет — можно всем» здесь
+/// БЕЗ режима первичной настройки (у этих прав <see cref="PermissionDefinition.OpenDuringInitialSetup"/> не
+/// выставлен): операции с материалами дел — не настройка контура, и «пока Администратора нет — можно всем» здесь
 /// означало бы поиск по лицам без роли. Fail-closed: нет роли — нет права (ТБ-012).
-/// Матрица закреплена таблицей в тесте по всем ролям и «без роли»: изменение требует правки теста и ADR.
+/// Умолчания закреплены таблицей в тесте по всем ролям и «без роли»: изменение умолчаний требует правки теста и ADR.
 /// </remarks>
 public sealed class MediaAdministration(IUserRoleStore roles, ISubjectProvider subjectProvider) : IMediaAdministration
 {
     /// <inheritdoc />
     public Task<bool> CanUploadAsync(CancellationToken cancellationToken = default) =>
-        AdministrationRule.CallerHasRoleAsync(
-            roles, subjectProvider, cancellationToken,
-            InvestigationRole.Investigator, InvestigationRole.Administrator);
+        PermissionRule.CallerHasAsync(roles, subjectProvider, InvestigationPermissions.MediaUpload, cancellationToken);
 
     /// <inheritdoc />
     public Task<bool> CanSearchAsync(CancellationToken cancellationToken = default) =>
-        AdministrationRule.CallerHasRoleAsync(
-            roles, subjectProvider, cancellationToken,
-            InvestigationRole.Investigator, InvestigationRole.FaceExpert, InvestigationRole.Administrator);
+        PermissionRule.CallerHasAsync(roles, subjectProvider, InvestigationPermissions.MediaSearch, cancellationToken);
 
     /// <inheritdoc />
     public Task<bool> CanPurgeAsync(CancellationToken cancellationToken = default) =>
-        AdministrationRule.CallerHasRoleAsync(
-            roles, subjectProvider, cancellationToken,
-            InvestigationRole.Administrator, InvestigationRole.Head);
+        PermissionRule.CallerHasAsync(roles, subjectProvider, InvestigationPermissions.MediaPurge, cancellationToken);
 }
 
 /// <summary>
 /// Реализация порта пакета «Медиа» <see cref="IVerificationPolicy"/>: кто вправе выступать на стадии
-/// верификации. Стадия эксперта — «Эксперт по лицам», стадия верификатора — «Верификатор»; обе стадии
-/// доступны и Администратору (решение заказчика 2026-09-18, см. <see cref="MediaAdministration"/>).
+/// верификации — по правам матрицы доступа (ADR-0032) «Верификация — первая подпись» и «вторая подпись». По
+/// умолчанию стадия эксперта — «Эксперт по лицам», стадия верификатора — «Верификатор»; обе стадии доступны и
+/// Администратору (решение заказчика 2026-09-18, см. <see cref="MediaAdministration"/>).
 /// </summary>
 /// <remarks>
 /// ТБ-073 НЕ ослаблено: само правило двух лиц — в модуле (<see cref="TwoPersonRule"/>), профиль его не
@@ -74,14 +70,13 @@ public sealed class MediaAdministration(IUserRoleStore roles, ISubjectProvider s
 public sealed class VerificationPolicy(IUserRoleStore roles) : IVerificationPolicy
 {
     /// <inheritdoc />
-    public async Task<bool> CanActAsync(VerificationStage stage, int userId, CancellationToken cancellationToken = default)
-    {
-        var role = await roles.GetRoleAsync(userId, cancellationToken);
-        return stage switch
+    public Task<bool> CanActAsync(VerificationStage stage, int userId, CancellationToken cancellationToken = default) =>
+        stage switch
         {
-            VerificationStage.Expert => role is InvestigationRole.FaceExpert or InvestigationRole.Administrator,
-            VerificationStage.Verifier => role is InvestigationRole.Verifier or InvestigationRole.Administrator,
-            _ => false,
+            VerificationStage.Expert =>
+                PermissionRule.UserHasAsync(roles, userId, InvestigationPermissions.VerificationExpert, cancellationToken),
+            VerificationStage.Verifier =>
+                PermissionRule.UserHasAsync(roles, userId, InvestigationPermissions.VerificationVerifier, cancellationToken),
+            _ => Task.FromResult(false),
         };
-    }
 }

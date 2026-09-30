@@ -96,7 +96,8 @@ public sealed class CaseDocumentStore(
 
     private async Task<bool> CaseVisibleAsync(InvestigationDbContext db, int caseId, AccessContext access, CancellationToken cancellationToken)
     {
-        var role = access.NumericSubjectId is { } userId ? await roles.GetRoleAsync(userId, cancellationToken) : (InvestigationRole?)null;
+        // Без права «Дашборд и реестр дел» (матрица доступа, ADR-0032) роль не видит дел — и их документов.
+        var role = await PermissionRule.ResolveCaseViewerAsync(roles, access.NumericSubjectId, cancellationToken);
         return await CaseAccessRule.Apply(db.Cases.AsNoTracking(), access, policy, role).AnyAsync(c => c.Id == caseId, cancellationToken);
     }
 }

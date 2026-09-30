@@ -23,53 +23,39 @@ public interface IUserRoleStore
 
     /// <summary>Назначить роль (<see langword="null"/> — снять).</summary>
     Task SetRoleAsync(int userId, InvestigationRole? role, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Сохранённое отличие ячейки матрицы доступа от умолчания (ADR-0032); нет отличия — <see langword="null"/>
+    /// (действует умолчание <see cref="InvestigationPermissions"/>).
+    /// </summary>
+    Task<bool?> GetPermissionOverrideAsync(InvestigationRole role, string permission, CancellationToken cancellationToken = default);
+
+    /// <summary>Все сохранённые отличия матрицы доступа от умолчаний.</summary>
+    Task<IReadOnlyList<RolePermissionOverride>> ListPermissionOverridesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Применить изменения ячеек одной транзакцией: значение — записать отличие, <see langword="null"/> — удалить (вернуть
+    /// к умолчанию). Проверку замков и права делает сценарий, хранилище пишет как велено.
+    /// </summary>
+    Task ApplyPermissionChangesAsync(
+        IReadOnlyCollection<RolePermissionChange> changes, int? changedByUserId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
-/// Единое правило «кто вправе администрировать» (роли, допуски, справочники, учётные записи):
-/// Администратор — всегда; пока Администратора нет ни одного — любой вошедший (режим первичной настройки:
-/// иначе на чистом контуре «замок без ключа»). Одно место для всех гвардов и для <c>IDocFlowAdministration</c>.
+/// Правило «кто вправе вести пользователей, роли и допуски»: Администратор — всегда; пока Администратора нет ни
+/// одного — любой вошедший (режим первичной настройки: иначе на чистом контуре «замок без ключа»). Это право
+/// <see cref="InvestigationPermissions.AdminUsers"/> матрицы доступа — замкнутое за Администратором (ADR-0032);
+/// остальные права администрирования спрашиваются у <see cref="PermissionRule"/> по своему ключу.
 /// </summary>
 public static class AdministrationRule
 {
     /// <summary>Текст отказа для ответов сценариев.</summary>
     public const string Denied = "Действие доступно только Администратору.";
 
-    /// <summary>Вправе ли текущий субъект администрировать.</summary>
-    public static async Task<bool> CallerCanManageAsync(
-        IUserRoleStore roles, ISubjectProvider subjectProvider, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(roles);
-        ArgumentNullException.ThrowIfNull(subjectProvider);
-
-        if (await subjectProvider.GetCurrentUserIdAsync(cancellationToken) is not { } userId)
-        {
-            return false;
-        }
-
-        if (await roles.GetRoleAsync(userId, cancellationToken) == InvestigationRole.Administrator)
-        {
-            return true;
-        }
-
-        return !await roles.AnyAdministratorAsync(cancellationToken);
-    }
-
-    /// <summary>Есть ли у текущего субъекта одна из ролей (без режима первичной настройки — для операций с данными дел).</summary>
-    public static async Task<bool> CallerHasRoleAsync(
-        IUserRoleStore roles, ISubjectProvider subjectProvider, CancellationToken cancellationToken, params InvestigationRole[] allowed)
-    {
-        ArgumentNullException.ThrowIfNull(roles);
-        ArgumentNullException.ThrowIfNull(subjectProvider);
-
-        if (await subjectProvider.GetCurrentUserIdAsync(cancellationToken) is not { } userId)
-        {
-            return false;
-        }
-
-        var role = await roles.GetRoleAsync(userId, cancellationToken);
-        return role is { } r && allowed.Contains(r);
-    }
+    /// <summary>Вправе ли текущий субъект вести пользователей, роли и допуски.</summary>
+    public static Task<bool> CallerCanManageAsync(
+        IUserRoleStore roles, ISubjectProvider subjectProvider, CancellationToken cancellationToken = default) =>
+        PermissionRule.CallerHasAsync(roles, subjectProvider, InvestigationPermissions.AdminUsers, cancellationToken);
 }
 
 /// <summary>

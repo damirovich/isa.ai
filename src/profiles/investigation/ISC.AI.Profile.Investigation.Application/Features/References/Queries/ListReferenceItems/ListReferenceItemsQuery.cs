@@ -13,7 +13,7 @@ namespace ISC.AI.Profile.Investigation.Application.Features.References;
 /// <param name="Kind">Вид справочника; <see langword="null"/> — все справочники.</param>
 /// <remarks>
 /// Чтение открыто любому вошедшему (как у справочника подразделений): наименования ГУ, званий и типов связей
-/// нужны формам и карточкам, режимных сведений в них нет. Запись — только Администратору.
+/// нужны формам и карточкам, режимных сведений в них нет. Запись — по праву «Подразделения и справочники» (ADR-0032).
 /// </remarks>
 public sealed record ListReferenceItemsQuery(ReferenceKind? Kind = null) : IRequest<ResponseDto<IReadOnlyList<ReferenceItemRow>>>
 {

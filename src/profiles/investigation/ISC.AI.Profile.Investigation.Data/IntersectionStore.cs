@@ -325,10 +325,10 @@ public sealed class IntersectionStore(
     private static string NameValue(string displayName, DateOnly birthDate) =>
         $"{displayName}, {birthDate.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)}";
 
-    private async Task<InvestigationRole?> ResolveRoleAsync(AccessContext access, CancellationToken cancellationToken) =>
-        access.NumericSubjectId is { } userId
-            ? await roles.GetRoleAsync(userId, cancellationToken)
-            : null;
+    // Роль для правила видимости дел: без права «Дашборд и реестр дел» (матрица доступа, ADR-0032) — null, и
+    // CaseAccessRule вернёт пусто (ТБ-012/021).
+    private Task<InvestigationRole?> ResolveRoleAsync(AccessContext access, CancellationToken cancellationToken) =>
+        PermissionRule.ResolveCaseViewerAsync(roles, access.NumericSubjectId, cancellationToken);
 
     private sealed record OwnPerson(
         int Id, int CaseId, short Classification, int DivisionId, string DisplayName,
