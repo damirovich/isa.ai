@@ -1,6 +1,8 @@
 @inherits LayoutComponentBase
 @inject IProfile Profile
 @inject IJSRuntime JS
+@inject NavigationManager Navigation
+@inject ISC.AI.Web.Common.ModuleAccess ModuleAccess
 @using Microsoft.JSInterop
 @using ISC.AI.Web.Common
 
@@ -111,7 +113,18 @@
        задаём на внутреннем контейнере — он не main-content и клиренс шапки не ломает. *@
     <MudMainContent>
         <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pt-4 pb-8">
-            @Body
+            @* Прямая ссылка на раздел, скрытый для роли (ТП-004), — понятное сообщение вместо страницы, где любое
+               действие получит отказ сервера. До ответа профиля — страница как есть (сервер всё равно проверяет). *@
+            @if (HiddenSection is { } hidden)
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mt-4">
+                    Раздел «@hidden.MenuTitle» недоступен для вашей роли. Если он нужен для работы, обратитесь к Администратору.
+                </MudAlert>
+            }
+            else
+            {
+                @Body
+            }
         </MudContainer>
     </MudMainContent>
 </MudLayout>
@@ -124,6 +137,15 @@
 
 @code {
     private bool _drawerOpen = true;
+    private IReadOnlySet<string>? _visibleIds;
+
+    // Раздел текущего адреса, скрытый для роли; вычисляется при каждом рендере (оболочка перерисовывается на переходе).
+    private ISC.AI.Abstractions.Modules.IModule? HiddenSection =>
+        _visibleIds is { } ids
+            ? ISC.AI.Web.Common.ModuleAccess.HiddenModuleFor(Navigation.ToBaseRelativePath(Navigation.Uri), Profile.Modules, ids)
+            : null;
+
+    protected override async Task OnInitializedAsync() => _visibleIds = await ModuleAccess.GetVisibleIdsAsync();
     private bool _isDarkMode = true;
 
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;

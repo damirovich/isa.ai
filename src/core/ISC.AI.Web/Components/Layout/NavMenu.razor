@@ -1,4 +1,5 @@
 @inject IProfile Profile
+@inject ISC.AI.Web.Common.ModuleAccess ModuleAccess
 
 @* Навигация строится из реестра модулей профиля (ТС-007). Хост не знает имён модулей заранее и не
    хардкодит секции: названия групп объявляет сам профиль (IModule.MenuGroup) — здесь только группировка. *@
@@ -6,7 +7,10 @@
 <MudNavMenu Class="pb-2">
     <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Home">Главная</MudNavLink>
 
-    @foreach (var group in Profile.Modules.GroupBy(m => m.MenuGroup))
+    @* Пункты, которые роль пользователя не использует, не показываются (ТП-004, IModuleVisibility профиля):
+       секция без видимых пунктов не выводится вовсе. До ответа профиля — только «Главная», без мигания
+       лишних пунктов. Права на действия всё равно проверяет сервер (ТБ-012). *@
+    @foreach (var group in VisibleModules.GroupBy(m => m.MenuGroup))
     {
         @if (!string.IsNullOrWhiteSpace(group.Key))
         {
@@ -24,3 +28,12 @@
         }
     }
 </MudNavMenu>
+
+@code {
+    private IReadOnlySet<string>? _visibleIds;
+
+    private IEnumerable<ISC.AI.Abstractions.Modules.IModule> VisibleModules =>
+        _visibleIds is { } ids ? Profile.Modules.Where(m => ids.Contains(m.Id)) : [];
+
+    protected override async Task OnInitializedAsync() => _visibleIds = await ModuleAccess.GetVisibleIdsAsync();
+}

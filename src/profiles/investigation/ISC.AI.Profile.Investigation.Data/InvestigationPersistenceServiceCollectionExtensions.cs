@@ -64,6 +64,9 @@ public static class InvestigationPersistenceServiceCollectionExtensions
         // кандидаты в ответственные/исполнители. Без реализаций модуль fail-closed.
         services.AddScoped<ISC.AI.Modules.DocFlow.Domain.Services.IDivisionDirectory, InvestigationDivisionDirectory>();
         services.AddScoped<ISC.AI.Modules.DocFlow.Domain.Services.IDocFlowAdministration, InvestigationDocFlowAdministration>();
+
+        // Разделы меню по роли (ТП-004): хост прячет то, где роль ничего не может; права проверяет сервер (ТБ-012).
+        services.AddScoped<ISC.AI.Abstractions.Modules.IModuleVisibility, InvestigationModuleVisibility>();
         services.AddScoped<ISC.AI.Modules.DocFlow.Domain.Services.IAssignmentCandidateDirectory, InvestigationAssignmentCandidateDirectory>();
 
         // Порты пакета «Медиа»: область дел субъекта (ТБ-071) и доступность носителя по прямому
