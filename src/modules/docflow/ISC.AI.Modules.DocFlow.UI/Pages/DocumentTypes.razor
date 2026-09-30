@@ -36,6 +36,10 @@
                    Disabled="@(_busy || string.IsNullOrWhiteSpace(_newName))" OnClick="CreateAsync">
             Добавить
         </MudButton>
+        @if (!_busy && string.IsNullOrWhiteSpace(_newName))
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="">Введите наименование типа</MudText>
+        }
     </div>
 </MudPaper>
 
@@ -98,6 +102,10 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _renameOpen = false)">Отмена</MudButton>
+        @if (string.IsNullOrWhiteSpace(_renameName))
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">Введите наименование типа</MudText>
+        }
         <MudButton Color="Color.Primary" Variant="Variant.Filled"
                    Disabled="@(string.IsNullOrWhiteSpace(_renameName))" OnClick="ConfirmRenameAsync">
             Сохранить

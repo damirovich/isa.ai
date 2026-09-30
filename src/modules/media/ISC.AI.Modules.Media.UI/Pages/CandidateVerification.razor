@@ -86,7 +86,7 @@ else
                 <MudRadio T="VerificationVerdict?" Value="VerificationVerdict.Rejected" Color="Color.Error">отклонён</MudRadio>
                 <MudRadio T="VerificationVerdict?" Value="VerificationVerdict.Undetermined" Color="Color.Warning">неопределённо</MudRadio>
             </MudRadioGroup>
-            <MudTextField @bind-Value="_rationale" Label="Обоснование *" Variant="Variant.Outlined" Lines="5" MaxLength="@RecordVerificationValidator.MaxRationaleLength" Class="mt-2"
+            <MudTextField @bind-Value="_rationale" Label="Обоснование *" Variant="Variant.Outlined" Immediate="true" Lines="5" MaxLength="@RecordVerificationValidator.MaxRationaleLength" Class="mt-2"
                           HelperText="морфологические признаки по методике: форма лица, надбровные дуги, нос, уши, особые приметы; какие признаки сходны, какие различаются" />
             @if (Stage == VerificationStage.Expert)
             {
@@ -128,6 +128,10 @@ else
                            Disabled="@(!FormValid || _busy)" OnClick="SubmitAsync">@(_busy ? "Записываю…" : "Записать решение")</MudButton>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">Решение необратимо и записывается в неизменяемый журнал (ТБ-072).</MudText>
             </div>
+            @if (!_busy && !PersonMissingForConfirm && FormHint is { } formHint)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-1">@formHint</MudText>
+            }
             @if (PersonMissingForConfirm)
             {
                 <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-1">@RecordVerificationValidator.PersonRequiredMessage</MudText>
@@ -172,7 +176,14 @@ else
     private bool PersonMissingForConfirm =>
         Stage == VerificationStage.Expert && _verdict == VerificationVerdict.Confirmed && _personRef is null;
 
-    private bool FormValid => _verdict is not null && !string.IsNullOrWhiteSpace(_rationale) && !PersonMissingForConfirm;
+    private bool FormValid => FormHint is null && !PersonMissingForConfirm;
+
+    // Чего не хватает для «Записать решение» (кроме фигуранта — для него отдельное сообщение ниже).
+    private string? FormHint =>
+        _verdict is null && string.IsNullOrWhiteSpace(_rationale) ? "Выберите решение и заполните обоснование"
+        : _verdict is null ? "Выберите решение: подтверждён, отклонён или неопределённо"
+        : string.IsNullOrWhiteSpace(_rationale) ? "Заполните обоснование"
+        : null;
 
     protected override async Task OnInitializedAsync()
     {

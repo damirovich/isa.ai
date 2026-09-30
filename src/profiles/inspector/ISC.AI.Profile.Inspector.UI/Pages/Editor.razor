@@ -47,6 +47,10 @@
                        OnClick="ReviseAsync" Disabled="@(_busy || !CanRevise)">
                 @(_busy ? "Готовлю правку…" : "Применить правку")
             </MudButton>
+            @if (!_busy && !CanRevise)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-1">@(string.IsNullOrWhiteSpace(_text) ? "Вставьте текст документа" : "Напишите, что нужно изменить")</MudText>
+            }
         </MudPaper>
     </MudItem>
 

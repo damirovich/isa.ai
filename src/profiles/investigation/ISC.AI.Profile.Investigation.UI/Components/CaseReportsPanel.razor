@@ -106,6 +106,10 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _createOpen = false)">Отмена</MudButton>
+        @if (!_busy && _date is null)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">Заполните: дата документа</MudText>
+        }
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_busy || _date is null)" OnClick="CreateAsync">Создать</MudButton>
     </DialogActions>
 </MudDialog>

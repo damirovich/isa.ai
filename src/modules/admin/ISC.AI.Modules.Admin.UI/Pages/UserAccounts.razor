@@ -53,6 +53,10 @@
         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd"
                    Disabled="@(_busy || string.IsNullOrWhiteSpace(_newUserName))"
                    OnClick="CreateAsync">Создать</MudButton>
+        @if (!_busy && string.IsNullOrWhiteSpace(_newUserName))
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="">Введите имя входа</MudText>
+        }
     </div>
 </MudPaper>
 

@@ -86,6 +86,10 @@
                                OnClick="GenerateAsync" Disabled="@(_busy || !CanGenerate)">
                         @(_busy ? "Формирую…" : "Сформировать документ")
                     </MudButton>
+                    @if (!_busy && !CanGenerate)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-1">Выберите подразделение или укажите направление проверки</MudText>
+                    }
                 </MudPaper>
             </MudItem>
 
@@ -133,7 +137,7 @@
                             <MudButton Color="Color.Primary" Variant="Variant.Filled" FullWidth="true"
                                        OnClick="SaveToRegistryAsync" Disabled="@(_saving || _savedId is not null)"
                                        StartIcon="@Icons.Material.Filled.Save">
-                                @(_saving ? "Сохраняю…" : "Сохранить в реестр")
+                                @(_saving ? "Сохраняю…" : _savedId is not null ? "Сохранено в реестре" : "Сохранить в реестр")
                             </MudButton>
                             <MudButton Color="Color.Secondary" Variant="Variant.Filled" FullWidth="true"
                                        OnClick="@(() => ExportAsync(_artifactKind, BuildScope(), Result!.DraftText, Result!.ResultClassification))"

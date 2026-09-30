@@ -229,6 +229,10 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _formOpen = false)">Отмена</MudButton>
+        @if (!_busy && FormHint is { } formHint)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">@formHint</MudText>
+        }
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!FormValid || _busy)"
                    OnClick="SaveAsync">Сохранить</MudButton>
     </DialogActions>
@@ -298,7 +302,22 @@
         }
     }
 
-    private bool FormValid => _formDivisionId is > 0 && _formCategoryId is > 0 && _formDetectedAt is not null;
+    private bool FormValid => FormHint is null;
+
+    // Чего не хватает для «Сохранить» — показывается у неактивной кнопки.
+    private string? FormHint
+    {
+        get
+        {
+            var missing = new[]
+            {
+                _formDivisionId is > 0 ? null : "подразделение",
+                _formCategoryId is > 0 ? null : "сфера / вид нарушения",
+                _formDetectedAt is not null ? null : "дата выявления",
+            }.Where(x => x is not null).ToList();
+            return missing.Count == 0 ? null : "Заполните: " + string.Join(", ", missing);
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {

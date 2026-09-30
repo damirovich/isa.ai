@@ -104,6 +104,10 @@
                        OnClick="GenerateAsync" Disabled="@(_busy || !CanGenerate)">
                 @(_busy ? "Формирую…" : "Сформировать документ")
             </MudButton>
+            @if (!_busy && !CanGenerate)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-1">@(_division is null ? "Выберите подразделение" : "Опишите выявленные нарушения")</MudText>
+            }
         </MudPaper>
     </MudItem>
 

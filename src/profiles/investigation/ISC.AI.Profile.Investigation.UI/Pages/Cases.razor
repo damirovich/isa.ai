@@ -123,7 +123,7 @@
         }
         <MudGrid Spacing="2">
             <MudItem xs="12" sm="4">
-                <MudTextField @bind-Value="_formNumber" Label="Номер *" Variant="Variant.Outlined" MaxLength="@CreateCaseValidator.MaxNumberLength" />
+                <MudTextField @bind-Value="_formNumber" Label="Номер *" Variant="Variant.Outlined" MaxLength="@CreateCaseValidator.MaxNumberLength" Immediate="true" />
             </MudItem>
             <MudItem xs="12" sm="4">
                 <MudSelect T="CaseKind?" @bind-Value="_formKind" Label="Вид *" Variant="Variant.Outlined" Dense="true" Placeholder="Выберите вид">
@@ -140,7 +140,7 @@
                 </div>
             </MudItem>
             <MudItem xs="12">
-                <MudTextField @bind-Value="_formTitle" Label="Название *" Variant="Variant.Outlined" MaxLength="@CreateCaseValidator.MaxTitleLength" />
+                <MudTextField @bind-Value="_formTitle" Label="Название *" Variant="Variant.Outlined" MaxLength="@CreateCaseValidator.MaxTitleLength" Immediate="true" />
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudSelect T="int?" @bind-Value="_formDivisionId" Label="Подразделение *" Variant="Variant.Outlined" Dense="true"
@@ -184,6 +184,10 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _formOpen = false)">Отмена</MudButton>
+        @if (!_busy && FormHint is { } hint)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">@hint</MudText>
+        }
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!FormValid || _busy)" OnClick="SaveAsync">Завести дело</MudButton>
     </DialogActions>
 </MudDialog>
@@ -228,11 +232,18 @@
     private int SelectableClassificationLimit =>
         _scope is { } s ? Math.Min((int)s.MaxClassification, CreateCaseValidator.MaxClassification) : -1;
 
-    private bool FormValid =>
-        !string.IsNullOrWhiteSpace(_formNumber) && !string.IsNullOrWhiteSpace(_formTitle)
-        && _formKind is not null && _formOpenedAt is not null
-        && _formDivisionId is > 0 && _formClassification is not null
-        && (_formKind != CaseKind.ObjectTask || _formTask.IsComplete);
+    private bool FormValid => FormHint is null;
+
+    // Чего не хватает для «Завести дело» — показывается у неактивной кнопки (порядок — как поля в форме).
+    private string? FormHint => FormHints.First(
+        FormHints.Missing(
+            (string.IsNullOrWhiteSpace(_formNumber), "номер"),
+            (_formKind is null, "вид"),
+            (_formOpenedAt is null, "дата открытия"),
+            (string.IsNullOrWhiteSpace(_formTitle), "название"),
+            (_formDivisionId is not > 0, "подразделение"),
+            (_formClassification is null, "гриф")),
+        _formKind == CaseKind.ObjectTask ? _formTask.MissingHint : null);
 
     protected override async Task OnInitializedAsync()
     {
