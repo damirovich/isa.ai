@@ -32,9 +32,9 @@ public sealed class InspectorProfile : IProfile
     private const string GroupNpa = "Нормативная база";
     private const string GroupOrg = "Организация работы";
     private const string GroupDivisions = "Подразделения";
-    // Секция администрирования — ОДНА на пакет и профиль: «Роли пользователей» и «Виды нарушений»
-    // остаются профильными (состав ролей и классификатор — его дело), а учётки, допуски и журнал
-    // даёт пакет. Имя берём у пакета, чтобы переименование не развалило секцию на две.
+    // Секция администрирования — ОДНА на пакет и профиль: «Виды нарушений» остаются профильными (классификатор —
+    // его дело), а «Пользователи» (учётная запись, роль, допуск) и журнал даёт пакет; роли пакет назначает через
+    // порт профиля. Имя берём у пакета, чтобы переименование не развалило секцию на две.
     private const string GroupAdmin = AdminModule.MenuGroup;
     private const string ReadPolicy = "inspector.read";
 
@@ -117,16 +117,10 @@ public sealed class InspectorProfile : IProfile
         new ModuleDescriptor("divisions-linear", "/divisions/linear", "Линейные",
             Icons.Material.Filled.Business, typeof(LinearDivisions), ReadPolicy, GroupDivisions),
 
-        // --- Секция «Администрирование»: роли (§2.1 ТЗ СКИД, этап 6 Э4-35) — страница видна всем
-        // (в claim'ах сессии нет роли, см. RoleScenarios.cs), обработчики отклоняют вызывающего,
-        // который сам не Администратор.
-        new ModuleDescriptor("admin-roles", "/admin/roles", "Роли пользователей",
-            Icons.Material.Filled.AdminPanelSettings, typeof(UserRoles), ReadPolicy, GroupAdmin),
-
-        // Учётные записи (Э4-35 §6.5), допуски (ТБ-011/020/021) и журнал аудита (ТБ-030/032) —
-        // подключаемый пакет модулей admin (ADR-0023). Раньше эти три экрана лежали в профиле, и
-        // второму профилю пришлось бы скопировать их целиком; теперь профиль лишь включает их в свой
-        // реестр и отвечает на три вопроса пакета (см. AddInspectorPersistence).
+        // --- Секция «Администрирование»: «Пользователи» — учётные записи (Э4-35 §6.5), роли (§2.1 ТЗ СКИД) и допуски
+        // (ТБ-011/020/021) в карточке сотрудника — и журнал аудита (ТБ-030/032) — подключаемый пакет модулей admin
+        // (ADR-0023). Профиль лишь включает их в свой реестр и отвечает на три вопроса пакета (см. AddInspectorPersistence);
+        // назначение роли идёт через порт профиля IUserRoleCatalog.
         // Секция у страниц пакета та же — AdminModule.MenuGroup, значение GroupAdmin.
         .. AdminModule.Modules,
 

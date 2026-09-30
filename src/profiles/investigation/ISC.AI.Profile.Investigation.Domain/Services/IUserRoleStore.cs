@@ -71,3 +71,36 @@ public static class AdministrationRule
         return role is { } r && allowed.Contains(r);
     }
 }
+
+/// <summary>
+/// Инвариант назначения ролей профиля «Следствие» (ТП-004): последнего Администратора снять нельзя. Одно место для
+/// сценария профиля и для порта назначения ролей пакета администрирования — правило не расходится между экранами.
+/// </summary>
+public static class RoleAssignmentRule
+{
+    /// <summary>Текст отказа при попытке снять последнего Администратора.</summary>
+    public const string LastAdministrator =
+        "Нельзя снять роль с последнего Администратора: система осталась бы без управления ролями и допусками.";
+
+    /// <summary>
+    /// Причина отказа назначить <paramref name="newRole"/> пользователю <paramref name="userId"/>; можно — <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    /// ИНВАРИАНТ: последний Администратор неснимаем. Иначе окно первичной настройки открылось бы заново для ЛЮБОГО
+    /// вошедшего (самовосстановление <see cref="AdministrationRule"/> обернулось бы дырой), а до этого — «замок без ключа».
+    /// </remarks>
+    public static async Task<string?> CheckAsync(
+        IUserRoleStore roles, int userId, InvestigationRole? newRole, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(roles);
+
+        if (newRole == InvestigationRole.Administrator
+            || await roles.GetRoleAsync(userId, cancellationToken) != InvestigationRole.Administrator)
+        {
+            return null;
+        }
+
+        var administrators = await roles.ListUserIdsByRoleAsync(InvestigationRole.Administrator, cancellationToken);
+        return administrators.Count <= 1 ? LastAdministrator : null;
+    }
+}

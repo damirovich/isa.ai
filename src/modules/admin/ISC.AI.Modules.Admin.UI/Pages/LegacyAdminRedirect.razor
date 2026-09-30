@@ -1,0 +1,11 @@
+@namespace ISC.AI.Modules.Admin.UI
+@* Прежние экраны «Допуски пользователей» и «Роли пользователей» объединены с учётными записями в экран
+   «Пользователи» (роль и допуск — в карточке сотрудника). Старые адреса из закладок и инструкций ведут туда же. *@
+@page "/admin/clearances"
+@page "/admin/roles"
+@inject NavigationManager Navigation
+
+@code {
+    /// <inheritdoc />
+    protected override void OnInitialized() => Navigation.NavigateTo("/admin/users", replace: true);
+}

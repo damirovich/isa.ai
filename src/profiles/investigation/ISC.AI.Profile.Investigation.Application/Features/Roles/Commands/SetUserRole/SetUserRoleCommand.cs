@@ -13,8 +13,7 @@ namespace ISC.AI.Profile.Investigation.Application.Features.Roles;
 public sealed record SetUserRoleCommand(int UserId, InvestigationRole? Role) : IRequest<ResponseDto<bool>>, IAuditableRequest
 {
     /// <summary>Отказ снять роль с последнего Администратора.</summary>
-    public const string LastAdministrator =
-        "Нельзя снять роль с последнего Администратора: система осталась бы без управления ролями и допусками.";
+    public const string LastAdministrator = RoleAssignmentRule.LastAdministrator;
 
     /// <inheritdoc />
     public AuditAction AuditAction => AuditAction.Modify;
@@ -36,16 +35,10 @@ public sealed record SetUserRoleCommand(int UserId, InvestigationRole? Role) : I
                 return ResponseDto<bool>.BadRequest(RoleGuard.AdminDenied);
             }
 
-            // Последний Администратор неснимаем: иначе окно первичной настройки открылось бы заново для
-            // ЛЮБОГО вошедшего (самовосстановление правила обернулось бы дырой), а до этого — «замок без ключа».
-            if (command.Role != InvestigationRole.Administrator
-                && await roles.GetRoleAsync(command.UserId, cancellationToken) == InvestigationRole.Administrator)
+            // Последний Администратор неснимаем — правило одно с портом назначения ролей пакета (RoleAssignmentRule).
+            if (await RoleAssignmentRule.CheckAsync(roles, command.UserId, command.Role, cancellationToken) is { } denied)
             {
-                var administrators = await roles.ListUserIdsByRoleAsync(InvestigationRole.Administrator, cancellationToken);
-                if (administrators.Count <= 1)
-                {
-                    return ResponseDto<bool>.BadRequest(LastAdministrator);
-                }
+                return ResponseDto<bool>.BadRequest(denied);
             }
 
             await roles.SetRoleAsync(command.UserId, command.Role, cancellationToken);

@@ -11,7 +11,7 @@ namespace ISC.AI.Profile.Investigation.Data;
 /// <remarks>
 /// ИНВАРИАНТ: таблица повторяет проверки СЕРВЕРА, а не заменяет их (ТБ-012) — прячется ровно то, где сценарии и так
 /// откажут: поиск по лицу — <c>MediaAdministration.CanSearchAsync</c>; верификация — <c>VerificationPolicy</c>;
-/// учётные записи, допуски, роли, подразделения, справочники, настройки документооборота —
+/// пользователи (учётные записи, роли, допуски), подразделения, справочники, настройки документооборота —
 /// <see cref="AdministrationRule.CallerCanManageAsync"/> (с режимом первичной настройки: пока Администратора нет,
 /// эти разделы видит любой вошедший, иначе роль назначить некому); журнал аудита — ещё и Офицер ИБ; запросы на
 /// правку сводок — только Администратор. Пользователь без роли видит лишь «Главную»: сценарии профиля ему отказывают.
@@ -54,9 +54,7 @@ public sealed class InvestigationModuleVisibility(IUserRoleStore roles, ISubject
         ["docflow-types"] = Audience.Management,
         ["docflow-settings"] = Audience.Management,
         ["admin-users"] = Audience.Management,
-        ["admin-clearances"] = Audience.Management,
         ["admin-audit"] = Audience.Audit,
-        ["admin-roles"] = Audience.Management,
         ["admin-divisions"] = Audience.Management,
         ["admin-references"] = Audience.Management,
         ["admin-report-permits"] = Audience.AdministratorOnly,

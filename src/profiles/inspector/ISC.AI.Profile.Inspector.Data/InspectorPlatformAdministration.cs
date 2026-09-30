@@ -36,4 +36,9 @@ public sealed class InspectorPlatformAdministration(IUserRoleStore roles, ISubje
     /// </remarks>
     public Task<bool> CanViewAuditAsync(CancellationToken cancellationToken = default) =>
         AdministrationRule.CallerCanManageAsync(roles, subjectProvider, cancellationToken);
+
+    /// <inheritdoc />
+    /// <remarks>Тот же признак, что открывает <see cref="AdministrationRule"/> любому вошедшему: Администратора нет ни одного.</remarks>
+    public async Task<bool> IsInitialSetupAsync(CancellationToken cancellationToken = default) =>
+        !await roles.AnyAdministratorAsync(cancellationToken);
 }

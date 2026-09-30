@@ -73,10 +73,9 @@ public static class AdminModule
     /// </summary>
     public static IReadOnlyList<IModule> Modules { get; } =
     [
-        new ModuleDescriptor("admin-users", "/admin/users", "Учётные записи",
-            Icons.Material.Filled.ManageAccounts, typeof(UserAccounts), ReadPolicy, MenuGroup),
-        new ModuleDescriptor("admin-clearances", "/admin/clearances", "Допуски пользователей",
-            Icons.Material.Filled.Key, typeof(UserClearances), ReadPolicy, MenuGroup),
+        // «Пользователи»: учётная запись, роль и допуск сотрудника на одном экране (карточка /admin/users/{id}).
+        new ModuleDescriptor("admin-users", "/admin/users", "Пользователи",
+            Icons.Material.Filled.People, typeof(UserAccounts), ReadPolicy, MenuGroup),
         new ModuleDescriptor("admin-audit", "/admin/audit", "Журнал аудита",
             Icons.Material.Filled.History, typeof(AuditJournal), ReadPolicy, MenuGroup),
     ];

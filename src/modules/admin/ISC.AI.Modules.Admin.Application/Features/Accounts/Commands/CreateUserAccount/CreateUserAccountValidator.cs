@@ -13,5 +13,6 @@ public sealed class CreateUserAccountValidator : AbstractValidator<CreateUserAcc
             .Matches("^[a-zA-Z0-9._-]+$")
                 .WithMessage("Имя входа: латиница, цифры, точка, дефис, подчёркивание.");
         RuleFor(c => c.DisplayName).MaximumLength(200);
+        RuleFor(c => c.Position).MaximumLength(200);
     }
 }
