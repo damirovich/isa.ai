@@ -95,6 +95,9 @@ public static class InvestigationPermissions
     /// <summary>Верификация — вторая подпись (стадия верификатора).</summary>
     public const string VerificationVerifier = "verification.verifier";
 
+    /// <summary>Отзыв ошибочного появления (ADR-0034).</summary>
+    public const string VerificationRevoke = "verification.revoke";
+
     /// <summary>Документы и отчёты документооборота.</summary>
     public const string DocFlowView = "docflow.view";
 
@@ -148,6 +151,9 @@ public static class InvestigationPermissions
         new(VerificationVerifier, PermissionSection.Media, "Верификация — вторая подпись",
             "Вслепую, другим сотрудником: один человек обе подписи не ставит",
             Roles(InvestigationRole.Verifier, InvestigationRole.Administrator)),
+        new(VerificationRevoke, PermissionSection.Media, "Отзыв ошибочного появления",
+            "С причиной; отзывает не тот, кто подтверждал. Пересечения пересчитываются",
+            Roles(InvestigationRole.Head, InvestigationRole.Administrator)),
 
         new(DocFlowView, PermissionSection.DocFlow, "Документы и отчёты",
             "Документы документооборота в пределах допуска",

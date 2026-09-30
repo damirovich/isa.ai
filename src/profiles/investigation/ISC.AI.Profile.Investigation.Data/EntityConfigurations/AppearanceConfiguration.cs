@@ -16,6 +16,7 @@ public class AppearanceConfiguration : IEntityTypeConfiguration<Appearance>
         builder.Property(e => e.Classification).IsRequired();
         builder.Property(e => e.DivisionId).IsRequired();
         builder.Property(e => e.Status).IsRequired();
+        builder.Property(e => e.RevokeReason).HasMaxLength(1000);
 
         // FK внутри схемы (ТО-инф-08); носитель/лицо/сессия/кандидат — по значению → схема media.
         builder.HasOne(e => e.Person).WithMany()

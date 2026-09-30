@@ -180,8 +180,58 @@ public sealed class PersonStore(
             .Select(a => new AppearanceRow(
                 a.Id, a.PersonId, a.CaseId, a.MediaAssetId, a.MediaFaceId, a.FrameIndex, a.FrameTimestampMs,
                 a.SearchSessionId, a.CandidateId, a.Similarity, a.Status, a.ConfirmedAtUtc,
-                a.ExpertUserId, a.VerifierUserId))
+                a.ExpertUserId, a.VerifierUserId, a.RevokedAtUtc, a.RevokedByUserId, a.RevokeReason))
             .ToListAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ИНВАРИАНТЫ (ADR-0034). (1) Отзыв виден и возможен только для появления, которое субъект видит по той же решётке,
+    /// что в <see cref="ListAppearancesAsync"/> (фигурант по полной решётке + floor строки появления): иначе отзыв стал бы
+    /// оракулом существования чужих появлений (ТБ-021). (2) Правило двух лиц для отзыва: эксперт и верификатор этого
+    /// появления его не отзывают — ошибку признаёт другой сотрудник (ТБ-073). (3) Строка не удаляется: статус
+    /// «отозвано», кто, когда и почему — история остаётся (ТБ-030/072); решения стадий в модуле «Медиа» не переписываются.
+    /// </remarks>
+    public async Task<AppearanceRevokeResult> RevokeAppearanceAsync(
+        int appearanceId, string reason, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+
+        var role = await ResolveRoleAsync(access, cancellationToken);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // tracking: true — НАРОЧНО. AsNoTracking в подзапросе по фигурантам EF применяет ко ВСЕМУ запросу, и отзыв
+        // молча не сохранялся бы (та же ловушка описана в PersonAccess.Accessible).
+        var visible = AccessiblePersons(db, access, role, tracking: true);
+        var appearance = await db.Appearances
+            .Where(BaselineAccess.Filter<Appearance>(access))
+            .Where(policy.BuildFilter<Appearance>(access))
+            .Where(a => a.Id == appearanceId && visible.Any(p => p.Id == a.PersonId))
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (appearance is null)
+        {
+            return AppearanceRevokeResult.NotFound;
+        }
+
+        if (appearance.Status == AppearanceStatus.Revoked)
+        {
+            return AppearanceRevokeResult.AlreadyRevoked;
+        }
+
+        var me = access.NumericSubjectId;
+        if (me is null || me == appearance.ExpertUserId || me == appearance.VerifierUserId)
+        {
+            return AppearanceRevokeResult.OwnDecision;
+        }
+
+        appearance.Status = AppearanceStatus.Revoked;
+        appearance.RevokedAtUtc = DateTime.UtcNow;
+        appearance.RevokedByUserId = me;
+        appearance.RevokeReason = reason.Trim();
+        await db.SaveChangesAsync(cancellationToken);
+        return AppearanceRevokeResult.Ok;
     }
 
     /// <inheritdoc />
@@ -218,8 +268,10 @@ public sealed class PersonStore(
             cancellationToken);
 
         var duplicateId = await db.Appearances.AsNoTracking()
+            // Отозванное появление по той же паре не мешает новому независимому подтверждению (ADR-0034); по кандидату —
+            // мешает: у кандидата одно появление навсегда (уникальный индекс candidate_id).
             .Where(a => a.CandidateId == draft.CandidateId
-                || (a.PersonId == draft.PersonId && a.MediaFaceId == draft.MediaFaceId))
+                || (a.PersonId == draft.PersonId && a.MediaFaceId == draft.MediaFaceId && a.Status != AppearanceStatus.Revoked))
             .OrderBy(a => a.Id)
             .Select(a => (int?)a.Id)
             .FirstOrDefaultAsync(cancellationToken);
@@ -290,7 +342,7 @@ public sealed class PersonStore(
         return await db.Appearances.AsNoTracking()
             .Where(BaselineAccess.Filter<Appearance>(access))
             .Where(policy.BuildFilter<Appearance>(access))
-            .Where(a => a.MediaFaceId == faceId && visible.Any(p => p.Id == a.PersonId))
+            .Where(a => a.MediaFaceId == faceId && a.Status != AppearanceStatus.Revoked && visible.Any(p => p.Id == a.PersonId))
             .Select(a => a.PersonId)
             .Distinct()
             .ToListAsync(cancellationToken);
@@ -387,7 +439,7 @@ public sealed class PersonStore(
                 p.Id, p.CaseId, p.DisplayName, p.IsUnidentified, p.UnidentifiedNumber, p.RoleInCase, p.Notes,
                 p.Classification, p.DivisionId,
                 db.ReferencePhotos.Count(r => r.PersonId == p.Id),
-                db.Appearances.Count(a => a.PersonId == p.Id),
+                db.Appearances.Count(a => a.PersonId == p.Id && a.Status != AppearanceStatus.Revoked),
                 p.Role,
                 new PersonQuestionnaire(p.BirthDate, p.BirthYear, p.BirthPlace, p.WorkPlace, p.Residence, p.Sex, p.Alias),
                 p.LinkedToPersonId,

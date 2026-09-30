@@ -195,6 +195,70 @@ public sealed class InvestigationIntersectionsTests : IAsyncLifetime
         mirrored.ShouldContain(r => r.Key == "face:shared" && r.OtherCaseId == ownCase);
     }
 
+    [Fact(DisplayName = "Отзыв появления (ADR-0034): эксперт и верификатор не отзывают; отозванное остаётся в истории, но уходит из пересечений, подсказок и счётчика; лицо можно подтвердить заново")]
+    public async Task Revoked_appearance_leaves_intersections_but_stays_in_history()
+    {
+        var kit = await ArrangeAsync();
+        var owner = InvestigationTestKit.Access(Owner, 9, 5);
+        var colleague = InvestigationTestKit.Access(Colleague, 9, 5);
+
+        var ownCase = (await kit.Cases.CreateAsync(InvestigationTestKit.Draft("А-1/26", 5, 2, Owner), owner)).CaseId;
+        var colleagueCase = (await kit.Cases.CreateAsync(InvestigationTestKit.Draft("Б-19/26", 5, 2, Colleague), colleague)).CaseId;
+        var target = await CreatePersonAsync(kit, owner, ownCase, "Объект", null);
+        var colleaguePerson = await CreatePersonAsync(kit, colleague, colleagueCase, "Шторм", null);
+
+        const int Asset = 500, Face = 900;
+        int ownAppearance;
+        await using (var db = kit.Factory.CreateDbContext())
+        {
+            db.CaseMediaLinks.AddRange(
+                new CaseMediaLink { CaseId = ownCase, MediaAssetId = Asset },
+                new CaseMediaLink { CaseId = colleagueCase, MediaAssetId = Asset });
+            var own = Appearance(target, ownCase, Asset, Face, 1, 2, 5, DateTime.UtcNow);
+            db.Appearances.AddRange(own, Appearance(colleaguePerson, colleagueCase, Asset, Face, 2, 2, 5, DateTime.UtcNow));
+            await db.SaveChangesAsync();
+            ownAppearance = own.Id;
+        }
+
+        var viewer = InvestigationTestKit.Access(Owner, 3, 5);
+        (await kit.Intersections.FindForPersonAsync(target, viewer)).ShouldNotBeNull().ShouldContain(r => r.Kind == IntersectionKind.Face);
+
+        // Правило двух лиц для отзыва: эксперт (1) и верификатор (2) этого появления его не отзывают — даже видя дело.
+        await InvestigationTestKit.AssignRolesAsync(kit.Factory, (1, InvestigationRole.FaceExpert), (2, InvestigationRole.Verifier));
+        (await kit.Persons.RevokeAppearanceAsync(ownAppearance, "ошибка эксперта", InvestigationTestKit.Access(1, 9, 5)))
+            .ShouldBe(AppearanceRevokeResult.OwnDecision);
+        (await kit.Persons.RevokeAppearanceAsync(ownAppearance, "ошибка эксперта", InvestigationTestKit.Access(2, 9, 5)))
+            .ShouldBe(AppearanceRevokeResult.OwnDecision);
+
+        // Выше допуска не видно — «не найдено», а не «нельзя» (ТБ-021).
+        (await kit.Persons.RevokeAppearanceAsync(ownAppearance, "проверка", InvestigationTestKit.Access(Owner, 1, 5)))
+            .ShouldBe(AppearanceRevokeResult.NotFound);
+
+        (await kit.Persons.RevokeAppearanceAsync(ownAppearance, "  на кадре другой человек  ", owner)).ShouldBe(AppearanceRevokeResult.Ok);
+        (await kit.Persons.RevokeAppearanceAsync(ownAppearance, "повтор", owner)).ShouldBe(AppearanceRevokeResult.AlreadyRevoked);
+
+        // История: строка на месте, с причиной и отозвавшим.
+        var history = (await kit.Persons.ListAppearancesAsync(target, owner)).ShouldHaveSingleItem();
+        history.IsRevoked.ShouldBeTrue();
+        history.RevokeReason.ShouldBe("на кадре другой человек");
+        history.RevokedByUserId.ShouldBe(Owner);
+
+        // Пересечения, подсказка «уже подтверждено у …» и счётчик — без отозванного.
+        (await kit.Intersections.FindForPersonAsync(target, viewer)).ShouldNotBeNull().ShouldNotContain(r => r.Kind == IntersectionKind.Face);
+        (await kit.Intersections.FindForPersonAsync(colleaguePerson, InvestigationTestKit.Access(Colleague, 3, 5))).ShouldNotBeNull()
+            // У коллеги своё действующее появление на общем материале — «на материале» законно остаётся; «то же лицо у
+            // фигуранта» ушло вместе с отозванным появлением.
+            .ShouldNotContain(r => r.Kind == IntersectionKind.Face && r.Key == "face:shared" && r.OtherCaseId == ownCase);
+        (await kit.Persons.ListPersonsConfirmedOnFaceAsync(ownCase, Face, owner)).ShouldBeEmpty();
+        (await kit.Persons.GetAsync(target, owner)).ShouldNotBeNull().AppearanceCount.ShouldBe(0);
+
+        // Новое независимое подтверждение того же лица — новое появление, а не «уже есть».
+        var again = await kit.Persons.AddAppearanceAsync(new AppearanceDraft(
+            target, ownCase, Asset, Face, null, null, 7, 77, 0.9, DateTime.UtcNow, 3, 4, 2, 5));
+        again.ShouldNotBe(ownAppearance);
+        (await kit.Persons.ListPersonsConfirmedOnFaceAsync(ownCase, Face, owner)).ShouldBe([target]);
+    }
+
     [Fact(DisplayName = "Пересечение по лицу: тот же файл в деле с другим грифом (отдельный носитель, тот же хеш) — находится в пределах допуска")]
     public async Task Face_intersection_finds_same_file_uploaded_under_other_classification()
     {

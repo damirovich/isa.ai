@@ -41,7 +41,7 @@ public class Appearance : AuditableEntity, IClassified
     /// <summary>Косинусная схожесть на момент подтверждения (привязана к версии модели, ТО-мат-09).</summary>
     public double Similarity { get; set; }
 
-    /// <summary>Статус — всегда «следственная версия».</summary>
+    /// <summary>Статус — «следственная версия» при создании; «отозвано» — после отзыва (ADR-0034).</summary>
     public AppearanceStatus Status { get; set; } = AppearanceStatus.InvestigativeLead;
 
     /// <summary>Когда подтверждено (UTC).</summary>
@@ -58,4 +58,13 @@ public class Appearance : AuditableEntity, IClassified
 
     /// <summary>Подразделение. NOT NULL.</summary>
     public int DivisionId { get; set; }
+
+    /// <summary>Когда отозвано (UTC); <see langword="null"/> — действует.</summary>
+    public DateTime? RevokedAtUtc { get; set; }
+
+    /// <summary>Кто отозвал (слабая ссылка; всегда ≠ эксперт и ≠ верификатор этого появления, ADR-0034).</summary>
+    public int? RevokedByUserId { get; set; }
+
+    /// <summary>Причина отзыва — обязательна.</summary>
+    public string? RevokeReason { get; set; }
 }
