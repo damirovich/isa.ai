@@ -2,6 +2,7 @@ using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.Media.Data;
 using ISC.AI.Modules.Media.Data.Entities;
 using ISC.AI.Modules.Media.Domain.Model;
+using ISC.AI.Modules.Media.Domain.Services;
 using Microsoft.EntityFrameworkCore;
 using Shouldly;
 using Testcontainers.PostgreSql;
@@ -167,6 +168,54 @@ public sealed class MediaSearchSessionStoreTests : IAsyncLifetime
         (await store.ListQueuePageAsync(VerificationStage.Expert, [100], 0, 50, Insider with { MaxClassification = 2 })).Total.ShouldBe(8);
         await Should.ThrowAsync<ArgumentOutOfRangeException>(() => store.ListQueuePageAsync(VerificationStage.Expert, [100], -1, 3, Insider));
         await Should.ThrowAsync<ArgumentOutOfRangeException>(() => store.ListQueuePageAsync(VerificationStage.Expert, [100], 0, 0, Insider));
+    }
+
+    [Fact(DisplayName = "ТФ-ПЛ-02: отбор очереди — схожесть, дело, дата материала (съёмка, иначе загрузка), порядок; итог считается с отбором")]
+    public async Task Queue_filter_narrows_and_orders()
+    {
+        var factory = new MediaContextFactory(_postgres.GetConnectionString());
+        var faces = new List<int>();
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+            for (var i = 0; i < 4; i++)
+            {
+                faces.Add(await SeedFaceAsync(db, classification: 1, divisionId: 7, crop: null));
+            }
+
+            // Материал лица 0 снят в августе; у остальных времени съёмки нет — считается время загрузки (сегодня).
+            var assetId = await db.Faces.Where(f => f.Id == faces[0]).Select(f => f.AssetId).SingleAsync();
+            var asset = await db.Assets.SingleAsync(a => a.Id == assetId);
+            asset.CapturedAt = new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero);
+            await db.SaveChangesAsync();
+        }
+
+        var store = new SearchSessionStore(factory, new AllowAllAccessPolicy());
+        // Схожесть = 1 − расстояние: 0.95, 0.75, 0.55 в деле 100; 0.85 в деле 101 (новая сессия).
+        await store.CreateAsync(Draft(caseId: 100, caseIds: [100]),
+            [Candidate(faces[0], 0.05), Candidate(faces[1], 0.25), Candidate(faces[2], 0.45)]);
+        await store.CreateAsync(Draft(caseId: 101, caseIds: [101]), [Candidate(faces[3], 0.15)]);
+
+        async Task<List<double>> Similarities(VerificationQueueFilter filter)
+        {
+            var page = await store.ListQueuePageAsync(VerificationStage.Expert, [100, 101], 0, 50, Insider, filter);
+            page.Total.ShouldBe(page.Rows.Count);
+            return [.. page.Rows.Select(r => Math.Round(r.Similarity, 2))];
+        }
+
+        (await Similarities(new VerificationQueueFilter(MinSimilarity: 0.8))).Order().ShouldBe([0.85, 0.95]);
+        (await Similarities(new VerificationQueueFilter(CaseId: 101))).ShouldBe([0.85]);
+        (await Similarities(new VerificationQueueFilter(Order: VerificationQueueOrder.MostSimilar))).ShouldBe([0.95, 0.85, 0.75, 0.55]);
+        (await Similarities(new VerificationQueueFilter(Order: VerificationQueueOrder.Newest)))[0].ShouldBe(0.85);
+
+        // Дата материала: август — только снятое в августе; «с сегодня» — только загруженные сегодня без даты съёмки.
+        (await Similarities(new VerificationQueueFilter(
+            MaterialFromUtc: new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc), MaterialToUtc: new DateTime(2026, 8, 31, 23, 59, 59, DateTimeKind.Utc))))
+            .ShouldBe([0.95]);
+        (await Similarities(new VerificationQueueFilter(MaterialFromUtc: DateTime.UtcNow.Date))).Order().ShouldBe([0.55, 0.75, 0.85]);
+
+        // Отбор только сужает: чужое подразделение по-прежнему не видит ничего.
+        (await store.ListQueuePageAsync(VerificationStage.Expert, [100, 101], 0, 50, Outsider, new VerificationQueueFilter(MinSimilarity: 0))).Total.ShouldBe(0);
     }
 
     [Fact(DisplayName = "ТБ-073: очередь по стадиям; решение и статус меняются одной транзакцией; повтор стадии отклоняется без следа")]

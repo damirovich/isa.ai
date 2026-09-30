@@ -48,7 +48,8 @@ public interface ISearchSessionStore
     /// <param name="access">Контекст допуска.</param>
     /// <param name="cancellationToken">Токен отмены.</param>
     Task<VerificationQueuePage> ListQueuePageAsync(
-        VerificationStage stage, IReadOnlyCollection<int> caseIds, int skip, int take, AccessContext access, CancellationToken cancellationToken = default);
+        VerificationStage stage, IReadOnlyCollection<int> caseIds, int skip, int take, AccessContext access,
+        VerificationQueueFilter? filter = null, CancellationToken cancellationToken = default);
 
     /// <summary>Записать решение и новый статус атомарно; привязка к фигуранту (<paramref name="personRef"/>) — если указана.</summary>
     Task RecordDecisionAsync(int candidateId, VerificationDecision decision, CandidateStatus newStatus, int? personRef, CancellationToken cancellationToken = default);
@@ -58,3 +59,32 @@ public interface ISearchSessionStore
 /// <param name="Rows">Кандидаты страницы.</param>
 /// <param name="Total">Всего кандидатов в очереди стадии в пределах допуска и области дел.</param>
 public sealed record VerificationQueuePage(IReadOnlyList<SearchCandidateRow> Rows, int Total);
+
+/// <summary>Порядок очереди верификации.</summary>
+public enum VerificationQueueOrder
+{
+    /// <summary>По поисковым сессиям и рангу — кандидаты одного поиска рядом (как раньше).</summary>
+    BySession = 0,
+
+    /// <summary>Сначала самые похожие.</summary>
+    MostSimilar = 1,
+
+    /// <summary>Сначала из новых поисков.</summary>
+    Newest = 2,
+}
+
+/// <summary>
+/// Отбор очереди верификации (ТФ-ПЛ-02): применяется на стороне БД поверх решётки и области дел — сужает, никогда не
+/// расширяет. Слепоту (ТБ-073) не затрагивает: отбирает по изображению и материалу, не по решениям и фигуранту.
+/// </summary>
+/// <param name="MinSimilarity">Схожесть не ниже (0..1); <see langword="null"/> — любая.</param>
+/// <param name="CaseId">Только это дело (из области субъекта); <see langword="null"/> — все.</param>
+/// <param name="MaterialFromUtc">Материал снят (или загружен, если время съёмки неизвестно) не раньше.</param>
+/// <param name="MaterialToUtc">…и не позже (включительно).</param>
+/// <param name="Order">Порядок.</param>
+public sealed record VerificationQueueFilter(
+    double? MinSimilarity = null,
+    int? CaseId = null,
+    DateTime? MaterialFromUtc = null,
+    DateTime? MaterialToUtc = null,
+    VerificationQueueOrder Order = VerificationQueueOrder.BySession);

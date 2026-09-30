@@ -65,7 +65,7 @@ public sealed class VerificationQueueBlindnessTests
         var store = Substitute.For<ISearchSessionStore>();
         var decision = new VerificationDecision(Expert, VerificationStage.Expert, VerificationVerdict.Confirmed, "признаки эксперта", DateTime.UtcNow);
         store.ListQueuePageAsync(VerificationStage.Verifier, Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<int>(), Arg.Any<int>(),
-                Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
+                Arg.Any<AccessContext>(), Arg.Any<VerificationQueueFilter?>(), Arg.Any<CancellationToken>())
             .Returns(new VerificationQueuePage([Candidate(decision), Candidate(decision) with { Id = 12, SessionId = 6 }], 2));
         store.GetAsync(5, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>()).Returns(Session());
         store.GetAsync(6, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>()).Returns((SearchSessionRow?)null);
@@ -97,7 +97,7 @@ public sealed class VerificationQueueBlindnessTests
         response.StatusCode.ShouldBe(Abstractions.Application.ResponseStatusCode.BadRequest);
         await store.DidNotReceive().ListQueuePageAsync(
             Arg.Any<VerificationStage>(), Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<int>(), Arg.Any<int>(),
-            Arg.Any<AccessContext>(), Arg.Any<CancellationToken>());
+            Arg.Any<AccessContext>(), Arg.Any<VerificationQueueFilter?>(), Arg.Any<CancellationToken>());
         await caseScope.DidNotReceive().ListAccessibleCasesAsync(Arg.Any<AccessContext>(), Arg.Any<CancellationToken>());
     }
 
