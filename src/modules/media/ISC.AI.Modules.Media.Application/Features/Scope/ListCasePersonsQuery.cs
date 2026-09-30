@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ISC.AI.Abstractions.Application;
@@ -14,7 +15,12 @@ namespace ISC.AI.Modules.Media.Application.Features.Scope;
 /// предлагается вовсе — слепота второй стадии (ТФ-ВЕР-02) обеспечивается на уровне страницы и команды.
 /// Дело вне допуска/роли неотличимо от несуществующего (ТБ-020/021).
 /// </summary>
-public sealed record ListCasePersonsQuery(int CaseId) : IRequest<ResponseDto<IReadOnlyList<CasePersonItem>>>
+/// <param name="CaseId">Дело кандидата.</param>
+/// <param name="FaceId">
+/// Лицо кандидата: если задано, у фигурантов отмечается <see cref="CasePersonItem.ConfirmedOnFace"/> — это лицо у
+/// них уже подтверждено (повторное подтверждение нового появления не создаст).
+/// </param>
+public sealed record ListCasePersonsQuery(int CaseId, int? FaceId = null) : IRequest<ResponseDto<IReadOnlyList<CasePersonItem>>>
 {
     /// <inheritdoc cref="ListCasePersonsQuery" />
     public sealed class Handler(IAccessContextProvider accessProvider, ICaseScope caseScope)
@@ -35,6 +41,12 @@ public sealed record ListCasePersonsQuery(int CaseId) : IRequest<ResponseDto<IRe
             }
 
             var persons = await caseScope.ListPersonsAsync(caseItem.CaseId, access, cancellationToken);
+            if (query.FaceId is { } faceId)
+            {
+                var confirmed = await caseScope.ListPersonsConfirmedOnFaceAsync(caseItem.CaseId, faceId, access, cancellationToken);
+                persons = persons.Select(p => p with { ConfirmedOnFace = confirmed.Contains(p.PersonId) }).ToList();
+            }
+
             return ResponseDto<IReadOnlyList<CasePersonItem>>.Ok(persons, persons.Count);
         }
     }
