@@ -1,6 +1,7 @@
 using FluentValidation;
 using ISC.AI.Modules.Admin.Application.Features.Clearances;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ISC.AI.Modules.Admin.Application;
 
@@ -20,8 +21,13 @@ public static class AdminApplicationServiceCollectionExtensions
     /// и приложение не запустится — это осознанный fail-closed (ТС-013): молчаливая заглушка вместо
     /// правила о доступе опаснее остановки.
     /// </remarks>
-    public static IServiceCollection AddAdminApplication(this IServiceCollection services) =>
-        services
+    public static IServiceCollection AddAdminApplication(this IServiceCollection services)
+    {
+        // Часы для имени файла выгрузки журнала. TryAdd: профиль может уже зарегистрировать свои (тестовые) часы.
+        services.TryAddSingleton(TimeProvider.System);
+
+        return services
             .AddValidatorsFromAssembly(typeof(AdminApplicationServiceCollectionExtensions).Assembly)
             .AddHostedService<ClearanceDivisionConsistencyCheck>();
+    }
 }
