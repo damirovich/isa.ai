@@ -37,8 +37,8 @@ namespace ISC.AI.Profile.Investigation;
 /// </para>
 /// <para>
 /// Секции меню (порядок первого появления): «Дела» → «Медиа» (страницы пакета) → «Документооборот»
-/// (страницы пакета) → «Администрирование» (страницы пакета «Администрирование» и три страницы
-/// профиля — роли, подразделения и справочники). Страницы <c>/account/password</c> (принудительная смена временного
+/// (страницы пакета) → «Администрирование» (страницы пакета «Администрирование» и страницы профиля —
+/// матрица доступа, подразделения, справочники, запросы на правку сводок). Страницы <c>/account/password</c> (принудительная смена временного
 /// пароля — <c>RequirePasswordChange</c> хоста, сборка <c>Modules.Admin.UI</c>) и <c>/docflow/dashboard</c>
 /// (адрес колокольчика уведомлений пакета docflow) в реестре не значатся, но существуют в сборках UI,
 /// которые попадают в маршрутизацию через записи реестра ниже.
@@ -89,6 +89,11 @@ public sealed class InvestigationProfile : IProfile
         // через порт профиля (IUserRoleCatalog), подразделения и справочники — страницы профиля. Разделы видны по роли
         // (InvestigationModuleVisibility), обработчики отклоняют вызывающего без права (ТБ-012).
         .. AdminModule.Modules,
+
+        // Матрица доступа (ТП-004, ADR-0032): Администратор решает, какие разделы и действия открыты каждой роли;
+        // сервер и это же меню проверяют права по ней.
+        new ModuleDescriptor("admin-access-matrix", "/admin/access", "Матрица доступа",
+            Icons.Material.Filled.GridOn, typeof(AccessMatrix), ReadPolicy, GroupAdmin),
         new ModuleDescriptor("admin-divisions", "/admin/divisions", "Подразделения",
             Icons.Material.Filled.AccountTree, typeof(Divisions), ReadPolicy, GroupAdmin),
 

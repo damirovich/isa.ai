@@ -30,9 +30,9 @@ public sealed record SetDivisionActiveCommand(int Id, bool IsActive) : IRequest<
         {
             ArgumentNullException.ThrowIfNull(command);
 
-            if (!await RoleGuard.CallerCanManageAsync(roles, subjectProvider, cancellationToken))
+            if (!await RoleGuard.CallerCanManageDirectoriesAsync(roles, subjectProvider, cancellationToken))
             {
-                return ResponseDto<bool>.BadRequest(RoleGuard.AdminDenied);
+                return ResponseDto<bool>.BadRequest(RoleGuard.DirectoriesDenied);
             }
 
             var result = await store.SetActiveAsync(command.Id, command.IsActive, cancellationToken);

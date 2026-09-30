@@ -37,7 +37,7 @@ public sealed class DivisionGuardTests
             .Handle(new CreateDivisionCommand("СО по г. Бишкек"), CancellationToken.None);
 
         response.Status.ShouldBeFalse();
-        response.StatusMessage.ShouldBe(RoleGuard.AdminDenied);
+        response.StatusMessage.ShouldBe(RoleGuard.DirectoriesDenied);
         await _store.DidNotReceive().CreateAsync(
             Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<int?>(), Arg.Any<CancellationToken>());
     }

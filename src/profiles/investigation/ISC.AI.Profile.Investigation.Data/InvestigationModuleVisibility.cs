@@ -6,59 +6,22 @@ using ISC.AI.Profile.Investigation.Domain.Services;
 namespace ISC.AI.Profile.Investigation.Data;
 
 /// <summary>
-/// Разделы меню «Следствия» по роли (ТП-004): пользователь видит только те разделы, где его роль что-то может.
+/// Разделы меню «Следствия» по матрице доступа (ТП-004, ADR-0032): пользователь видит только те разделы, право на
+/// которые у его роли открыто.
 /// </summary>
 /// <remarks>
-/// ИНВАРИАНТ: таблица повторяет проверки СЕРВЕРА, а не заменяет их (ТБ-012) — прячется ровно то, где сценарии и так
-/// откажут: поиск по лицу — <c>MediaAdministration.CanSearchAsync</c>; верификация — <c>VerificationPolicy</c>;
-/// пользователи (учётные записи, роли, допуски), подразделения, справочники, настройки документооборота —
-/// <see cref="AdministrationRule.CallerCanManageAsync"/> (с режимом первичной настройки: пока Администратора нет,
-/// эти разделы видит любой вошедший, иначе роль назначить некому); журнал аудита — ещё и Офицер ИБ; запросы на
-/// правку сводок — только Администратор. Пользователь без роли видит лишь «Главную»: сценарии профиля ему отказывают.
-/// Раздел, которого нет в таблице (новый модуль пакета), виден любой роли — прятать молча нельзя; тест требует,
-/// чтобы каждый модуль профиля был в таблице явно.
+/// ИНВАРИАНТ: меню считает видимость по ТЕМ ЖЕ правам и той же таблице, что проверяет сервер (ТБ-012), — соответствие
+/// «раздел → право» лежит в домене (<see cref="InvestigationPermissions.MenuSections"/>), итог ячейки —
+/// <see cref="InvestigationPermissions.Has"/>. Меню проверки сервера не заменяет: прячется ровно то, где сценарии и
+/// так откажут. Пока Администратора нет (режим первичной настройки), разделы администрирования видит любой вошедший —
+/// иначе роль назначить некому. Раздел, которого нет в таблице (новый модуль пакета), виден любой роли — прятать
+/// молча нельзя; тест требует, чтобы каждый модуль профиля был в таблице явно.
 /// </remarks>
 public sealed class InvestigationModuleVisibility(IUserRoleStore roles, ISubjectProvider subjectProvider) : IModuleVisibility
 {
-    /// <summary>Кому виден раздел.</summary>
-    public enum Audience
-    {
-        /// <summary>Любой роли профиля.</summary>
-        AnyRole,
-
-        /// <summary>Тем, кто вправе искать по лицу: Следователь, Эксперт по лицам, Администратор.</summary>
-        FaceSearch,
-
-        /// <summary>Эксперт по лицам, Верификатор, Администратор.</summary>
-        Verification,
-
-        /// <summary>Администратор (и любой вошедший, пока Администратора нет).</summary>
-        Management,
-
-        /// <summary>Как <see cref="Management"/> плюс Офицер ИБ.</summary>
-        Audit,
-
-        /// <summary>Только Администратор (без режима первичной настройки).</summary>
-        AdministratorOnly,
-    }
-
-    /// <summary>Таблица «раздел → кому виден» по идентификаторам модулей профиля.</summary>
-    public static IReadOnlyDictionary<string, Audience> Rules { get; } = new Dictionary<string, Audience>(StringComparer.Ordinal)
-    {
-        ["dashboard"] = Audience.AnyRole,
-        ["cases"] = Audience.AnyRole,
-        ["media-search"] = Audience.FaceSearch,
-        ["media-verification"] = Audience.Verification,
-        ["docflow-documents"] = Audience.AnyRole,
-        ["docflow-reports"] = Audience.AnyRole,
-        ["docflow-types"] = Audience.Management,
-        ["docflow-settings"] = Audience.Management,
-        ["admin-users"] = Audience.Management,
-        ["admin-audit"] = Audience.Audit,
-        ["admin-divisions"] = Audience.Management,
-        ["admin-references"] = Audience.Management,
-        ["admin-report-permits"] = Audience.AdministratorOnly,
-    };
+    /// <summary>Таблица «раздел → права, любое из которых его открывает» по идентификаторам модулей профиля.</summary>
+    public static IReadOnlyDictionary<string, MenuSectionRule> Rules { get; } =
+        InvestigationPermissions.MenuSections.ToDictionary(r => r.ModuleId, StringComparer.Ordinal);
 
     /// <inheritdoc />
     public async Task<IReadOnlySet<string>> GetVisibleModuleIdsAsync(
@@ -66,28 +29,35 @@ public sealed class InvestigationModuleVisibility(IUserRoleStore roles, ISubject
     {
         ArgumentNullException.ThrowIfNull(modules);
 
-        var userId = await subjectProvider.GetCurrentUserIdAsync(cancellationToken);
-        var role = userId is { } id ? await roles.GetRoleAsync(id, cancellationToken) : null;
-        var canManage = await AdministrationRule.CallerCanManageAsync(roles, subjectProvider, cancellationToken);
-        return Visible(modules.Select(m => m.Id), role, canManage);
+        // Без аутентификации — ничего (fail-closed до всякого обращения к данным).
+        if (await subjectProvider.GetCurrentUserIdAsync(cancellationToken) is not { } userId)
+        {
+            return new HashSet<string>(StringComparer.Ordinal);
+        }
+
+        var role = await roles.GetRoleAsync(userId, cancellationToken);
+        var overrides = await roles.ListPermissionOverridesAsync(cancellationToken) ?? [];
+        var initialSetup = !await roles.AnyAdministratorAsync(cancellationToken);
+        return Visible(modules.Select(m => m.Id), role, initialSetup, overrides);
     }
 
-    /// <summary>Видимые разделы для роли; <paramref name="canManage"/> — право администрирования с режимом первичной настройки.</summary>
-    public static IReadOnlySet<string> Visible(IEnumerable<string> moduleIds, InvestigationRole? role, bool canManage)
+    /// <summary>
+    /// Видимые разделы для роли по матрице: <paramref name="initialSetup"/> — в контуре нет ни одного Администратора,
+    /// <paramref name="overrides"/> — сохранённые отличия матрицы от умолчаний.
+    /// </summary>
+    public static IReadOnlySet<string> Visible(
+        IEnumerable<string> moduleIds,
+        InvestigationRole? role,
+        bool initialSetup,
+        IReadOnlyCollection<RolePermissionOverride> overrides)
     {
         ArgumentNullException.ThrowIfNull(moduleIds);
-        return moduleIds.Where(id => IsVisible(id, role, canManage)).ToHashSet(StringComparer.Ordinal);
-    }
+        ArgumentNullException.ThrowIfNull(overrides);
 
-    private static bool IsVisible(string moduleId, InvestigationRole? role, bool canManage) =>
-        (Rules.TryGetValue(moduleId, out var audience) ? audience : Audience.AnyRole) switch
-        {
-            Audience.AnyRole => role is not null || canManage,
-            Audience.FaceSearch => role is InvestigationRole.Investigator or InvestigationRole.FaceExpert or InvestigationRole.Administrator,
-            Audience.Verification => role is InvestigationRole.FaceExpert or InvestigationRole.Verifier or InvestigationRole.Administrator,
-            Audience.Management => canManage,
-            Audience.Audit => canManage || role is InvestigationRole.SecurityOfficer,
-            Audience.AdministratorOnly => role is InvestigationRole.Administrator,
-            _ => false,
-        };
+        return moduleIds
+            .Where(id => Rules.TryGetValue(id, out var rule)
+                ? rule.Permissions.Any(p => InvestigationPermissions.Has(InvestigationPermissions.Get(p), role, initialSetup, overrides))
+                : role is not null || initialSetup)
+            .ToHashSet(StringComparer.Ordinal);
+    }
 }

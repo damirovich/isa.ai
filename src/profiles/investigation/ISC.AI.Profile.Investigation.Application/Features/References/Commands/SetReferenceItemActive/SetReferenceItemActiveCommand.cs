@@ -31,9 +31,9 @@ public sealed record SetReferenceItemActiveCommand(int Id, bool IsActive) : IReq
         {
             ArgumentNullException.ThrowIfNull(command);
 
-            if (!await RoleGuard.CallerCanManageAsync(roles, subjectProvider, cancellationToken))
+            if (!await RoleGuard.CallerCanManageDirectoriesAsync(roles, subjectProvider, cancellationToken))
             {
-                return ResponseDto<bool>.BadRequest(RoleGuard.AdminDenied);
+                return ResponseDto<bool>.BadRequest(RoleGuard.DirectoriesDenied);
             }
 
             return ReferenceGuard.ToResponse(await store.SetActiveAsync(command.Id, command.IsActive, cancellationToken));

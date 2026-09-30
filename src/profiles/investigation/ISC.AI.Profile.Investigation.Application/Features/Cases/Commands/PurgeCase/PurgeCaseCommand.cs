@@ -35,9 +35,10 @@ namespace ISC.AI.Profile.Investigation.Application.Features.Cases;
 /// <item>неизменяемый журнал аудита — по определению (ТБ-030).</item>
 /// </list>
 ///
-/// ПРАВО — ТОЛЬКО АДМИНИСТРАТОР, и без режима первичной настройки (решение заказчика): следователь не
-/// может уничтожить своё же дело — это защита от сокрытия следов собственной работы, а «пока
-/// Администратора нет — можно всем» здесь означало бы уничтожение без единой роли.
+/// ПРАВО — ТОЛЬКО АДМИНИСТРАТОР (строка матрицы доступа закреплена замком, ADR-0032), и без режима
+/// первичной настройки (решение заказчика): следователь не может уничтожить своё же дело — это защита
+/// от сокрытия следов собственной работы, а «пока Администратора нет — можно всем» здесь означало бы
+/// уничтожение без единой роли.
 ///
 /// ПОДТВЕРЖДЕНИЕ И АКТ. Оператор вводит номер дела вручную — нажатие кнопки по ошибке ничего не
 /// уничтожит. Полный состав уничтожаемого с основанием пишется в неизменяемый журнал ПЕРВЫМ: это и есть
@@ -64,22 +65,20 @@ public sealed record PurgeCaseCommand(int CaseId, string ConfirmationNumber, str
         IAuditWriter auditWriter)
         : IRequestHandler<PurgeCaseCommand, ResponseDto<CasePurgeSummary>>
     {
-        /// <summary>Отказ по праву: уничтожение — только Администратору.</summary>
+        /// <summary>Отказ по праву «Уничтожение дела»: строка матрицы закреплена за Администратором (ADR-0032).</summary>
         internal const string Denied = "Уничтожение дела доступно только Администратору.";
 
         /// <summary>Отказ, когда введённый номер не совпал с номером дела.</summary>
         internal const string NumberMismatch = "Введённый номер не совпадает с номером дела — уничтожение не выполнено.";
-
-        private static readonly InvestigationRole[] Allowed = [InvestigationRole.Administrator];
 
         /// <inheritdoc />
         public async ValueTask<ResponseDto<CasePurgeSummary>> Handle(PurgeCaseCommand command, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(command);
 
-            // ТБ-012: право — ДО любого чтения. RoleGuard.CallerHasRoleAsync режима первичной настройки не
-            // имеет, и это здесь обязательно: уничтожение без роли недопустимо ни при каком состоянии контура.
-            if (!await RoleGuard.CallerHasRoleAsync(roles, subjectProvider, Allowed, cancellationToken))
+            // ТБ-012: право — ДО любого чтения. У права «Уничтожение дела» режима первичной настройки нет, и это
+            // здесь обязательно: уничтожение без роли недопустимо ни при каком состоянии контура.
+            if (!await RoleGuard.CallerHasAsync(roles, subjectProvider, InvestigationPermissions.CasesPurge, cancellationToken))
             {
                 return ResponseDto<CasePurgeSummary>.BadRequest(Denied);
             }

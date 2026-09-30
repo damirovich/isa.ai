@@ -27,10 +27,10 @@ public sealed record CreateDivisionCommand(string Name, string? Code = null, int
         {
             ArgumentNullException.ThrowIfNull(command);
 
-            // Справочник — словарь решётки доступа (ТБ-020): правит только Администратор (ТП-004).
-            if (!await RoleGuard.CallerCanManageAsync(roles, subjectProvider, cancellationToken))
+            // Справочник — словарь решётки доступа (ТБ-020): правит роль с правом «Подразделения и справочники» (ADR-0032).
+            if (!await RoleGuard.CallerCanManageDirectoriesAsync(roles, subjectProvider, cancellationToken))
             {
-                return ResponseDto<int>.BadRequest(RoleGuard.AdminDenied);
+                return ResponseDto<int>.BadRequest(RoleGuard.DirectoriesDenied);
             }
 
             var id = await store.CreateAsync(

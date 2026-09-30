@@ -1,0 +1,341 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@page "/admin/access"
+@rendermode InteractiveServer
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@using System.Net
+@using ISC.AI.Profile.Investigation.Application.Features.Access
+@using ISC.AI.Profile.Investigation.Domain.Enums
+@using ISC.AI.Profile.Investigation.Domain.Services
+
+@* «Матрица доступа» (ТП-004, ADR-0032): Администратор сам решает, какие разделы и действия открыты каждой роли.
+   Сервер и меню проверяют права по ЭТОЙ ЖЕ таблице (PermissionRule / InvestigationPermissions): экран лишь правит
+   её. Галочки не применяются сразу — сначала список изменений и подтверждение, затем одна команда сохранения с
+   записью в журнал аудита (ТБ-030). Замкнутые ячейки показаны замком с причиной прямо в строке — пользователь не
+   гадает, почему галочку нельзя поставить. Право на сам экран проверяет обработчик (ТБ-012). *@
+
+<PageHeader Title="Матрица доступа"
+            Subtitle="Какие разделы и действия открыты каждой роли · сервер и меню проверяют права по этой же таблице"
+            Icon="@Icons.Material.Filled.GridOn">
+    @if (_view is not null)
+    {
+        <div class="d-flex flex-column align-end">
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Restore"
+                       Disabled="@(_busy || !CanResetToDefaults)" OnClick="ResetToDefaults">Сбросить к умолчаниям</MudButton>
+            @if (!CanResetToDefaults)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1">Матрица уже совпадает с умолчаниями</MudText>
+            }
+        </div>
+    }
+</PageHeader>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mt-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@if (_view is null)
+{
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mt-4" />
+    }
+}
+else
+{
+    @if (_view.IsInitialSetup)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mt-3">
+            <b>Режим первичной настройки: Администратор не назначен.</b> Пока Администратора нет, этот экран, «Пользователи»,
+            справочники, журнал и настройки документооборота открыты любому вошедшему. Назначьте Администратора в разделе
+            «Пользователи».
+        </MudAlert>
+    }
+
+    <MudPaper Outlined="true" Class="pa-4 mt-3">
+        <div class="d-flex gap-4 align-center flex-wrap">
+            <div class="flex-grow-1" style="min-width:260px;">
+                <MudText Typo="Typo.body2">@SummaryText</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    Права вступают в силу сразу после сохранения. Меню у сотрудников обновится, когда они обновят страницу.
+                </MudText>
+            </div>
+            <MudSelect T="InvestigationRole" @bind-Value="_previewRole" Label="Предпросмотр: что увидит в меню роль"
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:280px;">
+                @foreach (var role in _view.Roles)
+                {
+                    <MudSelectItem T="InvestigationRole" Value="@role.Role">@role.Label</MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+        <div class="d-flex flex-wrap gap-1 mt-3">
+            @foreach (var (label, visible) in PreviewMenu)
+            {
+                <MudChip T="string" Size="Size.Small" Class="ma-0" Color="@(visible ? Color.Primary : Color.Default)"
+                         Variant="@(visible ? Variant.Text : Variant.Outlined)"
+                         Style="@(visible ? null : "text-decoration:line-through;opacity:.55;")">@label</MudChip>
+            }
+        </div>
+        @if (!PreviewMenu.Any(m => m.Visible))
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-1">
+                Роли не открыт ни один раздел — сотрудник с ней увидит только «Главную».
+            </MudText>
+        }
+    </MudPaper>
+
+    <MudPaper Outlined="true" Class="mt-3" Style="overflow-x:auto;">
+        <MudSimpleTable Dense="true" Hover="true" Style="min-width:960px;">
+            <thead>
+                <tr>
+                    <th style="min-width:300px;">Раздел / действие</th>
+                    @foreach (var role in _view.Roles)
+                    {
+                        <th style="text-align:center;min-width:100px;">
+                            <div>@role.Label</div>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">@role.UserCount чел.</MudText>
+                        </th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var group in _view.Rows.GroupBy(r => r.Section))
+                {
+                    <tr>
+                        <td colspan="@(_view.Roles.Count + 1)" style="background:var(--mud-palette-background-gray);">
+                            <MudText Typo="Typo.overline" Style="font-weight:600;">@group.Key.Label()</MudText>
+                        </td>
+                    </tr>
+                    @foreach (var row in group)
+                    {
+                        <tr>
+                            <td>
+                                <MudText Typo="Typo.body2" Style="font-weight:500;">@row.Label</MudText>
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">@row.Hint</MudText>
+                                @* Причина замка видна в самой строке, а не только во всплывающей подсказке. *@
+                                @if (row.Cells.Select(c => c.LockReason).FirstOrDefault(r => r is not null) is { } rowLock)
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-flex align-start gap-1 mt-1">
+                                        <MudIcon Icon="@Icons.Material.Filled.Lock" Size="Size.Small" Style="font-size:1rem;" /> @rowLock
+                                    </MudText>
+                                }
+                            </td>
+                            @foreach (var cell in row.Cells)
+                            {
+                                var key = (row.Key, cell.Role);
+                                <td style="@CellStyle(row.Key, cell)">
+                                    @if (cell.LockReason is { } reason)
+                                    {
+                                        <MudTooltip Text="@reason">
+                                            <MudIcon Icon="@(cell.IsGranted ? Icons.Material.Filled.Lock : Icons.Material.Outlined.Lock)"
+                                                     Color="@(cell.IsGranted ? Color.Primary : Color.Default)" Size="Size.Small"
+                                                     Style="@(cell.IsGranted ? null : "opacity:.45;")"
+                                                     aria-label="@($"{row.Label}, {RoleLabel(cell.Role)}: {(cell.IsGranted ? "открыто" : "закрыто")}, не меняется")" />
+                                        </MudTooltip>
+                                    }
+                                    else
+                                    {
+                                        <MudCheckBox T="bool" Value="@_grid[key]" ValueChanged="@(v => Toggle(key, v))" Color="Color.Primary"
+                                                     Dense="true" Disabled="_busy" Class="d-inline-flex"
+                                                     aria-label="@($"{row.Label}, {RoleLabel(cell.Role)}")" />
+                                    }
+                                </td>
+                            }
+                        </tr>
+                    }
+                }
+            </tbody>
+        </MudSimpleTable>
+    </MudPaper>
+
+    <div class="d-flex flex-wrap gap-4 mt-2 align-center">
+        <MudText Typo="Typo.caption" Class="d-flex align-center gap-1">
+            <span style="@($"display:inline-block;width:14px;height:14px;{ChangedStyle}")"></span> изменено, не сохранено
+        </MudText>
+        <MudText Typo="Typo.caption" Class="d-flex align-center gap-1">
+            <span style="@($"display:inline-block;width:14px;height:14px;{NotDefaultStyle}")"></span> отличается от умолчания
+        </MudText>
+        <MudText Typo="Typo.caption" Class="d-flex align-center gap-1">
+            <MudIcon Icon="@Icons.Material.Filled.Lock" Color="Color.Primary" Size="Size.Small" Style="font-size:1rem;" /> открыто и закреплено
+        </MudText>
+        <MudText Typo="Typo.caption" Class="d-flex align-center gap-1">
+            <MudIcon Icon="@Icons.Material.Outlined.Lock" Size="Size.Small" Style="font-size:1rem;opacity:.45;" /> закрыто и закреплено
+        </MudText>
+    </div>
+    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+        Галочками не настраивается: допуск по грифу и подразделениям — он выдаётся в карточке сотрудника; Следователь видит
+        только свои дела; эксперт и верификатор одного результата — всегда разные люди; последнего Администратора снять нельзя.
+    </MudText>
+
+    @if (Changes.Count > 0)
+    {
+        <MudPaper Elevation="8" Class="pa-3 mt-3 d-flex align-center gap-3 flex-wrap"
+                  Style="position:sticky;bottom:12px;z-index:5;border-left:4px solid var(--mud-palette-warning);">
+            <MudText Typo="Typo.body2"><b>Изменений: @Changes.Count</b></MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary flex-grow-1" Style="min-width:200px;">
+                @string.Join("; ", Changes.Take(3).Select(Describe))@(Changes.Count > 3 ? "…" : string.Empty)
+            </MudText>
+            <MudButton Variant="Variant.Text" Disabled="_busy" OnClick="Undo">Отменить</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="SaveAsync">
+                @(_busy ? "Сохраняю…" : "Сохранить…")
+            </MudButton>
+        </MudPaper>
+    }
+}
+
+@code {
+    private const string ChangedStyle = "background-color:rgba(255,167,38,.22);box-shadow:inset 0 0 0 2px var(--mud-palette-warning);";
+    private const string NotDefaultStyle = "background-color:rgba(33,150,243,.10);";
+
+    private AccessMatrixView? _view;
+    private readonly Dictionary<(string Permission, InvestigationRole Role), bool> _saved = [];
+    private readonly Dictionary<(string Permission, InvestigationRole Role), bool> _grid = [];
+    private InvestigationRole _previewRole = InvestigationRole.Verifier;
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+
+    // Изменённые, но не сохранённые ячейки — в порядке строк и столбцов матрицы.
+    private List<AccessMatrixCellChange> Changes =>
+        _view is null
+            ? []
+            : [.. _view.Rows.SelectMany(row => row.Cells
+                .Where(cell => cell.LockReason is null && _grid[(row.Key, cell.Role)] != _saved[(row.Key, cell.Role)])
+                .Select(cell => new AccessMatrixCellChange(cell.Role, row.Key, _grid[(row.Key, cell.Role)])))];
+
+    // «Сбросить к умолчаниям» активна, только если на экране есть ячейка не по умолчанию.
+    private bool CanResetToDefaults =>
+        _view is not null
+        && _view.Rows.Any(row => row.Cells.Any(cell => cell.LockReason is null && _grid[(row.Key, cell.Role)] != cell.IsDefault));
+
+    private string SummaryText
+    {
+        get
+        {
+            if (_view is null) { return string.Empty; }
+            if (_view.OverrideCount == 0) { return "Действуют правила поставки: отличий от умолчаний нет."; }
+
+            var when = _view.LastChangedAtUtc is { } at ? $" Последнее изменение — {at.ToLocalTime():dd.MM.yyyy HH:mm}" : string.Empty;
+            var who = _view.LastChangedBy is { } name ? $" · {name}" : string.Empty;
+            return $"Отличий от умолчаний: {_view.OverrideCount}.{when}{who}";
+        }
+    }
+
+    // Предпросмотр меню — по ТЕКУЩИМ галочкам (ещё не сохранённым) и той же таблице «раздел → право», что у меню.
+    private IEnumerable<(string Label, bool Visible)> PreviewMenu =>
+        InvestigationPermissions.MenuSections
+            .Select(section => (section.Label, section.Permissions.Any(p => _grid.TryGetValue((p, _previewRole), out var on) && on)));
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере не грузим.
+        if (!RendererInfo.IsInteractive) { return; }
+
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var response = await Dispatcher.Send(new GetAccessMatrixQuery());
+            if (response is not { Status: true, Data: { } view })
+            {
+                _error = response.StatusMessage;
+                _view = null;
+                return;
+            }
+
+            _view = view;
+            _saved.Clear();
+            _grid.Clear();
+            foreach (var row in view.Rows)
+            {
+                foreach (var cell in row.Cells)
+                {
+                    _saved[(row.Key, cell.Role)] = cell.IsGranted;
+                    _grid[(row.Key, cell.Role)] = cell.IsGranted;
+                }
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Toggle((string Permission, InvestigationRole Role) key, bool value) => _grid[key] = value;
+
+    private void Undo()
+    {
+        foreach (var (key, value) in _saved) { _grid[key] = value; }
+    }
+
+    private void ResetToDefaults()
+    {
+        if (_view is null) { return; }
+
+        foreach (var row in _view.Rows)
+        {
+            foreach (var cell in row.Cells.Where(c => c.LockReason is null))
+            {
+                _grid[(row.Key, cell.Role)] = cell.IsDefault;
+            }
+        }
+
+        Snackbar.Add("Подставлены умолчания поставки — проверьте изменения и сохраните.", Severity.Info);
+    }
+
+    private async Task SaveAsync()
+    {
+        var changes = Changes;
+        if (changes.Count == 0) { return; }
+
+        var items = string.Concat(changes.Select(c => $"<li>{WebUtility.HtmlEncode(Describe(c))}</li>"));
+        var html = $"<ul style=\"margin:0;padding-left:18px;\">{items}</ul>"
+            + "<div class=\"mud-text-secondary mt-2\" style=\"font-size:.85rem;\">Права вступают в силу сразу. Сотрудники увидят "
+            + "изменения меню после обновления страницы. Каждое изменение запишется в журнал аудита.</div>";
+
+        var answer = await DialogService.ShowMessageBoxAsync("Применить изменения матрицы?", (MarkupString)html,
+            yesText: "Применить", cancelText: "Отмена", options: new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        if (answer != true) { return; }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new SaveAccessMatrixCommand(changes));
+            if (!response.Status)
+            {
+                _error = response.StatusMessage;
+                return;
+            }
+
+            Snackbar.Add("Матрица доступа сохранена.", Severity.Success);
+            await ReloadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private string CellStyle(string permission, AccessMatrixCell cell)
+    {
+        const string center = "text-align:center;";
+        if (cell.LockReason is not null) { return center; }
+
+        var current = _grid[(permission, cell.Role)];
+        if (current != _saved[(permission, cell.Role)]) { return center + ChangedStyle; }
+        return current != cell.IsDefault ? center + NotDefaultStyle : center;
+    }
+
+    private string Describe(AccessMatrixCellChange change) =>
+        $"{RoleLabel(change.Role)}: {InvestigationPermissions.Get(change.Permission).Label} — {(change.IsGranted ? "открыть" : "закрыть")}";
+
+    private static string RoleLabel(InvestigationRole role) => role.Label();
+}

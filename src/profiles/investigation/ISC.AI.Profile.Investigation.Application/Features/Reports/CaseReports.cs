@@ -352,7 +352,8 @@ public sealed class RequestCaseReportPermitValidator : AbstractValidator<Request
 }
 
 /// <summary>
-/// Очередь запросов на правку архивных документов (ТФ-АДМ-06) — только метаданные (ТБ-079). Только Администратор.
+/// Очередь запросов на правку архивных документов (ТФ-АДМ-06) — только метаданные (ТБ-079). По праву «Разрешения на правку
+/// сводок» матрицы доступа (по умолчанию — Администратор, ADR-0032).
 /// </summary>
 /// <param name="PendingOnly">Только ждущие решения.</param>
 public sealed record ListCaseReportPermitsQuery(bool PendingOnly = false)
@@ -375,9 +376,10 @@ public sealed record ListCaseReportPermitsQuery(bool PendingOnly = false)
         {
             ArgumentNullException.ThrowIfNull(query);
 
-            if (!await RoleGuard.CallerHasRoleAsync(roles, subjectProvider, [InvestigationRole.Administrator], cancellationToken))
+            // Право «Разрешения на правку сводок» матрицы доступа (по умолчанию — Администратор, ADR-0032).
+            if (!await RoleGuard.CallerHasAsync(roles, subjectProvider, InvestigationPermissions.ReportPermits, cancellationToken))
             {
-                return ResponseDto<IReadOnlyList<CaseReportPermitRow>>.BadRequest("Очередь запросов доступна только Администратору.");
+                return ResponseDto<IReadOnlyList<CaseReportPermitRow>>.BadRequest(RoleGuard.Denied(InvestigationPermissions.ReportPermits));
             }
 
             var access = await accessProvider.GetCurrentAsync(cancellationToken);
@@ -387,7 +389,7 @@ public sealed record ListCaseReportPermitsQuery(bool PendingOnly = false)
     }
 }
 
-/// <summary>Разрешить или отказать в правке архивного документа (ТФ-АДМ-06). Только Администратор, не свой запрос.</summary>
+/// <summary>Разрешить или отказать в правке архивного документа (ТФ-АДМ-06). По праву «Разрешения на правку сводок», не свой запрос.</summary>
 /// <param name="PermitId">Запрос.</param>
 /// <param name="Approve">Разрешить.</param>
 public sealed record DecideCaseReportPermitCommand(int PermitId, bool Approve) : IRequest<ResponseDto<bool>>, IAuditableRequest
@@ -408,9 +410,9 @@ public sealed record DecideCaseReportPermitCommand(int PermitId, bool Approve) :
         {
             ArgumentNullException.ThrowIfNull(command);
 
-            if (!await RoleGuard.CallerHasRoleAsync(roles, subjectProvider, [InvestigationRole.Administrator], cancellationToken))
+            if (!await RoleGuard.CallerHasAsync(roles, subjectProvider, InvestigationPermissions.ReportPermits, cancellationToken))
             {
-                return ResponseDto<bool>.BadRequest("Решать запросы может только Администратор.");
+                return ResponseDto<bool>.BadRequest(RoleGuard.Denied(InvestigationPermissions.ReportPermits));
             }
 
             var access = await accessProvider.GetCurrentAsync(cancellationToken);

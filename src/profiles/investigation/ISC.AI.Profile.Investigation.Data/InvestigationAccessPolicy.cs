@@ -2,6 +2,7 @@ using System.Linq.Expressions;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.DocFlow.Domain.Entities;
 using ISC.AI.Profile.Investigation.Domain.Enums;
+using ISC.AI.Profile.Investigation.Domain.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace ISC.AI.Profile.Investigation.Data;
@@ -15,7 +16,8 @@ namespace ISC.AI.Profile.Investigation.Data;
 /// <remarks>
 /// Правило действует ТОЛЬКО для документов документооборота (<see cref="Document"/>): Администратор и
 /// Руководитель — всё; Следователь — документы, где он ответственный или регистратор; прочие роли —
-/// только зарегистрированные ими; без роли — ничего (default-deny, ТБ-012).
+/// только зарегистрированные ими; без роли или без права «Документы и отчёты» матрицы доступа (ADR-0032) —
+/// ничего (default-deny, ТБ-012).
 ///
 /// Для любого другого <c>T</c> (дела, фигуранты, шаблоны лиц, эмбеддинги корпуса) политика возвращает
 /// разрешающее <c>_ =&gt; true</c> — и это НЕ дыра: дела и фигуранты сужаются по роли/владению в
@@ -67,9 +69,26 @@ public sealed class InvestigationAccessPolicy(IDbContextFactory<InvestigationDbC
         }
 
         using var db = contextFactory.CreateDbContext();
-        return db.UserRoleAssignments.AsNoTracking()
+        var role = db.UserRoleAssignments.AsNoTracking()
             .Where(r => r.UserId == userId)
             .Select(r => (InvestigationRole?)r.Role)
             .FirstOrDefault();
+
+        if (role is not { } assigned)
+        {
+            return null;
+        }
+
+        // Право «Документы и отчёты» матрицы доступа (ADR-0032): закрыто — роль считается отсутствующей, документов
+        // нет (default-deny). То же правило, что у PermissionRule, но синхронно — контракт BuildFilter синхронный.
+        var permission = InvestigationPermissions.Get(InvestigationPermissions.DocFlowView);
+        var stored = InvestigationPermissions.LockReason(permission, assigned) is null
+            ? db.RolePermissions.AsNoTracking()
+                .Where(p => p.Role == assigned && p.Permission == permission.Key)
+                .Select(p => (bool?)p.IsGranted)
+                .FirstOrDefault()
+            : null;
+
+        return InvestigationPermissions.IsGranted(permission, assigned, stored) ? assigned : null;
     }
 }

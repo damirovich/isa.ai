@@ -1,5 +1,7 @@
 using System.Linq;
 using System.Threading.Tasks;
+using ISC.AI.Abstractions.Security;
+using ISC.AI.Modules.DocFlow.Domain.Entities;
 using ISC.AI.Modules.Media.Domain.Model;
 using ISC.AI.Persistence.Entities;
 using ISC.AI.Profile.Investigation.Data;
@@ -110,6 +112,66 @@ public sealed class InvestigationRoleStoreTests : IAsyncLifetime
         (await policy.CanActAsync(VerificationStage.Verifier, 10)).ShouldBeFalse();  // Следователь — не верификатор
         (await policy.CanActAsync(VerificationStage.Expert, 50)).ShouldBeFalse();    // без роли — ничего
 
+    }
+
+    [Fact(DisplayName = "Матрица доступа (ADR-0032): отличие — одна строка на ячейку, null возвращает к умолчанию; порты «Медиа», видимость дел и документов отвечают по БД сразу")]
+    public async Task Access_matrix_is_stored_and_applied_immediately()
+    {
+        var (factory, core) = await MigrateBothAsync();
+        await InvestigationTestKit.AssignRolesAsync(factory,
+            (10, InvestigationRole.Investigator),
+            (30, InvestigationRole.Administrator),
+            (41, InvestigationRole.Verifier));
+
+        var roles = new UserRoleStore(core, factory);
+        var verifierMedia = new MediaAdministration(roles, new FixedSubjectProvider(41));
+        var documents = new InvestigationAccessPolicy(factory);
+        var ownDocument = new Document { ShortContent = "Рапорт", RegisteredByUserId = 41 };
+        bool VerifierSeesOwnDocument() =>
+            documents.BuildFilter<Document>(new AccessContext("41", 0, [1])).Compile()(ownDocument);
+
+        // Чистая матрица — умолчания поставки.
+        (await roles.GetPermissionOverrideAsync(InvestigationRole.Verifier, InvestigationPermissions.MediaSearch)).ShouldBeNull();
+        (await verifierMedia.CanSearchAsync()).ShouldBeFalse();
+        (await PermissionRule.ResolveCaseViewerAsync(roles, 10)).ShouldBe(InvestigationRole.Investigator);
+        VerifierSeesOwnDocument().ShouldBeTrue();
+
+        await roles.ApplyPermissionChangesAsync(
+        [
+            new(InvestigationRole.Verifier, InvestigationPermissions.MediaSearch, true),
+            new(InvestigationRole.Investigator, InvestigationPermissions.CasesView, false),
+            new(InvestigationRole.Verifier, InvestigationPermissions.DocFlowView, false),
+        ], changedByUserId: 30);
+
+        // Действует со следующего же запроса — без кэша и перезапуска (ТБ-016).
+        (await roles.GetPermissionOverrideAsync(InvestigationRole.Verifier, InvestigationPermissions.MediaSearch)).ShouldBe(true);
+        (await verifierMedia.CanSearchAsync()).ShouldBeTrue();
+        (await PermissionRule.ResolveCaseViewerAsync(roles, 10)).ShouldBeNull();
+        VerifierSeesOwnDocument().ShouldBeFalse();
+
+        // Повторное сохранение ячейки правит ту же строку (уникальный индекс role + permission).
+        await roles.ApplyPermissionChangesAsync(
+            [new(InvestigationRole.Verifier, InvestigationPermissions.MediaSearch, false)], changedByUserId: 30);
+        await using (var db = factory.CreateDbContext())
+        {
+            var rows = await db.RolePermissions
+                .Where(p => p.Role == InvestigationRole.Verifier && p.Permission == InvestigationPermissions.MediaSearch)
+                .ToListAsync();
+            rows.Count.ShouldBe(1);
+            rows[0].IsGranted.ShouldBeFalse();
+            rows[0].UpdatedByUserId.ShouldBe(30);
+        }
+
+        var stored = await roles.ListPermissionOverridesAsync();
+        stored.Count.ShouldBe(3);
+        stored.ShouldAllBe(o => o.UpdatedAtUtc != null && o.UpdatedByUserId == 30);
+
+        // null — вернуть к умолчанию: строки удаляются, права снова по правилам поставки.
+        await roles.ApplyPermissionChangesAsync(
+            [.. stored.Select(o => new RolePermissionChange(o.Role, o.Permission, null))], changedByUserId: 30);
+        (await roles.ListPermissionOverridesAsync()).ShouldBeEmpty();
+        (await PermissionRule.ResolveCaseViewerAsync(roles, 10)).ShouldBe(InvestigationRole.Investigator);
+        VerifierSeesOwnDocument().ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Справочник подразделений: число пользователей в допуске из core.clearance; для докфлоу — только действующие, «Родитель / Дочернее»")]

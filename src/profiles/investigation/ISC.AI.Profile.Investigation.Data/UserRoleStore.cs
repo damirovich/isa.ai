@@ -93,4 +93,73 @@ public sealed class UserRoleStore(
 
         await db.SaveChangesAsync(cancellationToken);
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Не кэшируется НАМЕРЕННО (ТБ-016): снятая галочка действует со следующего же запроса, а не после истечения кэша.
+    /// Запрос — по уникальному индексу (role, permission) маленькой таблицы.
+    /// </remarks>
+    public async Task<bool?> GetPermissionOverrideAsync(
+        InvestigationRole role, string permission, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        return await db.RolePermissions.AsNoTracking()
+            .Where(p => p.Role == role && p.Permission == permission)
+            .Select(p => (bool?)p.IsGranted)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<RolePermissionOverride>> ListPermissionOverridesAsync(CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        return await db.RolePermissions.AsNoTracking()
+            .OrderBy(p => p.Permission).ThenBy(p => p.Role)
+            .Select(p => new RolePermissionOverride(p.Role, p.Permission, p.IsGranted, p.UpdatedByUserId, p.UpdatedAt ?? p.CreatedAt))
+            .ToListAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task ApplyPermissionChangesAsync(
+        IReadOnlyCollection<RolePermissionChange> changes, int? changedByUserId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(changes);
+        if (changes.Count == 0)
+        {
+            return;
+        }
+
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Вся пачка — один SaveChanges, то есть одна транзакция: матрица не остаётся «наполовину применённой».
+        var existing = await db.RolePermissions.ToListAsync(cancellationToken);
+        foreach (var change in changes)
+        {
+            var row = existing.FirstOrDefault(p => p.Role == change.Role
+                && string.Equals(p.Permission, change.Permission, StringComparison.Ordinal));
+
+            if (change.IsGranted is not { } granted)
+            {
+                if (row is not null)
+                {
+                    db.RolePermissions.Remove(row);
+                    existing.Remove(row);
+                }
+
+                continue;
+            }
+
+            if (row is null)
+            {
+                row = new RolePermission { Role = change.Role, Permission = change.Permission };
+                db.RolePermissions.Add(row);
+                existing.Add(row);
+            }
+
+            row.IsGranted = granted;
+            row.UpdatedByUserId = changedByUserId;
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
 }

@@ -45,7 +45,7 @@ public sealed class ReferenceGuardTests
         var disable = await new SetReferenceItemActiveCommand.Handler(_store, _roles, _subject)
             .Handle(new SetReferenceItemActiveCommand(3, false), CancellationToken.None);
 
-        create.StatusMessage.ShouldBe(RoleGuard.AdminDenied);
+        create.StatusMessage.ShouldBe(RoleGuard.DirectoriesDenied);
         update.Status.ShouldBeFalse();
         disable.Status.ShouldBeFalse();
         await _store.DidNotReceiveWithAnyArgs().CreateAsync(default, default!, default, default, default);
