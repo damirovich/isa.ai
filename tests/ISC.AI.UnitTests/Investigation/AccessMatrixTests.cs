@@ -36,6 +36,8 @@ public sealed class AccessMatrixTests
         [InvestigationPermissions.MediaPurge] = [InvestigationRole.Administrator, InvestigationRole.Head],
         [InvestigationPermissions.VerificationExpert] = [InvestigationRole.FaceExpert, InvestigationRole.Administrator],
         [InvestigationPermissions.VerificationVerifier] = [InvestigationRole.Verifier, InvestigationRole.Administrator],
+        // Новое право (ADR-0034): прежде отзыва не было вовсе; по умолчанию — Руководитель, утверждающий результаты, и Администратор.
+        [InvestigationPermissions.VerificationRevoke] = [InvestigationRole.Head, InvestigationRole.Administrator],
         [InvestigationPermissions.DocFlowView] = AllRoles,
         [InvestigationPermissions.DocFlowSettings] = [InvestigationRole.Administrator],
         [InvestigationPermissions.ReportPermits] = [InvestigationRole.Administrator],

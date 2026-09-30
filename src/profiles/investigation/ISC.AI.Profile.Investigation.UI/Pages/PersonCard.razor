@@ -10,6 +10,7 @@
 @using ISC.AI.Profile.Investigation.Domain.Enums
 @using ISC.AI.Profile.Investigation.Domain.Services
 @inject NavigationManager Navigation
+@inject ISnackbar Snackbar
 
 @* Карточка фигуранта (ТФ-ПЕР-01/02): реквизиты, подтверждённые появления и эталоны. Появление —
    ВСЕГДА «следственная версия» (ТФ-ВЕР-03): система не утверждает тождество личности, а балл схожести
@@ -280,12 +281,13 @@ else
     </MudTabPanel>
 
     @* --- Появления: только подтверждённые двумя лицами (ТБ-073), всегда «следственная версия» --- *@
-    <MudTabPanel Text="Появления" Icon="@Icons.Material.Filled.Visibility" BadgeData="@_appearances.Count" BadgeColor="Color.Default">
+    <MudTabPanel Text="Появления" Icon="@Icons.Material.Filled.Visibility" BadgeData="@_appearances.Count(a => !a.IsRevoked)" BadgeColor="Color.Default">
         <div class="pt-3">
             <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
                 Балл схожести — вероятностная оценка алгоритма, а не установление личности. Каждое появление —
                 <b>следственная версия</b>, подтверждённая экспертом и верификатором; процессуальная проверка
-                остаётся за следствием.
+                остаётся за следствием. Ошибочное появление можно <b>отозвать</b> с причиной: оно останется в истории,
+                но уйдёт из пересечений и подсказок.
             </MudAlert>
             @if (_appearancesError is not null)
             {
@@ -301,6 +303,7 @@ else
                     <MudTh>Верификатор</MudTh>
                     <MudTh>Подтверждено</MudTh>
                     <MudTh>Сессия</MudTh>
+                    <MudTh></MudTh>
                 </HeaderContent>
                 <RowTemplate>
                     @* Соглашение навигации пакета «Медиа»: ?face= подсвечивает лицо на карточке носителя (ТФ-ПЕР-02 «переход к кадру»). *@
@@ -312,12 +315,34 @@ else
                         </MudTooltip>
                     </MudTd>
                     <MudTd DataLabel="Статус">
-                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info">следственная версия</MudChip>
+                        @if (context.IsRevoked)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error">отозвано</MudChip>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block" Style="max-width:260px;">
+                                @(context.RevokedAtUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm")) · @UserName(context.RevokedByUserId)<br />@context.RevokeReason
+                            </MudText>
+                        }
+                        else
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info">следственная версия</MudChip>
+                        }
                     </MudTd>
                     <MudTd DataLabel="Эксперт">@UserName(context.ExpertUserId)</MudTd>
                     <MudTd DataLabel="Верификатор">@UserName(context.VerifierUserId)</MudTd>
                     <MudTd DataLabel="Подтверждено">@context.ConfirmedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudTd>
                     <MudTd DataLabel="Сессия"><MudLink Href="@($"/media/sessions/{context.SearchSessionId}")">№ @context.SearchSessionId</MudLink></MudTd>
+                    <MudTd>
+                        @if (!context.IsRevoked)
+                        {
+                            @* Кнопка неактивна — причина видна тут же, гадать не нужно. *@
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.Undo"
+                                       Disabled="@(_busy || RevokeBlocked(context) is not null)" OnClick="@(() => OpenRevoke(context))">Отозвать</MudButton>
+                            @if (RevokeBlocked(context) is { } why)
+                            {
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block" Style="max-width:200px;">@why</MudText>
+                            }
+                        }
+                    </MudTd>
                 </RowTemplate>
                 <NoRecordsContent>
                     <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
@@ -380,6 +405,12 @@ else
                         else
                         {
                             <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Success">актуален</MudChip>
+                            @if (FromRevokedAppearance(context))
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block" Style="max-width:220px;">
+                                    Взят с отозванного появления — проверьте и при необходимости замените.
+                                </MudText>
+                            }
                         }
                     </MudTd>
                     <MudTd DataLabel="Добавлен">@context.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudTd>
@@ -394,6 +425,38 @@ else
     </MudTabPanel>
     </MudTabs>
 }
+
+@* --- Отзыв ошибочного появления (RevokeAppearanceCommand, ADR-0034): причина обязательна, отзывает не тот, кто подтверждал --- *@
+<MudDialog @bind-Visible="_revokeOpen" Options="FormDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Отозвать появление</MudText></TitleContent>
+    <DialogContent>
+        @if (_revokeError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_revokeError</MudAlert>
+        }
+        @if (_revokeTarget is { } target)
+        {
+            <MudText Typo="Typo.body2" Class="mb-2">
+                Носитель № @target.MediaAssetId · лицо № @target.MediaFaceId · подтвердили @UserName(target.ExpertUserId) и @UserName(target.VerifierUserId).
+            </MudText>
+        }
+        <MudTextField T="string" @bind-Value="_revokeReason" Label="Причина отзыва *" Variant="Variant.Outlined" Lines="3"
+                      Immediate="true" MaxLength="@RevokeAppearanceValidator.MaxReasonLength"
+                      HelperText="Например: при повторной проверке установлено, что на кадре другой человек" />
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-3">
+            Появление останется в истории с пометкой «отозвано», причиной и вашим именем. Пересечения по этому лицу
+            пересчитаются, эталоны с него стоит проверить. Действие записывается в журнал аудита.
+        </MudAlert>
+    </DialogContent>
+    <DialogActions>
+        @if (RevokeHint is { } hint)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-auto ml-2">@hint</MudText>
+        }
+        <MudButton OnClick="@(() => _revokeOpen = false)">Отмена</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Error" Disabled="@(_busy || RevokeHint is not null)" OnClick="RevokeAsync">Отозвать</MudButton>
+    </DialogActions>
+</MudDialog>
 
 @* --- Правка реквизитов (UpdatePersonCommand); номер неустановленного лица при установлении личности сохраняется --- *@
 <MudDialog @bind-Visible="_editOpen" Options="FormDialogOptions">
@@ -637,6 +700,66 @@ else
     private string? _appearancesError;
     private string? _photosError;
 
+    // --- Отзыв появления (ADR-0034) ---
+    private AppearanceRevokeRight? _revokeRight;
+    private bool _revokeOpen;
+    private AppearanceRow? _revokeTarget;
+    private string? _revokeReason;
+    private string? _revokeError;
+
+    private string? RevokeHint => (_revokeReason?.Trim().Length ?? 0) < 10 ? "Укажите причину — не короче 10 знаков" : null;
+
+    // Почему отозвать нельзя — подпись у неактивной кнопки; сервер проверяет то же самое.
+    private string? RevokeBlocked(AppearanceRow row) => _revokeRight switch
+    {
+        null => "Проверяю права…",
+        { CanRevoke: false } => "Отзыв закрыт для вашей роли (матрица доступа)",
+        { UserId: { } me } when me == row.ExpertUserId || me == row.VerifierUserId => "Вы подтверждали — отзывает другой сотрудник",
+        _ => null,
+    };
+
+    // Эталон с лица, появление на котором отозвано, и ни одного действующего появления на этом лице.
+    private bool FromRevokedAppearance(ReferencePhotoRow photo) =>
+        photo.MediaFaceId is { } face
+        && _appearances.Any(a => a.IsRevoked && a.MediaFaceId == face)
+        && !_appearances.Any(a => !a.IsRevoked && a.MediaFaceId == face);
+
+    private void OpenRevoke(AppearanceRow row)
+    {
+        _revokeTarget = row;
+        _revokeReason = null;
+        _revokeError = null;
+        _revokeOpen = true;
+    }
+
+    private async Task RevokeAsync()
+    {
+        if (_revokeTarget is not { } target) { return; }
+
+        _busy = true;
+        _revokeError = null;
+        try
+        {
+            var response = await Dispatcher.Send(new RevokeAppearanceCommand(target.Id, _revokeReason ?? string.Empty));
+            if (!response.Status)
+            {
+                _revokeError = response.StatusMessage;
+                return;
+            }
+
+            _revokeOpen = false;
+            Snackbar.Add("Появление отозвано. Пересечения пересчитаны.", Severity.Success);
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        // Отозванное появление уходит из пересечений — перечитываем и их (ADR-0029/0034).
+        await ReloadAsync();
+        await LoadIntersectionsAsync();
+    }
+
     // --- Правка ---
     private bool _editOpen;
     private string? _editError;
@@ -756,6 +879,7 @@ else
             _person = person;
 
             _appearancesError = null;
+            if (await Dispatcher.Send(new GetAppearanceRevokeRightQuery()) is { Status: true, Data: { } right }) { _revokeRight = right; }
             var appearances = await Dispatcher.Send(new ListAppearancesQuery(Id));
             _appearances.Clear();
             if (appearances is { Status: true, Data: { } a }) { _appearances.AddRange(a); }

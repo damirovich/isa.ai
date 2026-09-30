@@ -198,7 +198,7 @@ public sealed class IntersectionStore(
         var ownAppearances = await db.Appearances.AsNoTracking()
             .Where(BaselineAccess.Filter<Appearance>(access))
             .Where(policy.BuildFilter<Appearance>(access))
-            .Where(a => a.PersonId == own.Id)
+            .Where(a => a.PersonId == own.Id && a.Status != AppearanceStatus.Revoked) // отозванное — не факт (ADR-0034)
             .Select(a => new { a.MediaAssetId, a.MediaFaceId, a.ConfirmedAtUtc })
             .ToListAsync(cancellationToken);
         var ownAssetIds = ownAppearances.Select(a => a.MediaAssetId).Distinct().ToList();
@@ -242,7 +242,7 @@ public sealed class IntersectionStore(
         var sameFace = await db.Appearances.AsNoTracking()
             .Where(BaselineAccess.Filter<Appearance>(access))
             .Where(policy.BuildFilter<Appearance>(access))
-            .Where(a => ownFaceIds.Contains(a.MediaFaceId) && a.PersonId != own.Id)
+            .Where(a => ownFaceIds.Contains(a.MediaFaceId) && a.PersonId != own.Id && a.Status != AppearanceStatus.Revoked)
             .Join(otherPersons, a => a.PersonId, p => p.Id, (a, p) => new { a.MediaFaceId, p.CaseId })
             .ToListAsync(cancellationToken);
         foreach (var group in sameFace.GroupBy(f => f.CaseId))

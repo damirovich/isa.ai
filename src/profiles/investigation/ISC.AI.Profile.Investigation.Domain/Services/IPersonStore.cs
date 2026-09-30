@@ -81,7 +81,30 @@ public sealed record AppearanceRow(
     AppearanceStatus Status,
     DateTime ConfirmedAtUtc,
     int ExpertUserId,
-    int VerifierUserId);
+    int VerifierUserId,
+    DateTime? RevokedAtUtc = null,
+    int? RevokedByUserId = null,
+    string? RevokeReason = null)
+{
+    /// <summary>Появление отозвано как ошибочное.</summary>
+    public bool IsRevoked => Status == AppearanceStatus.Revoked;
+}
+
+/// <summary>Итог отзыва появления (ADR-0034).</summary>
+public enum AppearanceRevokeResult
+{
+    /// <summary>Отозвано.</summary>
+    Ok = 0,
+
+    /// <summary>Появление не найдено или недоступно (неотличимо, ТБ-021).</summary>
+    NotFound = 1,
+
+    /// <summary>Уже отозвано.</summary>
+    AlreadyRevoked = 2,
+
+    /// <summary>Отзывающий сам подтверждал это появление (эксперт или верификатор) — нужен другой сотрудник.</summary>
+    OwnDecision = 3,
+}
 
 /// <summary>Черновик появления — из подтверждённого кандидата модуля «Медиа».</summary>
 public sealed record AppearanceDraft(
@@ -144,7 +167,7 @@ public interface IPersonStore
     /// </summary>
     Task<PersonWriteResult> UpdateAsync(int personId, PersonDraft edit, AccessContext access, CancellationToken cancellationToken = default);
 
-    /// <summary>Появления фигуранта (только подтверждённые, ТБ-073), новые первыми.</summary>
+    /// <summary>Появления фигуранта (подтверждённые двумя лицами, ТБ-073, включая отозванные — с пометкой), новые первыми.</summary>
     Task<IReadOnlyList<AppearanceRow>> ListAppearancesAsync(int personId, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -153,6 +176,13 @@ public interface IPersonStore
     /// новая запись не создаётся — возвращается существующая.
     /// </summary>
     Task<int> AddAppearanceAsync(AppearanceDraft draft, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Отозвать ошибочное появление (ADR-0034): статус «отозвано», кто, когда и почему. Появление должно быть видно
+    /// субъекту так же, как в <see cref="ListAppearancesAsync"/>; отзывает не эксперт и не верификатор этого появления.
+    /// </summary>
+    Task<AppearanceRevokeResult> RevokeAppearanceAsync(
+        int appearanceId, string reason, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Фигуранты дела, у которых это лицо уже подтверждено появлением, — подсказка эксперту «уже подтверждено у …»
