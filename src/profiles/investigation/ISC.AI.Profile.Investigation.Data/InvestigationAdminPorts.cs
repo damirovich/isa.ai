@@ -44,6 +44,11 @@ public sealed class InvestigationPlatformAdministration(IUserRoleStore roles, IS
 
         return await CanManageAsync(cancellationToken);
     }
+
+    /// <inheritdoc />
+    /// <remarks>Тот же признак, что открывает <see cref="AdministrationRule"/> любому вошедшему: Администратора нет ни одного.</remarks>
+    public async Task<bool> IsInitialSetupAsync(CancellationToken cancellationToken = default) =>
+        !await roles.AnyAdministratorAsync(cancellationToken);
 }
 
 /// <summary>
@@ -85,13 +90,14 @@ public sealed class InvestigationDivisionCatalog(IDbContextFactory<Investigation
 }
 
 /// <summary>
-/// Реализация порта <see cref="IUserRoleCatalog"/> — роли профиля (ТП-004) и их назначения для
-/// колонки и фильтра на экране учётных записей. Пакет роли только ПОКАЗЫВАЕТ: назначает их страница
-/// профиля «Роли пользователей» (<c>/admin/roles</c>).
+/// Реализация порта <see cref="IUserRoleCatalog"/> — роли профиля (ТП-004) с описаниями, их назначения и само
+/// назначение для экрана «Пользователи» пакета администрирования.
 /// </summary>
 /// <remarks>
-/// Ключ роли — <c>InvestigationRole.ToString()</c>: пакету он непрозрачен, а профилю разбирать его
-/// обратно не нужно — назначение идёт своим сценарием со своим типом.
+/// Ключ роли — <c>InvestigationRole.ToString()</c>: пакету он непрозрачен, профиль разбирает его обратно при
+/// назначении. Инвариант «последнего Администратора снять нельзя» — общий со сценарием профиля
+/// (<see cref="RoleAssignmentRule"/>). Описания повторяют права, которые проверяет сервер (ТП-004, ADR-0022 п. 8),
+/// — Администратор выбирает роль по тому, что она даёт.
 /// </remarks>
 public sealed class InvestigationUserRoleCatalog(IUserRoleStore roles) : IUserRoleCatalog
 {
@@ -101,7 +107,7 @@ public sealed class InvestigationUserRoleCatalog(IUserRoleStore roles) : IUserRo
         IReadOnlyList<RoleOption> options =
         [
             .. Enum.GetValues<InvestigationRole>()
-                .Select(role => new RoleOption(role.ToString(), role.Label())),
+                .Select(role => new RoleOption(role.ToString(), role.Label(), Describe(role))),
         ];
 
         return Task.FromResult(options);
@@ -117,4 +123,53 @@ public sealed class InvestigationUserRoleCatalog(IUserRoleStore roles) : IUserRo
             .Where(row => row.Role is not null)
             .ToDictionary(row => row.UserId, row => row.Role!.Value.ToString());
     }
+
+    /// <inheritdoc />
+    public async Task<RoleAssignmentResult> AssignAsync(int userId, string? roleKey, CancellationToken cancellationToken = default)
+    {
+        InvestigationRole? role = null;
+        if (roleKey is not null)
+        {
+            if (!Enum.TryParse<InvestigationRole>(roleKey, ignoreCase: false, out var parsed)
+                || !Enum.IsDefined(parsed)
+                || !string.Equals(parsed.ToString(), roleKey, StringComparison.Ordinal))
+            {
+                return RoleAssignmentResult.Fail("Неизвестная роль.");
+            }
+
+            role = parsed;
+        }
+
+        // Роль назначается только действующему пользователю: реестр ролей строится по активным учётным записям.
+        if (!(await roles.ListAsync(cancellationToken)).Any(row => row.UserId == userId))
+        {
+            return RoleAssignmentResult.Fail("Пользователь не найден или его учётная запись отключена.");
+        }
+
+        if (await RoleAssignmentRule.CheckAsync(roles, userId, role, cancellationToken) is { } denied)
+        {
+            return RoleAssignmentResult.Fail(denied);
+        }
+
+        await roles.SetRoleAsync(userId, role, cancellationToken);
+        return RoleAssignmentResult.Ok;
+    }
+
+    /// <summary>Что даёт роль — по правам, которые проверяет сервер (ТП-004).</summary>
+    public static string Describe(InvestigationRole role) => role switch
+    {
+        InvestigationRole.Administrator =>
+            "Пользователи, роли, допуски, справочники и настройки. Открыт весь функционал профиля; дела — в пределах собственного допуска.",
+        InvestigationRole.Head =>
+            "Все дела своего подразделения, организационное утверждение результатов. Поиск по лицу не запускает.",
+        InvestigationRole.Investigator =>
+            "Ведёт свои дела: фигуранты, материалы, основания поиска, поиск по лицу, сводки и справки.",
+        InvestigationRole.FaceExpert =>
+            "Поиск по лицу и первая подпись при верификации: привязывает найденное лицо к фигуранту.",
+        InvestigationRole.Verifier =>
+            "Вторая, независимая подпись при верификации — вслепую, без решения эксперта.",
+        InvestigationRole.SecurityOfficer =>
+            "Читает журнал аудита. Пользователями, ролями и допусками не распоряжается.",
+        _ => role.Label(),
+    };
 }

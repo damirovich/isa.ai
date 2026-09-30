@@ -1,0 +1,611 @@
+@namespace ISC.AI.Modules.Admin.UI
+@* Карточка сотрудника (экран «Пользователи»): учётная запись, роль (ТП-004/007), допуск (ТБ-011/020/021) и история
+   изменений из журнала (ТБ-030) — всё о человеке в одном месте. Каждое действие — отдельная команда пакета со своей
+   записью в журнале и своей проверкой права (ТБ-012); опасные действия (роль, допуск, сброс пароля, отключение) —
+   только после подтверждения. Инварианты модели ролей (последний Администратор) проверяет профиль через порт. *@
+@page "/admin/users/{UserId:int}"
+@rendermode InteractiveServer
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@using System.Globalization
+@using System.Net
+@using ISC.AI.Abstractions.Security
+@using ISC.AI.Modules.Admin.Application.Features.Accounts
+@using ISC.AI.Modules.Admin.Application.Features.Clearances
+@using ISC.AI.Modules.Admin.Application.Features.Roles
+@using ISC.AI.Modules.Admin.Domain.Services
+
+<PageTitle>@(_card is null ? "Сотрудник" : AdminUi.NameOf(_card.Account.Account))</PageTitle>
+
+<MudBreadcrumbs Items="Breadcrumbs" Class="px-0 pt-0 pb-2" />
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@if (_card is null)
+{
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+}
+else
+{
+    var account = _card.Account.Account;
+    var (statusLabel, statusColor) = AdminUi.Status(account);
+
+    <div class="d-flex align-center gap-4 flex-wrap mb-4">
+        <MudAvatar Size="Size.Large" Color="Color.Primary" Variant="Variant.Outlined">@AdminUi.Initials(account)</MudAvatar>
+        <div style="min-width:0;">
+            <MudText Typo="Typo.h4">@AdminUi.NameOf(account)</MudText>
+            <div class="d-flex align-center gap-2 flex-wrap">
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    @account.UserName@(string.IsNullOrWhiteSpace(account.Position) ? string.Empty : $" · {account.Position}")
+                </MudText>
+                <MudChip T="string" Size="Size.Small" Color="@statusColor" Variant="Variant.Text" Class="ma-0">@statusLabel</MudChip>
+                @if (_card.IsSelf)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0">это вы</MudChip>
+                }
+            </div>
+        </div>
+        <MudSpacer />
+        <div class="d-flex gap-2 flex-wrap">
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" Disabled="_busy" OnClick="OpenEdit">Изменить данные</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Key" Disabled="_busy" OnClick="ResetPasswordAsync">Сбросить пароль…</MudButton>
+            @if (!account.IsActive)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Success" StartIcon="@Icons.Material.Filled.CheckCircle" Disabled="_busy"
+                           OnClick="EnableAsync">Включить</MudButton>
+            }
+            else if (!_card.IsSelf)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Block" Disabled="_busy"
+                           OnClick="OpenDisable">Отключить…</MudButton>
+            }
+        </div>
+    </div>
+    @if (_card.IsSelf && account.IsActive)
+    {
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-3 mt-n2">
+            Свою учётную запись отключить нельзя — вы потеряли бы доступ немедленно.
+        </MudText>
+    }
+    @if (!account.IsActive)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+            Учётная запись отключена@(string.IsNullOrWhiteSpace(account.DeactivationReason) ? "" : $": {account.DeactivationReason}").
+            Войти по ней нельзя; роль и допуск не меняются, пока её не включат.
+        </MudAlert>
+    }
+
+    <MudGrid Spacing="3">
+        <MudItem xs="12" md="7">
+            @* --- Роль --- *@
+            <MudPaper Outlined="true" Class="mb-3">
+                <div class="d-flex align-center px-4 py-3 gap-2 flex-wrap" style="border-bottom:1px solid var(--mud-palette-lines-default);">
+                    <MudText Typo="Typo.subtitle1" Style="font-weight:600;">Роль</MudText>
+                    <MudSpacer />
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">у сотрудника одна роль</MudText>
+                </div>
+                <div class="pa-4">
+                    <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:10px;">
+                        @foreach (var role in _card.Roles)
+                        {
+                            var option = role;
+                            var selected = _card.Account.RoleKey == option.Key;
+                            <MudPaper Outlined="true" Class="pa-3 d-flex flex-column gap-1"
+                                      Style="@RoleCardStyle(selected, account.IsActive)"
+                                      @onclick="@(() => ChangeRoleAsync(option))">
+                                <div class="d-flex align-center gap-2">
+                                    <MudIcon Size="Size.Small" Color="@(selected ? Color.Primary : Color.Default)"
+                                             Icon="@(selected ? Icons.Material.Filled.RadioButtonChecked : Icons.Material.Filled.RadioButtonUnchecked)" />
+                                    <MudText Typo="Typo.body2" Style="font-weight:600;">@option.Label</MudText>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(option.Description))
+                                {
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@option.Description</MudText>
+                                }
+                            </MudPaper>
+                        }
+                    </div>
+                    <div class="d-flex align-center gap-2 flex-wrap mt-3">
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            @(_card.Account.RoleKey is null
+                                ? "Роль не назначена: сотрудник видит только «Главную»."
+                                : "Смена роли применяется после подтверждения; новое меню сотрудник увидит после перезагрузки страницы.")
+                        </MudText>
+                        <MudSpacer />
+                        @if (_card.Account.RoleKey is not null && account.IsActive)
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" Disabled="_busy"
+                                       OnClick="@(() => ChangeRoleAsync(null))">Снять роль</MudButton>
+                        }
+                    </div>
+                </div>
+            </MudPaper>
+
+            @* --- Допуск --- *@
+            <MudPaper Outlined="true">
+                <div class="d-flex align-center px-4 py-3 gap-2 flex-wrap" style="border-bottom:1px solid var(--mud-palette-lines-default);">
+                    <MudText Typo="Typo.subtitle1" Style="font-weight:600;">Допуск</MudText>
+                    <MudSpacer />
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">дело видно, если гриф не выше допуска и подразделение из списка</MudText>
+                </div>
+                <div class="pa-4">
+                    <MudGrid Spacing="2">
+                        <MudItem xs="12" sm="5">
+                            <MudSelect T="short?" Value="_draftGrif" ValueChanged="@(v => _draftGrif = v)" Label="Максимальный гриф"
+                                       Variant="Variant.Outlined" Clearable="true" Placeholder="Не выдан" Disabled="@(_busy || !account.IsActive)">
+                                @for (short level = 0; level <= SetUserClearanceValidator.MaxClassification; level++)
+                                {
+                                    var value = level;
+                                    <MudSelectItem T="short?" Value="@value">@ClassificationLevels.Label(value)</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" sm="7">
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-1">Разрешённые подразделения</MudText>
+                            <div class="d-flex flex-wrap gap-1">
+                                @foreach (var division in _card.DivisionCatalog)
+                                {
+                                    var id = division.Id;
+                                    <MudCheckBox T="bool" Dense="true" Size="Size.Small" Label="@division.Name" Disabled="@(_busy || !account.IsActive)"
+                                                 Value="@_draftDivisions.Contains(id)" ValueChanged="@(on => ToggleDivision(id, on))" />
+                                }
+                            </div>
+                        </MudItem>
+                    </MudGrid>
+                    @if (_draftGrif is not null && _draftDivisions.Count == 0)
+                    {
+                        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-3">
+                            Пустой список подразделений — это «ни одного», а не «все»: сотрудник не увидит ни одного дела и документа.
+                        </MudAlert>
+                    }
+                    @if (_card.ClearanceDivisions.Where(d => !d.IsKnown).Select(d => d.Id).ToList() is { Count: > 0 } unknown)
+                    {
+                        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-3">
+                            В допуске есть номера подразделений, которых нет в справочнике: @string.Join(", ", unknown).
+                            Такой номер не даёт доступа ни к чему; сохранение допуска уберёт его.
+                        </MudAlert>
+                    }
+                </div>
+                @if (ClearanceDirty)
+                {
+                    <div class="d-flex align-center gap-2 flex-wrap px-4 py-2"
+                         style="border-top:1px solid var(--mud-palette-warning); background:rgba(234,179,8,.10);">
+                        <MudIcon Icon="@Icons.Material.Filled.EditNote" Color="Color.Warning" Size="Size.Small" />
+                        <MudText Typo="Typo.body2">Есть несохранённые изменения допуска</MudText>
+                        <MudSpacer />
+                        @if (ClearanceHint is { } hint)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Warning">@hint</MudText>
+                        }
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="_busy" OnClick="ResetClearanceDraft">Отменить</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="@(_draftGrif is null ? Color.Error : Color.Primary)"
+                                   Disabled="@(_busy || ClearanceHint is not null)" OnClick="SaveClearanceAsync">
+                            @(_draftGrif is null ? "Отозвать допуск" : "Сохранить допуск")
+                        </MudButton>
+                    </div>
+                }
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="5">
+            @* --- Учётная запись --- *@
+            <MudPaper Outlined="true" Class="mb-3">
+                <div class="px-4 py-3" style="border-bottom:1px solid var(--mud-palette-lines-default);">
+                    <MudText Typo="Typo.subtitle1" Style="font-weight:600;">Учётная запись</MudText>
+                </div>
+                <div class="pa-4" style="display:grid; grid-template-columns:auto 1fr; gap:8px 16px;">
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">Имя входа</MudText>
+                    <MudText Typo="Typo.body2" Style="font-family:'Roboto Mono',ui-monospace,monospace;">@account.UserName</MudText>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">ФИО</MudText>
+                    <MudText Typo="Typo.body2">@(account.DisplayName ?? "—")</MudText>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">Должность</MudText>
+                    <MudText Typo="Typo.body2">@(account.Position ?? "—")</MudText>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">Пароль</MudText>
+                    <MudText Typo="Typo.body2">
+                        @(!account.HasLocalPassword ? "не задан — войти нельзя, пока не сброшен"
+                            : account.MustChangePassword ? "временный, сменит при первом входе" : "задан сотрудником")
+                    </MudText>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">Допуск</MudText>
+                    <MudText Typo="Typo.body2">@(AdminUi.Clearance(account) ?? "не выдан")</MudText>
+                </div>
+            </MudPaper>
+
+            @* --- История --- *@
+            <MudPaper Outlined="true">
+                <div class="d-flex align-center px-4 py-3 gap-2" style="border-bottom:1px solid var(--mud-palette-lines-default);">
+                    <MudText Typo="Typo.subtitle1" Style="font-weight:600;">История изменений</MudText>
+                    <MudSpacer />
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Href="/admin/audit">Весь журнал</MudButton>
+                </div>
+                <div class="px-4 py-2">
+                    @if (_historyError is not null)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block py-2">@_historyError</MudText>
+                    }
+                    else if (_history.Count == 0)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block py-2">
+                            Изменений в журнале нет либо они выше вашего допуска.
+                        </MudText>
+                    }
+                    else
+                    {
+                        @foreach (var entry in _history)
+                        {
+                            <div class="d-flex gap-3 py-2" style="border-bottom:1px solid var(--mud-palette-lines-default);">
+                                <MudIcon Icon="@Icons.Material.Filled.Circle" Color="@AdminUi.HistoryColor(entry.Kind)"
+                                         Style="font-size:10px; margin-top:6px;" />
+                                <div style="min-width:0;">
+                                    <MudText Typo="Typo.body2">@entry.What</MudText>
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                        @entry.OccurredAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture) · @(entry.Who ?? "—")
+                                    </MudText>
+                                </div>
+                            </div>
+                        }
+                    }
+                </div>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@* --- Правка ФИО и должности --- *@
+<MudDialog @bind-Visible="_editOpen" Options="FormOptions">
+    <TitleContent><MudText Typo="Typo.h6">Изменить данные</MudText></TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_editName" Label="ФИО" Variant="Variant.Outlined" MaxLength="200" Class="mb-3" />
+        <MudTextField @bind-Value="_editPosition" Label="Должность" Variant="Variant.Outlined" MaxLength="200" />
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+            Имя входа не меняется. Роль и допуск правятся в карточке — это другие полномочия со своей записью в журнале.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _editOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="_busy" OnClick="SaveEditAsync">Сохранить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* --- Отключение с причиной --- *@
+<MudDialog @bind-Visible="_disableOpen" Options="FormOptions">
+    <TitleContent><MudText Typo="Typo.h6">Отключить учётную запись?</MudText></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            <b>@(_card is null ? "" : AdminUi.NameOf(_card.Account.Account))</b> не сможет войти, текущие сессии завершатся немедленно.
+            Дела, документы и история сохраняются.
+        </MudText>
+        <MudTextField @bind-Value="_disableReason" Label="Причина" Variant="Variant.Outlined" MaxLength="200" Immediate="true"
+                      HelperText="Например: уволен, переведён, длительный отпуск. Видна в списке сотрудников." />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _disableOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Filled" Disabled="_busy" OnClick="DisableAsync">Отключить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* --- Новый временный пароль --- *@
+<MudDialog @bind-Visible="_passwordOpen" Options="PasswordOptions">
+    <TitleContent><MudText Typo="Typo.h6">Новый временный пароль</MudText></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">Все сессии сотрудника завершены.</MudText>
+        @if (_issuedPassword is { } password)
+        {
+            <TemporaryPasswordBox Password="@password" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="@(() => { _passwordOpen = false; _issuedPassword = null; })">Я записал, закрыть</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly DialogOptions FormOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true };
+    private static readonly DialogOptions PasswordOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false };
+
+    /// <summary>Сотрудник из адреса.</summary>
+    [Parameter] public int UserId { get; set; }
+
+    private UserAccountCard? _card;
+    private readonly List<UserHistoryEntry> _history = [];
+    private string? _historyError;
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+
+    // Черновик допуска: правки видны сразу, применяются только «Сохранить допуск» после подтверждения.
+    private short? _draftGrif;
+    private readonly HashSet<int> _draftDivisions = [];
+
+    private bool _editOpen;
+    private string? _editName;
+    private string? _editPosition;
+    private bool _disableOpen;
+    private string? _disableReason;
+    private bool _passwordOpen;
+    private string? _issuedPassword;
+
+    private List<BreadcrumbItem> Breadcrumbs =>
+    [
+        new("Пользователи", "/admin/users"),
+        new(_card is null ? "Сотрудник" : AdminUi.NameOf(_card.Account.Account), null, disabled: true),
+    ];
+
+    private short? SavedGrif => _card?.Account.Account.MaxClassification is { } g ? ClassificationLevels.Normalize(g) : null;
+
+    private IEnumerable<int> SavedKnownDivisions => _card?.ClearanceDivisions.Where(d => d.IsKnown).Select(d => d.Id) ?? [];
+
+    // Номера вне справочника тоже повод сохранить: сохранение их уберёт (они не дают доступа ни к чему).
+    private bool ClearanceDirty =>
+        _card is not null
+        && (_draftGrif != SavedGrif
+            || !_draftDivisions.SetEquals(SavedKnownDivisions)
+            || (SavedGrif is not null && _card.ClearanceDivisions.Any(d => !d.IsKnown)));
+
+    // Что мешает сохранить допуск; кнопка неактивна ровно тогда же.
+    private string? ClearanceHint =>
+        _draftGrif is null && _draftDivisions.Count > 0 ? "Выберите гриф или снимите подразделения"
+        : _draftGrif is null && SavedGrif is null ? "Выберите гриф"
+        : null;
+
+    /// <inheritdoc />
+    protected override async Task OnParametersSetAsync()
+    {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере не грузим (история — аудируемое обращение к журналу).
+        if (!RendererInfo.IsInteractive) { return; }
+
+        if (_card is null || _card.Account.Account.UserId != UserId)
+        {
+            await LoadAsync(withHistory: true);
+        }
+    }
+
+    private async Task LoadAsync(bool withHistory)
+    {
+        _loading = true;
+        try
+        {
+            var response = await Dispatcher.Send(new GetUserAccountQuery(UserId));
+            if (response is not { Status: true, Data: { } card })
+            {
+                _card = null;
+                _error = response.StatusMessage;
+                return;
+            }
+
+            _card = card;
+            ResetClearanceDraft();
+
+            if (withHistory)
+            {
+                var history = await Dispatcher.Send(new GetUserHistoryQuery(UserId));
+                _history.Clear();
+                if (history is { Status: true, Data: { } entries })
+                {
+                    _history.AddRange(entries);
+                    _historyError = null;
+                }
+                else
+                {
+                    _historyError = history.StatusMessage;
+                }
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void ResetClearanceDraft()
+    {
+        _draftGrif = SavedGrif;
+        _draftDivisions.Clear();
+        _draftDivisions.UnionWith(SavedKnownDivisions);
+    }
+
+    private void ToggleDivision(int id, bool on)
+    {
+        if (on) { _draftDivisions.Add(id); } else { _draftDivisions.Remove(id); }
+    }
+
+    private static string RoleCardStyle(bool selected, bool enabled) =>
+        (enabled ? "cursor:pointer;" : "cursor:not-allowed; opacity:.6;")
+        + (selected ? "border-color:var(--mud-palette-primary); background:var(--mud-palette-primary-hover);" : string.Empty);
+
+    private async Task<bool> ConfirmAsync(string title, string html, string yes)
+    {
+        var answer = await DialogService.ShowMessageBoxAsync(title, (MarkupString)html, yesText: yes, cancelText: "Отмена",
+            options: new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        return answer == true;
+    }
+
+    private static string Html(string? text) => WebUtility.HtmlEncode(text ?? string.Empty);
+
+    // Команда с общим поведением: «занято», текст отказа на экране, уведомление об успехе, перечитать карточку и историю.
+    private async Task RunAsync(Func<Task<(bool Ok, string? Message)>> action, string success)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var (ok, message) = await action();
+            if (!ok)
+            {
+                _error = message;
+                return;
+            }
+
+            Snackbar.Add(success, Severity.Success);
+            await LoadAsync(withHistory: true);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ChangeRoleAsync(RoleOption? role)
+    {
+        if (_card is null || _busy || !_card.Account.Account.IsActive || _card.Account.RoleKey == role?.Key)
+        {
+            return;
+        }
+
+        var name = AdminUi.NameOf(_card.Account.Account);
+        var from = _card.Account.RoleLabel ?? _card.Account.RoleKey ?? "без роли";
+        var body = role is null
+            ? $"<b>{Html(name)}</b>: {Html(from)} → <b>без роли</b>.<br/>Сотрудник увидит только «Главную»."
+            : $"<b>{Html(name)}</b>: {Html(from)} → <b>{Html(role.Label)}</b>.<br/><span style=\"opacity:.75\">{Html(role.Description)}</span>";
+        if (!await ConfirmAsync(role is null ? "Снять роль?" : "Сменить роль?",
+                body + "<br/><br/>Изменение запишется в журнал аудита.", role is null ? "Снять роль" : "Сменить роль"))
+        {
+            return;
+        }
+
+        await RunAsync(async () =>
+        {
+            var response = await Dispatcher.Send(new AssignUserRoleCommand(UserId, role?.Key));
+            return (response.Status, response.StatusMessage);
+        }, role is null ? "Роль снята" : $"Роль изменена: {role.Label}");
+    }
+
+    private async Task SaveClearanceAsync()
+    {
+        if (_card is null || ClearanceHint is not null)
+        {
+            return;
+        }
+
+        var name = AdminUi.NameOf(_card.Account.Account);
+        if (_draftGrif is not { } grif)
+        {
+            if (!await ConfirmAsync("Отозвать допуск?",
+                    $"<b>{Html(name)}</b> перестанет видеть все дела и документы — немедленно, в том числе в открытых сессиях.", "Отозвать"))
+            {
+                return;
+            }
+
+            await RunAsync(async () =>
+            {
+                var response = await Dispatcher.Send(new RevokeUserClearanceCommand(UserId));
+                return (response.Status, response.StatusMessage);
+            }, "Допуск отозван");
+            return;
+        }
+
+        var scope = _card.DivisionCatalog.Where(d => _draftDivisions.Contains(d.Id)).Select(d => d.Name ?? $"№ {d.Id}").ToList();
+        if (!await ConfirmAsync("Сохранить допуск?",
+                $"<b>{Html(name)}</b>: гриф <b>{Html(ClassificationLevels.Label(grif))}</b>, подразделения: "
+                + $"<b>{Html(scope.Count == 0 ? "ни одного" : string.Join(", ", scope))}</b>.<br/><br/>"
+                + "Действует немедленно, в том числе в открытых сессиях.", "Сохранить"))
+        {
+            return;
+        }
+
+        await RunAsync(async () =>
+        {
+            var response = await Dispatcher.Send(new SetUserClearanceCommand(UserId, grif, [.. _draftDivisions.Order()]));
+            return (response.Status, response.StatusMessage);
+        }, "Допуск сохранён");
+    }
+
+    private async Task ResetPasswordAsync()
+    {
+        if (_card is null)
+        {
+            return;
+        }
+
+        if (!await ConfirmAsync("Сбросить пароль?",
+                $"Все сессии <b>{Html(AdminUi.NameOf(_card.Account.Account))}</b> завершатся немедленно. "
+                + "Вы получите новый временный пароль — его нужно передать лично.", "Сбросить пароль"))
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new ResetUserPasswordCommand(UserId));
+            if (response is not { Status: true, Data: { } password })
+            {
+                _error = response.StatusMessage;
+                return;
+            }
+
+            _issuedPassword = password;
+            _passwordOpen = true;
+            await LoadAsync(withHistory: true);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void OpenDisable()
+    {
+        _disableReason = null;
+        _disableOpen = true;
+    }
+
+    private async Task DisableAsync()
+    {
+        _disableOpen = false;
+        await RunAsync(async () =>
+        {
+            var reason = string.IsNullOrWhiteSpace(_disableReason) ? null : _disableReason.Trim();
+            var response = await Dispatcher.Send(new SetUserAccountActiveCommand(UserId, false, reason));
+            return (response.Status, response.StatusMessage);
+        }, "Учётная запись отключена");
+    }
+
+    private async Task EnableAsync()
+    {
+        if (_card is null
+            || !await ConfirmAsync("Включить учётную запись?",
+                $"<b>{Html(AdminUi.NameOf(_card.Account.Account))}</b> снова сможет войти с прежним паролем, ролью и допуском.", "Включить"))
+        {
+            return;
+        }
+
+        await RunAsync(async () =>
+        {
+            var response = await Dispatcher.Send(new SetUserAccountActiveCommand(UserId, true));
+            return (response.Status, response.StatusMessage);
+        }, "Учётная запись включена");
+    }
+
+    private void OpenEdit()
+    {
+        if (_card is null)
+        {
+            return;
+        }
+
+        _editName = _card.Account.Account.DisplayName;
+        _editPosition = _card.Account.Account.Position;
+        _editOpen = true;
+    }
+
+    private async Task SaveEditAsync()
+    {
+        _editOpen = false;
+        await RunAsync(async () =>
+        {
+            var response = await Dispatcher.Send(new UpdateUserAccountCommand(
+                UserId,
+                string.IsNullOrWhiteSpace(_editName) ? null : _editName.Trim(),
+                string.IsNullOrWhiteSpace(_editPosition) ? null : _editPosition.Trim()));
+            return (response.Status, response.StatusMessage);
+        }, "Данные сохранены");
+    }
+}

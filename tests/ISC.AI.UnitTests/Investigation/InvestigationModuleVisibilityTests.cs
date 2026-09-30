@@ -43,13 +43,13 @@ public sealed class InvestigationModuleVisibilityTests
         visible.ShouldNotContain("admin-audit");
     }
 
-    [Fact(DisplayName = "Офицер ИБ видит журнал аудита, но не учётные записи и допуски")]
+    [Fact(DisplayName = "Офицер ИБ видит журнал аудита, но не «Пользователей» и справочники")]
     public void Security_officer_sees_audit_only_in_admin()
     {
         var visible = InvestigationModuleVisibility.Visible(AllIds, InvestigationRole.SecurityOfficer, canManage: false);
         visible.ShouldContain("admin-audit");
         visible.ShouldNotContain("admin-users");
-        visible.ShouldNotContain("admin-clearances");
+        visible.ShouldNotContain("admin-divisions");
     }
 
     [Fact(DisplayName = "Без роли — ничего; пока Администратора нет (первичная настройка) — разделы администрирования видны")]
@@ -58,7 +58,7 @@ public sealed class InvestigationModuleVisibilityTests
         InvestigationModuleVisibility.Visible(AllIds, role: null, canManage: false).ShouldBeEmpty();
 
         var bootstrap = InvestigationModuleVisibility.Visible(AllIds, role: null, canManage: true);
-        bootstrap.ShouldContain("admin-roles");
+        bootstrap.ShouldContain("admin-divisions");
         bootstrap.ShouldContain("admin-users");
         bootstrap.ShouldNotContain("admin-report-permits"); // только настоящему Администратору
     }

@@ -14,8 +14,9 @@ namespace ISC.AI.Profile.Inspector.Data;
 /// берётся из единственного места, где она записана (<see cref="UserRoleLabels"/>), — копия подписи
 /// на стороне пакета разъехалась бы с профилем незаметно.
 ///
-/// Назначение ролей здесь НЕ реализуется намеренно: это страница профиля «Роли пользователей»
-/// (состав ролей у каждого эксплуатанта свой), пакет роли только показывает.
+/// Назначение роли идёт с карточки сотрудника пакета (экран «Пользователи»): пакет проверяет право вызывающего,
+/// профиль — сам ключ и то, что учётная запись действующая. Правило снятия последнего Администратора у профиля
+/// «ИнспекторAI» прежнее: окно первичной настройки самовосстанавливается (<see cref="AdministrationRule"/>).
 /// </remarks>
 public sealed class InspectorUserRoleCatalog(IUserRoleStore roles) : IUserRoleCatalog
 {
@@ -23,7 +24,7 @@ public sealed class InspectorUserRoleCatalog(IUserRoleStore roles) : IUserRoleCa
     public Task<IReadOnlyList<RoleOption>> ListRolesAsync(CancellationToken cancellationToken = default)
     {
         IReadOnlyList<RoleOption> options = Enum.GetValues<UserRole>()
-            .Select(role => new RoleOption(role.ToString(), role.Label()))
+            .Select(role => new RoleOption(role.ToString(), role.Label(), Describe(role)))
             .ToList();
 
         return Task.FromResult(options);
@@ -40,4 +41,40 @@ public sealed class InspectorUserRoleCatalog(IUserRoleStore roles) : IUserRoleCa
             .Where(row => row.Role is not null)
             .ToDictionary(row => row.UserId, row => row.Role!.Value.ToString());
     }
+
+    /// <inheritdoc />
+    public async Task<RoleAssignmentResult> AssignAsync(int userId, string? roleKey, CancellationToken cancellationToken = default)
+    {
+        UserRole? role = null;
+        if (roleKey is not null)
+        {
+            if (!Enum.TryParse<UserRole>(roleKey, ignoreCase: false, out var parsed)
+                || !Enum.IsDefined(parsed)
+                || !string.Equals(parsed.ToString(), roleKey, StringComparison.Ordinal))
+            {
+                return RoleAssignmentResult.Fail("Неизвестная роль.");
+            }
+
+            role = parsed;
+        }
+
+        // Роль назначается только действующему пользователю: реестр ролей строится по активным учётным записям.
+        if (!(await roles.ListAsync(cancellationToken)).Any(row => row.UserId == userId))
+        {
+            return RoleAssignmentResult.Fail("Пользователь не найден или его учётная запись отключена.");
+        }
+
+        await roles.SetRoleAsync(userId, role, cancellationToken);
+        return RoleAssignmentResult.Ok;
+    }
+
+    /// <summary>Что даёт роль — по построчному доступу к документам (§2.1 ТЗ СКИД).</summary>
+    public static string Describe(UserRole role) => role switch
+    {
+        UserRole.Administrator => "Пользователи, справочники и журнал действий; видит все документы.",
+        UserRole.Manager => "Видит все документы системы; единственный, кто снимает документ с контроля.",
+        UserRole.Inspector => "Только документы, где сам назначен инспектором, включая отчёты и дашборд.",
+        UserRole.Performer => "Только документы, где у него есть хотя бы одно поручение.",
+        _ => role.Label(),
+    };
 }

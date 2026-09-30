@@ -22,4 +22,11 @@ public interface IPlatformAdministration
 
     /// <summary>Текущий субъект вправе читать неизменяемый журнал аудита (ТБ-030/032).</summary>
     Task<bool> CanViewAuditAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Идёт ли режим первичной настройки: в контуре нет ни одного Администратора, и настройки открыты любому
+    /// вошедшему. Экран «Пользователи» показывает это баннером, чтобы первый вошедший назначил себе
+    /// Администратора и закрыл окно.
+    /// </summary>
+    Task<bool> IsInitialSetupAsync(CancellationToken cancellationToken = default);
 }

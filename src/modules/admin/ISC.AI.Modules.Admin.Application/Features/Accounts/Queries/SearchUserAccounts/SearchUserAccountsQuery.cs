@@ -84,7 +84,8 @@ public sealed record SearchUserAccountsQuery(
                 .ToList();
 
             return ResponseDto<UserAccountViewPage>.Ok(
-                new UserAccountViewPage(rows, page.TotalCount), page.TotalCount);
+                new UserAccountViewPage(rows, page.TotalCount, await administration.IsInitialSetupAsync(cancellationToken)),
+                page.TotalCount);
         }
     }
 }

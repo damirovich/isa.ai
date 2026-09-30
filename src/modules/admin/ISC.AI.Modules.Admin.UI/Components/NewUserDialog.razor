@@ -1,0 +1,246 @@
+@namespace ISC.AI.Modules.Admin.UI
+@inject ISnackbar Snackbar
+@using ISC.AI.Abstractions.Security
+@using ISC.AI.Modules.Admin.Application.Features.Accounts
+@using ISC.AI.Modules.Admin.Application.Features.Clearances
+@using ISC.AI.Modules.Admin.Application.Features.Roles
+@using ISC.AI.Modules.Admin.Domain.Services
+@* Мастер «Новый сотрудник» (экран «Пользователи»): учётная запись → роль и допуск → временный пароль. Каждый шаг —
+   отдельная команда с собственной записью в журнале (ТБ-030) и собственной проверкой права (ТБ-012): учётная
+   запись создаётся первой, роль и допуск назначаются следом. Если роль или допуск не назначились, учётная запись
+   уже есть — пароль всё равно показывается, а причина видна на третьем шаге (дозадать можно в карточке). *@
+
+<MudDialog Visible="Visible" VisibleChanged="VisibleChanged" Options="Options">
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(_step == 3 ? "Учётная запись создана" : "Новый сотрудник")</MudText>
+        <div class="d-flex gap-2 align-center flex-wrap mt-1">
+            @foreach (var (number, title) in Steps)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="@(number == _step ? Variant.Filled : Variant.Text)"
+                         Color="@(number == _step ? Color.Primary : Color.Default)" Class="ma-0">@number. @title</MudChip>
+            }
+        </div>
+    </TitleContent>
+    <DialogContent>
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_error</MudAlert>
+        }
+
+        @if (_step == 1)
+        {
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="6">
+                    <MudTextField @bind-Value="_login" Label="Имя входа *" Variant="Variant.Outlined" Immediate="true" MaxLength="100"
+                                  HelperText="Латиница, цифры, точка, дефис, подчёркивание" AutoFocus="true"
+                                  Error="@(!string.IsNullOrEmpty(_login) && !AdminUi.IsValidLogin(_login))" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudTextField @bind-Value="_position" Label="Должность" Variant="Variant.Outlined" MaxLength="200" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="_name" Label="ФИО *" Variant="Variant.Outlined" Immediate="true" MaxLength="200" />
+                </MudItem>
+            </MudGrid>
+        }
+        else if (_step == 2)
+        {
+            <MudSelect T="string" @bind-Value="_roleKey" Label="Роль" Variant="Variant.Outlined" Clearable="true"
+                       Placeholder="Пока без роли" Class="mb-1">
+                @foreach (var role in Roles)
+                {
+                    <MudSelectItem T="string" Value="@role.Key">@role.Label</MudSelectItem>
+                }
+            </MudSelect>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-3">
+                @(Roles.FirstOrDefault(r => r.Key == _roleKey)?.Description ?? "Без роли сотрудник войдёт, но увидит только «Главную».")
+            </MudText>
+
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="5">
+                    <MudSelect T="short?" @bind-Value="_grif" Label="Максимальный гриф" Variant="Variant.Outlined" Clearable="true"
+                               Placeholder="Не выдавать">
+                        @for (short level = 0; level <= SetUserClearanceValidator.MaxClassification; level++)
+                        {
+                            var value = level;
+                            <MudSelectItem T="short?" Value="@value">@ClassificationLevels.Label(value)</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="7">
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-1">Разрешённые подразделения</MudText>
+                    <div class="d-flex flex-wrap gap-1">
+                        @foreach (var division in Divisions)
+                        {
+                            var id = division.Id;
+                            <MudCheckBox T="bool" Dense="true" Size="Size.Small" Label="@division.Name"
+                                         Value="@_divisions.Contains(id)" ValueChanged="@(on => Toggle(id, on))" />
+                        }
+                    </div>
+                </MudItem>
+            </MudGrid>
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-3">
+                Роль и допуск можно задать и позже, в карточке сотрудника. Без допуска сотрудник войдёт, но не увидит ни одного дела.
+            </MudAlert>
+        }
+        else if (_created is { } created)
+        {
+            <MudText Typo="Typo.body2" Class="mb-3">Временный пароль для <b>@_login.Trim()</b>:</MudText>
+            <TemporaryPasswordBox Password="@created.TemporaryPassword" />
+            @foreach (var warning in _warnings)
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-2">@warning</MudAlert>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (!_busy && Hint is { } hint)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-auto ml-2">@hint</MudText>
+        }
+        @if (_step == 1)
+        {
+            <MudButton OnClick="CloseAsync">Отмена</MudButton>
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(Hint is not null)" OnClick="@(() => { _error = null; _step = 2; })">Далее</MudButton>
+        }
+        else if (_step == 2)
+        {
+            <MudButton Disabled="_busy" OnClick="@(() => _step = 1)">Назад</MudButton>
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_busy || Hint is not null)" OnClick="CreateAsync">
+                @(_busy ? "Создаю…" : "Создать и выдать пароль")
+            </MudButton>
+        }
+        else
+        {
+            <MudButton Variant="Variant.Text" OnClick="OpenCardAsync">Открыть карточку</MudButton>
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="CloseAsync">Я записал, закрыть</MudButton>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly (int Number, string Title)[] Steps = [(1, "Учётная запись"), (2, "Роль и допуск"), (3, "Временный пароль")];
+
+    private static readonly DialogOptions Options = new()
+    {
+        MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = false, BackdropClick = false,
+    };
+
+    /// <summary>Окно открыто.</summary>
+    [Parameter] public bool Visible { get; set; }
+
+    /// <summary>Открытие/закрытие окна.</summary>
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+
+    /// <summary>Роли профиля с описаниями.</summary>
+    [Parameter] public IReadOnlyList<RoleOption> Roles { get; set; } = [];
+
+    /// <summary>Подразделения для допуска.</summary>
+    [Parameter] public IReadOnlyList<ClearanceDivision> Divisions { get; set; } = [];
+
+    /// <summary>Мастер завершён: учётная запись создана (номер), <c>open</c> — открыть её карточку.</summary>
+    [Parameter] public EventCallback<(int UserId, bool Open)> Completed { get; set; }
+
+    private int _step = 1;
+    private string _login = string.Empty;
+    private string? _name;
+    private string? _position;
+    private string? _roleKey;
+    private short? _grif;
+    private readonly HashSet<int> _divisions = [];
+    private bool _busy;
+    private string? _error;
+    private CreatedUserAccount? _created;
+    private readonly List<string> _warnings = [];
+
+    // Что мешает перейти дальше — подпись у кнопки, кнопка неактивна ровно тогда же.
+    private string? Hint => _step switch
+    {
+        1 when string.IsNullOrWhiteSpace(_login) && string.IsNullOrWhiteSpace(_name) => "Заполните: имя входа, ФИО",
+        1 when string.IsNullOrWhiteSpace(_login) => "Заполните: имя входа",
+        1 when !AdminUi.IsValidLogin(_login) => "Имя входа: латиница, цифры, точка, дефис, подчёркивание",
+        1 when string.IsNullOrWhiteSpace(_name) => "Заполните: ФИО",
+        2 when _grif is null && _divisions.Count > 0 => "Выберите гриф — без него подразделения не выдаются",
+        _ => null,
+    };
+
+    private void Toggle(int id, bool on)
+    {
+        if (on) { _divisions.Add(id); } else { _divisions.Remove(id); }
+    }
+
+    private async Task CreateAsync()
+    {
+        _busy = true;
+        _error = null;
+        _warnings.Clear();
+        try
+        {
+            var response = await Dispatcher.Send(new CreateUserAccountCommand(
+                _login.Trim(), _name?.Trim(), string.IsNullOrWhiteSpace(_position) ? null : _position.Trim()));
+            if (response is not { Status: true, Data: { } created })
+            {
+                _error = response.StatusMessage;
+                return;
+            }
+
+            _created = created;
+
+            if (_roleKey is not null)
+            {
+                var role = await Dispatcher.Send(new AssignUserRoleCommand(created.UserId, _roleKey));
+                if (!role.Status)
+                {
+                    _warnings.Add($"Роль не назначена: {role.StatusMessage} Назначьте её в карточке сотрудника.");
+                }
+            }
+
+            if (_grif is { } grif)
+            {
+                var clearance = await Dispatcher.Send(new SetUserClearanceCommand(created.UserId, grif, [.. _divisions.Order()]));
+                if (!clearance.Status)
+                {
+                    _warnings.Add($"Допуск не выдан: {clearance.StatusMessage} Выдайте его в карточке сотрудника.");
+                }
+            }
+
+            _step = 3;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private Task CloseAsync() => FinishAsync(open: false);
+
+    private Task OpenCardAsync() => FinishAsync(open: true);
+
+    private async Task FinishAsync(bool open)
+    {
+        var created = _created;
+        await VisibleChanged.InvokeAsync(false);
+        if (created is not null)
+        {
+            Snackbar.Add($"Сотрудник заведён: {_login.Trim()}", Severity.Success);
+            await Completed.InvokeAsync((created.UserId, open));
+        }
+
+        Reset();
+    }
+
+    // Каждое закрытие очищает мастер: прошлые поля и выданный пароль при следующем открытии не всплывают.
+    private void Reset()
+    {
+        _step = 1;
+        _login = string.Empty;
+        _name = null;
+        _position = null;
+        _roleKey = null;
+        _grif = null;
+        _divisions.Clear();
+        _error = null;
+        _created = null;
+        _warnings.Clear();
+    }
+}

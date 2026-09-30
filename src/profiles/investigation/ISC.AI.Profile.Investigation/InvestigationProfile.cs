@@ -84,13 +84,11 @@ public sealed class InvestigationProfile : IProfile
         // --- Секция «Документооборот»: «Документы дела» и остальные страницы пакета docflow.
         .. DocFlowModule.Modules,
 
-        // --- Секция «Администрирование» (ТФ-АДМ-01..03, 07). Учётные записи, допуски и журнал аудита даёт
-        // ПАКЕТ (ADR-0023) — те же экраны, что у «ИнспекторAI»; роли, подразделения и справочники — за
-        // профилем: состав ролей и иерархия подразделений у каждого эксплуатанта свои. Страницы видны
-        // всем (в claim'ах сессии роли нет), обработчики отклоняют вызывающего без права (ТБ-012).
+        // --- Секция «Администрирование» (ТФ-АДМ-01..03, 07). «Пользователи» (учётная запись, роль, допуск в карточке
+        // сотрудника) и журнал аудита даёт ПАКЕТ (ADR-0023) — те же экраны, что у «ИнспекторAI»; роли пакет назначает
+        // через порт профиля (IUserRoleCatalog), подразделения и справочники — страницы профиля. Разделы видны по роли
+        // (InvestigationModuleVisibility), обработчики отклоняют вызывающего без права (ТБ-012).
         .. AdminModule.Modules,
-        new ModuleDescriptor("admin-roles", "/admin/roles", "Роли пользователей",
-            Icons.Material.Filled.AdminPanelSettings, typeof(UserRoles), ReadPolicy, GroupAdmin),
         new ModuleDescriptor("admin-divisions", "/admin/divisions", "Подразделения",
             Icons.Material.Filled.AccountTree, typeof(Divisions), ReadPolicy, GroupAdmin),
 

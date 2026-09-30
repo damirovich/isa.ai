@@ -74,8 +74,10 @@ public sealed class InvestigationProfileTests
 
         profile.Modules.ShouldContain(m => m.Route == "/dashboard");
         profile.Modules.ShouldContain(m => m.Route == "/cases");
-        profile.Modules.ShouldContain(m => m.Route == "/admin/roles");
-        profile.Modules.ShouldContain(m => m.Route == "/admin/clearances");
+        profile.Modules.ShouldContain(m => m.Route == "/admin/users");
+        // Роли и допуски — в карточке сотрудника экрана «Пользователи»: отдельных пунктов меню больше нет.
+        profile.Modules.ShouldNotContain(m => m.Route == "/admin/roles");
+        profile.Modules.ShouldNotContain(m => m.Route == "/admin/clearances");
         profile.Modules.ShouldContain(m => m.Route == "/admin/divisions");
         profile.Modules.ShouldContain(m => m.Route == "/admin/references");
 
@@ -85,8 +87,8 @@ public sealed class InvestigationProfileTests
             profile.Modules.ShouldContain(m => m.Route == module.Route && m.ComponentType == module.ComponentType);
         }
 
-        // Учётные записи, допуски и журнал аудита пришли ИЗ ПАКЕТА (ADR-0023), а не из UI профиля.
-        foreach (var route in new[] { "/admin/users", "/admin/clearances", "/admin/audit" })
+        // «Пользователи» и журнал аудита пришли ИЗ ПАКЕТА (ADR-0023), а не из UI профиля.
+        foreach (var route in new[] { "/admin/users", "/admin/audit" })
         {
             profile.Modules.First(m => m.Route == route).ComponentType.Assembly.GetName().Name
                 .ShouldBe("ISC.AI.Modules.Admin.UI");
