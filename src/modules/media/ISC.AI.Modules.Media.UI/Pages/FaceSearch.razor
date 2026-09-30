@@ -282,6 +282,22 @@
     /// <summary>Параметр <c>?faceId=</c> как пришёл в адресе — строкой по той же причине; разбор — <see cref="QueryFaceId"/>.</summary>
     [SupplyParameterFromQuery(Name = "faceId")] public string? FaceIdQuery { get; set; }
 
+    /// <summary>
+    /// Параметр <c>?authId=</c> — основание поиска (переход «Искать по материалам» из карточки фигуранта). Принимается,
+    /// только если это основание выбранного дела (ТБ-071); иначе выбор остаётся за оператором.
+    /// </summary>
+    [SupplyParameterFromQuery(Name = "authId")] public string? AuthIdQuery { get; set; }
+
+    /// <summary>Параметр <c>?scope=all</c> — область «все доступные дела» (ТФ-ПЛ-05).</summary>
+    [SupplyParameterFromQuery(Name = "scope")] public string? ScopeQuery { get; set; }
+
+    /// <summary>
+    /// Параметр <c>?auto=1</c> — сразу запустить поиск, если форма заполнена полностью (дело, основание, пригодная проба).
+    /// Ничего не обходит: запуск — тот же SearchByFaceQuery с проверкой права, основания и аудитом ТБ-072; не хватает
+    /// чего-то — форма остаётся открытой с подсказкой, что заполнить.
+    /// </summary>
+    [SupplyParameterFromQuery(Name = "auto")] public string? AutoQuery { get; set; }
+
     /// <summary>Дело из адресной строки (переход из медиатеки дела / карточки носителя); неразобранное — нет дела.</summary>
     private int? QueryCaseId => MediaQueryValues.ParseInt(CaseIdQuery);
 
@@ -365,6 +381,22 @@
             _probeFaceId = faceId;
             var face = await Dispatcher.Send(new GetFaceQuery(faceId));
             _probeFace = face is { Status: true, Data: { } row } ? row : null;
+        }
+
+        // Основание из адреса — только из перечня оснований выбранного дела (ТБ-071).
+        if (MediaQueryValues.ParseInt(AuthIdQuery) is { } authId && _authorizations.Any(a => a.AuthorizationId == authId))
+        {
+            _authorizationId = authId;
+        }
+
+        if (string.Equals(ScopeQuery, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            _scope = SearchScopeKind.AllAccessibleCases;
+        }
+
+        if (AutoQuery == "1" && CanSearch)
+        {
+            await SearchAsync();
         }
     }
 
