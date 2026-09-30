@@ -26,6 +26,10 @@
     <ProjectReference Include="..\..\src\integrations\ISC.AI.Speech\ISC.AI.Speech.csproj" />
     <!-- Профиль «Следствие» (ЭС3): InvestigationDbContext, решётка на делах, порты пакетов. -->
     <ProjectReference Include="..\..\src\profiles\investigation\ISC.AI.Profile.Investigation.Data\ISC.AI.Profile.Investigation.Data.csproj" />
+    <!-- Сценарии «Следствия» (уничтожение дела) и «Медиа» (снимок кадра) — явно, а не транзитивно через хост: хост по
+         умолчанию собирается с профилем «ИнспекторAI», и без этих ссылок проект не компилировался в Visual Studio. -->
+    <ProjectReference Include="..\..\src\profiles\investigation\ISC.AI.Profile.Investigation.Application\ISC.AI.Profile.Investigation.Application.csproj" />
+    <ProjectReference Include="..\..\src\modules\media\ISC.AI.Modules.Media.Application\ISC.AI.Modules.Media.Application.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.AI\ISC.AI.AI.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.Documents\ISC.AI.Documents.csproj" />
     <ProjectReference Include="..\..\src\core\ISC.AI.Ingestion\ISC.AI.Ingestion.csproj" />
