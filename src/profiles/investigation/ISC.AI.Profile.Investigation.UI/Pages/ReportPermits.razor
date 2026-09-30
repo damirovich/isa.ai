@@ -1,6 +1,8 @@
 @namespace ISC.AI.Profile.Investigation.UI
 @page "/admin/report-permits"
 @rendermode InteractiveServer
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
 @using ISC.AI.Abstractions.Security
 @using ISC.AI.Profile.Investigation.Application.Features.Directory
 @using ISC.AI.Profile.Investigation.Application.Features.Reports
@@ -55,7 +57,7 @@
                 <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy"
                            OnClick="@(() => DecideAsync(context.Id, true))">Разрешить</MudButton>
                 <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" Disabled="_busy"
-                           OnClick="@(() => DecideAsync(context.Id, false))">Отказать</MudButton>
+                           OnClick="@(() => DecideAsync(context.Id, false))">Отказать…</MudButton>
             }
         </MudTd>
     </RowTemplate>
@@ -63,6 +65,13 @@
         <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Запросов нет.</MudText>
     </NoRecordsContent>
 </MudTable>
+
+<div class="d-flex justify-space-between flex-wrap gap-2 px-1 pt-2">
+    <MudText Typo="Typo.caption">Ожидают решения: @_rows.Count(r => r.Status == ReportEditPermitStatus.Pending)</MudText>
+    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+        Содержание сводки здесь не показывается (ТБ-079). Свой запрос решает другой сотрудник.
+    </MudText>
+</div>
 
 @code {
     private readonly List<CaseReportPermitRow> _rows = [];
@@ -107,6 +116,14 @@
 
     private async Task DecideAsync(int permitId, bool approve)
     {
+        if (!approve)
+        {
+            var answer = await DialogService.ShowMessageBoxAsync("Отказать в правке?",
+                "Сотрудник не сможет изменить архивный документ. При необходимости он подаст новый запрос.",
+                yesText: "Отказать", cancelText: "Отмена");
+            if (answer != true) { return; }
+        }
+
         _busy = true;
         _error = null;
         try
@@ -117,6 +134,8 @@
                 _error = response.StatusMessage;
                 return;
             }
+
+            Snackbar.Add(approve ? "Правка разрешена." : "В правке отказано.", Severity.Success);
         }
         finally
         {
