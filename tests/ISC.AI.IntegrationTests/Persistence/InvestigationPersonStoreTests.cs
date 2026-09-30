@@ -177,6 +177,50 @@ public sealed class InvestigationPersonStoreTests : IAsyncLifetime
         (await persons.GetAsync(person.PersonId, owner)).ShouldNotBeNull().AppearanceCount.ShouldBe(2);
     }
 
+    [Fact(DisplayName = "Одно появление на пару «фигурант — лицо»: повторное подтверждение из другой сессии и параллельные подтверждения не дублируют")]
+    public async Task Same_face_confirmed_again_does_not_duplicate_appearance()
+    {
+        var factory = new InvestigationContextFactory(_postgres.GetConnectionString());
+        var core = new CoreContextFactory(_postgres.GetConnectionString());
+        await InvestigationTestKit.MigrateAsync(factory);
+        await InvestigationTestKit.AssignRolesAsync(factory, (10, InvestigationRole.Investigator));
+
+        var cases = InvestigationTestKit.CreateCaseStore(factory, core);
+        var persons = InvestigationTestKit.CreatePersonStore(factory, core);
+        var owner = InvestigationTestKit.Access(10, 9, 5);
+
+        var caseA = await cases.CreateAsync(InvestigationTestKit.Draft("A-1", 5, 1, 10), owner);
+        var ivanov = (await persons.CreateAsync(new PersonDraft(caseA.CaseId, "Иванов", false, null, null), owner)).PersonId;
+        var petrov = (await persons.CreateAsync(new PersonDraft(caseA.CaseId, "Петров", false, null, null), owner)).PersonId;
+
+        var first = new AppearanceDraft(ivanov, caseA.CaseId, 100, 1000, null, null, 7, 71, 0.81,
+            new DateTime(2026, 9, 1, 10, 0, 0, DateTimeKind.Utc), ExpertUserId: 40, VerifierUserId: 41, 1, 5);
+        var firstId = await persons.AddAppearanceAsync(first);
+
+        // То же лицо у того же фигуранта из другой сессии поиска — существующее появление, новой строки нет.
+        (await persons.AddAppearanceAsync(first with { SearchSessionId = 8, CandidateId = 81, Similarity = 0.51 })).ShouldBe(firstId);
+
+        // Параллельные подтверждения того же лица из разных сессий — одна строка (блокировка фигуранта).
+        var parallel = await Task.WhenAll(Enumerable.Range(0, 4).Select(i =>
+            persons.AddAppearanceAsync(first with { SearchSessionId = 9, CandidateId = 90 + i })));
+        parallel.ShouldAllBe(id => id == firstId);
+
+        // Другое лицо того же фигуранта и то же лицо у другого фигуранта — отдельные появления.
+        var otherFace = await persons.AddAppearanceAsync(first with { CandidateId = 100, MediaFaceId = 1001 });
+        var otherPerson = await persons.AddAppearanceAsync(first with { PersonId = petrov, CandidateId = 101 });
+        otherFace.ShouldNotBe(firstId);
+        otherPerson.ShouldNotBe(firstId);
+
+        (await persons.ListAppearancesAsync(ivanov, owner)).Count.ShouldBe(2);
+        (await persons.ListAppearancesAsync(petrov, owner)).Count.ShouldBe(1);
+
+        // Подсказка эксперту: у кого в деле это лицо уже подтверждено — только видимые фигуранты.
+        (await persons.ListPersonsConfirmedOnFaceAsync(caseA.CaseId, 1000, owner)).Order().ShouldBe(new[] { ivanov, petrov }.Order());
+        (await persons.ListPersonsConfirmedOnFaceAsync(caseA.CaseId, 1001, owner)).ShouldBe([ivanov]);
+        (await persons.ListPersonsConfirmedOnFaceAsync(caseA.CaseId, 5555, owner)).ShouldBeEmpty();
+        (await persons.ListPersonsConfirmedOnFaceAsync(caseA.CaseId, 1000, InvestigationTestKit.Access(11, 9, 5))).ShouldBeEmpty();
+    }
+
     [Fact(DisplayName = "Появление выше допуска или чужого подразделения не выдаётся даже при видимом фигуранте (ТБ-020/070); параллельное создание неустановленных лиц даёт разные номера без 23505")]
     public async Task Appearance_floor_and_concurrent_unidentified_numbering()
     {
@@ -197,9 +241,9 @@ public sealed class InvestigationPersonStoreTests : IAsyncLifetime
             new DateTime(2026, 9, 1, 10, 0, 0, DateTimeKind.Utc), ExpertUserId: 40, VerifierUserId: 41, 1, 5);
         await persons.AddAppearanceAsync(visible);
         // Гриф появления (с кандидата чужого носителя) выше допуска субъекта.
-        await persons.AddAppearanceAsync(visible with { CandidateId = 72, Classification = 3 });
+        await persons.AddAppearanceAsync(visible with { CandidateId = 72, MediaAssetId = 101, MediaFaceId = 1001, Classification = 3 });
         // Подразделение появления вне допуска субъекта.
-        await persons.AddAppearanceAsync(visible with { CandidateId = 73, DivisionId = 6 });
+        await persons.AddAppearanceAsync(visible with { CandidateId = 73, MediaAssetId = 102, MediaFaceId = 1002, DivisionId = 6 });
 
         var list = await persons.ListAppearancesAsync(person.PersonId, owner);
         list.ShouldHaveSingleItem().CandidateId.ShouldBe(71);

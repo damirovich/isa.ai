@@ -97,9 +97,18 @@ else
                            Clearable="true" Class="mt-2" Placeholder="без привязки" Disabled="_busy">
                     @foreach (var person in _persons)
                     {
-                        <MudSelectItem T="int?" Value="@person.PersonId">@person.DisplayName</MudSelectItem>
+                        <MudSelectItem T="int?" Value="@person.PersonId">@person.DisplayName@(person.ConfirmedOnFace ? " — это лицо уже подтверждено" : string.Empty)</MudSelectItem>
                     }
                 </MudSelect>
+                @* Одно появление на пару «фигурант — лицо»: то же лицо, пришедшее из другой сессии поиска, уже подтверждено —
+                   повторное «подтверждён» нового появления не создаст. Подсказка только эксперту: верификатор слеп (ТФ-ВЕР-02). *@
+                @if (_persons.FirstOrDefault(p => p.PersonId == _personRef) is { ConfirmedOnFace: true } already)
+                {
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-2">
+                        Это лицо у фигуранта «@already.DisplayName» уже подтверждено (появление есть). Повторное подтверждение
+                        нового появления не добавит — кандидата можно отклонить как повтор или подтвердить, запись останется одна.
+                    </MudAlert>
+                }
                 @if (SuggestedPersonRef is { } suggested)
                 {
                     <MudText Typo="Typo.caption" Color="Color.Info" Class="d-block mt-1">
@@ -183,7 +192,7 @@ else
         // Фигуранты — ТОЛЬКО для стадии эксперта: верификатор о привязке не знает (ТФ-ВЕР-02).
         if (Stage == VerificationStage.Expert && item.OwnDecision is null)
         {
-            var persons = await Dispatcher.Send(new ListCasePersonsQuery(item.CaseId));
+            var persons = await Dispatcher.Send(new ListCasePersonsQuery(item.CaseId, item.FaceId));
             if (persons is { Status: true, Data: { } list })
             {
                 _persons = list;

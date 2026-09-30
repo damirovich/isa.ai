@@ -28,6 +28,10 @@ public sealed class PersonStore(
     // хеш-цепочка аудита ядра. Значение произвольное, фиксированное.
     private const int UnidentifiedNumberLockNamespace = 0x4950_534E; // "IPSN" — investigation.person number
 
+    // Пространство ключей блокировки записи появлений фигуранта (ключ — фигурант): проверка «это лицо у него уже
+    // подтверждено» и вставка выполняются под одной блокировкой, два одновременных подтверждения не дадут дубль.
+    private const int AppearanceLockNamespace = 0x4950_4150; // "IPAP" — investigation.person appearance
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<PersonRow>> ListByCaseAsync(int caseId, AccessContext access, CancellationToken cancellationToken = default)
     {
@@ -188,6 +192,14 @@ public sealed class PersonStore(
     /// Идемпотентно по кандидату: повторный вызов с тем же <see cref="AppearanceDraft.CandidateId"/>
     /// (повтор после сбоя между фиксацией решения и записью появления, ТФ-ВЕР-03) возвращает идентификатор
     /// уже существующего появления — уникальный индекс <c>candidate_id</c> гарантирует «один кандидат — одно появление».
+    /// <para>
+    /// Одно появление на пару «фигурант — лицо»: то же лицо (та же детекция на том же кадре) может прийти кандидатом
+    /// из нескольких сессий поиска; второе подтверждение того же факта — не новое появление, а повтор. Возвращается
+    /// существующая запись; решения второй пары сотрудников остаются в журнале верификации модуля «Медиа».
+    /// Копия того же файла в деле с другим грифом — ДРУГОЙ носитель со своими лицами и своей видимостью (ТБ-070):
+    /// появление на ней — отдельная запись, иначе субъект с меньшим допуском потерял бы доступный ему факт.
+    /// Проверка и вставка — под транзакционной блокировкой фигуранта: параллельные подтверждения не дублируют.
+    /// </para>
     /// </remarks>
     public async Task<int> AddAppearanceAsync(AppearanceDraft draft, CancellationToken cancellationToken = default)
     {
@@ -200,6 +212,22 @@ public sealed class PersonStore(
         }
 
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.Database.ExecuteSqlAsync(
+            $"SELECT pg_advisory_xact_lock({AppearanceLockNamespace}, {draft.PersonId})",
+            cancellationToken);
+
+        var duplicateId = await db.Appearances.AsNoTracking()
+            .Where(a => a.CandidateId == draft.CandidateId
+                || (a.PersonId == draft.PersonId && a.MediaFaceId == draft.MediaFaceId))
+            .OrderBy(a => a.Id)
+            .Select(a => (int?)a.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (duplicateId is { } already)
+        {
+            await transaction.CommitAsync(cancellationToken);
+            return already;
+        }
 
         var entity = new Appearance
         {
@@ -224,11 +252,14 @@ public sealed class PersonStore(
         try
         {
             await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: UniqueViolation })
         {
             // Единственный уникальный индекс таблицы — candidate_id: появление для этого кандидата уже есть
-            // (параллельный или повторный вызов). Возвращаем существующий, ничего не дублируя.
+            // (тот же кандидат, привязанный к другому фигуранту другим путём). Транзакция после ошибки
+            // непригодна — откатываем и читаем существующую запись вне её, ничего не дублируя.
+            await transaction.RollbackAsync(cancellationToken);
             db.Entry(entity).State = EntityState.Detached;
             var existingId = await db.Appearances.AsNoTracking()
                 .Where(a => a.CandidateId == draft.CandidateId)
@@ -243,6 +274,26 @@ public sealed class PersonStore(
         }
 
         return entity.Id;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyCollection<int>> ListPersonsConfirmedOnFaceAsync(
+        int caseId, int faceId, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+
+        var role = await ResolveRoleAsync(access, cancellationToken);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Фигурант — по полной решётке (как список фигурантов для привязки), появление — под floor'ом строки.
+        var visible = AccessiblePersons(db, access, role).Where(p => p.CaseId == caseId);
+        return await db.Appearances.AsNoTracking()
+            .Where(BaselineAccess.Filter<Appearance>(access))
+            .Where(policy.BuildFilter<Appearance>(access))
+            .Where(a => a.MediaFaceId == faceId && visible.Any(p => p.Id == a.PersonId))
+            .Select(a => a.PersonId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
     }
 
     /// <inheritdoc />

@@ -446,6 +446,25 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
         }
     }
 
+    [Fact(DisplayName = "Решение эксперта: у фигуранта это лицо уже подтверждено — пометка в списке и предупреждение «повтор», запрос с лицом кандидата")]
+    public void CandidateVerification_warns_when_face_already_confirmed_for_person()
+    {
+        Render<MudPopoverProvider>();
+        _mediator.Send(Arg.Any<GetCandidatePairQuery>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<ResponseDto<VerificationQueueItem>>(ResponseDto<VerificationQueueItem>.Ok(
+                new VerificationQueueItem(21, 4, 3, 1, 11, 5, null, null, 0.61, null, "probe.jpg", new string('a', 64), null,
+                    0, 1, CandidateStatus.Candidate, null))));
+        _mediator.Send(Arg.Any<ListCasePersonsQuery>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<ResponseDto<IReadOnlyList<CasePersonItem>>>(
+                ResponseDto<IReadOnlyList<CasePersonItem>>.Ok([new CasePersonItem(7, "Иванов", ConfirmedOnFace: true)])));
+
+        Services.GetRequiredService<NavigationManager>().NavigateTo("/media/verification/21?stage=Expert&person=7");
+        var cut = Render<ISC.AI.Modules.Media.UI.CandidateVerification>(p => p.Add(x => x.CandidateId, 21));
+
+        cut.Markup.ShouldContain("Это лицо у фигуранта «Иванов» уже подтверждено");
+        _mediator.Received().Send(Arg.Is<ListCasePersonsQuery>(q => q.CaseId == 3 && q.FaceId == 11), Arg.Any<CancellationToken>());
+    }
+
     [Fact(DisplayName = "Карточка видео 3GP: вместо проигрывателя — кадр с сервера и «скачать», в подсказке назван именно 3GP, фрагмент расшифровки ведёт к кадру")]
     public void AssetCard_3gp_video_names_its_container()
     {

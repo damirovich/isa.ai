@@ -147,8 +147,19 @@ public interface IPersonStore
     /// <summary>Появления фигуранта (только подтверждённые, ТБ-073), новые первыми.</summary>
     Task<IReadOnlyList<AppearanceRow>> ListAppearancesAsync(int personId, AccessContext access, CancellationToken cancellationToken = default);
 
-    /// <summary>Записать появление (вызывается модулем «Медиа» через порт после подтверждения; без решётки — факт уже проверен).</summary>
+    /// <summary>
+    /// Записать появление (вызывается модулем «Медиа» через порт после подтверждения; без решётки — факт уже проверен).
+    /// Одно появление на пару «фигурант — лицо»: если это лицо у фигуранта уже подтверждено (другой сессией поиска),
+    /// новая запись не создаётся — возвращается существующая.
+    /// </summary>
     Task<int> AddAppearanceAsync(AppearanceDraft draft, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Фигуранты дела, у которых это лицо уже подтверждено появлением, — подсказка эксперту «уже подтверждено у …»
+    /// (ТФ-ВЕР-03). Только фигуранты, доступные субъекту по полной решётке, и появления под floor'ом.
+    /// </summary>
+    Task<IReadOnlyCollection<int>> ListPersonsConfirmedOnFaceAsync(
+        int caseId, int faceId, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>Эталоны фигуранта.</summary>
     Task<IReadOnlyList<ReferencePhotoRow>> ListReferencePhotosAsync(int personId, AccessContext access, CancellationToken cancellationToken = default);

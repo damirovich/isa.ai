@@ -158,6 +158,14 @@ public sealed class CaseScope(
     }
 
     /// <inheritdoc />
+    public Task<IReadOnlyCollection<int>> ListPersonsConfirmedOnFaceAsync(
+        int caseId, int faceId, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        return persons.ListPersonsConfirmedOnFaceAsync(caseId, faceId, access, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public Task RecordAppearanceAsync(ConfirmedAppearance appearance, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(appearance);

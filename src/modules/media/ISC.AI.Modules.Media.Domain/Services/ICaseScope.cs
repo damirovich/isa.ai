@@ -17,7 +17,13 @@ public sealed record CaseScopeItem(
     int CaseId, string Number, string Title, short Classification, int DivisionId, bool IsClosed = false);
 
 /// <summary>Фигурант дела для привязки кандидата (ТФ-ВЕР-03); модуль знает только идентификатор и подпись.</summary>
-public sealed record CasePersonItem(int PersonId, string DisplayName);
+/// <param name="PersonId">Фигурант.</param>
+/// <param name="DisplayName">Подпись.</param>
+/// <param name="ConfirmedOnFace">
+/// Лицо кандидата у этого фигуранта уже подтверждено появлением: повторное «подтверждён» новой записи не даст
+/// (одно появление на пару «фигурант — лицо»). Заполняется только для стадии эксперта.
+/// </param>
+public sealed record CasePersonItem(int PersonId, string DisplayName, bool ConfirmedOnFace = false);
 
 /// <summary>Основание поиска в деле (ТБ-071): непрозрачный идентификатор профиля и реквизиты для аудита.</summary>
 public sealed record CaseAuthorizationItem(int AuthorizationId, string Reference);
@@ -102,6 +108,16 @@ public interface ICaseScope
     /// <summary>Фигуранты дела для привязки кандидата.</summary>
     Task<IReadOnlyList<CasePersonItem>> ListPersonsAsync(int caseId, AccessContext access, CancellationToken cancellationToken = default);
 
-    /// <summary>Зафиксировать подтверждённое появление фигуранта (ТФ-ВЕР-03 → ТФ-ПЕР-02).</summary>
+    /// <summary>
+    /// Фигуранты дела, у которых это лицо уже подтверждено появлением (подсказка эксперту, ТФ-ВЕР-03); только
+    /// видимые субъекту фигуранты и появления.
+    /// </summary>
+    Task<IReadOnlyCollection<int>> ListPersonsConfirmedOnFaceAsync(
+        int caseId, int faceId, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Зафиксировать подтверждённое появление фигуранта (ТФ-ВЕР-03 → ТФ-ПЕР-02). Лицо, уже подтверждённое у этого
+    /// фигуранта, второй записи не создаёт.
+    /// </summary>
     Task RecordAppearanceAsync(ConfirmedAppearance appearance, CancellationToken cancellationToken = default);
 }
