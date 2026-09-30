@@ -34,7 +34,7 @@ public sealed class VerificationQueuePagingTests
         _caseScope.ListAccessibleCasesAsync(Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
             .Returns([new CaseScopeItem(3, "№ 1", "Дело", 2, 1)]);
         _store.ListQueuePageAsync(Arg.Any<VerificationStage>(), Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<int>(), Arg.Any<int>(),
-                Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
+                Arg.Any<AccessContext>(), Arg.Any<VerificationQueueFilter?>(), Arg.Any<CancellationToken>())
             .Returns(new VerificationQueuePage([Candidate(21), Candidate(22)], 130));
         _store.GetAsync(5, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>()).Returns(Session());
     }
@@ -48,7 +48,7 @@ public sealed class VerificationQueuePagingTests
         response.Data!.Count.ShouldBe(2);
         response.TotalCount.ShouldBe(130);
         await _store.Received(1).ListQueuePageAsync(
-            VerificationStage.Expert, Arg.Any<IReadOnlyCollection<int>>(), 48, 24, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>());
+            VerificationStage.Expert, Arg.Any<IReadOnlyCollection<int>>(), 48, 24, Arg.Any<AccessContext>(), Arg.Any<VerificationQueueFilter?>(), Arg.Any<CancellationToken>());
         // Сессия запрошена один раз на всю страницу, а не на каждого кандидата.
         await _store.Received(1).GetAsync(5, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>());
     }
@@ -60,7 +60,7 @@ public sealed class VerificationQueuePagingTests
 
         await _store.Received(1).ListQueuePageAsync(
             VerificationStage.Expert, Arg.Any<IReadOnlyCollection<int>>(), 0, ListVerificationQueueQuery.MaxPageSize,
-            Arg.Any<AccessContext>(), Arg.Any<CancellationToken>());
+            Arg.Any<AccessContext>(), Arg.Any<VerificationQueueFilter?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact(DisplayName = "Пустая область дел — пустая очередь с нулевым итогом, хранилище не читается (ТБ-071)")]
@@ -72,7 +72,7 @@ public sealed class VerificationQueuePagingTests
 
         response.Data!.ShouldBeEmpty();
         response.TotalCount.ShouldBe(0);
-        await _store.DidNotReceiveWithAnyArgs().ListQueuePageAsync(default, default!, default, default, default!, default);
+        await _store.DidNotReceiveWithAnyArgs().ListQueuePageAsync(default, default!, default, default, default!, default, default);
     }
 
     [Fact(DisplayName = "Валидатор: страница ≥ 1, размер 1..100, известная стадия; сводка аудита называет страницу")]
@@ -90,6 +90,38 @@ public sealed class VerificationQueuePagingTests
         new ListVerificationQueueQuery(VerificationStage.Expert, 3).AuditSummary.ShouldBe("media:verification:queue:Expert:page:3");
     }
 
+    [Fact(DisplayName = "ТФ-ПЛ-02: отбор передаётся хранилищу как есть; дело вне области субъекта — пустая очередь без обращения к хранилищу")]
+    public async Task Filter_is_passed_and_foreign_case_gives_empty_queue()
+    {
+        var filter = new VerificationQueueFilter(MinSimilarity: 0.8, CaseId: 3, Order: VerificationQueueOrder.MostSimilar);
+        (await Handler().Handle(new ListVerificationQueueQuery(VerificationStage.Expert, 1, 14, filter), CancellationToken.None))
+            .Status.ShouldBeTrue();
+        await _store.Received(1).ListQueuePageAsync(
+            VerificationStage.Expert, Arg.Any<IReadOnlyCollection<int>>(), 0, 14, Arg.Any<AccessContext>(), filter, Arg.Any<CancellationToken>());
+
+        _store.ClearReceivedCalls();
+        var foreign = await Handler().Handle(
+            new ListVerificationQueueQuery(VerificationStage.Expert, 1, 14, new VerificationQueueFilter(CaseId: 999)), CancellationToken.None);
+        foreign.Data!.ShouldBeEmpty();
+        foreign.TotalCount.ShouldBe(0);
+        await _store.DidNotReceiveWithAnyArgs().ListQueuePageAsync(default, default!, default, default, default!, default, default);
+    }
+
+    [Fact(DisplayName = "Валидатор отбора: схожесть 0..1, перевёрнутый период отклоняется; сводка аудита называет отбор")]
+    public void Filter_validator_and_audit()
+    {
+        var validator = new ListVerificationQueueValidator();
+        Query(new VerificationQueueFilter(MinSimilarity: 0.7)).Let(q => validator.Validate(q).IsValid.ShouldBeTrue());
+        Query(new VerificationQueueFilter(MinSimilarity: 1.5)).Let(q => validator.Validate(q).IsValid.ShouldBeFalse());
+        Query(new VerificationQueueFilter(MaterialFromUtc: new DateTime(2026, 9, 2), MaterialToUtc: new DateTime(2026, 9, 1)))
+            .Let(q => validator.Validate(q).IsValid.ShouldBeFalse());
+
+        Query(new VerificationQueueFilter(MinSimilarity: 0.7, CaseId: 3)).AuditSummary!
+            .ShouldStartWith("media:verification:queue:Expert:page:1:filter:min=0.7;case=3");
+    }
+
+    private static ListVerificationQueueQuery Query(VerificationQueueFilter filter) => new(VerificationStage.Expert, 1, 14, filter);
+
     private ListVerificationQueueQuery.Handler Handler() => new(_subjects, _policy, _access, _caseScope, _store);
 
     private static SearchCandidateRow Candidate(int id) =>
@@ -102,4 +134,9 @@ public sealed class VerificationQueuePagingTests
             ProbeSha256: "abc", ProbeFaceId: 900, ProbeCropStoredFileName: "probe.jpg", TopK: 20, MaxCosineDistance: null,
             DetectorVersion: "yunet-1", EmbedderVersion: "sface-1", Classification: 2, DivisionId: 1, RequestedByUserId: 1,
             CreatedAt: DateTime.UtcNow, CandidateCount: 2);
+}
+
+internal static class QueryTestExtensions
+{
+    public static void Let<T>(this T value, Action<T> action) => action(value);
 }

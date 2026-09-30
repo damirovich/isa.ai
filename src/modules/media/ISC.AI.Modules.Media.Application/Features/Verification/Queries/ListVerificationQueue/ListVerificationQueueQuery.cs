@@ -21,7 +21,12 @@ namespace ISC.AI.Modules.Media.Application.Features.Verification;
 /// <param name="Stage">Стадия верификации.</param>
 /// <param name="Page">Номер страницы, с 1.</param>
 /// <param name="PageSize">Размер страницы, 1..<see cref="MaxPageSize"/>.</param>
-public sealed record ListVerificationQueueQuery(VerificationStage Stage, int Page = 1, int PageSize = ListVerificationQueueQuery.DefaultPageSize)
+/// <param name="Filter">Отбор и порядок (ТФ-ПЛ-02): схожесть, дело, дата материала — только сужает очередь.</param>
+public sealed record ListVerificationQueueQuery(
+    VerificationStage Stage,
+    int Page = 1,
+    int PageSize = ListVerificationQueueQuery.DefaultPageSize,
+    VerificationQueueFilter? Filter = null)
     : IRequest<ResponseDto<IReadOnlyList<VerificationQueueItem>>>, IAuditableRequest
 {
     /// <summary>Размер страницы по умолчанию: три полных ряда по 6 карточек.</summary>
@@ -34,7 +39,10 @@ public sealed record ListVerificationQueueQuery(VerificationStage Stage, int Pag
     public AuditAction AuditAction => AuditAction.View;
 
     /// <inheritdoc />
-    public string? AuditSummary => $"media:verification:queue:{Stage}:page:{Page}";
+    /// <remarks>Отбор — в сводке: из журнала видно, какой срез очереди смотрел сотрудник (ТБ-030).</remarks>
+    public string? AuditSummary => $"media:verification:queue:{Stage}:page:{Page}" + (Filter is { } f
+        ? System.FormattableString.Invariant($":filter:min={f.MinSimilarity};case={f.CaseId};from={f.MaterialFromUtc:yyyy-MM-dd};to={f.MaterialToUtc:yyyy-MM-dd};order={f.Order}")
+        : string.Empty);
 
     /// <inheritdoc cref="ListVerificationQueueQuery" />
     public sealed class Handler(
@@ -80,8 +88,14 @@ public sealed record ListVerificationQueueQuery(VerificationStage Stage, int Pag
             // Страница — на стороне БД; границы зажимаются и здесь (валидатор — первый рубеж, этот — последний).
             var pageSize = Math.Clamp(query.PageSize, 1, MaxPageSize);
             var skip = (long)(Math.Max(query.Page, 1) - 1) * pageSize;
+            // Дело из отбора — только из области субъекта (ТБ-071): чужое дело даёт пустую очередь, а не расширение.
+            if (query.Filter?.CaseId is { } filterCase && !caseIds.Contains(filterCase))
+            {
+                return ResponseDto<IReadOnlyList<VerificationQueueItem>>.Ok([], 0);
+            }
+
             var page = await store.ListQueuePageAsync(
-                query.Stage, caseIds, (int)Math.Min(skip, int.MaxValue), pageSize, access, cancellationToken);
+                query.Stage, caseIds, (int)Math.Min(skip, int.MaxValue), pageSize, access, query.Filter, cancellationToken);
 
             // Проба (вырезка/хеш) — из сессии; сессии кэшируем: на странице много кандидатов одной сессии.
             var sessions = new Dictionary<int, SearchSessionRow?>();
@@ -116,5 +130,11 @@ public sealed class ListVerificationQueueValidator : AbstractValidator<ListVerif
         RuleFor(q => q.Stage).IsInEnum();
         RuleFor(q => q.Page).GreaterThanOrEqualTo(1);
         RuleFor(q => q.PageSize).InclusiveBetween(1, ListVerificationQueueQuery.MaxPageSize);
+        RuleFor(q => q.Filter!.MinSimilarity).InclusiveBetween(0, 1).When(q => q.Filter?.MinSimilarity is not null);
+        RuleFor(q => q.Filter!.Order).IsInEnum().When(q => q.Filter is not null);
+        RuleFor(q => q.Filter)
+            .Must(f => f!.MaterialFromUtc is not { } from || f.MaterialToUtc is not { } to || from <= to)
+            .When(q => q.Filter is not null)
+            .WithMessage("Начало периода позже его конца.");
     }
 }

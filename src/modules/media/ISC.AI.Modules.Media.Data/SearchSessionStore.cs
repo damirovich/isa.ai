@@ -167,7 +167,7 @@ public sealed class SearchSessionStore(
         }
 
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-        return await MaterializeAsync(db, OrderedQueue(QueueCandidates(db, stage, caseIds, access)), cancellationToken);
+        return await MaterializeAsync(db, OrderedQueue(QueueCandidates(db, stage, caseIds, access), VerificationQueueOrder.BySession), cancellationToken);
     }
 
     /// <inheritdoc />
@@ -178,7 +178,7 @@ public sealed class SearchSessionStore(
     /// </remarks>
     public async Task<VerificationQueuePage> ListQueuePageAsync(
         VerificationStage stage, IReadOnlyCollection<int> caseIds, int skip, int take, AccessContext access,
-        CancellationToken cancellationToken = default)
+        VerificationQueueFilter? filter = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(caseIds);
         ArgumentOutOfRangeException.ThrowIfNegative(skip);
@@ -189,14 +189,14 @@ public sealed class SearchSessionStore(
         }
 
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-        var queue = QueueCandidates(db, stage, caseIds, access);
+        var queue = ApplyFilter(db, QueueCandidates(db, stage, caseIds, access), filter);
         var total = await queue.CountAsync(cancellationToken);
         if (total <= skip)
         {
             return new VerificationQueuePage([], total);
         }
 
-        var rows = await MaterializeAsync(db, OrderedQueue(queue).Skip(skip).Take(take), cancellationToken);
+        var rows = await MaterializeAsync(db, OrderedQueue(queue, filter?.Order ?? VerificationQueueOrder.BySession).Skip(skip).Take(take), cancellationToken);
         return new VerificationQueuePage(rows, total);
     }
 
@@ -264,8 +264,49 @@ public sealed class SearchSessionStore(
     }
 
     // Устойчивый порядок: идентификатор замыкает сортировку, чтобы страницы не перекрывались.
-    private static IQueryable<SearchCandidate> OrderedQueue(IQueryable<SearchCandidate> queue) =>
-        queue.OrderBy(c => c.SessionId).ThenBy(c => c.Rank).ThenBy(c => c.Id);
+    private static IQueryable<SearchCandidate> OrderedQueue(IQueryable<SearchCandidate> queue, VerificationQueueOrder order) => order switch
+    {
+        VerificationQueueOrder.MostSimilar => queue.OrderBy(c => c.CosineDistance).ThenBy(c => c.Id),
+        VerificationQueueOrder.Newest => queue.OrderByDescending(c => c.SessionId).ThenBy(c => c.Rank).ThenBy(c => c.Id),
+        _ => queue.OrderBy(c => c.SessionId).ThenBy(c => c.Rank).ThenBy(c => c.Id),
+    };
+
+    // Отбор ТФ-ПЛ-02 — только сужает уже ограниченную решёткой и областью выборку. Схожесть = 1 − косинусное расстояние.
+    // Дата материала — время съёмки, а если оно неизвестно — время загрузки носителя.
+    private static IQueryable<SearchCandidate> ApplyFilter(MediaDbContext db, IQueryable<SearchCandidate> queue, VerificationQueueFilter? filter)
+    {
+        if (filter is null)
+        {
+            return queue;
+        }
+
+        if (filter.MinSimilarity is { } min)
+        {
+            var maxDistance = 1 - Math.Clamp(min, 0, 1);
+            queue = queue.Where(c => c.CosineDistance <= maxDistance);
+        }
+
+        if (filter.CaseId is { } caseId)
+        {
+            queue = queue.Where(c => c.Session!.CaseId == caseId);
+        }
+
+        if (filter.MaterialFromUtc is { } from)
+        {
+            var fromOffset = new DateTimeOffset(DateTime.SpecifyKind(from, DateTimeKind.Utc));
+            queue = queue.Where(c => db.Assets.Any(a => a.Id == c.AssetId
+                && (a.CapturedAt != null ? a.CapturedAt >= fromOffset : a.CreatedAt >= from)));
+        }
+
+        if (filter.MaterialToUtc is { } to)
+        {
+            var toOffset = new DateTimeOffset(DateTime.SpecifyKind(to, DateTimeKind.Utc));
+            queue = queue.Where(c => db.Assets.Any(a => a.Id == c.AssetId
+                && (a.CapturedAt != null ? a.CapturedAt <= toOffset : a.CreatedAt <= to)));
+        }
+
+        return queue;
+    }
 
     // --- решётка: сессия и кандидат — обе режимные сущности (ТБ-020/070) ---
 

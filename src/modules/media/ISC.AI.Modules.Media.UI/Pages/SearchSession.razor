@@ -66,7 +66,25 @@ else
         Балл схожести — вероятностная оценка модели, не установление личности (ТЭ-006). Статус «подтверждён» —
         только после независимых решений двух сотрудников (ТБ-073).
     </MudAlert>
-    <MudTable T="SearchCandidateRow" Items="_details.Candidates" Hover="true" Dense="true" Outlined="true">
+    @* Отбор кандидат-листа (ТФ-ПЛ-02) — на странице: лист сессии уже загружен целиком и под решёткой. *@
+    <div class="d-flex gap-3 align-end flex-wrap mb-2">
+        <MudSelect T="double?" @bind-Value="_minSimilarity" Label="Схожесть" Variant="Variant.Outlined" Margin="Margin.Dense"
+                   Clearable="true" Placeholder="Любая" Style="width:170px;">
+            @foreach (var level in SimilarityLevels)
+            {
+                <MudSelectItem T="double?" Value="@level">не ниже @(((level ?? 0) * 100).ToString("0")) %</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="CandidateStatus?" @bind-Value="_status" Label="Статус" Variant="Variant.Outlined" Margin="Margin.Dense"
+                   Clearable="true" Placeholder="Любой" Style="width:220px;">
+            @foreach (var status in Enum.GetValues<CandidateStatus>())
+            {
+                <MudSelectItem T="CandidateStatus?" Value="@status">@status.Label()</MudSelectItem>
+            }
+        </MudSelect>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">Показано @Shown.Count из @_details.Candidates.Count</MudText>
+    </div>
+    <MudTable T="SearchCandidateRow" Items="Shown" Hover="true" Dense="true" Outlined="true">
         <HeaderContent>
             <MudTh>№</MudTh><MudTh>Кандидат</MudTh><MudTh>Схожесть</MudTh><MudTh>Статус</MudTh><MudTh>Решения</MudTh><MudTh>Носитель</MudTh><MudTh>Гриф</MudTh><MudTh></MudTh>
         </HeaderContent>
@@ -122,7 +140,7 @@ else
             </MudTd>
         </RowTemplate>
         <NoRecordsContent>
-            <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Кандидатов нет либо они вне вашего допуска.</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">@(_minSimilarity is not null || _status is not null ? "По отбору кандидатов нет — ослабьте отбор. " : string.Empty)Кандидатов нет либо они вне вашего допуска.</MudText>
         </NoRecordsContent>
     </MudTable>
 }
@@ -132,6 +150,15 @@ else
     [Parameter] public int Id { get; set; }
 
     private SearchSessionDetails? _details;
+
+    private static readonly double?[] SimilarityLevels = [0.5, 0.6, 0.7, 0.8, 0.9];
+    private double? _minSimilarity;
+    private CandidateStatus? _status;
+
+    // Отбор кандидат-листа: схожесть не ниже порога и статус; порядок — ранг сессии.
+    private List<SearchCandidateRow> Shown => _details is null
+        ? []
+        : [.. _details.Candidates.Where(c => (_minSimilarity is not { } min || c.Similarity >= min) && (_status is not { } st || c.Status == st))];
     private FaceRow? _probeFace;
     private string? _error;
 

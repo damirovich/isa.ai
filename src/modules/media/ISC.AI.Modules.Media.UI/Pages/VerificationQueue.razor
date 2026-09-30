@@ -7,8 +7,10 @@
    на страницу (ProbeFaceCache) — открытие не замедляется с ростом очереди. *@
 @page "/media/verification"
 @rendermode InteractiveServer
+@using ISC.AI.Modules.Media.Application.Features.Scope
 @using ISC.AI.Modules.Media.Application.Features.Verification
 @using ISC.AI.Modules.Media.Domain.Model
+@using ISC.AI.Modules.Media.Domain.Services
 
 <PageTitle>Верификация</PageTitle>
 
@@ -27,6 +29,52 @@
     Балл схожести — вероятностная оценка модели, не установление личности (ТЭ-006). Решение — по морфологическим
     признакам; статус «подтверждён» — только после независимых решений двух сотрудников (ТБ-073).
 </MudAlert>
+
+@* Отбор очереди (ТФ-ПЛ-02): только сужает очередь на сервере; слепоту не трогает — отбирает по материалу, не по решениям. *@
+<MudPaper Outlined="true" Class="pa-3 mt-3">
+    <div class="d-flex gap-3 align-end flex-wrap">
+        <MudSelect T="double?" Value="_minSimilarity" ValueChanged="OnMinSimilarityChangedAsync" Label="Схожесть"
+                   Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Placeholder="Любая" Style="width:170px;">
+            @foreach (var level in SimilarityLevels)
+            {
+                <MudSelectItem T="double?" Value="@level">не ниже @(((level ?? 0) * 100).ToString("0")) %</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="int?" Value="_caseId" ValueChanged="OnCaseChangedAsync" Label="Дело" Variant="Variant.Outlined"
+                   Margin="Margin.Dense" Clearable="true" Placeholder="Все доступные" Style="min-width:220px;">
+            @foreach (var c in _cases)
+            {
+                <MudSelectItem T="int?" Value="@c.CaseId">№ @c.Number · @c.Title</MudSelectItem>
+            }
+        </MudSelect>
+        @* Ширина календарей — обёрткой: MudBlazor копирует Style пикера на раскрытый календарь. *@
+        <div style="width:160px;">
+            <MudDatePicker Date="_from" DateChanged="OnFromChangedAsync" Label="Материал с" Variant="Variant.Outlined"
+                           Margin="Margin.Dense" DateFormat="dd.MM.yyyy" Clearable="true" />
+        </div>
+        <div style="width:160px;">
+            <MudDatePicker Date="_to" DateChanged="OnToChangedAsync" Label="по" Variant="Variant.Outlined"
+                           Margin="Margin.Dense" DateFormat="dd.MM.yyyy" Clearable="true" />
+        </div>
+        <MudSelect T="VerificationQueueOrder" Value="_order" ValueChanged="OnOrderChangedAsync" Label="Порядок"
+                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="width:220px;">
+            <MudSelectItem T="VerificationQueueOrder" Value="VerificationQueueOrder.BySession">по поискам</MudSelectItem>
+            <MudSelectItem T="VerificationQueueOrder" Value="VerificationQueueOrder.MostSimilar">сначала самые похожие</MudSelectItem>
+            <MudSelectItem T="VerificationQueueOrder" Value="VerificationQueueOrder.Newest">сначала из новых поисков</MudSelectItem>
+        </MudSelect>
+        @if (FilterActive)
+        {
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.FilterAltOff" OnClick="ResetFilterAsync">Сбросить отбор</MudButton>
+        }
+    </div>
+    @if (_from is { } f && _to is { } t && f > t)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-1">Начало периода позже конца — поправьте даты.</MudText>
+    }
+    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
+        Дата материала — время съёмки, а если оно неизвестно — время загрузки. Отбор действует на обе вкладки.
+    </MudText>
+</MudPaper>
 
 <MudTabs Elevation="0" Border="true" Rounded="true" Class="mt-3" ActivePanelIndex="_activeTab" ActivePanelIndexChanged="OnTabChangedAsync">
     <MudTabPanel Text="Эксперт" Icon="@Icons.Material.Filled.Person">
@@ -61,12 +109,69 @@
 
     private VerificationStage ActiveStage => _activeTab == 1 ? VerificationStage.Verifier : VerificationStage.Expert;
 
-    protected override Task OnInitializedAsync()
+    // --- Отбор (ТФ-ПЛ-02) ---
+    private static readonly double?[] SimilarityLevels = [0.5, 0.6, 0.7, 0.8, 0.9];
+    private IReadOnlyList<CaseScopeItem> _cases = [];
+    private double? _minSimilarity;
+    private int? _caseId;
+    private DateTime? _from;
+    private DateTime? _to;
+    private VerificationQueueOrder _order = VerificationQueueOrder.BySession;
+
+    private bool FilterActive =>
+        _minSimilarity is not null || _caseId is not null || _from is not null || _to is not null || _order != VerificationQueueOrder.BySession;
+
+    // Даты — в местном времени сотрудника; «по» — включительно весь день.
+    private VerificationQueueFilter? Filter => FilterActive
+        ? new VerificationQueueFilter(
+            _minSimilarity,
+            _caseId,
+            _from?.Date.ToUniversalTime(),
+            _to?.Date.AddDays(1).AddTicks(-1).ToUniversalTime(),
+            _order)
+        : null;
+
+    protected override async Task OnInitializedAsync()
     {
         // ТБ-030 «одно открытие — одна запись»: на предрендере (статический SSR до подключения circuit'а)
         // очередь не грузим — ListVerificationQueueQuery и GetFaceQuery пар аудируются и попадали бы в журнал дважды.
-        if (!RendererInfo.IsInteractive) { return Task.CompletedTask; }
+        if (!RendererInfo.IsInteractive) { return; }
 
+        // Дела для отбора — те же, что область очереди (дела субъекта, ТБ-071).
+        if (await Dispatcher.Send(new ListAccessibleCasesQuery()) is { Status: true, Data: { } cases })
+        {
+            _cases = cases;
+        }
+
+        await LoadAsync(ActiveStage);
+    }
+
+    private Task OnMinSimilarityChangedAsync(double? value) { _minSimilarity = value; return ApplyFilterAsync(); }
+
+    private Task OnCaseChangedAsync(int? value) { _caseId = value; return ApplyFilterAsync(); }
+
+    private Task OnFromChangedAsync(DateTime? value) { _from = value; return ApplyFilterAsync(); }
+
+    private Task OnToChangedAsync(DateTime? value) { _to = value; return ApplyFilterAsync(); }
+
+    private Task OnOrderChangedAsync(VerificationQueueOrder value) { _order = value; return ApplyFilterAsync(); }
+
+    private Task ResetFilterAsync()
+    {
+        (_minSimilarity, _caseId, _from, _to, _order) = (null, null, null, null, VerificationQueueOrder.BySession);
+        return ApplyFilterAsync();
+    }
+
+    // Новый отбор — с первой страницы на обеих стадиях; вторая стадия перечитается при переходе на её вкладку.
+    private Task ApplyFilterAsync()
+    {
+        if (_from is { } f && _to is { } t && f > t)
+        {
+            return Task.CompletedTask; // перевёрнутый период — ждём исправления, подсказка под отбором
+        }
+
+        _pages.Clear();
+        _items.Remove(ActiveStage == VerificationStage.Expert ? VerificationStage.Verifier : VerificationStage.Expert);
         return LoadAsync(ActiveStage);
     }
 
@@ -150,7 +255,7 @@
 
     private Task<Abstractions.Application.ResponseDto<IReadOnlyList<VerificationQueueItem>>> FetchAsync(
         VerificationStage stage, int page, int size) =>
-        Dispatcher.Send(new ListVerificationQueueQuery(stage, page, size)).AsTask();
+        Dispatcher.Send(new ListVerificationQueueQuery(stage, page, size, Filter)).AsTask();
 
     private RenderFragment RenderQueue(VerificationStage stage) => __builder =>
     {
@@ -177,7 +282,7 @@
             {
                 @* Текст НЕ утверждает «пусто»: кандидаты могут быть вне допуска (ТБ-020/021). *@
                 <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
-                    Очередь пуста: кандидатов, ждущих вашего решения на этой стадии, нет либо они вне вашего допуска.
+                    @(FilterActive ? "По этому отбору кандидатов нет — ослабьте отбор или сбросьте его. " : string.Empty)Очередь пуста: кандидатов, ждущих вашего решения на этой стадии, нет либо они вне вашего допуска.
                 </MudText>
             }
         }
