@@ -95,8 +95,10 @@ public sealed record GetUserHistoryQuery(int UserId) : IRequest<ResponseDto<IRea
                 .. records.Values
                     .OrderByDescending(r => r.OccurredAt)
                     .ThenByDescending(r => r.Id)
+                    // Сводку сценария AuditBehavior пишет в PayloadSensitive; ObjectRef — запасной путь для записей,
+                    // где объект указан отдельно.
                     .Select(r => (Row: r, Text: UserHistoryText.Describe(
-                        r.ObjectRef, r.SubjectId, query.UserId, account.UserName, roleLabels, divisionNames)))
+                        r.PayloadSensitive ?? r.ObjectRef, r.SubjectId, query.UserId, account.UserName, roleLabels, divisionNames)))
                     .Where(x => x.Text is not null)
                     .Take(MaxEntries)
                     .Select(x => new UserHistoryEntry(x.Row.OccurredAt, x.Row.SubjectName, x.Text!.Value.What, x.Text.Value.Kind)),

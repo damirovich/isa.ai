@@ -52,10 +52,16 @@ public sealed class AuditReader(IDbContextFactory<CoreDbContext> contextFactory)
             query = query.Where(r => r.Action == action);
         }
 
+        // Текст ищется и в ссылке на объект, и в сводке действия: сценарии Mediator пишут своё описание
+        // («admin:role:5:Verifier», «investigation:case:4:purge») в PayloadSensitive, а ObjectRef заполняют только
+        // генерация и корпус. Искать по одной колонке значило не находить почти ничего. Решётка (ТБ-032) уже
+        // применена выше — поиск по сводке не выдаёт записей сверх допуска.
         if (!string.IsNullOrWhiteSpace(filter.ObjectRef))
         {
-            var text = filter.ObjectRef.Trim();
-            query = query.Where(r => r.ObjectRef != null && EF.Functions.ILike(r.ObjectRef, $"%{text}%"));
+            var pattern = "%" + EscapeLike(filter.ObjectRef.Trim()) + "%";
+            query = query.Where(r =>
+                (r.ObjectRef != null && EF.Functions.ILike(r.ObjectRef, pattern, "\\"))
+                || (r.PayloadSensitive != null && EF.Functions.ILike(r.PayloadSensitive, pattern, "\\")));
         }
 
         // Общее число — ДО постраничного среза: без него навигация не знает, сколько страниц.
@@ -85,4 +91,10 @@ public sealed class AuditReader(IDbContextFactory<CoreDbContext> contextFactory)
 
         return new AuditPage(rows, total);
     }
+
+    // Символы шаблона LIKE в тексте пользователя — буквальные: «50%» ищет «50%», а не «всё, что начинается с 50».
+    private static string EscapeLike(string text) =>
+        text.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
 }

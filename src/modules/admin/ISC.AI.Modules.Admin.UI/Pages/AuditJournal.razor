@@ -1,19 +1,33 @@
 @namespace ISC.AI.Modules.Admin.UI
-@* Журнал аудита (ТБ-030/032). Журнал ПИСАЛСЯ с самого начала и защищён от изменения хеш-цепочкой,
-   но посмотреть его из интерфейса было нельзя — только запросом к БД. Экран это закрывает.
-   Страница видна всем, у кого открыт раздел: право читать журнал решает обработчик
-   (IPlatformAdministration.CanViewAuditAsync — ТБ-030/032), отказ показывается текстом. *@
+@* Журнал аудита (ТБ-030/032): неизменяемая история действий в пределах допуска смотрящего.
+   Отбор — период одной кнопкой, сотрудник по имени, действие и текст; строка открывается целиком; отбор можно
+   выгрузить в .csv (выгрузка сама пишется в журнал). Право читать журнал решает обработчик
+   (IPlatformAdministration.CanViewAuditAsync — у «Следствия» и «Инспектора» это строка матрицы доступа), отказ
+   показывается текстом. Что именно видно — решает решётка гриф/подразделение в порту журнала (ТБ-032). *@
 @page "/admin/audit"
 @rendermode InteractiveServer
-@using ISC.AI.Abstractions.Security
+@inject Microsoft.JSInterop.IJSRuntime JS
+@inject ISnackbar Snackbar
 @using System.Globalization
-@using ISC.AI.Abstractions.Application
+@using Microsoft.JSInterop
 @using ISC.AI.Abstractions.Audit
+@using ISC.AI.Abstractions.Security
 @using ISC.AI.Modules.Admin.Application.Features.Audit
 
 <PageHeader Title="Журнал аудита"
-            Subtitle="Неизменяемая история обращений и действий · смотрит администратор платформы"
-            Icon="@Icons.Material.Filled.History" />
+            Subtitle="Неизменяемая история действий · показаны записи в пределах вашего допуска"
+            Icon="@Icons.Material.Filled.History">
+    <div class="d-flex flex-column align-end">
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download"
+                   Disabled="@(_busy || _exporting || _total == 0)" OnClick="ExportAsync">
+            @(_exporting ? "Готовлю файл…" : "Выгрузить .csv")
+        </MudButton>
+        @if (!_busy && !_exporting && _total == 0 && _error is null)
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1">Нечего выгружать: по отбору нет записей</MudText>
+        }
+    </div>
+</PageHeader>
 
 @if (_error is not null)
 {
@@ -21,84 +35,99 @@
               ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
 }
 
-<MudPaper Outlined="true" Class="pa-3 mb-4">
+<MudPaper Outlined="true" Class="pa-3 mb-3">
+    <div class="d-flex gap-2 align-center flex-wrap mb-3">
+        <MudText Typo="Typo.body2" Class="mr-1">Период:</MudText>
+        @foreach (var (period, label) in Periods)
+        {
+            <MudChip T="string" Size="Size.Small" Class="ma-0"
+                     Color="@(_period == period ? Color.Primary : Color.Default)"
+                     Variant="@(_period == period ? Variant.Filled : Variant.Outlined)"
+                     OnClick="@(() => SelectPeriodAsync(period))">@label</MudChip>
+        }
+        @if (_period == Period.Custom)
+        {
+            @* Ширина календарей — ОБЁРТКОЙ, не Style: MudBlazor копирует Style пикера на раскрытый календарь. *@
+            <div style="width:160px;">
+                <MudDatePicker Date="_from" DateChanged="OnFromChangedAsync" Label="С" Variant="Variant.Outlined"
+                               Margin="Margin.Dense" DateFormat="dd.MM.yyyy" Clearable="true" />
+            </div>
+            <div style="width:160px;">
+                <MudDatePicker Date="_to" DateChanged="OnToChangedAsync" Label="По" Variant="Variant.Outlined"
+                               Margin="Margin.Dense" DateFormat="dd.MM.yyyy" Clearable="true" />
+            </div>
+        }
+    </div>
     <div class="d-flex gap-3 align-end flex-wrap">
-        @* Ширина календарей — ОБЁРТКОЙ, не Style: MudBlazor копирует Style пикера на раскрытый
-           календарь, и попап сжимался до ширины поля (дата в шапке обрезалась до года). *@
-        <div style="width:170px;">
-            <MudDatePicker @bind-Date="_from" Label="С" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy"
-                           Clearable="true" />
-        </div>
-        <div style="width:170px;">
-            <MudDatePicker @bind-Date="_to" Label="По" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy"
-                           Clearable="true" />
-        </div>
-        <MudSelect T="AuditAction?" @bind-Value="_action" Label="Действие" Variant="Variant.Outlined"
-                   Clearable="true" Style="width:200px;">
+        @* Сотрудник — по имени или имени входа, а не по номеру. Отключённые тоже здесь: их действия в журнале остаются. *@
+        <MudAutocomplete T="AuditSubject" Value="_subject" ValueChanged="OnSubjectChangedAsync" Label="Кто"
+                         Variant="Variant.Outlined" Margin="Margin.Dense" SearchFunc="SearchSubjectsAsync"
+                         ToStringFunc="@(s => s is null ? string.Empty : $"{s.Name} ({s.UserName})")"
+                         Clearable="true" ResetValueOnEmptyText="true" MaxItems="30" Placeholder="Все сотрудники"
+                         Style="min-width:280px;">
+            <ItemTemplate Context="subject">
+                <MudText Typo="Typo.body2">@subject.Name</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    @subject.UserName@(subject.IsActive ? string.Empty : " · отключён")
+                </MudText>
+            </ItemTemplate>
+        </MudAutocomplete>
+        <MudSelect T="AuditAction?" Value="_action" ValueChanged="OnActionChangedAsync" Label="Действие"
+                   Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Placeholder="Любое" Style="width:200px;">
             @foreach (var action in Enum.GetValues<AuditAction>())
             {
-                <MudSelectItem T="AuditAction?" Value="@action">@Label(action)</MudSelectItem>
+                <MudSelectItem T="AuditAction?" Value="@action">@AuditText.Label(action)</MudSelectItem>
             }
         </MudSelect>
-        <MudNumericField T="int?" @bind-Value="_subjectId" Label="Пользователь (Id)" Variant="Variant.Outlined"
-                         Clearable="true" Style="width:170px;" />
-        <MudTextField @bind-Value="_objectRef" Label="Объект содержит" Variant="Variant.Outlined"
-                      Style="min-width:220px;" Class="flex-grow-1"
+        <MudTextField T="string" @bind-Value="_text" Label="Что искать" Variant="Variant.Outlined" Margin="Margin.Dense"
+                      Placeholder="дело, фигурант, роль, номер…" Adornment="Adornment.Start"
+                      AdornmentIcon="@Icons.Material.Filled.Search" Clearable="true" Style="min-width:240px;" Class="flex-grow-1"
                       OnKeyDown="@(async e => { if (e.Key == "Enter") { await SearchAsync(); } })" />
-        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Search"
-                   OnClick="SearchAsync" Disabled="_busy">Найти</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SearchAsync" Disabled="_busy">Показать</MudButton>
     </div>
+    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+        «Что искать» ищет по сводке действия, например «дело:4», «role», «access-matrix». Нажмите на строку, чтобы открыть запись целиком.
+    </MudText>
 </MudPaper>
 
-<MudTable T="AuditRecordRow" Items="_rows" Dense="true" Hover="true" Outlined="true" Loading="_busy"
-          LoadingProgressColor="Color.Primary">
+<MudTable T="AuditJournalRow" Items="_rows" Dense="true" Hover="true" Outlined="true" Loading="_busy"
+          LoadingProgressColor="Color.Primary" OnRowClick="@(e => _selected = e.Item)" RowStyle="cursor:pointer;">
     <HeaderContent>
-        <MudTh>Время</MudTh>
+        <MudTh Style="width:150px;">Время</MudTh>
         <MudTh>Кто</MudTh>
         <MudTh>Действие</MudTh>
-        <MudTh>Объект</MudTh>
+        <MudTh>Что произошло</MudTh>
         <MudTh>Гриф</MudTh>
         <MudTh>Подразделение</MudTh>
-        <MudTh>Подробности</MudTh>
     </HeaderContent>
     <RowTemplate>
-        <MudTd DataLabel="Время">
-            @context.OccurredAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture)
-        </MudTd>
+        <MudTd DataLabel="Время">@Time(context.Record.OccurredAt)</MudTd>
         <MudTd DataLabel="Кто">
-            @* Имя берётся из реестра сейчас, а в записи хранится идентификатор: запись неизменяема
-               (ТБ-031), а человек может смениться местами или быть переименован. *@
-            @(context.SubjectName ?? (context.SubjectId is { } id
-                ? $"пользователь №{id.ToString(CultureInfo.InvariantCulture)}"
-                : "—"))
+            <MudText Typo="Typo.body2">@Who(context.Record)</MudText>
+            @if (context.SubjectLogin is { } login)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">@login</MudText>
+            }
         </MudTd>
         <MudTd DataLabel="Действие">
-            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@ActionColor(context.Action)"
-                     Class="ma-0">@Label(context.Action)</MudChip>
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@ActionColor(context.Record.Action)"
+                     Class="ma-0">@AuditText.Label(context.Record.Action)</MudChip>
         </MudTd>
-        <MudTd DataLabel="Объект" Style="max-width:280px;">
-            <MudText Typo="Typo.body2" Style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                @(context.ObjectRef ?? "—")
-            </MudText>
+        <MudTd DataLabel="Что произошло" Style="max-width:420px;">
+            <MudText Typo="Typo.body2" Style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@context.What</MudText>
+            @if (Code(context.Record) is { } raw)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary"
+                         Style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-family:monospace;">@raw</MudText>
+            }
         </MudTd>
-        <MudTd DataLabel="Гриф">
-            @ClassificationLevels.Label(context.Classification)
-        </MudTd>
-        <MudTd DataLabel="Подразделение">
-            @(context.DivisionId?.ToString(CultureInfo.InvariantCulture) ?? "—")
-        </MudTd>
-        <MudTd DataLabel="Подробности" Style="max-width:320px;">
-            <MudText Typo="Typo.body2" Class="mud-text-secondary"
-                     Style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                @(context.PayloadSensitive ?? "—")
-            </MudText>
-        </MudTd>
+        <MudTd DataLabel="Гриф">@ClassificationLevels.Label(context.Record.Classification)</MudTd>
+        <MudTd DataLabel="Подразделение">@(context.DivisionName ?? "—")</MudTd>
     </RowTemplate>
     <NoRecordsContent>
-        @* Пустая выдача НЕ утверждает отсутствия: записи могли не прийти из-за отбора, права или
-           грифа — журнал показывает только то, что в пределах допуска. *@
-        <MudText Typo="Typo.body2" Class="mud-text-secondary">
-            Записей по этому отбору нет либо они вне вашего допуска.
+        @* Пустая выдача НЕ утверждает отсутствия: записи могли не прийти из-за отбора или грифа. *@
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+            Записей по этому отбору нет либо они вне вашего допуска. Попробуйте расширить период.
         </MudText>
     </NoRecordsContent>
 </MudTable>
@@ -106,33 +135,64 @@
 @if (_total > 0)
 {
     <div class="d-flex align-center justify-space-between mt-3 flex-wrap gap-2">
-        <MudText Typo="Typo.caption" Class="mud-text-secondary">
-            Записей: @_total · страница @_page из @PageCount
-        </MudText>
-        <MudPagination Count="@PageCount" Selected="_page" SelectedChanged="GoToPageAsync"
-                       Color="Color.Primary" Size="Size.Small" />
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">Записей: @_total · страница @_page из @PageCount</MudText>
+        <MudPagination Count="@PageCount" Selected="_page" SelectedChanged="GoToPageAsync" Color="Color.Primary" Size="Size.Small" />
     </div>
 }
 
-<MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-3">
-    Показаны только записи в пределах вашего допуска: журнал не должен становиться обходным каналом
-    к тому, что скрыто грифом.
-</MudText>
+<MudDialog Visible="@(_selected is not null)" VisibleChanged="@(v => { if (!v) { _selected = null; } })"
+           Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true })">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Запись журнала № @_selected?.Record.Id.ToString(CultureInfo.InvariantCulture)</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_selected is { } row)
+        {
+            <MudSimpleTable Dense="true" Elevation="0" Bordered="false">
+                <tbody>
+                    <tr><td class="mud-text-secondary" style="width:170px;">Время</td><td>@Time(row.Record.OccurredAt)</td></tr>
+                    <tr><td class="mud-text-secondary">Кто</td><td>@Who(row.Record)@(row.SubjectLogin is { } l ? $" · {l}" : string.Empty)@(row.Record.SubjectId is { } sid ? $" · № {sid.ToString(CultureInfo.InvariantCulture)}" : string.Empty)</td></tr>
+                    <tr><td class="mud-text-secondary">Действие</td><td>@AuditText.Label(row.Record.Action)</td></tr>
+                    <tr><td class="mud-text-secondary">Что произошло</td><td>@row.What</td></tr>
+                    <tr><td class="mud-text-secondary">Сводка</td><td style="font-family:monospace;word-break:break-all;">@(row.Record.PayloadSensitive ?? "—")</td></tr>
+                    <tr><td class="mud-text-secondary">Объект</td><td style="font-family:monospace;word-break:break-all;">@(row.Record.ObjectRef ?? "—")</td></tr>
+                    <tr><td class="mud-text-secondary">Гриф</td><td>@ClassificationLevels.Label(row.Record.Classification)</td></tr>
+                    <tr><td class="mud-text-secondary">Подразделение</td><td>@(row.DivisionName ?? "—")</td></tr>
+                </tbody>
+            </MudSimpleTable>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+                Запись неизменяема: журнал защищён хеш-цепочкой, правка или удаление записи обнаруживаются проверкой.
+            </MudText>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _selected = null)">Закрыть</MudButton>
+    </DialogActions>
+</MudDialog>
 
 @code {
     private const int PageSize = 50;
 
-    private IReadOnlyList<AuditRecordRow> _rows = [];
+    private enum Period { Today, Week, Month, All, Custom }
+
+    private static readonly (Period Period, string Label)[] Periods =
+        [(Period.Today, "Сегодня"), (Period.Week, "7 дней"), (Period.Month, "30 дней"), (Period.All, "Всё время"), (Period.Custom, "Свой период")];
+
+    private IReadOnlyList<AuditJournalRow> _rows = [];
+    private IReadOnlyList<AuditSubject> _subjects = [];
     private int _total;
     private int _page = 1;
 
+    private Period _period = Period.Week;
     private DateTime? _from;
     private DateTime? _to;
-    private int? _subjectId;
+    private AuditSubject? _subject;
     private AuditAction? _action;
-    private string? _objectRef;
+    private string? _text;
 
+    private AuditJournalRow? _selected;
     private bool _busy;
+    private bool _exporting;
     private string? _error;
 
     private int PageCount => Math.Max(1, (int)Math.Ceiling(_total / (double)PageSize));
@@ -140,18 +200,44 @@
     /// <inheritdoc />
     protected override async Task OnInitializedAsync()
     {
-        // ТБ-030: Blazor выполняет инициализацию дважды (предрендер и интерактив) — без этого
-        // каждое открытие давало бы две записи в журнал. Здесь это особенно наглядно: САМ просмотр
-        // журнала — аудируемое обращение (ListAuditRecordsQuery : IAuditableRequest).
+        // ТБ-030: инициализация идёт дважды (предрендер и интерактив) — иначе каждое открытие давало бы две записи
+        // о просмотре журнала (ListAuditRecordsQuery сам аудируется).
         if (!RendererInfo.IsInteractive) { return; }
+
+        if (await Dispatcher.Send(new ListAuditSubjectsQuery()) is { Status: true, Data: { } subjects })
+        {
+            _subjects = subjects;
+        }
 
         await LoadAsync();
     }
 
+    private Task<IEnumerable<AuditSubject>> SearchSubjectsAsync(string? text, CancellationToken cancellationToken)
+    {
+        IEnumerable<AuditSubject> found = string.IsNullOrWhiteSpace(text)
+            ? _subjects
+            : _subjects.Where(s => s.Name.Contains(text.Trim(), StringComparison.CurrentCultureIgnoreCase)
+                || s.UserName.Contains(text.Trim(), StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(found);
+    }
+
+    private Task SelectPeriodAsync(Period period)
+    {
+        _period = period;
+        return period == Period.Custom ? Task.CompletedTask : SearchAsync();
+    }
+
+    private Task OnFromChangedAsync(DateTime? value) { _from = value; return SearchAsync(); }
+
+    private Task OnToChangedAsync(DateTime? value) { _to = value; return SearchAsync(); }
+
+    private Task OnSubjectChangedAsync(AuditSubject? value) { _subject = value; return SearchAsync(); }
+
+    private Task OnActionChangedAsync(AuditAction? value) { _action = value; return SearchAsync(); }
+
     private Task SearchAsync()
     {
-        // Новый отбор всегда начинается с первой страницы: иначе после сужения фильтра пользователь
-        // остаётся на несуществующей странице и видит пустоту вместо результатов.
+        // Новый отбор — с первой страницы: иначе после сужения можно остаться на несуществующей странице.
         _page = 1;
         return LoadAsync();
     }
@@ -162,40 +248,42 @@
         return LoadAsync();
     }
 
+    // Период — в местном времени пользователя; конец дня включительно: «по 07.08» включает весь день.
+    private AuditFilter BuildFilter()
+    {
+        var today = DateTime.Now.Date;
+        var (from, to) = _period switch
+        {
+            Period.Today => (today, (DateTime?)null),
+            Period.Week => (today.AddDays(-6), null),
+            Period.Month => (today.AddDays(-29), null),
+            Period.Custom => (_from?.Date, _to?.Date.AddDays(1).AddTicks(-1)),
+            _ => ((DateTime?)null, (DateTime?)null),
+        };
+
+        return new AuditFilter(
+            from?.ToUniversalTime(), to?.ToUniversalTime(), _subject?.UserId, _action,
+            string.IsNullOrWhiteSpace(_text) ? null : _text.Trim(), _page, PageSize);
+    }
+
     private async Task LoadAsync()
     {
         _busy = true;
         _error = null;
         try
         {
-            // Конец периода — включительно по ДЕНЬ: пользователь выбирает дату, а не момент времени,
-            // и «по 07.08» обязано включать события этого дня целиком.
-            var to = _to?.Date.AddDays(1).AddTicks(-1);
-
-            var response = await Dispatcher.Send(new ListAuditRecordsQuery(new AuditFilter(
-                _from?.Date.ToUniversalTime(),
-                to?.ToUniversalTime(),
-                _subjectId,
-                _action,
-                _objectRef,
-                _page,
-                PageSize)));
-
-            if (!response.Status || response.Data is null)
+            var response = await Dispatcher.Send(new ListAuditRecordsQuery(BuildFilter()));
+            if (response is not { Status: true, Data: { } data })
             {
-                // Отказ (нет права читать журнал либо нет действующего допуска) показываем текстом.
+                // Отказ (нет права читать журнал либо нет действующего допуска) — текстом.
                 _error = response.StatusMessage;
                 _rows = [];
                 _total = 0;
                 return;
             }
 
-            _rows = response.Data.Rows;
-            _total = response.Data.TotalCount;
-        }
-        catch (Exception exception)
-        {
-            _error = exception.Message;
+            _rows = data.Rows;
+            _total = data.TotalCount;
         }
         finally
         {
@@ -203,19 +291,43 @@
         }
     }
 
-    private static string Label(AuditAction action) => action switch
+    private async Task ExportAsync()
     {
-        AuditAction.Login => "Вход",
-        AuditAction.View => "Просмотр",
-        AuditAction.Search => "Поиск",
-        AuditAction.Generate => "Генерация",
-        AuditAction.Export => "Выгрузка",
-        AuditAction.Print => "Печать",
-        AuditAction.Ingest => "Загрузка в корпус",
-        AuditAction.Purge => "Удаление из корпуса",
-        AuditAction.Modify => "Изменение",
-        _ => action.ToString(),
-    };
+        _exporting = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new ExportAuditJournalQuery(BuildFilter()));
+            if (response is not { Status: true, Data: { } file })
+            {
+                _error = response.StatusMessage;
+                return;
+            }
+
+            using var stream = new DotNetStreamReference(new MemoryStream(file.Content));
+            await JS.InvokeVoidAsync("downloadFileFromStream", file.FileName, stream);
+            Snackbar.Add(file.Truncated
+                    ? $"Выгружены последние {file.RowCount} записей — это предел одного файла. Сузьте период, чтобы выгрузить остальные."
+                    : $"Выгружено записей: {file.RowCount}.",
+                file.Truncated ? Severity.Warning : Severity.Success);
+        }
+        catch (Microsoft.JSInterop.JSException exception)
+        {
+            _error = "Браузер не сохранил файл: " + exception.Message;
+        }
+        finally
+        {
+            _exporting = false;
+        }
+    }
+
+    private static string Time(DateTime utc) => utc.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture);
+
+    // Имя берётся из реестра сейчас, а в записи хранится идентификатор (запись неизменяема, ТБ-031).
+    private static string Who(AuditRecordRow record) =>
+        record.SubjectName ?? (record.SubjectId is { } id ? $"пользователь № {id.ToString(CultureInfo.InvariantCulture)}" : "система");
+
+    private static string? Code(AuditRecordRow record) => record.PayloadSensitive ?? record.ObjectRef;
 
     private static Color ActionColor(AuditAction action) => action switch
     {

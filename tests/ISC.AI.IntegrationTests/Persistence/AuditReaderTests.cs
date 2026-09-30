@@ -82,6 +82,27 @@ public sealed class AuditReaderTests : IAsyncLifetime
         byObject.TotalCount.ShouldBe(2);
     }
 
+    [Fact(DisplayName = "Поиск находит сводку сценария (PayloadSensitive), а % и _ в запросе — буквальные символы")]
+    public async Task Text_search_covers_payload_and_escapes_wildcards()
+    {
+        var (writer, reader) = await BuildAsync();
+        var access = new AccessContext("42", 9, [5]);
+
+        // Так пишет AuditBehavior: ObjectRef пуст, описание действия — в сводке.
+        await writer.WriteAsync(new AuditEntry(AuditAction.Modify, 0, 7, PayloadSensitive: "admin:role:5:Verifier"));
+        await writer.WriteAsync(new AuditEntry(AuditAction.Modify, 0, 7, PayloadSensitive: "admin:clearance:5:set"));
+        await writer.WriteAsync(new AuditEntry(AuditAction.View, 0, 7, PayloadSensitive: "load 50% done"));
+        await writer.WriteAsync(new AuditEntry(AuditAction.View, 0, 7, PayloadSensitive: "load 500 done"));
+
+        (await reader.QueryAsync(new AuditFilter(ObjectRef: "admin:role:5:"), access)).Rows
+            .ShouldHaveSingleItem().PayloadSensitive.ShouldBe("admin:role:5:Verifier");
+        (await reader.QueryAsync(new AuditFilter(ObjectRef: "ADMIN:"), access)).TotalCount.ShouldBe(2);
+
+        // «50%» ищет именно «50%», а не «всё, что начинается с 50».
+        (await reader.QueryAsync(new AuditFilter(ObjectRef: "50%"), access)).Rows
+            .ShouldHaveSingleItem().PayloadSensitive.ShouldBe("load 50% done");
+    }
+
     [Fact(DisplayName = "Журнал отдаётся страницами, новые записи первыми")]
     public async Task Reader_pages_newest_first()
     {

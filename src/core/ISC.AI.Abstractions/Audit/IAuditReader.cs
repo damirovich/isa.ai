@@ -7,7 +7,10 @@ namespace ISC.AI.Abstractions.Audit;
 /// <param name="To">Конец периода (UTC, включительно); <see langword="null"/> — без верхней границы.</param>
 /// <param name="SubjectId">Субъект действия; <see langword="null"/> — любой.</param>
 /// <param name="Action">Тип действия; <see langword="null"/> — любой.</param>
-/// <param name="ObjectRef">Подстрока идентификатора объекта; <see langword="null"/> — любой.</param>
+/// <param name="ObjectRef">
+/// Подстрока, которая ищется в ссылке на объект И в сводке действия (<see cref="AuditRecordRow.PayloadSensitive"/>) —
+/// сценарии пишут своё описание именно в сводку; без учёта регистра, символы % и _ буквальные. <see langword="null"/> — любой.
+/// </param>
 /// <param name="Page">Номер страницы, с 1.</param>
 /// <param name="PageSize">Размер страницы.</param>
 public sealed record AuditFilter(

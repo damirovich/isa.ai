@@ -18,7 +18,7 @@ namespace ISC.AI.Modules.Admin.Application.Features.Audit;
 /// и подразделению.
 /// </remarks>
 public sealed record ListAuditRecordsQuery(AuditFilter Filter)
-    : IRequest<ResponseDto<AuditPage>>, IAuditableRequest
+    : IRequest<ResponseDto<AuditJournalPage>>, IAuditableRequest
 {
     /// <inheritdoc />
     /// <remarks>
@@ -35,11 +35,13 @@ public sealed record ListAuditRecordsQuery(AuditFilter Filter)
     public sealed class Handler(
         IAuditReader reader,
         IAccessContextProvider accessProvider,
-        IPlatformAdministration administration)
-        : IRequestHandler<ListAuditRecordsQuery, ResponseDto<AuditPage>>
+        IPlatformAdministration administration,
+        IUserAccountStore accounts,
+        IDivisionCatalog divisions)
+        : IRequestHandler<ListAuditRecordsQuery, ResponseDto<AuditJournalPage>>
     {
         /// <inheritdoc />
-        public async ValueTask<ResponseDto<AuditPage>> Handle(
+        public async ValueTask<ResponseDto<AuditJournalPage>> Handle(
             ListAuditRecordsQuery query, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(query);
@@ -48,7 +50,7 @@ public sealed record ListAuditRecordsQuery(AuditFilter Filter)
             // и знает его профиль. Пакет о ролях не догадывается.
             if (!await administration.CanViewAuditAsync(cancellationToken))
             {
-                return ResponseDto<AuditPage>.BadRequest(AdminGuard.AuditDenied);
+                return ResponseDto<AuditJournalPage>.BadRequest(AdminGuard.AuditDenied);
             }
 
             try
@@ -57,8 +59,10 @@ public sealed record ListAuditRecordsQuery(AuditFilter Filter)
                 // (ТБ-032). Право даёт ОТКРЫТЬ журнал, а не видеть в нём всё.
                 var access = await accessProvider.GetCurrentAsync(cancellationToken);
                 var page = await reader.QueryAsync(query.Filter, access, cancellationToken);
+                var names = await AuditJournal.LoadNamesAsync(accounts, divisions, cancellationToken);
+                var journal = new AuditJournalPage([.. page.Rows.Select(names.ToJournalRow)], page.TotalCount);
 
-                return ResponseDto<AuditPage>.Ok(page, page.TotalCount);
+                return ResponseDto<AuditJournalPage>.Ok(journal, journal.TotalCount);
             }
             catch (AccessContextRequiredException)
             {
@@ -67,7 +71,7 @@ public sealed record ListAuditRecordsQuery(AuditFilter Filter)
                 // штатное состояние (допуска нет ни у кого), и необработанное исключение роняло бы
                 // страницу с 500 вместо объяснения. Ослабления режима здесь нет: записей не выдано
                 // ни одной, изменился только текст отказа.
-                return ResponseDto<AuditPage>.BadRequest(AdminGuard.AuditClearanceRequired);
+                return ResponseDto<AuditJournalPage>.BadRequest(AdminGuard.AuditClearanceRequired);
             }
         }
     }
