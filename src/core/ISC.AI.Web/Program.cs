@@ -25,6 +25,7 @@ using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Configuration.Json;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using MudBlazor.Services;
 using Serilog;
 using Serilog.Events;
@@ -140,6 +141,11 @@ try
     {
         contributor.Register(builder.Services, builder.Configuration);
     }
+
+    // Видимость разделов меню по роли (ТС-007, ТП-004): профиль с ролями регистрирует свой порт выше —
+    // TryAdd не перекрывает его; профиль без ролей получает «все разделы видны».
+    builder.Services.TryAddScoped<ISC.AI.Abstractions.Modules.IModuleVisibility, ISC.AI.Web.Common.AllModulesVisible>();
+    builder.Services.AddScoped<ISC.AI.Web.Common.ModuleAccess>();
 
     // --- Аутентификация и авторизация (Э3-08, ТБ-010..016) — последний шаг композиции (ТО-прог-05). ---
     // Auth:Mode=Dev (только Development) — dev-заглушка без входа, чтобы каркас был запускаем без
