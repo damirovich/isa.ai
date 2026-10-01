@@ -270,6 +270,35 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
         return Render<ISC.AI.Modules.Media.UI.AssetCard>(p => p.Add(x => x.Id, 5));
     }
 
+    [Fact(DisplayName = "Видео: лица собраны в карточки по трекам — отрезок, число кадров, лучшее лицо; кадры трека — по раскрытию (ADR-0037)")]
+    public void Video_faces_are_grouped_into_track_cards()
+    {
+        SetupTranscript(Transcript(TranscriptStatus.NotApplicable));
+        var cut = RenderCard(Asset(MediaKind.Video, "video/x-matroska", frameRate: 25),
+        [
+            TrackFace(11, 1_000, track: 1, quality: 0.7f),
+            TrackFace(12, 2_000, track: 1, quality: 0.9f),
+            TrackFace(13, 3_000, track: 1, quality: 0.8f),
+            TrackFace(14, 2_000, track: 2, quality: 0.9f),
+        ]);
+
+        cut.Markup.ShouldContain("Лица на носителе: 4 · треков: 2");
+        cut.Markup.ShouldContain("Трек 1");
+        cut.Markup.ShouldContain("Трек 2");
+        cut.Markup.ShouldContain("0:01.0 – 0:03.0");
+        cut.Markup.ShouldContain("3 кадра · лучшее лицо № 12");
+        cut.Markup.ShouldNotContain("ещё не связаны в треки");
+
+        // Кадры трека скрыты, пока не раскрыты; раскрытие показывает каждый кадр с переходом к нему.
+        cut.FindAll("button").Count(b => b.TextContent.Trim() == "0:03.0").ShouldBe(0);
+        cut.FindAll("button").First(b => b.TextContent.Contains("Показать кадры (3)")).Click();
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "0:03.0").Click();
+        FrameSrc(cut).ShouldBe("/media/frames/5?t=3000");
+    }
+
+    private static FaceRow TrackFace(int id, long timestampMs, int track, float quality) =>
+        new(id, 5, (int)(timestampMs / 40), timestampMs, 10, 10, 50, 50, 0.9f, quality, true, null, null, track, 0, 1);
+
     private static FaceRow VideoFace(int id, long timestampMs) =>
         new(id, 5, 1, timestampMs, 10, 10, 50, 50, 0.9f, 0.8f, true, null, null, null, 0, 1);
 
