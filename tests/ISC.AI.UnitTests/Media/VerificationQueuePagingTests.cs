@@ -122,7 +122,8 @@ public sealed class VerificationQueuePagingTests
 
     private static ListVerificationQueueQuery Query(VerificationQueueFilter filter) => new(VerificationStage.Expert, 1, 14, filter);
 
-    private ListVerificationQueueQuery.Handler Handler() => new(_subjects, _policy, _access, _caseScope, _store);
+    private ListVerificationQueueQuery.Handler Handler() =>
+        new(_subjects, _policy, _access, _caseScope, _store, new MaterialContextReader(Substitute.For<IMediaCatalog>(), _caseScope));
 
     private static SearchCandidateRow Candidate(int id) =>
         new(Id: id, SessionId: 5, CaseId: 3, Rank: id, FaceId: 100 + id, AssetId: 50, FrameIndex: null, FrameTimestampMs: null,

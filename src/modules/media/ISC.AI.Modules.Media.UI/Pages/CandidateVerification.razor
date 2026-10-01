@@ -59,6 +59,13 @@ else
             <MudText Typo="Typo.caption" Class="mud-text-secondary">ранг @item.Rank</MudText>
             <MudText Typo="Typo.caption" Class="mud-text-secondary">носитель <MudLink Href="@($"/media/assets/{item.AssetId}?face={item.FaceId}")" Typo="Typo.caption">№ @item.AssetId</MudLink>@(item.FrameTimestampMs is { } ms ? $" · кадр {MediaLabels.Timecode(ms)}" : string.Empty)</MudText>
         </div>
+        @if (item.Material is { } material)
+        {
+            @* ТФ-ПЛ-02: когда, откуда и где снят материал кандидата. *@
+            <div class="d-flex justify-center mt-1">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Event">@material.MaterialLine(withTime: true)</MudChip>
+            </div>
+        }
     </MudPaper>
 
     @if (_review is { } review)

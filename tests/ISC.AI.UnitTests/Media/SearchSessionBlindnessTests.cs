@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.Media.Application.Features.Search;
 using ISC.AI.Modules.Media.Domain.Model;
+using ISC.AI.Modules.Media.Application.Features.Verification;
 using ISC.AI.Modules.Media.Domain.Services;
 using NSubstitute;
 using Shouldly;
@@ -96,7 +97,7 @@ public sealed class SearchSessionBlindnessTests
         var caseScope = Substitute.For<ICaseScope>();
         caseScope.GetCaseAsync(1, access, Arg.Any<CancellationToken>()).Returns(new CaseScopeItem(1, "№ 1", "Дело", 1, 1));
 
-        var response = await new GetSearchSessionQuery.Handler(accessProvider, subjects, store, caseScope)
+        var response = await new GetSearchSessionQuery.Handler(accessProvider, subjects, store, caseScope, new MaterialContextReader(Substitute.For<IMediaCatalog>(), caseScope))
             .Handle(new GetSearchSessionQuery(5), CancellationToken.None);
 
         response.Status.ShouldBeTrue();
@@ -108,7 +109,7 @@ public sealed class SearchSessionBlindnessTests
         // ТБ-071 / ТФ-ПЛ-07: сессия дела, недоступного субъекту по роли/владению, — «не найдена», кандидаты не читаются.
         caseScope.GetCaseAsync(1, access, Arg.Any<CancellationToken>()).Returns((CaseScopeItem?)null);
         store.ClearReceivedCalls();
-        var denied = await new GetSearchSessionQuery.Handler(accessProvider, subjects, store, caseScope)
+        var denied = await new GetSearchSessionQuery.Handler(accessProvider, subjects, store, caseScope, new MaterialContextReader(Substitute.For<IMediaCatalog>(), caseScope))
             .Handle(new GetSearchSessionQuery(5), CancellationToken.None);
         denied.StatusCode.ShouldBe(Abstractions.Application.ResponseStatusCode.NotFound);
         await store.DidNotReceive().ListCandidatesAsync(Arg.Any<int>(), Arg.Any<AccessContext>(), Arg.Any<CancellationToken>());

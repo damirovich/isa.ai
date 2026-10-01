@@ -135,6 +135,11 @@ else
                 {
                     <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">кадр @MediaLabels.Timecode(ms)</MudText>
                 }
+                @if (_details.Materials?.GetValueOrDefault(context.AssetId) is { } material)
+                {
+                    @* ТФ-ПЛ-02: когда, откуда и где снят материал кандидата. *@
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block" Style="max-width:240px;">@material.MaterialLine()</MudText>
+                }
             </MudTd>
             <MudTd DataLabel="Гриф"><ClassificationChip Classification="@context.Classification" /></MudTd>
             <MudTd>

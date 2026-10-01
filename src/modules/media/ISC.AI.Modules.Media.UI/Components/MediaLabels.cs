@@ -128,6 +128,34 @@ public static class MediaLabels
         _ => scope.ToString(),
     };
 
+    /// <summary>
+    /// Строка о материале кандидата (ТФ-ПЛ-02): «снято 08.12.2022 · Материалы ОРМ · г. Бишкек»; без времени съёмки —
+    /// «загружено …» (время съёмки не выдумывается). Местное время сотрудника; <paramref name="withTime"/> — с часами.
+    /// </summary>
+    public static string MaterialLine(this MaterialContext material, bool withTime = false)
+    {
+        ArgumentNullException.ThrowIfNull(material);
+
+        var format = withTime ? "dd.MM.yyyy HH:mm" : "dd.MM.yyyy";
+        var parts = new List<string>(3)
+        {
+            material.CapturedAt is { } captured
+                ? "снято " + captured.ToLocalTime().ToString(format, CultureInfo.InvariantCulture)
+                : "загружено " + DateTime.SpecifyKind(material.UploadedAtUtc, DateTimeKind.Utc).ToLocalTime().ToString(format, CultureInfo.InvariantCulture),
+        };
+        if (!string.IsNullOrWhiteSpace(material.Source))
+        {
+            parts.Add(material.Source.Trim());
+        }
+
+        if (!string.IsNullOrWhiteSpace(material.Place))
+        {
+            parts.Add(material.Place.Trim());
+        }
+
+        return string.Join(" · ", parts);
+    }
+
     /// <summary>Таймкод кадра видео «м:сс.д» из миллисекунд.</summary>
     public static string Timecode(long milliseconds)
     {

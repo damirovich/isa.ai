@@ -28,7 +28,8 @@ public sealed record GetCandidatePairQuery(int CandidateId, VerificationStage St
         ISubjectProvider subjectProvider,
         IVerificationPolicy policy,
         IAccessContextProvider accessProvider,
-        ISearchSessionStore store)
+        ISearchSessionStore store,
+        IMaterialContextReader materials)
         : IRequestHandler<GetCandidatePairQuery, ResponseDto<VerificationQueueItem>>
     {
         /// <inheritdoc />
@@ -64,7 +65,11 @@ public sealed record GetCandidatePairQuery(int CandidateId, VerificationStage St
                 return ResponseDto<VerificationQueueItem>.NotFound("Кандидат не найден или недоступен.");
             }
 
-            return ResponseDto<VerificationQueueItem>.Ok(VerificationQueueItem.From(candidate, session, subjectId, query.Stage));
+            // ТФ-ПЛ-02: когда, откуда и где снят материал кандидата.
+            var item = VerificationQueueItem.From(candidate, session, subjectId, query.Stage);
+            var context = await materials.ReadAsync([candidate.AssetId], access, cancellationToken);
+            return ResponseDto<VerificationQueueItem>.Ok(
+                context.TryGetValue(candidate.AssetId, out var material) ? item with { Material = material } : item);
         }
     }
 }

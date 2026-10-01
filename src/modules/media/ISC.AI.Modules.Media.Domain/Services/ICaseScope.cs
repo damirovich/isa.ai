@@ -124,6 +124,14 @@ public interface ICaseScope
     Task<bool> IsAssetAccessibleAsync(int assetId, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Место съёмки носителей (ТФ-ПЛ-02) — из привязки носителя к делу, только по делам, ДОСТУПНЫМ субъекту (роль и
+    /// floor ядра, ТБ-012/021/071). Носитель без места или без доступной привязки в ответ не попадает; при нескольких
+    /// привязках — место первой (по порядку привязки).
+    /// </summary>
+    Task<IReadOnlyDictionary<int, string>> ListAssetPlacesAsync(
+        IReadOnlyCollection<int> assetIds, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Можно ли СТРОИТЬ биометрию по этому носителю: <see langword="false"/>, если дело носителя закрыто
     /// и его шаблоны уже удалены регламентом (ТБ-074, ТФ-ДЕЛ-04, ADR-0024).
     /// </summary>
