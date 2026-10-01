@@ -45,7 +45,9 @@ public sealed record GetCandidatePairQuery(int CandidateId, VerificationStage St
 
             if (!await policy.CanActAsync(query.Stage, subjectId, cancellationToken))
             {
-                return ResponseDto<VerificationQueueItem>.BadRequest("Карточка пары доступна только ролям Эксперт/Верификатор.");
+                return ResponseDto<VerificationQueueItem>.BadRequest(query.Stage == VerificationStage.Supervisor
+                    ? VerificationMessages.SupervisorDenied
+                    : "Карточка пары доступна только ролям Эксперт/Верификатор.");
             }
 
             // Fail-closed (ТБ-020/021): кандидат и сессия — под решёткой дела.

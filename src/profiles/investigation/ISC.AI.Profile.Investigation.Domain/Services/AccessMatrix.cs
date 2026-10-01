@@ -95,6 +95,9 @@ public static class InvestigationPermissions
     /// <summary>Верификация — вторая подпись (стадия верификатора).</summary>
     public const string VerificationVerifier = "verification.verifier";
 
+    /// <summary>Верификация — итог руководителя при расхождении эксперта и верификатора (ТФ-ВЕР-02, ADR-0036).</summary>
+    public const string VerificationResolve = "verification.resolve";
+
     /// <summary>Отзыв ошибочного появления (ADR-0034).</summary>
     public const string VerificationRevoke = "verification.revoke";
 
@@ -154,6 +157,9 @@ public static class InvestigationPermissions
         new(VerificationVerifier, PermissionSection.Media, "Верификация — вторая подпись",
             "Вслепую, другим сотрудником: один человек обе подписи не ставит",
             Roles(InvestigationRole.Verifier, InvestigationRole.Administrator)),
+        new(VerificationResolve, PermissionSection.Media, "Верификация — решение при расхождении",
+            "Итог по кандидату, где эксперт и верификатор разошлись; подтвердить — только если один из них подтвердил",
+            Roles(InvestigationRole.Head, InvestigationRole.Administrator)),
         new(VerificationRevoke, PermissionSection.Media, "Отзыв ошибочного появления",
             "С причиной; отзывает не тот, кто подтверждал. Пересечения пересчитываются",
             Roles(InvestigationRole.Head, InvestigationRole.Administrator)),
@@ -198,7 +204,7 @@ public static class InvestigationPermissions
         new("dashboard", "Дашборд", [CasesView]),
         new("cases", "Дела", [CasesView]),
         new("media-search", "Поиск по лицу", [MediaSearch]),
-        new("media-verification", "Верификация", [VerificationExpert, VerificationVerifier]),
+        new("media-verification", "Верификация", [VerificationExpert, VerificationVerifier, VerificationResolve]),
         new("docflow-documents", "Документы", [DocFlowView]),
         new("docflow-reports", "Отчёты", [DocFlowView]),
         new("docflow-types", "Типы документов", [DocFlowSettings]),

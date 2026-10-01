@@ -4,7 +4,9 @@
    Стадия — из query (по умолчанию эксперт). На стадии ЭКСПЕРТА можно привязать фигуранта дела;
    на стадии ВЕРИФИКАТОРА фигурант НЕ показывается и НЕ спрашивается — слепота второй проверки
    (ТФ-ВЕР-02): верификатор судит по изображениям, а не по выводу эксперта. После двух «подтверждён»
-   разных сотрудников — не «установлен», а «следственная версия» (ТЭ-005, TwoPersonRule). *@
+   разных сотрудников — не «установлен», а «следственная версия» (ТЭ-005, TwoPersonRule).
+   Стадия РУКОВОДИТЕЛЯ (ТФ-ВЕР-02, ADR-0036) — итог по расхождению: видны оба решения с обоснованиями и привязанный
+   фигурант; выбор — только «подтверждён» (если кто-то из двоих подтвердил, ТБ-073) или «отклонён». *@
 @page "/media/verification/{CandidateId:int}"
 @rendermode InteractiveServer
 @using ISC.AI.Modules.Media.Application.Features.Scope
@@ -59,6 +61,31 @@ else
         </div>
     </MudPaper>
 
+    @if (_review is { } review)
+    {
+        @* Только руководителю (ТФ-ВЕР-02): оба решения, из-за расхождения которых кандидат попал к нему. *@
+        <MudPaper Outlined="true" Class="pa-4 my-4">
+            <MudText Typo="Typo.subtitle1" Class="mb-2">Решения сотрудников</MudText>
+            @foreach (var decision in review.Decisions)
+            {
+                <div class="d-flex align-start gap-3 py-2 flex-wrap">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@VerdictColor(decision.Verdict)">
+                        @decision.Stage.Label(): @decision.Verdict.Label()
+                    </MudChip>
+                    <div style="flex:1 1 320px;min-width:0;">
+                        <MudText Typo="Typo.body2">@decision.Rationale</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            сотрудник № @decision.SubjectId · @decision.DecidedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                        </MudText>
+                    </div>
+                </div>
+            }
+            <MudText Typo="Typo.body2" Class="mt-1">
+                Привязанный фигурант: <b>@(review.LinkedPersonRef is { } linked ? PersonName(linked) : "не привязан")</b>
+            </MudText>
+        </MudPaper>
+    }
+
     @if (_recordedStatus is { } recorded)
     {
         <MudAlert Severity="@(recorded == CandidateStatus.Confirmed ? Severity.Success : Severity.Info)" Variant="Variant.Outlined" Class="my-3">
@@ -75,7 +102,16 @@ else
         <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="my-3">
             Ваше решение по этому кандидату уже записано: <b>@own.Verdict.Label()</b>
             (@own.DecidedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")). Обоснование: @own.Rationale
+            @if (Stage == VerificationStage.Supervisor && own.Stage != VerificationStage.Supervisor)
+            {
+                @* ТБ-073: итог по расхождению — третье лицо; эксперт или верификатор этого кандидата его не выносит. *@
+                <span> Вы уже решали как @own.Stage.Label() — итог по расхождению выносит другой руководитель (ТБ-073).</span>
+            }
         </MudAlert>
+    }
+    else if (Stage == VerificationStage.Supervisor && _review is null)
+    {
+        @* Без решений сотрудников итог не выносится; причина — в сообщении об ошибке выше. *@
     }
     else
     {
@@ -86,15 +122,26 @@ else
                 <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_formError</MudAlert>
             }
             <MudRadioGroup T="VerificationVerdict?" @bind-Value="_verdict">
-                <MudRadio T="VerificationVerdict?" Value="VerificationVerdict.Confirmed" Color="Color.Success">подтверждён</MudRadio>
+                <MudRadio T="VerificationVerdict?" Value="VerificationVerdict.Confirmed" Color="Color.Success" Disabled="@SupervisorCannotConfirm">подтверждён</MudRadio>
                 <MudRadio T="VerificationVerdict?" Value="VerificationVerdict.Rejected" Color="Color.Error">отклонён</MudRadio>
-                <MudRadio T="VerificationVerdict?" Value="VerificationVerdict.Undetermined" Color="Color.Warning">неопределённо</MudRadio>
+                @if (Stage != VerificationStage.Supervisor)
+                {
+                    @* Руководитель снимает неопределённость, а не оставляет её (ADR-0036). *@
+                    <MudRadio T="VerificationVerdict?" Value="VerificationVerdict.Undetermined" Color="Color.Warning">неопределённо</MudRadio>
+                }
             </MudRadioGroup>
+            @if (SupervisorCannotConfirm)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block">
+                    Подтвердить нельзя: ни эксперт, ни верификатор не сказал «подтверждён», а статус требует двух положительных
+                    решений разных сотрудников (ТБ-073). Возможен только «отклонён».
+                </MudText>
+            }
             <MudTextField @bind-Value="_rationale" Label="Обоснование *" Variant="Variant.Outlined" Immediate="true" Lines="5" MaxLength="@RecordVerificationValidator.MaxRationaleLength" Class="mt-2"
                           HelperText="морфологические признаки по методике: форма лица, надбровные дуги, нос, уши, особые приметы; какие признаки сходны, какие различаются" />
-            @if (Stage == VerificationStage.Expert)
+            @if (Stage is VerificationStage.Expert or VerificationStage.Supervisor)
             {
-                @* Только эксперту (ТФ-ВЕР-03); верификатору фигурант не показывается — слепота (ТФ-ВЕР-02).
+                @* Эксперту (ТФ-ВЕР-03) и руководителю; верификатору фигурант не показывается — слепота (ТФ-ВЕР-02).
                    При исходе «подтверждён» фигурант ОБЯЗАТЕЛЕН (валидатор команды требует то же) — иначе после
                    второго «подтверждён» статус был бы без «появления». *@
                 <MudSelect T="int?" @bind-Value="_personRef" Label="Фигурант дела (обязателен при «подтверждён»)" Variant="Variant.Outlined" Dense="true"
@@ -125,7 +172,8 @@ else
                 @if (_persons.Count == 0)
                 {
                     <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
-                        Фигурантов у дела нет либо они вне вашего допуска: «подтверждён» записать нельзя (ТФ-ВЕР-03), «отклонён»/«неопределённо» — можно.
+                        Фигурантов у дела нет либо они вне вашего допуска: «подтверждён» записать нельзя (ТФ-ВЕР-03),
+                        @(Stage == VerificationStage.Supervisor ? "«отклонён» — можно." : "«отклонён»/«неопределённо» — можно.")
                     </MudText>
                 }
             }
@@ -150,7 +198,7 @@ else
     /// <summary>Кандидат из маршрута.</summary>
     [Parameter] public int CandidateId { get; set; }
 
-    /// <summary>Стадия из адресной строки (<c>Expert</c>/<c>Verifier</c>); по умолчанию — эксперт.</summary>
+    /// <summary>Стадия из адресной строки (<c>Expert</c>/<c>Verifier</c>/<c>Supervisor</c>); по умолчанию — эксперт.</summary>
     [SupplyParameterFromQuery(Name = "stage")] public string? StageQuery { get; set; }
 
     /// <summary>
@@ -169,6 +217,9 @@ else
         Enum.TryParse<VerificationStage>(StageQuery, ignoreCase: true, out var stage) ? stage : VerificationStage.Expert;
 
     private VerificationQueueItem? _item;
+
+    /// <summary>Решения сотрудников — только руководителю и только отдельным запросом (ТФ-ВЕР-02, ADR-0036).</summary>
+    private SupervisorReview? _review;
     private IReadOnlyList<CasePersonItem> _persons = [];
     private VerificationVerdict? _verdict;
     private string? _rationale;
@@ -180,16 +231,41 @@ else
 
     /// <summary>ТФ-ВЕР-03: эксперт при «подтверждён» обязан указать фигуранта — проверяем на клиенте и объясняем причину.</summary>
     private bool PersonMissingForConfirm =>
-        Stage == VerificationStage.Expert && _verdict == VerificationVerdict.Confirmed && _personRef is null;
+        Stage is VerificationStage.Expert or VerificationStage.Supervisor
+        && _verdict == VerificationVerdict.Confirmed && _personRef is null;
 
-    private bool FormValid => FormHint is null && !PersonMissingForConfirm;
+    /// <summary>
+    /// ТБ-073, ADR-0036: руководитель подтверждает только вместе с положительным решением эксперта или верификатора.
+    /// Форма показывается, лишь когда своего решения по кандидату у руководителя нет, — значит, любое «подтверждён» в
+    /// списке принадлежит другому сотруднику. Сервер проверяет то же правило.
+    /// </summary>
+    private bool SupervisorCannotConfirm =>
+        Stage == VerificationStage.Supervisor
+        && _review is { } review
+        && !review.Decisions.Any(d => d.Stage != VerificationStage.Supervisor && d.Verdict == VerificationVerdict.Confirmed);
+
+    private bool FormValid => FormHint is null && !PersonMissingForConfirm
+        && !(SupervisorCannotConfirm && _verdict == VerificationVerdict.Confirmed);
 
     // Чего не хватает для «Записать решение» (кроме фигуранта — для него отдельное сообщение ниже).
     private string? FormHint =>
         _verdict is null && string.IsNullOrWhiteSpace(_rationale) ? "Выберите решение и заполните обоснование"
-        : _verdict is null ? "Выберите решение: подтверждён, отклонён или неопределённо"
+        : _verdict is null ? (Stage == VerificationStage.Supervisor
+            ? "Выберите итог: подтверждён или отклонён"
+            : "Выберите решение: подтверждён, отклонён или неопределённо")
         : string.IsNullOrWhiteSpace(_rationale) ? "Заполните обоснование"
         : null;
+
+    private static Color VerdictColor(VerificationVerdict verdict) => verdict switch
+    {
+        VerificationVerdict.Confirmed => Color.Success,
+        VerificationVerdict.Rejected => Color.Error,
+        _ => Color.Warning,
+    };
+
+    /// <summary>Имя фигуранта из списка дела; нет в списке (вне допуска) — номер.</summary>
+    private string PersonName(int personId) =>
+        _persons.FirstOrDefault(p => p.PersonId == personId)?.DisplayName ?? $"№ {personId}";
 
     protected override async Task OnInitializedAsync()
     {
@@ -206,8 +282,23 @@ else
 
         _item = item;
 
-        // Фигуранты — ТОЛЬКО для стадии эксперта: верификатор о привязке не знает (ТФ-ВЕР-02).
-        if (Stage == VerificationStage.Expert && item.OwnDecision is null)
+        // Руководителю — решения эксперта и верификатора: без них итог по расхождению не вынести.
+        if (Stage == VerificationStage.Supervisor)
+        {
+            var review = await Dispatcher.Send(new GetSupervisorReviewQuery(CandidateId));
+            if (review is { Status: true, Data: { } data })
+            {
+                _review = data;
+            }
+            else
+            {
+                _error = review.StatusMessage;
+            }
+        }
+
+        // Фигуранты — эксперту и руководителю: верификатор о привязке не знает (ТФ-ВЕР-02). Руководителю — всегда:
+        // по списку подписывается фигурант, которого привязал эксперт.
+        if ((Stage == VerificationStage.Expert && item.OwnDecision is null) || Stage == VerificationStage.Supervisor)
         {
             var persons = await Dispatcher.Send(new ListCasePersonsQuery(item.CaseId, item.FaceId));
             if (persons is { Status: true, Data: { } list })
@@ -215,8 +306,10 @@ else
                 _persons = list;
             }
 
-            // Подсказка ручной привязки принимается ТОЛЬКО если фигурант есть среди фигурантов дела (ТБ-071).
-            if (SuggestedPersonRef is { } suggested && _persons.Any(p => p.PersonId == suggested))
+            // Подставляется фигурант эксперта (у руководителя), иначе подсказка ручной привязки или системы — и ТОЛЬКО
+            // если он есть среди фигурантов дела (ТБ-071).
+            var preset = Stage == VerificationStage.Supervisor ? _review?.LinkedPersonRef ?? SuggestedPersonRef : SuggestedPersonRef;
+            if (preset is { } suggested && _persons.Any(p => p.PersonId == suggested))
             {
                 _personRef = suggested;
             }
@@ -234,9 +327,10 @@ else
         _formError = null;
         try
         {
-            // PersonRef уходит только со стадии эксперта; для верификатора всегда null (команда и валидатор это тоже проверяют).
+            // PersonRef уходит со стадий эксперта и руководителя; для верификатора всегда null (команда и валидатор это тоже проверяют).
             var response = await Dispatcher.Send(new RecordVerificationCommand(
-                CandidateId, Stage, verdict, _rationale.Trim(), Stage == VerificationStage.Expert ? _personRef : null));
+                CandidateId, Stage, verdict, _rationale.Trim(),
+                Stage is VerificationStage.Expert or VerificationStage.Supervisor ? _personRef : null));
             if (response is { Status: true, Data: { } status })
             {
                 _recordedStatus = status;

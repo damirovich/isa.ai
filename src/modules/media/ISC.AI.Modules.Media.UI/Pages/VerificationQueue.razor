@@ -1,6 +1,7 @@
 @namespace ISC.AI.Modules.Media.UI
-@* Очередь двойной верификации (ТФ-ВЕР-01/02, ТБ-073): две вкладки — стадия эксперта и стадия
-   верификатора. Каждая — СЛЕПАЯ проекция: без чужих решений и без фигуранта. Кнопки/вкладки по ролям
+@* Очередь двойной верификации (ТФ-ВЕР-01/02, ТБ-073): вкладки стадий эксперта, верификатора и руководителя
+   (итог по расхождению, ADR-0036; ему видны оба решения). Вкладки эксперта и верификатора — СЛЕПЫЕ проекции:
+   без чужих решений и без привязанного фигуранта. Кнопки/вкладки по ролям
    не прячем — право проверяет обработчик, отказ показываем текстом (StatusMessage). Мини-пара
    «проба ↔ кандидат» в равном масштабе, балл — с предупреждением (ТЭ-006), формулировки — ТЭ-005.
    Очередь листается ПОСТРАНИЧНО: сервер отдаёт одну страницу и общее число, лицо пробы запрашивается один раз
@@ -18,7 +19,7 @@
     <div>
         <MudText Typo="Typo.h5">Верификация кандидатов</MudText>
         <MudText Typo="Typo.body2" Class="mud-text-secondary">
-            Два независимых решения разных сотрудников; верификатор решения эксперта не видит (ТБ-073)
+            Два независимых решения разных сотрудников; верификатор решения эксперта не видит; при расхождении итог выносит руководитель (ТБ-073, ТФ-ВЕР-02)
         </MudText>
     </div>
     <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@IsLoading(ActiveStage)" OnClick="ReloadAsync">Обновить</MudButton>
@@ -72,7 +73,7 @@
         <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-1">Начало периода позже конца — поправьте даты.</MudText>
     }
     <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
-        Дата материала — время съёмки, а если оно неизвестно — время загрузки. Отбор действует на обе вкладки.
+        Дата материала — время съёмки, а если оно неизвестно — время загрузки. Отбор действует на все вкладки.
     </MudText>
 </MudPaper>
 
@@ -82,6 +83,10 @@
     </MudTabPanel>
     <MudTabPanel Text="Верификатор" Icon="@Icons.Material.Filled.VerifiedUser">
         @RenderQueue(VerificationStage.Verifier)
+    </MudTabPanel>
+    @* ТФ-ВЕР-02, ADR-0036: «неопределённые» — эксперт и верификатор разошлись; руководитель видит оба решения и выносит итог. *@
+    <MudTabPanel Text="Руководитель" Icon="@Icons.Material.Filled.Gavel">
+        @RenderQueue(VerificationStage.Supervisor)
     </MudTabPanel>
 </MudTabs>
 
@@ -117,7 +122,12 @@
     // считаются по ним, а не по выбранному в эту секунду.
     private readonly Dictionary<VerificationStage, (int Page, int Size)> _shown = [];
 
-    private VerificationStage ActiveStage => _activeTab == 1 ? VerificationStage.Verifier : VerificationStage.Expert;
+    private VerificationStage ActiveStage => _activeTab switch
+    {
+        1 => VerificationStage.Verifier,
+        2 => VerificationStage.Supervisor,
+        _ => VerificationStage.Expert,
+    };
 
     // --- Отбор (ТФ-ПЛ-02) ---
     private static readonly double?[] SimilarityLevels = [0.5, 0.6, 0.7, 0.8, 0.9];
@@ -172,7 +182,7 @@
         return ApplyFilterAsync();
     }
 
-    // Новый отбор — с первой страницы на обеих стадиях; вторая стадия перечитается при переходе на её вкладку.
+    // Новый отбор — с первой страницы на всех стадиях; остальные стадии перечитаются при переходе на их вкладки.
     private Task ApplyFilterAsync()
     {
         if (_from is { } f && _to is { } t && f > t)
@@ -181,7 +191,14 @@
         }
 
         _pages.Clear();
-        _items.Remove(ActiveStage == VerificationStage.Expert ? VerificationStage.Verifier : VerificationStage.Expert);
+        foreach (var stage in Enum.GetValues<VerificationStage>())
+        {
+            if (stage != ActiveStage)
+            {
+                _items.Remove(stage);
+            }
+        }
+
         return LoadAsync(ActiveStage);
     }
 
@@ -202,7 +219,7 @@
     private Task OnPageSizeChangedAsync(int size)
     {
         _pageSize = size;
-        // Смена размера меняет границы страниц — начинаем с первой на обеих стадиях.
+        // Смена размера меняет границы страниц — начинаем с первой на всех стадиях.
         _pages.Clear();
         return LoadAsync(ActiveStage);
     }
@@ -340,7 +357,7 @@
                         }
                         <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.FactCheck"
                                    Href="@VerificationHref(current, stageName)">
-                            @(current.OwnDecision is null ? "Принять решение" : "Открыть")
+                            @(current.OwnDecision is not null ? "Открыть" : stage == VerificationStage.Supervisor ? "Вынести итог" : "Принять решение")
                         </MudButton>
                     </MudPaper>
                 }

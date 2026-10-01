@@ -68,7 +68,9 @@ public sealed record ListVerificationQueueQuery(
             // ТП-004: стадия доступна только соответствующей роли (эксперт по лицам / верификатор).
             if (!await policy.CanActAsync(query.Stage, subjectId, cancellationToken))
             {
-                return ResponseDto<IReadOnlyList<VerificationQueueItem>>.BadRequest("Очередь доступна только ролям Эксперт/Верификатор.");
+                return ResponseDto<IReadOnlyList<VerificationQueueItem>>.BadRequest(query.Stage == VerificationStage.Supervisor
+                    ? VerificationMessages.SupervisorDenied
+                    : "Очередь доступна только ролям Эксперт/Верификатор.");
             }
 
             // Fail-closed (ТБ-020/021): решётка — на стороне БД; область — дела субъекта (ТБ-071).

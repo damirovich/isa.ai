@@ -16,12 +16,15 @@ namespace ISC.AI.Modules.Media.Application.Features.Verification;
 /// Записать решение стадии верификации по кандидату (ТФ-ВЕР-01..03, ТБ-073, GATE-5). Статус кандидата
 /// считается ТОЛЬКО правилом двух лиц (<see cref="TwoPersonRule"/>) по решениям людей; никакого
 /// автоматического решения нет. Два «подтверждён» РАЗНЫХ сотрудников → «следственная версия — требует
-/// процессуальной проверки» и появление фигуранта в деле (ТФ-ПЕР-02).
+/// процессуальной проверки» и появление фигуранта в деле (ТФ-ПЕР-02). При расхождении («неопределённо») итог
+/// выносит руководитель — третье лицо (ТФ-ВЕР-02, ADR-0036).
 /// </summary>
 /// <remarks>
 /// НЕ <see cref="IAuditableRequest"/>: запись ТБ-072 требует ОБОИХ субъектов при подтверждении и отдельной
 /// фиксации ОТКЛОНЁННЫХ попыток (самоподтверждение, повтор стадии, чужая роль, обход слепоты) — пишется
-/// вручную. Привязка к фигуранту — только на стадии эксперта: верификатор слеп (ТФ-ВЕР-02).
+/// вручную. Привязка к фигуранту — на стадии эксперта и у руководителя: верификатор слеп (ТФ-ВЕР-02).
+/// «Подтверждён» руководителя даёт статус только вместе с положительным решением эксперта или верификатора
+/// (<see cref="TwoPersonRule.CanSupervisorDecide"/>); в появлении первая подпись — это решение, вторая — руководитель.
 /// </remarks>
 public sealed record RecordVerificationCommand(
     int CandidateId,
@@ -62,7 +65,9 @@ public sealed record RecordVerificationCommand(
             {
                 await AuditDeniedAsync(command, subjectId, access.MaxClassification, divisionId: null,
                     "роль не даёт права решения на этой стадии (ТП-004)", cancellationToken);
-                return ResponseDto<CandidateStatus>.BadRequest("Решение доступно только ролям Эксперт/Верификатор.");
+                return ResponseDto<CandidateStatus>.BadRequest(command.Stage == VerificationStage.Supervisor
+                    ? VerificationMessages.SupervisorDenied
+                    : "Решение доступно только ролям Эксперт/Верификатор.");
             }
 
             var candidate = await store.GetCandidateAsync(command.CandidateId, access, cancellationToken);
@@ -88,27 +93,37 @@ public sealed record RecordVerificationCommand(
                 return ResponseDto<CandidateStatus>.BadRequest(reason ?? "Решение на этой стадии сейчас невозможно (ТБ-073).");
             }
 
-            var personRef = command.Stage == VerificationStage.Expert ? command.PersonRef : null;
-            if (command.Stage == VerificationStage.Expert)
+            // ТБ-073, ADR-0036: руководитель подтверждает только вместе с положительным решением другого сотрудника.
+            if (command.Stage == VerificationStage.Supervisor
+                && !TwoPersonRule.CanSupervisorDecide(candidate.Decisions, command.Verdict, subjectId, out var supervisorReason))
             {
-                // ТФ-ВЕР-03: «подтверждён» без фигуранта дал бы статус без «появления» — отказ (дублирует валидатор:
-                // обработчик вызывается и напрямую, не только через конвейер).
-                if (command.Verdict == VerificationVerdict.Confirmed && personRef is null)
-                {
-                    return ResponseDto<CandidateStatus>.BadRequest(RecordVerificationValidator.PersonRequiredMessage);
-                }
+                await AuditDeniedAsync(command, subjectId, candidate.Classification, candidate.DivisionId,
+                    supervisorReason ?? "правило двух лиц", cancellationToken);
+                return ResponseDto<CandidateStatus>.BadRequest(supervisorReason ?? "Такой итог руководителю недоступен (ТБ-073).");
+            }
 
-                // ТБ-020/070, ТФ-ВЕР-03 «фигурант ДЕЛА»: фигурант — только из дела кандидата, видимого субъекту;
-                // чужой/несуществующий идентификатор ушёл бы «появлением» в чужое дело — отказ аудируется.
-                if (personRef is { } requestedPerson)
+            var personRef = command.Stage is VerificationStage.Expert or VerificationStage.Supervisor ? command.PersonRef : null;
+
+            // ТФ-ВЕР-03: «подтверждён» без фигуранта дал бы статус без «появления» — отказ (дублирует валидатор:
+            // обработчик вызывается и напрямую, не только через конвейер). Руководитель может оставить фигуранта,
+            // которого привязал эксперт.
+            if (command.Verdict == VerificationVerdict.Confirmed
+                && ((command.Stage == VerificationStage.Expert && personRef is null)
+                    || (command.Stage == VerificationStage.Supervisor && (personRef ?? candidate.PersonRef) is null)))
+            {
+                return ResponseDto<CandidateStatus>.BadRequest(RecordVerificationValidator.PersonRequiredMessage);
+            }
+
+            // ТБ-020/070, ТФ-ВЕР-03 «фигурант ДЕЛА»: фигурант — только из дела кандидата, видимого субъекту;
+            // чужой/несуществующий идентификатор ушёл бы «появлением» в чужое дело — отказ аудируется.
+            if (personRef is { } requestedPerson)
+            {
+                var persons = await caseScope.ListPersonsAsync(candidate.CaseId, access, cancellationToken);
+                if (!persons.Any(p => p.PersonId == requestedPerson))
                 {
-                    var persons = await caseScope.ListPersonsAsync(candidate.CaseId, access, cancellationToken);
-                    if (!persons.Any(p => p.PersonId == requestedPerson))
-                    {
-                        await AuditDeniedAsync(command, subjectId, candidate.Classification, candidate.DivisionId,
-                            "фигурант не принадлежит делу кандидата (ТФ-ВЕР-03)", cancellationToken);
-                        return ResponseDto<CandidateStatus>.BadRequest("Фигурант не принадлежит делу кандидата либо недоступен (ТФ-ВЕР-03).");
-                    }
+                    await AuditDeniedAsync(command, subjectId, candidate.Classification, candidate.DivisionId,
+                        "фигурант не принадлежит делу кандидата (ТФ-ВЕР-03)", cancellationToken);
+                    return ResponseDto<CandidateStatus>.BadRequest("Фигурант не принадлежит делу кандидата либо недоступен (ТФ-ВЕР-03).");
                 }
             }
 
@@ -130,6 +145,12 @@ public sealed record RecordVerificationCommand(
             }
 
             var expert = decisions.LastOrDefault(d => d.Stage == VerificationStage.Expert);
+            var verifier = decisions.LastOrDefault(d => d.Stage == VerificationStage.Verifier);
+
+            // Первая подпись под «подтверждён»: эксперт, а при решении руководителя — тот из двоих, кто подтвердил.
+            var firstSignature = command.Stage == VerificationStage.Supervisor
+                ? TwoPersonRule.PositiveBy(expert, verifier, subjectId)
+                : expert;
             await auditWriter.WriteAsync(
                 new AuditEntry(
                     AuditAction.Modify,
@@ -137,18 +158,18 @@ public sealed record RecordVerificationCommand(
                     subjectId,
                     ObjectRef: $"media:candidate:{candidate.Id}:decision:{command.Stage}",
                     DivisionId: candidate.DivisionId,
-                    PayloadSensitive: BuildPayload(command, subjectId, newStatus, expert)),
+                    PayloadSensitive: BuildPayload(command, subjectId, newStatus, expert, verifier, firstSignature)),
                 cancellationToken);
 
             // ТФ-ВЕР-03 → ТФ-ПЕР-02: подтверждённый кандидат становится «появлением» фигуранта в деле.
-            if (newStatus == CandidateStatus.Confirmed && expert is not null && (personRef ?? candidate.PersonRef) is { } person)
+            if (newStatus == CandidateStatus.Confirmed && firstSignature is not null && (personRef ?? candidate.PersonRef) is { } person)
             {
                 await caseScope.RecordAppearanceAsync(
                     new ConfirmedAppearance(
                         candidate.CaseId, person, candidate.SessionId, candidate.Id, candidate.FaceId, candidate.AssetId,
                         candidate.FrameIndex, candidate.FrameTimestampMs, candidate.Similarity,
                         candidate.Classification, candidate.DivisionId,
-                        ExpertUserId: expert.SubjectId, VerifierUserId: subjectId, ConfirmedAtUtc: decision.DecidedAtUtc),
+                        ExpertUserId: firstSignature.SubjectId, VerifierUserId: subjectId, ConfirmedAtUtc: decision.DecidedAtUtc),
                     cancellationToken);
             }
 
@@ -156,18 +177,28 @@ public sealed record RecordVerificationCommand(
         }
 
         private static string BuildPayload(
-            RecordVerificationCommand command, int subjectId, CandidateStatus newStatus, VerificationDecision? expert)
+            RecordVerificationCommand command, int subjectId, CandidateStatus newStatus,
+            VerificationDecision? expert, VerificationDecision? verifier, VerificationDecision? firstSignature)
         {
             var text = $"стадия={command.Stage}; вердикт={command.Verdict}; статус={newStatus}; обоснование={command.Rationale}";
-            if (command.Stage == VerificationStage.Expert && command.PersonRef is { } personRef)
+            if ((command.Stage is VerificationStage.Expert or VerificationStage.Supervisor) && command.PersonRef is { } personRef)
             {
                 text += $"; фигурант={personRef}";
             }
 
-            if (newStatus == CandidateStatus.Confirmed && expert is not null)
+            if (command.Stage == VerificationStage.Supervisor)
+            {
+                // ТФ-ВЕР-02: итог по расхождению — с обоими прежними решениями, чтобы журнал показывал, что было решено.
+                text += $"; решение руководителя={subjectId}; эксперт={expert?.SubjectId}:{expert?.Verdict}; "
+                    + $"верификатор={verifier?.SubjectId}:{verifier?.Verdict}";
+            }
+
+            if (newStatus == CandidateStatus.Confirmed && firstSignature is not null)
             {
                 // ТБ-072: оба субъекта; ТБ-073: маркировка — версия, а не «установлен».
-                text += $"; эксперт={expert.SubjectId}; верификатор={subjectId}; {TwoPersonRule.ConfirmedMarker}";
+                text += command.Stage == VerificationStage.Supervisor
+                    ? $"; подписи: {firstSignature.SubjectId} и руководитель {subjectId}; {TwoPersonRule.ConfirmedMarker}"
+                    : $"; эксперт={firstSignature.SubjectId}; верификатор={subjectId}; {TwoPersonRule.ConfirmedMarker}";
             }
 
             return text;

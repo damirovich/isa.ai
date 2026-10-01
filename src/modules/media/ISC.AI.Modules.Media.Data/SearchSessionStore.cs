@@ -301,6 +301,7 @@ public sealed class SearchSessionStore(
         {
             VerificationStage.Expert => CandidateStatus.Candidate,
             VerificationStage.Verifier => CandidateStatus.PendingVerifier,
+            VerificationStage.Supervisor => CandidateStatus.Undetermined, // расхождение — к руководителю (ТФ-ВЕР-02)
             _ => throw new ArgumentOutOfRangeException(nameof(stage), stage, "Неизвестная стадия верификации."),
         };
         var ids = caseIds as int[] ?? caseIds.ToArray();

@@ -212,6 +212,7 @@ else
     {
         CandidateStatus.Candidate => nameof(VerificationStage.Expert),
         CandidateStatus.PendingVerifier => nameof(VerificationStage.Verifier),
+        CandidateStatus.Undetermined => nameof(VerificationStage.Supervisor), // расхождение — итог руководителя (ТФ-ВЕР-02)
         _ => null,
     };
 }

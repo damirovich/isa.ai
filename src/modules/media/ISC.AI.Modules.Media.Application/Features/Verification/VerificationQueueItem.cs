@@ -31,7 +31,7 @@ namespace ISC.AI.Modules.Media.Application.Features.Verification;
 /// <param name="Origin">Происхождение сессии: поиск сотрудника или предложение системы (ТФ-ПЕР-09) — видно обеим стадиям.</param>
 /// <param name="SuggestedPersonRef">
 /// Фигурант, которого предложила система, — ТОЛЬКО на стадии эксперта (подсказка к выбору фигуранта, ТФ-ВЕР-03).
-/// Верификатору не выдаётся: его решение — по изображениям, без «кто это» (ТФ-ВЕР-02).
+/// Верификатору не выдаётся: его решение — по изображениям, без «кто это» (ТФ-ВЕР-02). Руководителю — выдаётся.
 /// </param>
 public sealed record VerificationQueueItem(
     int CandidateId,
@@ -57,7 +57,9 @@ public sealed record VerificationQueueItem(
     /// <summary>
     /// Слепая проекция полной строки кандидата: из решений остаётся только решение <paramref name="userId"/>,
     /// привязка к фигуранту (<c>PersonRef</c>) отбрасывается (ТФ-ВЕР-02). Предложенный системой фигурант остаётся только
-    /// для стадии эксперта (<paramref name="stage"/>); по умолчанию — стадия верификатора, то есть «слепо».
+    /// для стадий эксперта и руководителя (<paramref name="stage"/>); по умолчанию — стадия верификатора, то есть «слепо».
+    /// Решения сотрудников руководитель получает ОТДЕЛЬНЫМ запросом (<see cref="GetSupervisorReviewQuery"/>): этот тип
+    /// структурно слеп, чтобы ни одна стадия не получила чужие решения через общую проекцию.
     /// </summary>
     public static VerificationQueueItem From(
         SearchCandidateRow candidate, SearchSessionRow session, int userId, VerificationStage stage = VerificationStage.Verifier)
@@ -84,6 +86,6 @@ public sealed record VerificationQueueItem(
             candidate.Status,
             candidate.Decisions.LastOrDefault(d => d.SubjectId == userId),
             session.Origin,
-            stage == VerificationStage.Expert ? session.SuggestedPersonRef : null);
+            stage is VerificationStage.Expert or VerificationStage.Supervisor ? session.SuggestedPersonRef : null);
     }
 }
