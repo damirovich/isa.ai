@@ -1,18 +1,23 @@
 @namespace ISC.AI.Profile.Investigation.UI
-@* Справочник подразделений профиля (ТФ-АДМ-01): идентификаторы — словарь допусков ядра (ТБ-011), поэтому
-   подразделение не удаляется, а выключается: номер в допусках и делах должен оставаться разрешимым.
-   Ведёт Администратор (режим первичной настройки — любой вошедший); право проверяет обработчик,
-   отказ показывается. Родитель задаётся при создании и не меняется (переименование — только имя/код). *@
+@* Справочник подразделений профиля (ТФ-АДМ-01) деревом любой глубины: идентификаторы — словарь допусков ядра
+   (ТБ-011), поэтому подразделение не удаляется, а выключается — номер в допусках и делах должен оставаться
+   разрешимым. Ведёт роль с правом «Подразделения и справочники» (матрица доступа, ADR-0032; режим первичной
+   настройки — любой вошедший); право проверяет обработчик, отказ показывается. Родитель задаётся при создании
+   («Добавить дочернее» на строке) и не меняется. Выключение — с подтверждением: видно, у скольких сотрудников
+   подразделение в допуске. *@
 @page "/admin/divisions"
 @rendermode InteractiveServer
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@using System.Net
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Profile.Investigation.Application.Features.Divisions
 @using ISC.AI.Profile.Investigation.Domain.Services
 
-<PageHeader Title="Подразделения" Subtitle="Справочник подразделений — словарь допусков и дел (ТФ-АДМ-01) · ведёт Администратор"
+<PageHeader Title="Подразделения" Subtitle="Иерархия подразделений — определяет, какие дела и документы видит сотрудник по допуску"
             Icon="@Icons.Material.Filled.AccountTree">
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-               OnClick="OpenCreate" Disabled="_busy">Новое подразделение</MudButton>
+               OnClick="@(() => OpenCreate(null))" Disabled="_busy">Новое подразделение</MudButton>
 </PageHeader>
 
 @if (_error is not null)
@@ -21,37 +26,76 @@
               ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
 }
 
-<MudTable T="DivisionNode" Items="Ordered" Hover="true" Dense="true" Outlined="true" Loading="_busy"
-          RowClassFunc="@((node, _) => node.IsActive ? string.Empty : "mud-text-secondary")">
-    <HeaderContent>
-        <MudTh>Наименование</MudTh>
-        <MudTh>Код</MudTh>
-        <MudTh>Родитель</MudTh>
-        <MudTh>Состояние</MudTh>
-        <MudTh Style="text-align:right;">В допусках у</MudTh>
-        <MudTh Style="width:220px;">Действия</MudTh>
-    </HeaderContent>
-    <RowTemplate>
-        <MudTd DataLabel="Наименование">@(context.ParentId is null ? context.Name : "— " + context.Name)</MudTd>
-        <MudTd DataLabel="Код">@(context.Code ?? "—")</MudTd>
-        <MudTd DataLabel="Родитель">@(context.ParentId is { } parent ? Name(parent) : "—")</MudTd>
-        <MudTd DataLabel="Состояние">
-            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@(context.IsActive ? Color.Success : Color.Default)">
-                @(context.IsActive ? "действует" : "выключено")
-            </MudChip>
-        </MudTd>
-        <MudTd DataLabel="В допусках у" Style="text-align:right;">@context.Users</MudTd>
-        <MudTd DataLabel="Действия">
-            <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="_busy"
-                       OnClick="@(() => OpenRename(context))">Переименовать</MudButton>
-            <MudButton Size="Size.Small" Variant="Variant.Text" Color="@(context.IsActive ? Color.Error : Color.Success)" Disabled="_busy"
-                       OnClick="@(() => SetActiveAsync(context, !context.IsActive))">@(context.IsActive ? "Выключить" : "Включить")</MudButton>
-        </MudTd>
-    </RowTemplate>
-    <NoRecordsContent>
-        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Справочник пуст либо недоступен вам.</MudText>
-    </NoRecordsContent>
-</MudTable>
+<div class="d-flex gap-3 align-center flex-wrap mb-3">
+    <MudTextField T="string" @bind-Value="_search" Placeholder="Найти по наименованию или коду" Variant="Variant.Outlined"
+                  Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                  Immediate="true" DebounceInterval="250" Clearable="true" Style="min-width:280px;" Class="flex-grow-1" />
+    <MudSwitch T="bool" @bind-Value="_showInactive" Color="Color.Primary" Label="Показывать выключенные" />
+    <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.UnfoldMore" OnClick="ExpandAll"
+               Disabled="@(_collapsed.Count == 0)">Раскрыть всё</MudButton>
+    <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.UnfoldLess" OnClick="CollapseAll">Свернуть всё</MudButton>
+</div>
+
+<MudPaper Outlined="true">
+    @if (_busy && _nodes.Count == 0)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    @foreach (var row in Rows)
+    {
+        var current = row;
+        <div class="d-flex align-center gap-2 px-3 py-1" style="@($"padding-left:{12 + current.Depth * 24}px !important;border-bottom:1px solid var(--mud-palette-lines-default);")">
+            @if (current.HasChildren)
+            {
+                <MudIconButton Size="Size.Small" Icon="@(current.Expanded ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)"
+                               OnClick="@(() => Toggle(current.Node.Id))" aria-label="@(current.Expanded ? "Свернуть" : "Раскрыть")"
+                               Disabled="@(!string.IsNullOrWhiteSpace(_search))" />
+            }
+            else
+            {
+                <span style="width:34px;display:inline-block;"></span>
+            }
+            <div class="flex-grow-1" style="min-width:0;">
+                <MudText Typo="Typo.body2" Class="@(current.Node.IsActive ? null : "mud-text-secondary")" Style="font-weight:500;">
+                    @current.Node.Name@(current.Node.Code is { } code ? $" · {code}" : string.Empty)
+                </MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    @(current.Node.Users == 0 ? "ни у кого нет в допуске" : $"в допуске у сотрудников: {current.Node.Users}")
+                </MudText>
+            </div>
+            @if (!current.Node.IsActive)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0">выключено</MudChip>
+            }
+            <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Dense="true" Disabled="_busy" aria-label="Действия">
+                <MudMenuItem Icon="@Icons.Material.Filled.Edit" OnClick="@(() => OpenRename(current.Node))">Переименовать</MudMenuItem>
+                @if (current.Node.IsActive)
+                {
+                    <MudMenuItem Icon="@Icons.Material.Filled.SubdirectoryArrowRight" OnClick="@(() => OpenCreate(current.Node))">Добавить дочернее</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Filled.Block" OnClick="@(() => SetActiveAsync(current.Node, false))">Выключить…</MudMenuItem>
+                }
+                else
+                {
+                    <MudMenuItem Icon="@Icons.Material.Filled.CheckCircle" OnClick="@(() => SetActiveAsync(current.Node, true))">Включить</MudMenuItem>
+                }
+            </MudMenu>
+        </div>
+    }
+    @if (!_busy && Rows.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+            @(_nodes.Count == 0
+                ? "Справочник пуст — добавьте первое подразделение. Без него не выдать допуск по подразделениям."
+                : "По этому отбору подразделений нет.")
+        </MudText>
+    }
+    <div class="d-flex justify-space-between flex-wrap gap-2 px-3 py-2">
+        <MudText Typo="Typo.caption">Подразделений: @_nodes.Count, действующих: @_nodes.Count(n => n.IsActive)</MudText>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+            Выключенное подразделение остаётся в истории и допусках, но новые дела в него не заводятся.
+        </MudText>
+    </div>
+</MudPaper>
 
 @* Одна форма на создание и переименование (_formId is null → создание); родитель — только при создании. *@
 <MudDialog @bind-Visible="_formOpen" Options="FormDialogOptions">
@@ -63,28 +107,29 @@
         }
         <MudGrid Spacing="2">
             <MudItem xs="12" sm="8">
-                <MudTextField @bind-Value="_formName" Label="Наименование *" Variant="Variant.Outlined" MaxLength="300" Immediate="true" />
+                <MudTextField @bind-Value="_formName" Label="Наименование *" Variant="Variant.Outlined" MaxLength="300" Immediate="true" AutoFocus="true" />
             </MudItem>
             <MudItem xs="12" sm="4">
                 <MudTextField @bind-Value="_formCode" Label="Код" Variant="Variant.Outlined" MaxLength="50" />
             </MudItem>
             <MudItem xs="12">
-                <MudSelect T="int?" @bind-Value="_formParentId" Label="Родительское подразделение" Variant="Variant.Outlined" Dense="true"
-                           Clearable="true" Placeholder="Верхний уровень" Disabled="_formId is not null">
-                    @foreach (var node in _nodes.Where(n => n.IsActive && n.Id != _formId))
+                <MudSelect T="int?" @bind-Value="_formParentId" Label="Входит в" Variant="Variant.Outlined" Dense="true"
+                           Clearable="true" Placeholder="Верхний уровень" Disabled="_formId is not null"
+                           HelperText="@(_formId is not null ? "Родитель задаётся при создании и не меняется" : null)">
+                    @foreach (var option in ParentOptions)
                     {
-                        <MudSelectItem T="int?" Value="@node.Id">@node.Name</MudSelectItem>
+                        <MudSelectItem T="int?" Value="@option.Node.Id">@option.Path</MudSelectItem>
                     }
                 </MudSelect>
             </MudItem>
         </MudGrid>
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="@(() => _formOpen = false)">Отмена</MudButton>
         @if (!_busy && string.IsNullOrWhiteSpace(_formName))
         {
-            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">Заполните: наименование</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-auto ml-2">Заполните: наименование</MudText>
         }
+        <MudButton OnClick="@(() => _formOpen = false)">Отмена</MudButton>
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(string.IsNullOrWhiteSpace(_formName) || _busy)" OnClick="SaveAsync">Сохранить</MudButton>
     </DialogActions>
 </MudDialog>
@@ -94,6 +139,9 @@
         new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true };
 
     private readonly List<DivisionNode> _nodes = [];
+    private readonly HashSet<int> _collapsed = [];
+    private string? _search;
+    private bool _showInactive = true;
     private bool _busy = true; // «загрузка…» до первой интерактивной загрузки (предрендер данных не грузит)
     private string? _error;
 
@@ -104,38 +152,35 @@
     private string? _formCode;
     private int? _formParentId;
 
-    // Порядок «родитель, под ним дочерние»: справочник плоский, навигаций у узла нет.
-    private IEnumerable<DivisionNode> Ordered
-    {
-        get
-        {
-            foreach (var parent in _nodes.Where(n => n.ParentId is null).OrderBy(n => n.Name, StringComparer.CurrentCulture))
-            {
-                yield return parent;
-                foreach (var child in _nodes.Where(n => n.ParentId == parent.Id).OrderBy(n => n.Name, StringComparer.CurrentCulture))
-                {
-                    yield return child;
-                }
-            }
+    private IReadOnlyList<DivisionTreeRow> Rows => DivisionTree.Build(_nodes, _collapsed, _search, _showInactive);
 
-            // Узлы с несуществующим родителем (после выключения/удаления вручную) — в конце, чтобы не потерялись.
-            foreach (var orphan in _nodes.Where(n => n.ParentId is { } p && _nodes.All(x => x.Id != p)))
-            {
-                yield return orphan;
-            }
-        }
-    }
+    // Родитель — из действующих, с полным путём: одноимённые отделы разных управлений различимы.
+    private IEnumerable<DivisionTreeRow> ParentOptions =>
+        DivisionTree.Build(_nodes, new HashSet<int>(), null, showInactive: false);
 
     protected override async Task OnInitializedAsync()
     {
-        // ТБ-030 «одно открытие — одна запись»: на предрендере (статический SSR до подключения circuit'а)
-        // справочник не грузим — иначе аудируемый запрос попадал бы в журнал дважды.
+        // ТБ-030 «одно открытие — одна запись»: на предрендере справочник не грузим.
         if (!RendererInfo.IsInteractive) { return; }
 
         await ReloadAsync();
     }
 
-    private string Name(int id) => _nodes.FirstOrDefault(n => n.Id == id)?.Name ?? $"№ {id}";
+    private void Toggle(int id)
+    {
+        if (!_collapsed.Add(id)) { _collapsed.Remove(id); }
+    }
+
+    private void ExpandAll() => _collapsed.Clear();
+
+    private void CollapseAll()
+    {
+        _collapsed.Clear();
+        foreach (var node in _nodes.Where(n => _nodes.Any(c => c.ParentId == n.Id)))
+        {
+            _collapsed.Add(node.Id);
+        }
+    }
 
     private async Task ReloadAsync()
     {
@@ -159,12 +204,12 @@
         }
     }
 
-    private void OpenCreate()
+    private void OpenCreate(DivisionNode? parent)
     {
         _formId = null;
         _formName = null;
         _formCode = null;
-        _formParentId = null;
+        _formParentId = parent?.Id;
         _formError = null;
         _formOpen = true;
     }
@@ -198,6 +243,7 @@
             }
 
             _formOpen = false;
+            Snackbar.Add(_formId is null ? $"Подразделение «{name}» добавлено." : "Изменения сохранены.", Severity.Success);
         }
         finally
         {
@@ -209,11 +255,28 @@
 
     private async Task SetActiveAsync(DivisionNode node, bool isActive)
     {
+        if (!isActive)
+        {
+            // Выключение — с подтверждением и последствиями: сколько сотрудников держат подразделение в допуске.
+            var users = node.Users == 0
+                ? "Ни у кого из сотрудников это подразделение не выдано в допуске."
+                : $"Подразделение выдано в допуске сотрудникам: {node.Users}. Допуски не изменятся — выданное остаётся действовать.";
+            var html = $"<p>«{WebUtility.HtmlEncode(node.Name)}» перестанет предлагаться для новых дел и допусков. Старые дела и история останутся.</p>"
+                + $"<p class=\"mud-text-secondary\">{WebUtility.HtmlEncode(users)}</p>";
+            var answer = await DialogService.ShowMessageBoxAsync("Выключить подразделение?", (MarkupString)html,
+                yesText: "Выключить", cancelText: "Отмена", options: FormDialogOptions);
+            if (answer != true) { return; }
+        }
+
         _error = null;
         var response = await Dispatcher.Send(new SetDivisionActiveCommand(node.Id, isActive));
         if (!response.Status)
         {
             _error = response.StatusMessage;
+        }
+        else
+        {
+            Snackbar.Add(isActive ? $"«{node.Name}» снова действует." : $"«{node.Name}» выключено.", Severity.Success);
         }
 
         await ReloadAsync();

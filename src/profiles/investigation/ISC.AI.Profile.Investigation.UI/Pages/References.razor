@@ -5,12 +5,15 @@
    запись остаётся читаемой в старых делах. Вид записи задаётся вкладкой при создании и не меняется. *@
 @page "/admin/references"
 @rendermode InteractiveServer
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@using System.Net
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Profile.Investigation.Application.Features.References
 @using ISC.AI.Profile.Investigation.Domain.Enums
 @using ISC.AI.Profile.Investigation.Domain.Services
 
-<PageHeader Title="Справочники" Subtitle="Инициаторы заданий, звания, должности, типы связей, категории материалов (ТФ-АДМ-07) · ведёт Администратор"
+<PageHeader Title="Справочники" Subtitle="Словари реквизитов заданий и карточек: инициаторы, звания, должности, типы связей, категории материалов"
             Icon="@Icons.Material.Filled.MenuBook">
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
                OnClick="OpenCreate" Disabled="_busy">Новая запись</MudButton>
@@ -21,6 +24,13 @@
     <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
               ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
 }
+
+<div class="d-flex gap-3 align-center flex-wrap mb-3">
+    <MudTextField T="string" @bind-Value="_search" Placeholder="Найти по наименованию или коду" Variant="Variant.Outlined"
+                  Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                  Immediate="true" DebounceInterval="250" Clearable="true" Style="min-width:280px;" Class="flex-grow-1" />
+    <MudSwitch T="bool" @bind-Value="_showInactive" Color="Color.Primary" Label="Показывать выключенные" />
+</div>
 
 <MudTabs Elevation="0" Border="true" Rounded="true" @bind-ActivePanelIndex="_activeTab">
     @foreach (var kind in Kinds)
@@ -48,13 +58,19 @@
                         <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="_busy"
                                    OnClick="@(() => OpenEdit(context))">Изменить</MudButton>
                         <MudButton Size="Size.Small" Variant="Variant.Text" Color="@(context.IsActive ? Color.Error : Color.Success)" Disabled="_busy"
-                                   OnClick="@(() => SetActiveAsync(context, !context.IsActive))">@(context.IsActive ? "Выключить" : "Включить")</MudButton>
+                                   OnClick="@(() => SetActiveAsync(context, !context.IsActive))">@(context.IsActive ? "Выключить…" : "Включить")</MudButton>
                     </MudTd>
                 </RowTemplate>
                 <NoRecordsContent>
-                    <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Справочник пуст либо недоступен вам.</MudText>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                        @(_items.Any(i => i.Kind == kind) ? "По этому отбору записей нет." : "Справочник пуст — добавьте первую запись кнопкой «Новая запись».")
+                    </MudText>
                 </NoRecordsContent>
             </MudTable>
+            <div class="d-flex justify-space-between flex-wrap gap-2 px-1 pt-2">
+                <MudText Typo="Typo.caption">Записей: @_items.Count(i => i.Kind == kind), действующих: @_items.Count(i => i.Kind == kind && i.IsActive)</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Выключенная запись остаётся в старых делах, но не предлагается в новых.</MudText>
+            </div>
         </MudTabPanel>
     }
 </MudTabs>
@@ -100,6 +116,8 @@
     private static readonly ReferenceKind[] Kinds = Enum.GetValues<ReferenceKind>();
 
     private readonly List<ReferenceItemRow> _items = [];
+    private string? _search;
+    private bool _showInactive = true;
     private int _activeTab;
     private bool _busy = true; // «загрузка…» до первой интерактивной загрузки (предрендер данных не грузит)
     private string? _error;
@@ -115,9 +133,14 @@
     private ReferenceKind ActiveKind => Kinds[Math.Clamp(_activeTab, 0, Kinds.Length - 1)];
 
     private IEnumerable<ReferenceItemRow> ItemsOf(ReferenceKind kind) =>
-        _items.Where(i => i.Kind == kind)
+        _items.Where(i => i.Kind == kind && (_showInactive || i.IsActive) && Matches(i))
             .OrderBy(i => i.SortOrder)
             .ThenBy(i => i.Name, StringComparer.CurrentCulture);
+
+    private bool Matches(ReferenceItemRow item) =>
+        string.IsNullOrWhiteSpace(_search)
+        || item.Name.Contains(_search.Trim(), StringComparison.CurrentCultureIgnoreCase)
+        || (item.Code?.Contains(_search.Trim(), StringComparison.CurrentCultureIgnoreCase) ?? false);
 
     protected override async Task OnInitializedAsync()
     {
@@ -190,6 +213,7 @@
             }
 
             _formOpen = false;
+            Snackbar.Add(_formId is null ? $"Запись «{name}» добавлена." : "Изменения сохранены.", Severity.Success);
         }
         finally
         {
@@ -201,11 +225,24 @@
 
     private async Task SetActiveAsync(ReferenceItemRow item, bool isActive)
     {
+        if (!isActive)
+        {
+            var html = $"<p>«{WebUtility.HtmlEncode(item.Name)}» перестанет предлагаться в новых заданиях и карточках.</p>"
+                + "<p class=\"mud-text-secondary\">В уже заполненных делах запись останется и будет читаться как прежде.</p>";
+            var answer = await DialogService.ShowMessageBoxAsync("Выключить запись справочника?", (MarkupString)html,
+                yesText: "Выключить", cancelText: "Отмена", options: FormDialogOptions);
+            if (answer != true) { return; }
+        }
+
         _error = null;
         var response = await Dispatcher.Send(new SetReferenceItemActiveCommand(item.Id, isActive));
         if (!response.Status)
         {
             _error = response.StatusMessage;
+        }
+        else
+        {
+            Snackbar.Add(isActive ? $"«{item.Name}» снова действует." : $"«{item.Name}» выключена.", Severity.Success);
         }
 
         await ReloadAsync();

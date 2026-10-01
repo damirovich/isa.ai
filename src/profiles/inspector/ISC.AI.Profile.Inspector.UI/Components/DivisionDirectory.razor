@@ -1,4 +1,7 @@
 @namespace ISC.AI.Profile.Inspector.UI
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@using System.Net
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Profile.Inspector.Application.Features.Divisions
 @using ISC.AI.Profile.Inspector.Domain.Enums
@@ -10,7 +13,10 @@
    (IDivisionDirectory, вопрос 3 Э4-35). Иерархия — внутри типа: родитель выбирается из своего типа.
    Смена типа в правке переносит запись на соседнюю страницу — честно, без дублей. *@
 
-<PageHeader Title="@Title" Subtitle="@Subtitle" Icon="@Icon" />
+<PageHeader Title="@Title" Subtitle="@Subtitle" Icon="@Icon">
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="@(() => OpenCreate(null))" Disabled="_busy">Новое подразделение</MudButton>
+</PageHeader>
 
 @if (_error is not null)
 {
@@ -18,29 +24,18 @@
               ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
 }
 
-@* --- Добавление: тип предзадан страницей --- *@
-<MudPaper Outlined="true" Class="pa-3 mb-4">
-    <div class="d-flex gap-3 align-end flex-wrap">
-        <MudTextField @bind-Value="_newName" Label="Наименование" Variant="Variant.Outlined" MaxLength="500"
-                      Immediate="true" Style="min-width:260px;" Class="flex-grow-1" />
-        <MudTextField @bind-Value="_newCode" Label="Код подразделения" Variant="Variant.Outlined" MaxLength="100"
-                      Style="width:180px;" HelperText="пусто — номер назначит система" />
-        <MudSelect T="int?" @bind-Value="_newParentId" Label="Родитель (пусто — верхний уровень)"
-                   Variant="Variant.Outlined" Clearable="true" Style="min-width:260px;">
-            @foreach (var node in KindFlat)
-            {
-                <MudSelectItem T="int?" Value="@node.Id">@node.Name</MudSelectItem>
-            }
-        </MudSelect>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-                   Disabled="@(_busy || string.IsNullOrWhiteSpace(_newName))" OnClick="CreateAsync">
-            Добавить
-        </MudButton>
-    </div>
-</MudPaper>
+<div class="d-flex gap-3 align-center flex-wrap mb-3">
+    <MudTextField T="string" @bind-Value="_search" Placeholder="Найти по наименованию или коду" Variant="Variant.Outlined"
+                  Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                  Immediate="true" DebounceInterval="250" Clearable="true" Style="min-width:280px;" Class="flex-grow-1" />
+    <MudSwitch T="bool" @bind-Value="_showInactive" Color="Color.Primary" Label="Показывать выключенные" />
+    <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.UnfoldMore"
+               OnClick="@(() => _collapsed.Clear())" Disabled="@(_collapsed.Count == 0)">Раскрыть всё</MudButton>
+    <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.UnfoldLess" OnClick="CollapseAll">Свернуть всё</MudButton>
+</div>
 
 @* --- Дерево типа (плоской таблицей с отступами по уровню) --- *@
-<MudTable T="TreeRow" Items="_tree" Hover="true" Dense="true" Outlined="true" Loading="_busy">
+<MudTable T="TreeRow" Items="Tree" Hover="true" Dense="true" Outlined="true" Loading="_busy">
     <HeaderContent>
         <MudTh>Подразделение</MudTh>
         <MudTh>Код</MudTh>
@@ -51,7 +46,14 @@
     <RowTemplate>
         <MudTd DataLabel="Подразделение">
             <div style="@($"padding-left:{context.Level * 24}px;")" class="d-flex align-center gap-1">
-                @if (context.Level > 0)
+                @if (context.HasChildren)
+                {
+                    var id = context.Node.Id;
+                    <MudIconButton Size="Size.Small" Icon="@(context.Expanded ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)"
+                                   OnClick="@(() => Toggle(id))" Disabled="@(!string.IsNullOrWhiteSpace(_search))"
+                                   aria-label="@(context.Expanded ? "Свернуть" : "Раскрыть")" />
+                }
+                else if (context.Level > 0)
                 {
                     <MudIcon Icon="@Icons.Material.Filled.SubdirectoryArrowRight" Size="Size.Small"
                              Class="mud-text-secondary" />
@@ -107,11 +109,15 @@
         <MudTd>
             <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Dense="true">
                 <MudMenuItem OnClick="@(() => OpenRename(context.Node))">Изменить</MudMenuItem>
+                @if (context.Node.IsActive)
+                {
+                    <MudMenuItem OnClick="@(() => OpenCreate(context.Node))">Добавить дочернее</MudMenuItem>
+                }
                 @* Удаление предлагается только тому, за кем ничего не числится: расформированное
                    подразделение выводят из обращения переключателем, а не удаляют. *@
                 @if (context.Node.CanDelete)
                 {
-                    <MudMenuItem OnClick="@(() => DeleteAsync(context.Node))">Удалить</MudMenuItem>
+                    <MudMenuItem OnClick="@(() => DeleteAsync(context.Node))">Удалить…</MudMenuItem>
                 }
             </MudMenu>
         </MudTd>
@@ -124,6 +130,39 @@
         </MudText>
     </NoRecordsContent>
 </MudTable>
+<div class="d-flex justify-space-between flex-wrap gap-2 px-1 pt-2">
+    <MudText Typo="Typo.caption">Подразделений: @KindFlat.Count(), действующих: @KindFlat.Count(n => n.IsActive)</MudText>
+    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+        Удалить можно только неиспользуемое подразделение; используемое выводят из обращения переключателем «Действует».
+    </MudText>
+</div>
+
+@* --- Новое подразделение: тип — страницы, родитель — из того же типа --- *@
+<MudDialog @bind-Visible="_createOpen" Options="RenameDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Новое подразделение</MudText></TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_newName" Label="Наименование *" Variant="Variant.Outlined" MaxLength="500"
+                      Immediate="true" AutoFocus="true" Class="mb-2" />
+        <MudTextField @bind-Value="_newCode" Label="Код подразделения" Variant="Variant.Outlined" MaxLength="100"
+                      HelperText="Пусто — номер назначит система" Class="mb-2" />
+        <MudSelect T="int?" @bind-Value="_newParentId" Label="Входит в" Variant="Variant.Outlined" Clearable="true"
+                   Placeholder="Верхний уровень" Dense="true">
+            @foreach (var row in BuildRows(null, showInactive: false, collapsed: new HashSet<int>()))
+            {
+                <MudSelectItem T="int?" Value="@row.Node.Id">@(new string(' ', row.Level * 4))@row.Node.Name</MudSelectItem>
+            }
+        </MudSelect>
+    </DialogContent>
+    <DialogActions>
+        @if (string.IsNullOrWhiteSpace(_newName))
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-auto ml-2">Заполните: наименование</MudText>
+        }
+        <MudButton OnClick="@(() => _createOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_busy || string.IsNullOrWhiteSpace(_newName))"
+                   OnClick="CreateAsync">Добавить</MudButton>
+    </DialogActions>
+</MudDialog>
 
 @* --- Диалог правки: смена типа переносит запись на соседнюю страницу --- *@
 <MudDialog @bind-Visible="_renameOpen" Options="RenameDialogOptions">
@@ -141,6 +180,10 @@
         </MudSelect>
     </DialogContent>
     <DialogActions>
+        @if (string.IsNullOrWhiteSpace(_renameName))
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-auto ml-2">Заполните: наименование</MudText>
+        }
         <MudButton OnClick="@(() => _renameOpen = false)">Отмена</MudButton>
         <MudButton Color="Color.Primary" Variant="Variant.Filled"
                    Disabled="@(string.IsNullOrWhiteSpace(_renameName))" OnClick="ConfirmRenameAsync">
@@ -150,7 +193,7 @@
 </MudDialog>
 
 @code {
-    private sealed record TreeRow(DivisionNode Node, int Level);
+    private sealed record TreeRow(DivisionNode Node, int Level, bool HasChildren, bool Expanded);
 
     private static readonly DialogOptions RenameDialogOptions =
         new() { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, CloseOnEscapeKey = true };
@@ -172,7 +215,10 @@
     public string Icon { get; set; } = string.Empty;
 
     private readonly List<DivisionNode> _flat = [];
-    private readonly List<TreeRow> _tree = [];
+    private readonly HashSet<int> _collapsed = [];
+    private string? _search;
+    private bool _showInactive = true;
+    private bool _createOpen;
     private string _newName = string.Empty;
     private string? _newCode;
     private int? _newParentId;
@@ -188,7 +234,37 @@
     // Дерево и выбор родителя — внутри типа страницы (иерархия не пересекает типы).
     private IEnumerable<DivisionNode> KindFlat => _flat.Where(n => n.Kind == Kind);
 
-    protected override async Task OnInitializedAsync() => await ReloadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере справочник не грузим.
+        if (!RendererInfo.IsInteractive) { return; }
+
+        await ReloadAsync();
+    }
+
+    private IReadOnlyList<TreeRow> Tree => BuildRows(_search, _showInactive, _collapsed);
+
+    private void Toggle(int id)
+    {
+        if (!_collapsed.Add(id)) { _collapsed.Remove(id); }
+    }
+
+    private void CollapseAll()
+    {
+        _collapsed.Clear();
+        foreach (var node in KindFlat.Where(n => KindFlat.Any(c => c.ParentId == n.Id)))
+        {
+            _collapsed.Add(node.Id);
+        }
+    }
+
+    private void OpenCreate(DivisionNode? parent)
+    {
+        _newName = string.Empty;
+        _newCode = null;
+        _newParentId = parent?.Id;
+        _createOpen = true;
+    }
 
     private async Task ReloadAsync()
     {
@@ -206,7 +282,6 @@
                 _error = response.StatusMessage;
             }
 
-            BuildTree();
         }
         finally
         {
@@ -214,21 +289,49 @@
         }
     }
 
-    // Дерево обходом в глубину: корни по алфавиту, дети под родителем с отступом по уровню.
-    private void BuildTree()
+    // Дерево обходом в глубину: корни по алфавиту, дети под родителем с отступом по уровню. Поиск показывает найденные
+    // узлы с их родителями и раскрывает ветки; выключенные можно скрыть.
+    private IReadOnlyList<TreeRow> BuildRows(string? search, bool showInactive, IReadOnlySet<int> collapsed)
     {
-        _tree.Clear();
-        var byParent = KindFlat.ToLookup(n => n.ParentId);
+        var nodes = KindFlat.ToList();
+        var byId = nodes.ToDictionary(n => n.Id);
+        var text = search?.Trim();
+        var visible = new HashSet<int>();
+        foreach (var node in nodes)
+        {
+            if ((!showInactive && !node.IsActive)
+                || (!string.IsNullOrEmpty(text)
+                    && !node.Name.Contains(text, StringComparison.CurrentCultureIgnoreCase)
+                    && !(node.Code?.Contains(text, StringComparison.CurrentCultureIgnoreCase) ?? false)))
+            {
+                continue;
+            }
+
+            for (DivisionNode? current = node; current is not null && visible.Add(current.Id);)
+            {
+                current = current.ParentId is { } p && byId.TryGetValue(p, out var parent) ? parent : null;
+            }
+        }
+
+        var searching = !string.IsNullOrEmpty(text);
+        var byParent = nodes.Where(n => visible.Contains(n.Id))
+            .ToLookup(n => n.ParentId is { } p && byId.ContainsKey(p) ? p : (int?)null);
+        var rows = new List<TreeRow>();
         void Walk(int? parentId, int level)
         {
-            foreach (var node in byParent[parentId])
+            foreach (var node in byParent[parentId].OrderBy(n => n.Name, StringComparer.CurrentCultureIgnoreCase))
             {
-                _tree.Add(new TreeRow(node, level));
-                Walk(node.Id, level + 1);
+                var expanded = searching || !collapsed.Contains(node.Id);
+                rows.Add(new TreeRow(node, level, byParent[node.Id].Any(), expanded));
+                if (expanded && level < 50)
+                {
+                    Walk(node.Id, level + 1);
+                }
             }
         }
 
         Walk(null, 0);
+        return rows;
     }
 
     private async Task CreateAsync()
@@ -240,6 +343,8 @@
             var response = await Dispatcher.Send(new CreateDivisionCommand(_newName, _newCode, _newParentId, Kind));
             if (response.Status)
             {
+                Snackbar.Add($"Подразделение «{_newName.Trim()}» добавлено.", Severity.Success);
+                _createOpen = false;
                 _newName = string.Empty;
                 _newCode = null;
             }
@@ -258,6 +363,18 @@
 
     private async Task SetActiveAsync(DivisionNode node, bool isActive)
     {
+        if (!isActive)
+        {
+            // Выключение — с последствиями: сколько за подразделением числится.
+            var html = $"<p>«{WebUtility.HtmlEncode(node.Name)}» перестанет предлагаться для новых документов, поручений и допусков.</p>"
+                + $"<p class=\"mud-text-secondary\">Числится: сотрудников в допуске — {node.Users}, документов — {node.Documents}, поручений — {node.Assignments}. История сохранится.</p>";
+            if (await DialogService.ShowMessageBoxAsync("Выключить подразделение?", (MarkupString)html,
+                    yesText: "Выключить", cancelText: "Отмена", options: RenameDialogOptions) != true)
+            {
+                return;
+            }
+        }
+
         _error = null;
         var response = await Dispatcher.Send(new SetDivisionActiveCommand(node.Id, isActive));
         if (!response.Status)
@@ -270,6 +387,13 @@
 
     private async Task DeleteAsync(DivisionNode node)
     {
+        if (await DialogService.ShowMessageBoxAsync("Удалить подразделение?",
+                $"«{node.Name}» будет удалено из справочника. За ним ничего не числится, но отменить удаление нельзя.",
+                yesText: "Удалить", cancelText: "Отмена", options: RenameDialogOptions) != true)
+        {
+            return;
+        }
+
         _error = null;
         var response = await Dispatcher.Send(new DeleteDivisionCommand(node.Id));
         if (!response.Status)

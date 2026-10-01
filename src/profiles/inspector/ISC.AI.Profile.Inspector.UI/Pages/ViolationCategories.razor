@@ -5,11 +5,16 @@
    классификатор автозаполняется стартовыми сферами прототипа (см. ListViolationCategoriesQuery). *@
 @page "/admin/violation-categories"
 @rendermode InteractiveServer
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
 @using ISC.AI.Profile.Inspector.Application.Features.ViolationCategories
 @using ISC.AI.Profile.Inspector.Domain.Services
 
 <PageHeader Title="Виды нарушений" Subtitle="Классификатор «сфера → вид» — категории для учёта нарушений"
-            Icon="@Icons.Material.Filled.Category" />
+            Icon="@Icons.Material.Filled.Category">
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="@(() => OpenCreate(null))" Disabled="_busy">Новая сфера</MudButton>
+</PageHeader>
 
 @if (_error is not null)
 {
@@ -17,27 +22,12 @@
               ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
 }
 
-@* --- Добавление --- *@
-<MudPaper Outlined="true" Class="pa-3 mb-4">
-    <div class="d-flex gap-3 align-end flex-wrap">
-        <MudTextField @bind-Value="_newName" Label="Название" Variant="Variant.Outlined" MaxLength="500"
-                      Immediate="true" Style="min-width:260px;" Class="flex-grow-1" />
-        <MudSelect T="int?" @bind-Value="_newParentId" Label="Сфера (пусто — новая сфера)"
-                   Variant="Variant.Outlined" Clearable="true" Style="min-width:260px;">
-            @foreach (var sphere in Spheres)
-            {
-                <MudSelectItem T="int?" Value="@sphere.Id">@sphere.Name</MudSelectItem>
-            }
-        </MudSelect>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-                   Disabled="@(_busy || string.IsNullOrWhiteSpace(_newName))" OnClick="CreateAsync">
-            Добавить
-        </MudButton>
-    </div>
-</MudPaper>
+<MudTextField T="string" @bind-Value="_search" Placeholder="Найти сферу или вид" Variant="Variant.Outlined"
+              Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+              Immediate="true" DebounceInterval="250" Clearable="true" Class="mb-3" />
 
 @* --- Дерево (плоской таблицей с отступами, как справочник подразделений) --- *@
-<MudTable T="TreeRow" Items="_tree" Hover="true" Dense="true" Outlined="true" Loading="_busy">
+<MudTable T="TreeRow" Items="Tree" Hover="true" Dense="true" Outlined="true" Loading="_busy">
     <HeaderContent>
         <MudTh>Сфера / вид</MudTh>
         <MudTh>Нарушений</MudTh>
@@ -73,19 +63,61 @@
         <MudTd>
             <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Dense="true">
                 <MudMenuItem OnClick="@(() => OpenRename(context.Node))">Переименовать</MudMenuItem>
+                @if (context.Level == 0)
+                {
+                    <MudMenuItem OnClick="@(() => OpenCreate(context.Node))">Добавить вид в сферу</MudMenuItem>
+                }
+                @* Удаление — только пустого элемента; иначе объясняем, почему пункта нет. *@
                 @if (CanDelete(context.Node))
                 {
-                    <MudMenuItem OnClick="@(() => DeleteAsync(context.Node))">Удалить</MudMenuItem>
+                    <MudMenuItem OnClick="@(() => DeleteAsync(context.Node))">Удалить…</MudMenuItem>
+                }
+                else
+                {
+                    <MudMenuItem Disabled="true">
+                        @(context.Node.ViolationCount > 0 ? "Удалить нельзя: есть нарушения" : "Удалить нельзя: в сфере есть виды")
+                    </MudMenuItem>
                 }
             </MudMenu>
         </MudTd>
     </RowTemplate>
     <NoRecordsContent>
         <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
-            Классификатор пуст — добавьте сферу (например, «Документооборот»), затем виды внутри неё.
+            @(_flat.Count == 0
+                ? "Классификатор пуст — добавьте сферу (например, «Документооборот»), затем виды внутри неё."
+                : "По этому отбору ничего нет.")
         </MudText>
     </NoRecordsContent>
 </MudTable>
+<div class="d-flex justify-space-between flex-wrap gap-2 px-1 pt-2">
+    <MudText Typo="Typo.caption">Сфер: @Spheres.Count(), видов: @_flat.Count(c => c.ParentId is not null)</MudText>
+    <MudText Typo="Typo.caption" Class="mud-text-secondary">Удалить можно только элемент, за которым нет нарушений.</MudText>
+</div>
+
+@* --- Новая сфера или вид --- *@
+<MudDialog @bind-Visible="_createOpen" Options="RenameDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">@(_newParentId is null ? "Новая сфера" : "Новый вид нарушения")</MudText></TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_newName" Label="Название *" Variant="Variant.Outlined" MaxLength="500"
+                      Immediate="true" AutoFocus="true" Class="mb-2" />
+        <MudSelect T="int?" @bind-Value="_newParentId" Label="Сфера" Variant="Variant.Outlined" Clearable="true"
+                   Placeholder="Нет — это новая сфера" Dense="true">
+            @foreach (var sphere in Spheres)
+            {
+                <MudSelectItem T="int?" Value="@sphere.Id">@sphere.Name</MudSelectItem>
+            }
+        </MudSelect>
+    </DialogContent>
+    <DialogActions>
+        @if (string.IsNullOrWhiteSpace(_newName))
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-auto ml-2">Заполните: название</MudText>
+        }
+        <MudButton OnClick="@(() => _createOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_busy || string.IsNullOrWhiteSpace(_newName))"
+                   OnClick="CreateAsync">Добавить</MudButton>
+    </DialogActions>
+</MudDialog>
 
 @* --- Диалог переименования --- *@
 <MudDialog @bind-Visible="_renameOpen" Options="RenameDialogOptions">
@@ -97,6 +129,10 @@
                       Immediate="true" AutoFocus="true" />
     </DialogContent>
     <DialogActions>
+        @if (string.IsNullOrWhiteSpace(_renameName))
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-auto ml-2">Заполните: название</MudText>
+        }
         <MudButton OnClick="@(() => _renameOpen = false)">Отмена</MudButton>
         <MudButton Color="Color.Primary" Variant="Variant.Filled"
                    Disabled="@(string.IsNullOrWhiteSpace(_renameName))" OnClick="ConfirmRenameAsync">
@@ -112,7 +148,8 @@
         new() { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, CloseOnEscapeKey = true };
 
     private readonly List<ViolationCategoryNode> _flat = [];
-    private readonly List<TreeRow> _tree = [];
+    private string? _search;
+    private bool _createOpen;
     private string _newName = string.Empty;
     private int? _newParentId;
     private bool _busy;
@@ -124,7 +161,20 @@
 
     private IEnumerable<ViolationCategoryNode> Spheres => _flat.Where(c => c.ParentId is null);
 
-    protected override async Task OnInitializedAsync() => await ReloadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере классификатор не грузим.
+        if (!RendererInfo.IsInteractive) { return; }
+
+        await ReloadAsync();
+    }
+
+    private void OpenCreate(ViolationCategoryNode? sphere)
+    {
+        _newName = string.Empty;
+        _newParentId = sphere?.Id;
+        _createOpen = true;
+    }
 
     private async Task ReloadAsync()
     {
@@ -142,7 +192,6 @@
                 _error = response.StatusMessage;
             }
 
-            BuildTree();
         }
         finally
         {
@@ -150,17 +199,28 @@
         }
     }
 
-    private void BuildTree()
+    // Сфера и её виды; поиск по сфере показывает все её виды, по виду — вид со своей сферой.
+    private IReadOnlyList<TreeRow> Tree
     {
-        _tree.Clear();
-        var byParent = _flat.ToLookup(n => n.ParentId);
-        foreach (var sphere in byParent[(int?)null])
+        get
         {
-            _tree.Add(new TreeRow(sphere, 0));
-            foreach (var leaf in byParent[sphere.Id])
+            var text = _search?.Trim();
+            bool Hit(ViolationCategoryNode n) => string.IsNullOrEmpty(text) || n.Name.Contains(text, StringComparison.CurrentCultureIgnoreCase);
+            var byParent = _flat.ToLookup(n => n.ParentId);
+            var rows = new List<TreeRow>();
+            foreach (var sphere in byParent[(int?)null])
             {
-                _tree.Add(new TreeRow(leaf, 1));
+                var leaves = Hit(sphere) ? byParent[sphere.Id].ToList() : byParent[sphere.Id].Where(Hit).ToList();
+                if (!Hit(sphere) && leaves.Count == 0)
+                {
+                    continue;
+                }
+
+                rows.Add(new TreeRow(sphere, 0));
+                rows.AddRange(leaves.Select(leaf => new TreeRow(leaf, 1)));
             }
+
+            return rows;
         }
     }
 
@@ -177,6 +237,8 @@
             var response = await Dispatcher.Send(new SaveViolationCategoryCommand(null, _newName, _newParentId));
             if (response.Status)
             {
+                Snackbar.Add($"«{_newName.Trim()}» добавлено.", Severity.Success);
+                _createOpen = false;
                 _newName = string.Empty;
             }
             else
@@ -219,6 +281,13 @@
 
     private async Task DeleteAsync(ViolationCategoryNode node)
     {
+        if (await DialogService.ShowMessageBoxAsync("Удалить из классификатора?",
+                $"«{node.Name}» будет удалено. Нарушений на нём нет, но отменить удаление нельзя.",
+                yesText: "Удалить", cancelText: "Отмена", options: RenameDialogOptions) != true)
+        {
+            return;
+        }
+
         _error = null;
         var response = await Dispatcher.Send(new DeleteViolationCategoryCommand(node.Id));
         if (!response.Status)
