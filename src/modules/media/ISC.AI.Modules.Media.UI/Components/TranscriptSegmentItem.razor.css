@@ -1,0 +1,39 @@
+/* Строка расшифровки «[мм:сс] текст»: таймкод — ровной колонкой слева, текст — по левому краю. Строка-кнопка явно
+   прижимается влево: браузер (и общие стили кнопок) иначе центрирует её содержимое, и список становится «лесенкой». */
+.transcript-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: 12px;
+    width: 100%;
+    padding: 4px 8px;
+    text-align: left;
+}
+
+button.transcript-row {
+    border-top: 0;
+    border-right: 0;
+    border-bottom: 0;
+    background: none;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+}
+
+button.transcript-row:hover,
+button.transcript-row:focus-visible {
+    background: var(--mud-palette-action-default-hover);
+}
+
+.transcript-time {
+    flex: 0 0 auto;
+    min-width: 4.5em;
+    font-family: monospace;
+    white-space: nowrap;
+    color: var(--mud-palette-text-secondary);
+}
+
+.transcript-text {
+    flex: 1 1 auto;
+    min-width: 0;
+}

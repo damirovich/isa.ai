@@ -58,7 +58,8 @@ public static class MediaModule
 
     /// <summary>
     /// Ключи конфигурации, которые читает пакет: строка подключения и модели — обязательны; параметры
-    /// поиска (ТН-008, ТФ-ПЛ-06), раскадровки (ТО-мат-06) и копии пробы в аудите (ТБ-072) — с умолчаниями.
+    /// поиска (ТН-008, ТФ-ПЛ-06), раскадровки (ТО-мат-06), треков лиц (ADR-0037), автопредложения (ADR-0035) и копии
+    /// пробы в аудите (ТБ-072) — с умолчаниями.
     /// Секция <c>Speech</c> (ADR-0026) — из единого списка интеграции (<see cref="SpeechConfigurationKeys.All"/>):
     /// процесс-распознаватель, пути и пины SHA-256 модели, словаря и детектора речи, параметры.
     /// </summary>
@@ -79,6 +80,11 @@ public static class MediaModule
         MediaSearchOptions.MaxAllowedCosineDistanceKey,
         MediaSearchOptions.SampleFpsKey,
         MediaSearchOptions.ProbeCopyMaxBytesKey,
+        MediaSearchOptions.AutoSuggestEnabledKey,
+        MediaSearchOptions.AutoSuggestMaxCosineDistanceKey,
+        MediaSearchOptions.AutoSuggestCandidatesPerReferenceKey,
+        MediaSearchOptions.TrackMinSimilarityKey,
+        MediaSearchOptions.TrackMaxGapSecondsKey,
     ];
 
     /// <summary>Политика доступа страниц пакета (регистрируется хостом из реестра профиля).</summary>

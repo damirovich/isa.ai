@@ -21,6 +21,8 @@ namespace ISC.AI.Modules.Media.Application;
 /// <param name="AutoSuggestEnabled">Предлагать ли связи с фигурантами после индексации носителя (ТФ-ПЕР-09).</param>
 /// <param name="AutoSuggestMaxCosineDistance">Порог расстояния для предложений системы — строже ручного поиска: в очередь идут только близкие совпадения.</param>
 /// <param name="AutoSuggestCandidatesPerReference">Сколько ближайших лиц носителя предлагается на один эталон фигуранта.</param>
+/// <param name="TrackMinSimilarity">Схожесть шаблонов, с которой лицо соседнего кадра продолжает трек (ТФ-ПЕР-02, ADR-0037).</param>
+/// <param name="TrackMaxGapSeconds">Наибольший разрыв между кадрами одного трека, секунд (лицо пропало из кадра дольше — новый трек).</param>
 public sealed record MediaSearchOptions(
     int CandidateListSize = MediaSearchOptions.DefaultCandidateListSize,
     int MinCandidateListSize = MediaSearchOptions.DefaultMinCandidateListSize,
@@ -32,8 +34,28 @@ public sealed record MediaSearchOptions(
     int HnswEfSearch = MediaSearchOptions.DefaultHnswEfSearch,
     bool AutoSuggestEnabled = true,
     double AutoSuggestMaxCosineDistance = MediaSearchOptions.DefaultAutoSuggestMaxCosineDistance,
-    int AutoSuggestCandidatesPerReference = MediaSearchOptions.DefaultAutoSuggestCandidatesPerReference)
+    int AutoSuggestCandidatesPerReference = MediaSearchOptions.DefaultAutoSuggestCandidatesPerReference,
+    double TrackMinSimilarity = MediaSearchOptions.DefaultTrackMinSimilarity,
+    double TrackMaxGapSeconds = MediaSearchOptions.DefaultTrackMaxGapSeconds)
 {
+    /// <summary>Ключ конфигурации: порог схожести шаблонов для продолжения трека лица в видео.</summary>
+    public const string TrackMinSimilarityKey = "Media:Video:TrackMinSimilarity";
+
+    /// <summary>Ключ конфигурации: наибольший разрыв между кадрами одного трека, секунд.</summary>
+    public const string TrackMaxGapSecondsKey = "Media:Video:TrackMaxGapSeconds";
+
+    /// <summary>
+    /// Трек продолжается при схожести 0,5 и выше: одно лицо на соседних кадрах обычно заметно ближе, разные люди —
+    /// заметно дальше. Предварительное значение до калибровки на пилоте (ТО-мат-08).
+    /// </summary>
+    public const double DefaultTrackMinSimilarity = 0.5;
+
+    /// <summary>Разрыв до 3 с: при выборке 1 кадр/с лицо может пропасть на два кадра (поворот, заслонили) и остаться в треке.</summary>
+    public const double DefaultTrackMaxGapSeconds = 3.0;
+
+    /// <summary>Разрыв трека в миллисекундах — для трекера.</summary>
+    public long TrackMaxGapMs => (long)Math.Round(TrackMaxGapSeconds * 1000);
+
     /// <summary>Ключ конфигурации: ширина кандидат-листа по умолчанию.</summary>
     public const string CandidateListSizeKey = "Media:Search:CandidateListSize";
 
@@ -138,7 +160,9 @@ public sealed record MediaSearchOptions(
             HnswEfSearch: ReadInt(configuration, HnswEfSearchKey, DefaultHnswEfSearch),
             AutoSuggestEnabled: suggestEnabled,
             AutoSuggestMaxCosineDistance: suggestThreshold,
-            AutoSuggestCandidatesPerReference: perReference);
+            AutoSuggestCandidatesPerReference: perReference,
+            TrackMinSimilarity: Math.Clamp(ReadDouble(configuration, TrackMinSimilarityKey) ?? DefaultTrackMinSimilarity, 0, 1),
+            TrackMaxGapSeconds: ReadDouble(configuration, TrackMaxGapSecondsKey) is { } gap && gap > 0 ? gap : DefaultTrackMaxGapSeconds);
     }
 
     /// <summary>

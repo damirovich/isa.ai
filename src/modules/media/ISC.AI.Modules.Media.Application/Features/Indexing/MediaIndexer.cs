@@ -287,6 +287,11 @@ public sealed class MediaIndexer(
             await ProcessImageAsync(frame.JpegBytes, frame.Index, timestampMs, subPath, progress, cancellationToken);
         }
 
+        // ТФ-ПЕР-02, ADR-0037: одно лицо на соседних кадрах — один трек; по нему появление показывается отрезком.
+        var tracked = FaceTracker.Assign(progress.Faces, options.TrackMinSimilarity, options.TrackMaxGapMs);
+        progress.Faces.Clear();
+        progress.Faces.AddRange(tracked);
+
         return durationMs;
     }
 

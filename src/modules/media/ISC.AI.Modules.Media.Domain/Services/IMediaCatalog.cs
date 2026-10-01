@@ -40,6 +40,20 @@ public sealed record MediaAssetRow(
     int? SourceAssetId = null,
     long? SourceTimestampMs = null);
 
+/// <summary>Отрезок трека лица в видео (ТФ-ПЕР-02, ADR-0037): одно лицо на соседних кадрах выборки.</summary>
+/// <param name="FaceId">Лицо, по которому спросили.</param>
+/// <param name="TrackId">Номер трека в пределах носителя.</param>
+/// <param name="StartMs">Момент первого кадра трека, мс.</param>
+/// <param name="EndMs">Момент последнего кадра трека, мс.</param>
+/// <param name="Frames">Сколько кадров выборки в треке.</param>
+public sealed record FaceTrackSpan(int FaceId, int TrackId, long StartMs, long EndMs, int Frames);
+
+/// <summary>Запрос отрезка трека: лицо и, на случай переиндексации, его носитель и момент кадра.</summary>
+/// <param name="FaceId">Лицо (как его запомнило появление).</param>
+/// <param name="AssetId">Носитель лица.</param>
+/// <param name="FrameTimestampMs">Момент кадра лица, мс; у фото — <see langword="null"/>.</param>
+public sealed record FaceTrackRequest(int FaceId, int AssetId, long? FrameTimestampMs);
+
 /// <summary>Лицо на носителе для чтения (рамки на фото, шкала лиц видео, вырезки).</summary>
 public sealed record FaceRow(
     int Id,
@@ -76,6 +90,19 @@ public interface IMediaCatalog
 
     /// <summary>Одно лицо, если доступно.</summary>
     Task<FaceRow?> GetFaceAsync(int faceId, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Отрезки треков лиц из <paramref name="requests"/> (ТФ-ПЕР-02, ADR-0037): первый и последний кадр трека и число
+    /// кадров — для показа появления фигуранта «с … по …»; ключ ответа — лицо из запроса. Лица без трека (фото, видео,
+    /// проиндексированное до треков) в ответ не попадают; кадры трека считаются под решёткой (ТБ-020/021).
+    /// </summary>
+    /// <remarks>
+    /// Переиндексация пересоздаёт лица с новыми номерами, а появление помнит прежний. Если прежнего лица нет, трек
+    /// берётся у лица того же носителя на том же кадре — ТОЛЬКО если оно на этом кадре одно: при нескольких лицах
+    /// угадывать нельзя, и отрезок не показывается.
+    /// </remarks>
+    Task<IReadOnlyDictionary<int, FaceTrackSpan>> GetTrackSpansAsync(
+        IReadOnlyCollection<FaceTrackRequest> requests, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>Шаблон лица для поиска «этого человека в других материалах» (ТФ-ПЛ-03); <see langword="null"/> — нет/недоступен.</summary>
     Task<float[]?> GetTemplateAsync(int faceId, AccessContext access, CancellationToken cancellationToken = default);

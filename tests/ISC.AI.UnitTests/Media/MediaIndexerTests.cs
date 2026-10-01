@@ -32,6 +32,9 @@ public sealed class MediaIndexerTests : IDisposable
         Path.Combine(Path.GetTempPath(), "iscai-media-unit-tests", Guid.NewGuid().ToString("N")),
         Path.Combine(Path.GetTempPath(), "iscai-media-unit-tests", Guid.NewGuid().ToString("N") + "-legacy"));
 
+    /// <summary>Один и тот же ненулевой шаблон — «то же лицо» для трекера.</summary>
+    private static readonly float[] SameFace = [1f, 0f, 0f];
+
     private static readonly DetectedFace FaceA = new(new BoundingBox(0, 0, 10, 10), default, 0.9f);
     private static readonly DetectedFace FaceB = new(new BoundingBox(20, 20, 10, 10), default, 0.5f);
     private static readonly DetectedFace FaceC = new(new BoundingBox(40, 40, 10, 10), default, 0.8f);
@@ -114,6 +117,25 @@ public sealed class MediaIndexerTests : IDisposable
         result.Success.ShouldBeTrue();
         result.Faces.ShouldBe(3);
         await _store.DidNotReceiveWithAnyArgs().FailIndexingAsync(default, default!, default);
+    }
+
+    [Fact(DisplayName = "Видео: одно лицо на соседних кадрах получает общий трек, другое лицо — свой (ТФ-ПЕР-02, ADR-0037)")]
+    public async Task Video_faces_on_adjacent_frames_share_track()
+    {
+        _frames.ExtractAsync(Arg.Any<string>(), Arg.Any<FrameSamplingOptions>(), Arg.Any<CancellationToken>())
+            .Returns(Frames(
+                new VideoFrame(1, TimeSpan.FromSeconds(1), [5]),
+                new VideoFrame(2, TimeSpan.FromSeconds(2), [7])));
+        _detector.DetectAsync(Arg.Is<byte[]>(b => b[0] == 7), Arg.Any<CancellationToken>()).Returns([FaceA]);
+        _embedder.EmbedAsync(Arg.Any<byte[]>(), Arg.Any<DetectedFace>(), Arg.Any<CancellationToken>()).Returns(SameFace);
+
+        (await Indexer().IndexAsync(AssetId)).Success.ShouldBeTrue();
+
+        // Кадр 1 с: A (с шаблоном) и B (непригодно) — два трека; кадр 2 с: снова A — продолжает свой трек.
+        await _store.Received(1).CompleteIndexingAsync(
+            AssetId,
+            Arg.Is<IReadOnlyList<IndexedFace>>(faces => faces.Select(f => f.TrackId).SequenceEqual(new int?[] { 1, 2, 1 })),
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<long?>(), Arg.Any<VideoProbe?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact(DisplayName = "Видео: 3 кадра, 3 лица (1 непригодно без шаблона), вырезки для всех, длительность = последний таймкод, аудит Ingest без субъекта")]
