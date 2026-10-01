@@ -45,4 +45,8 @@ internal static partial class MediaIndexerLog
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Индексация носителя {AssetId}: проба видеопотока (частота кадров, длительность, размер кадра) не удалась — поля носителя не обновлены, раскадровка продолжается (ADR-0028).")]
     public static partial void ProbeFailed(ILogger logger, Exception exception, int assetId);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Носитель {AssetId} проиндексирован, но предложения связей с фигурантами не составлены (ТФ-ПЕР-09) — индексация не отменяется; повтор — переиндексацией.")]
+    public static partial void SuggestionsFailed(ILogger logger, Exception exception, int assetId);
 }

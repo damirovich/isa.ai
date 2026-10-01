@@ -204,6 +204,8 @@ public sealed class MediaPurger(
 
         if (sessions.Count == 0)
         {
+            // Журнал сверок дела (ТФ-ПЕР-09) биометрии не несёт, но без дела ему не место — уходит и без истории поисков.
+            await db.SuggestionRuns.Where(r => r.CaseId == caseRef).ExecuteDeleteAsync(cancellationToken);
             return CaseSearchPurgeResult.Empty; // идемпотентно: истории нет — ни удаления, ни записи
         }
 
@@ -232,6 +234,7 @@ public sealed class MediaPurger(
         // Атомарно: сессии → кандидаты → решения верификации каскадом БД (см. конфигурации).
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await db.SearchSessions.Where(s => s.CaseId == caseRef).ExecuteDeleteAsync(cancellationToken);
+        await db.SuggestionRuns.Where(r => r.CaseId == caseRef).ExecuteDeleteAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         // Файлы проб — после фиксации; подкаталог = идентификатор дела (конвенция резолвера раздачи).

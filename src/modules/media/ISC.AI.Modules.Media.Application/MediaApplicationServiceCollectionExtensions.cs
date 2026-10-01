@@ -34,6 +34,10 @@ public static class MediaApplicationServiceCollectionExtensions
         services.AddSingleton(MediaSearchOptions.Read(configuration));
         services.AddSingleton(new MediaTempFiles());
         services.AddScoped<IMediaIndexer, MediaIndexer>();
+
+        // ТФ-ПЕР-09: предложения связей с фигурантами после индексации нового носителя (ADR-0035).
+        services.AddScoped<IPersonSuggester, Features.Suggestions.PersonSuggester>();
+        services.AddScoped<IPersonSuggestionScheduler, Features.Suggestions.PersonSuggestionScheduler>();
         services.AddScoped<IMediaTranscriptionPipeline, MediaTranscriptionPipeline>();
         services.AddHostedService<MediaStartupMaintenance>();
         return services;

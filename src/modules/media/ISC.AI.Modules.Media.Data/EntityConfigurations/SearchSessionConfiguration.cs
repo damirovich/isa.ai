@@ -1,4 +1,5 @@
 using ISC.AI.Modules.Media.Data.Entities;
+using ISC.AI.Modules.Media.Domain.Model;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -27,7 +28,15 @@ public sealed class SearchSessionConfiguration : IEntityTypeConfiguration<Search
         builder.Property(s => s.Classification).IsRequired();
         builder.Property(s => s.DivisionId).IsRequired();
 
+        // Происхождение (ТФ-ПЕР-09): прежние сессии — поиски сотрудников (миграция ставит 1).
+        builder.Property(s => s.Origin).IsRequired().HasDefaultValue(SessionOrigin.Operator);
+
         builder.HasIndex(s => s.CaseId);
+
+        // Повторная индексация носителя не должна плодить одинаковые предложения: хранилище ищет прежнее
+        // предложение по (дело, фигурант, эталон) — индекс под этот поиск.
+        builder.HasIndex(s => new { s.CaseId, s.SuggestedPersonRef, s.ProbeFaceId })
+            .HasFilter("suggested_person_ref IS NOT NULL");
         builder.HasIndex(s => new { s.Classification, s.DivisionId });
         // Вырезка пробы разрешается в файл по (сессия, имя) — имя уникально в пределах категории media-probes.
         // Уникальность — только для пробы-изображения (probe_face_id IS NULL): у пробы-лица носителя своей вырезки

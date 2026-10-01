@@ -5,6 +5,11 @@ namespace ISC.AI.Modules.Media.Domain.Model;
 /// сюда не входит и в базу не пишется (ТБ-074) — только хеш; копия пробного изображения — в аудите под
 /// решёткой (ТБ-072). Гриф/подразделение — дела, в контексте которого ведётся поиск (ТБ-070).
 /// </summary>
+/// <remarks>
+/// <c>Origin</c> — кто запустил: сотрудник или система (ТФ-ПЕР-09). <c>SuggestedPersonRef</c> — фигурант дела, чей
+/// эталон был пробой автоматического предложения (непрозрачный идентификатор профиля); это подсказка эксперту,
+/// а не решение: привязку к фигуранту (<c>PersonRef</c> кандидата) по-прежнему ставит эксперт (ТФ-ВЕР-03).
+/// </remarks>
 public sealed record SearchSessionDraft(
     int CaseId,
     string AuthorizationRef,
@@ -20,7 +25,9 @@ public sealed record SearchSessionDraft(
     int HnswEfSearch,
     short Classification,
     int DivisionId,
-    int? RequestedByUserId);
+    int? RequestedByUserId,
+    SessionOrigin Origin = SessionOrigin.Operator,
+    int? SuggestedPersonRef = null);
 
 /// <summary>Поисковая сессия, как она хранится (ТО-инф-12, ТФ-ПЛ-07).</summary>
 public sealed record SearchSessionRow(
@@ -40,7 +47,9 @@ public sealed record SearchSessionRow(
     int DivisionId,
     int? RequestedByUserId,
     DateTime CreatedAt,
-    int CandidateCount);
+    int CandidateCount,
+    SessionOrigin Origin = SessionOrigin.Operator,
+    int? SuggestedPersonRef = null);
 
 /// <summary>
 /// Кандидат поисковой сессии с решениями верификации (ТФ-ПЛ-02, ТФ-ВЕР-01/02). Полная строка — для
@@ -63,7 +72,9 @@ public sealed record SearchCandidateRow(
     CandidateStatus Status,
     int? PersonRef,
     IReadOnlyList<VerificationDecision> Decisions,
-    float? QualityScore = null)
+    float? QualityScore = null,
+    SessionOrigin Origin = SessionOrigin.Operator,
+    int? SuggestedPersonRef = null)
 {
     /// <summary>Косинусная схожесть (1 − расстояние) — показывается ТОЛЬКО с предупреждением о вероятностной природе (ТЭ-006).</summary>
     public double Similarity => 1 - CosineDistance;

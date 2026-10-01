@@ -28,6 +28,11 @@ namespace ISC.AI.Modules.Media.Application.Features.Verification;
 /// <param name="DivisionId">Подразделение.</param>
 /// <param name="Status">Статус кандидата.</param>
 /// <param name="OwnDecision">Решение ТЕКУЩЕГО субъекта по кандидату, если есть; чужие решения не выдаются.</param>
+/// <param name="Origin">Происхождение сессии: поиск сотрудника или предложение системы (ТФ-ПЕР-09) — видно обеим стадиям.</param>
+/// <param name="SuggestedPersonRef">
+/// Фигурант, которого предложила система, — ТОЛЬКО на стадии эксперта (подсказка к выбору фигуранта, ТФ-ВЕР-03).
+/// Верификатору не выдаётся: его решение — по изображениям, без «кто это» (ТФ-ВЕР-02).
+/// </param>
 public sealed record VerificationQueueItem(
     int CandidateId,
     int SessionId,
@@ -45,13 +50,17 @@ public sealed record VerificationQueueItem(
     short Classification,
     int DivisionId,
     CandidateStatus Status,
-    VerificationDecision? OwnDecision)
+    VerificationDecision? OwnDecision,
+    SessionOrigin Origin = SessionOrigin.Operator,
+    int? SuggestedPersonRef = null)
 {
     /// <summary>
     /// Слепая проекция полной строки кандидата: из решений остаётся только решение <paramref name="userId"/>,
-    /// привязка к фигуранту (<c>PersonRef</c>) отбрасывается (ТФ-ВЕР-02).
+    /// привязка к фигуранту (<c>PersonRef</c>) отбрасывается (ТФ-ВЕР-02). Предложенный системой фигурант остаётся только
+    /// для стадии эксперта (<paramref name="stage"/>); по умолчанию — стадия верификатора, то есть «слепо».
     /// </summary>
-    public static VerificationQueueItem From(SearchCandidateRow candidate, SearchSessionRow session, int userId)
+    public static VerificationQueueItem From(
+        SearchCandidateRow candidate, SearchSessionRow session, int userId, VerificationStage stage = VerificationStage.Verifier)
     {
         System.ArgumentNullException.ThrowIfNull(candidate);
         System.ArgumentNullException.ThrowIfNull(session);
@@ -73,6 +82,8 @@ public sealed record VerificationQueueItem(
             candidate.Classification,
             candidate.DivisionId,
             candidate.Status,
-            candidate.Decisions.LastOrDefault(d => d.SubjectId == userId));
+            candidate.Decisions.LastOrDefault(d => d.SubjectId == userId),
+            session.Origin,
+            stage == VerificationStage.Expert ? session.SuggestedPersonRef : null);
     }
 }

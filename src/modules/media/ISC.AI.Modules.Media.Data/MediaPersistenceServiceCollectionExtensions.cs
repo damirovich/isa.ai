@@ -58,6 +58,7 @@ public static class MediaPersistenceServiceCollectionExtensions
         services.AddMediaFrameRateLimiting();
         services.AddScoped<IMediaCatalog, MediaCatalog>();
         services.AddScoped<ISearchSessionStore, SearchSessionStore>();
+        services.AddScoped<ISuggestionRunStore, SuggestionRunStore>();
 
         return services;
     }

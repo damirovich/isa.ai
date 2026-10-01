@@ -10,6 +10,7 @@ using ISC.AI.Abstractions.Application;
 using ISC.AI.Modules.Media.Application.Features.Assets;
 using ISC.AI.Modules.Media.Application.Features.Assets.Commands.SnapshotFrame;
 using ISC.AI.Modules.Media.Application.Features.Scope;
+using ISC.AI.Modules.Media.Application.Features.Suggestions;
 using ISC.AI.Modules.Media.Application.Features.Transcripts;
 using ISC.AI.Modules.Media.Application.Features.Verification;
 using ISC.AI.Modules.Media.Domain.Model;
@@ -39,6 +40,11 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
         Services.AddMudServices();
         Services.AddSingleton(_mediator);
         SetRendererInfo(new RendererInfo("Server", true));
+
+        // Блок «Сверка с фигурантами дела» (ТФ-ПЕР-09) есть на каждой карточке с лицами: по умолчанию — пустое состояние.
+        _mediator.Send(Arg.Any<GetAssetSuggestionStatusQuery>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<ResponseDto<AssetSuggestionStatus>>(ResponseDto<AssetSuggestionStatus>.Ok(
+                new AssetSuggestionStatus(true, false, 0.5, [], []))));
     }
 
     Task IAsyncLifetime.InitializeAsync() => Task.CompletedTask;

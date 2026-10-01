@@ -113,7 +113,7 @@ public sealed record ListVerificationQueueQuery(
                     continue; // сессия вне допуска — кандидат не показывается (fail-closed)
                 }
 
-                items.Add(VerificationQueueItem.From(candidate, session, subjectId));
+                items.Add(VerificationQueueItem.From(candidate, session, subjectId, query.Stage));
             }
 
             return ResponseDto<IReadOnlyList<VerificationQueueItem>>.Ok(items, page.Total);

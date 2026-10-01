@@ -62,7 +62,7 @@ public sealed record GetCandidatePairQuery(int CandidateId, VerificationStage St
                 return ResponseDto<VerificationQueueItem>.NotFound("Кандидат не найден или недоступен.");
             }
 
-            return ResponseDto<VerificationQueueItem>.Ok(VerificationQueueItem.From(candidate, session, subjectId));
+            return ResponseDto<VerificationQueueItem>.Ok(VerificationQueueItem.From(candidate, session, subjectId, query.Stage));
         }
     }
 }

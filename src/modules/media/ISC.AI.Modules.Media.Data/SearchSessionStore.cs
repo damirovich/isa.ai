@@ -86,6 +86,8 @@ public sealed class SearchSessionStore(
             Classification = draft.Classification,
             DivisionId = draft.DivisionId,
             RequestedByUserId = draft.RequestedByUserId,
+            Origin = draft.Origin,
+            SuggestedPersonRef = draft.SuggestedPersonRef,
         };
         db.SearchSessions.Add(session);
 
@@ -198,6 +200,50 @@ public sealed class SearchSessionStore(
 
         var rows = await MaterializeAsync(db, OrderedQueue(queue, filter?.Order ?? VerificationQueueOrder.BySession).Skip(skip).Take(take), cancellationToken);
         return new VerificationQueuePage(rows, total);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> HasSuggestionAsync(
+        int caseId, int personRef, int probeFaceId, int assetId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        return await db.SearchCandidates.AsNoTracking()
+            .AnyAsync(c => c.AssetId == assetId
+                && c.Session!.Origin == SessionOrigin.SystemSuggestion
+                && c.Session.CaseId == caseId
+                && c.Session.SuggestedPersonRef == personRef
+                && c.Session.ProbeFaceId == probeFaceId,
+                cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<SuggestedCandidateRow>> ListSuggestedForAssetAsync(
+        int assetId, IReadOnlyCollection<int> caseIds, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(caseIds);
+        if (caseIds.Count == 0)
+        {
+            return []; // область дел пуста — читать нечего (ТБ-071)
+        }
+
+        var ids = caseIds as int[] ?? caseIds.ToArray();
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var rows = await VisibleCandidates(db, access)
+            .Where(c => c.AssetId == assetId
+                && c.Session!.Origin == SessionOrigin.SystemSuggestion
+                && ids.Contains(c.Session.CaseId))
+            .OrderByDescending(c => c.SessionId)
+            .ThenBy(c => c.Rank)
+            .Select(c => new { c.Id, c.SessionId, c.Session!.CaseId, c.FaceId, c.CosineDistance, c.Status, c.Session.SuggestedPersonRef })
+            .ToListAsync(cancellationToken);
+
+        // Слепая проекция (ТФ-ВЕР-02): предложенного фигуранта видно только до решения эксперта — иначе верификатор
+        // узнал бы его из карточки носителя.
+        return rows
+            .Select(r => new SuggestedCandidateRow(
+                r.Id, r.SessionId, r.CaseId, r.FaceId, 1 - r.CosineDistance, r.Status,
+                r.Status == CandidateStatus.Candidate ? r.SuggestedPersonRef : null))
+            .ToList();
     }
 
     /// <inheritdoc />
@@ -326,23 +372,24 @@ public sealed class SearchSessionStore(
     private sealed record SessionProjection(
         int Id, int CaseId, string AuthorizationRef, SearchScopeKind Scope, int[] CaseIds, string ProbeSha256,
         int? ProbeFaceId, string? ProbeCropStoredFileName, int TopK, double? MaxCosineDistance, string DetectorVersion,
-        string EmbedderVersion, short Classification, int DivisionId, int? RequestedByUserId, DateTime CreatedAt, int CandidateCount);
+        string EmbedderVersion, short Classification, int DivisionId, int? RequestedByUserId, DateTime CreatedAt, int CandidateCount,
+        SessionOrigin Origin, int? SuggestedPersonRef);
 
     private static IQueryable<SessionProjection> ProjectSessions(MediaDbContext db, IQueryable<SearchSession> sessions) =>
         sessions.Select(s => new SessionProjection(
             s.Id, s.CaseId, s.AuthorizationRef, s.Scope, s.CaseIds, s.ProbeSha256, s.ProbeFaceId, s.ProbeCropStoredFileName,
             s.TopK, s.MaxCosineDistance, s.DetectorVersion, s.EmbedderVersion, s.Classification, s.DivisionId,
-            s.RequestedByUserId, s.CreatedAt, db.SearchCandidates.Count(c => c.SessionId == s.Id)));
+            s.RequestedByUserId, s.CreatedAt, db.SearchCandidates.Count(c => c.SessionId == s.Id), s.Origin, s.SuggestedPersonRef));
 
     private static SearchSessionRow ToRow(SessionProjection s) => new(
         s.Id, s.CaseId, s.AuthorizationRef, s.Scope, s.CaseIds, s.ProbeSha256, s.ProbeFaceId, s.ProbeCropStoredFileName,
         s.TopK, s.MaxCosineDistance, s.DetectorVersion, s.EmbedderVersion, s.Classification, s.DivisionId,
-        s.RequestedByUserId, s.CreatedAt, s.CandidateCount);
+        s.RequestedByUserId, s.CreatedAt, s.CandidateCount, s.Origin, s.SuggestedPersonRef);
 
     private sealed record CandidateProjection(
         int Id, int SessionId, int CaseId, int Rank, int FaceId, int AssetId, int? FrameIndex, long? FrameTimestampMs,
         double CosineDistance, string? CropStoredFileName, string ModelVersion, short Classification, int DivisionId,
-        CandidateStatus Status, int? PersonRef, float? QualityScore);
+        CandidateStatus Status, int? PersonRef, float? QualityScore, SessionOrigin Origin, int? SuggestedPersonRef);
 
     private static async Task<List<SearchCandidateRow>> MaterializeAsync(
         MediaDbContext db, IQueryable<SearchCandidate> candidates, CancellationToken cancellationToken)
@@ -352,7 +399,8 @@ public sealed class SearchSessionStore(
             .Select(c => new CandidateProjection(
                 c.Id, c.SessionId, c.Session!.CaseId, c.Rank, c.FaceId, c.AssetId, c.FrameIndex, c.FrameTimestampMs,
                 c.CosineDistance, c.CropStoredFileName, c.ModelVersion, c.Classification, c.DivisionId, c.Status, c.PersonRef,
-                db.Faces.Where(f => f.Id == c.FaceId).Select(f => (float?)f.QualityScore).FirstOrDefault()))
+                db.Faces.Where(f => f.Id == c.FaceId).Select(f => (float?)f.QualityScore).FirstOrDefault(),
+                c.Session.Origin, c.Session.SuggestedPersonRef))
             .ToListAsync(cancellationToken);
         if (rows.Count == 0)
         {
@@ -372,7 +420,9 @@ public sealed class SearchSessionStore(
             byCandidate[r.Id]
                 .Select(d => new VerificationDecision(d.SubjectId, d.Stage, d.Verdict, d.Rationale, d.DecidedAtUtc))
                 .ToList(),
-            r.QualityScore))
+            r.QualityScore,
+            r.Origin,
+            r.SuggestedPersonRef))
             .ToList();
     }
 

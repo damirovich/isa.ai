@@ -156,8 +156,14 @@ else
         </div>
     </MudPaper>
 
+    @* Фото — в две колонки: слева снимок по своей ширине, справа лица и сверка с фигурантами; не хватает ширины —
+       правая колонка уходит под снимок. Справа от портретного фото иначе оставалось пустое поле. Видео и аудио — как
+       прежде, блоками друг под другом (обёртки без стилей ничего не меняют). *@
+    var split = asset.Kind == MediaKind.Image;
+    <div class="@(split ? "d-flex flex-wrap align-start my-4" : null)" style="@(split ? "gap:16px;" : null)">
+    <div style="@(split ? "flex:0 1 auto;max-width:100%;min-width:0;" : null)">
     @* ================= Само изображение / видео / аудио — как есть (ТЭ-007) ================= *@
-    <MudPaper Outlined="true" Class="pa-4 my-4 text-center">
+    <MudPaper Outlined="true" Class="@(split ? "pa-4 text-center" : "pa-4 my-4 text-center")">
         @if (asset.Kind == MediaKind.Audio)
         {
             @if (IsBrowserPlayableAudio(asset.ContentType))
@@ -213,12 +219,14 @@ else
                     }
                 }
             </div>
-            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+            @* width:0 + min-width:100% — подпись переносится по ширине снимка и не растягивает колонку. *@
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2" Style="width:0;min-width:100%;">
                 Изображение показано без обработки (ТЭ-007); рамки — найденные лица (пригодные — зелёные, непригодные — жёлтые,
                 выбранное — синяя). Если оно не отображается — файла нет либо он вне вашего допуска.
             </MudText>
         }
     </MudPaper>
+    </div>
 
     @* ================= Расшифровка речи (ADR-0026): аудио и звуковая дорожка видео ================= *@
     @if (asset.Kind is MediaKind.Audio or MediaKind.Video)
@@ -237,9 +245,10 @@ else
     }
 
     @* ================= Лица носителя (к аудио неприменимо — блок скрыт) ================= *@
+    <div style="@(split ? "flex:1 1 380px;min-width:0;" : null)">
     @if (FacesApplicable(asset))
     {
-        <MudPaper Outlined="true" Class="pa-4 my-4">
+        <MudPaper Outlined="true" Class="@(split ? "pa-4 mb-4" : "pa-4 my-4")">
             <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
                 <MudText Typo="Typo.subtitle1">Лица на носителе: @_details.Faces.Count</MudText>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">
@@ -295,23 +304,36 @@ else
             }
             else
             {
-                <div class="d-flex flex-wrap gap-4">
+                @* Лицо фото — карточкой: вырезка слева, номер, баллы и действия справа. В узкой плитке подписи кнопок
+                   переносились в три строки. *@
+                <div class="d-flex flex-wrap gap-3">
                     @foreach (var face in _details.Faces)
                     {
                         var current = face;
-                        <FaceCropTile Url="@CropUrl(current)" Size="128" Highlighted="@(HighlightFaceId == current.Id)"
-                                      Caption="@($"лицо № {current.Id} · детектор {current.DetectionScore:0.00} · качество {current.QualityScore:0.00}")"
-                                      Unusable="@(!current.QualityAcceptable)" UnusableReason="@current.QualityReason">
-                            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonSearch" Class="mt-1"
-                                       Disabled="@(!current.QualityAcceptable)" OnClick="@(() => SearchFace(current.Id))">Найти в других материалах</MudButton>
-                            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonAdd"
-                                       Disabled="@(_busy || _details.CaseId is null)" OnClick="@(() => OpenLinkAsync(current))">Привязать к фигуранту</MudButton>
-                        </FaceCropTile>
+                        <MudPaper Outlined="true" Class="pa-2 d-flex gap-3 align-start">
+                            <FaceCropTile Url="@CropUrl(current)" Size="128" Highlighted="@(HighlightFaceId == current.Id)"
+                                          Unusable="@(!current.QualityAcceptable)" UnusableReason="@current.QualityReason" />
+                            <div class="d-flex flex-column gap-1">
+                                <MudText Typo="Typo.subtitle2">Лицо № @current.Id</MudText>
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                    детектор @current.DetectionScore.ToString("0.00", CultureInfo.CurrentCulture) · качество @current.QualityScore.ToString("0.00", CultureInfo.CurrentCulture)
+                                </MudText>
+                                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonSearch" Class="mt-2"
+                                           Disabled="@(!current.QualityAcceptable)" OnClick="@(() => SearchFace(current.Id))">Найти в других материалах</MudButton>
+                                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonAdd"
+                                           Disabled="@(_busy || _details.CaseId is null)" OnClick="@(() => OpenLinkAsync(current))">Привязать к фигуранту</MudButton>
+                            </div>
+                        </MudPaper>
                     }
                 </div>
             }
         </MudPaper>
+
+        @* ================= Сверка с фигурантами дела (ТФ-ПЕР-09, ADR-0035) ================= *@
+        <PersonSuggestionPanel AssetId="@asset.Id" IndexStatus="@asset.IndexStatus" FaceCount="@_details.Faces.Count" />
     }
+    </div>
+    </div>
 }
 
 @* --- Подтверждение гарантированного удаления (ТБ-064/075, GATE-6) --- *@

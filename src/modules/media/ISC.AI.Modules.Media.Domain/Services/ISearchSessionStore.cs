@@ -51,6 +51,22 @@ public interface ISearchSessionStore
         VerificationStage stage, IReadOnlyCollection<int> caseIds, int skip, int take, AccessContext access,
         VerificationQueueFilter? filter = null, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Предлагала ли уже система (ТФ-ПЕР-09) в этом деле этого фигуранта по этому эталону на этом носителе — в любом
+    /// статусе. Повторная индексация носителя пересоздаёт лица с новыми идентификаторами, поэтому сверка идёт по
+    /// носителю, а не по лицу: разобранное или ждущее разбора предложение второй раз не ставится.
+    /// </summary>
+    /// <remarks>Без решётки: вызывает фоновый конвейер, ответ наружу не выдаётся.</remarks>
+    Task<bool> HasSuggestionAsync(int caseId, int personRef, int probeFaceId, int assetId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Кандидаты «предложено системой» (ТФ-ПЕР-09) на лицах носителя в делах <paramref name="caseIds"/> — для
+    /// карточки носителя; под решёткой (ТБ-020/021), дела вне списка не читаются (ТБ-071). Предложенный фигурант
+    /// отдаётся только у кандидатов, ждущих эксперта (слепая проекция верификатора, ТФ-ВЕР-02).
+    /// </summary>
+    Task<IReadOnlyList<SuggestedCandidateRow>> ListSuggestedForAssetAsync(
+        int assetId, IReadOnlyCollection<int> caseIds, AccessContext access, CancellationToken cancellationToken = default);
+
     /// <summary>Записать решение и новый статус атомарно; привязка к фигуранту (<paramref name="personRef"/>) — если указана.</summary>
     Task RecordDecisionAsync(int candidateId, VerificationDecision decision, CandidateStatus newStatus, int? personRef, CancellationToken cancellationToken = default);
 }

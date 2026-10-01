@@ -318,6 +318,54 @@ public sealed class MediaSearchSessionStoreTests : IAsyncLifetime
         await Should.ThrowAsync<DbUpdateException>(() => store.CreateAsync(imageProbe, []));
     }
 
+    [Fact(DisplayName = "Предложение системы (ТФ-ПЕР-09): происхождение и фигурант сохраняются в сессии, кандидате и очереди; повтор находится по делу, фигуранту, эталону и носителю")]
+    public async Task System_suggestion_is_stored_and_found_as_repeat()
+    {
+        var factory = new MediaContextFactory(_postgres.GetConnectionString());
+        int face;
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+            face = await SeedFaceAsync(db, classification: 1, divisionId: 7, crop: null);
+        }
+
+        var store = new SearchSessionStore(factory, new AllowAllAccessPolicy());
+        const int assetId = 555;
+        var sessionId = await store.CreateAsync(
+            Draft(caseId: 100, caseIds: [100]) with
+            {
+                ProbeFaceId = 42,
+                RequestedByUserId = null,
+                Origin = SessionOrigin.SystemSuggestion,
+                SuggestedPersonRef = 9,
+            },
+            [new FaceCandidate(face, assetId, null, null, 0.2, 1, 7, "sface-test")]);
+
+        var session = (await store.GetAsync(sessionId, Insider)).ShouldNotBeNull();
+        session.Origin.ShouldBe(SessionOrigin.SystemSuggestion);
+        session.SuggestedPersonRef.ShouldBe(9);
+        session.RequestedByUserId.ShouldBeNull();
+
+        var candidate = (await store.ListCandidatesAsync(sessionId, Insider)).ShouldHaveSingleItem();
+        candidate.Origin.ShouldBe(SessionOrigin.SystemSuggestion);
+        candidate.SuggestedPersonRef.ShouldBe(9);
+        candidate.PersonRef.ShouldBeNull(); // привязку ставит эксперт, а не система (ТФ-ВЕР-03)
+        (await store.ListQueueAsync(VerificationStage.Expert, [100], Insider)).ShouldHaveSingleItem().Origin
+            .ShouldBe(SessionOrigin.SystemSuggestion);
+
+        (await store.HasSuggestionAsync(100, 9, 42, assetId)).ShouldBeTrue();
+        (await store.HasSuggestionAsync(100, 9, 42, assetId + 1)).ShouldBeFalse();
+        (await store.HasSuggestionAsync(100, 10, 42, assetId)).ShouldBeFalse();
+        (await store.HasSuggestionAsync(101, 9, 42, assetId)).ShouldBeFalse();
+
+        // Обычный поиск сотрудника — не «предложение»: в повторы не засчитывается, происхождение — «сотрудник».
+        var manual = await store.CreateAsync(
+            Draft(caseId: 100, caseIds: [100]) with { ProbeFaceId = 43 },
+            [new FaceCandidate(face, assetId, null, null, 0.2, 1, 7, "sface-test")]);
+        (await store.GetAsync(manual, Insider)).ShouldNotBeNull().Origin.ShouldBe(SessionOrigin.Operator);
+        (await store.HasSuggestionAsync(100, 9, 43, assetId)).ShouldBeFalse();
+    }
+
     private static SearchSessionDraft Draft(int caseId, int[] caseIds) => new(
         CaseId: caseId,
         AuthorizationRef: "поручение № 7",

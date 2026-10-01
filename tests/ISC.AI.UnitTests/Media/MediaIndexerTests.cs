@@ -45,6 +45,7 @@ public sealed class MediaIndexerTests : IDisposable
     private readonly IFrameExtractor _frames = Substitute.For<IFrameExtractor>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly ICaseScope _caseScope = Substitute.For<ICaseScope>();
+    private readonly IPersonSuggester _suggester = Substitute.For<IPersonSuggester>();
     private readonly List<string> _calls = [];
     private int _saved;
 
@@ -91,6 +92,28 @@ public sealed class MediaIndexerTests : IDisposable
         _detector.DetectAsync(Arg.Is<byte[]>(b => b[0] == 10), Arg.Any<CancellationToken>()).Returns([FaceC]);
         _quality.Assess(Arg.Any<DetectedFace>(), Arg.Any<int>(), Arg.Any<int>()).Returns(new FaceQuality(0.9f, true, null));
         _quality.Assess(FaceB, Arg.Any<int>(), Arg.Any<int>()).Returns(new FaceQuality(0.1f, false, "мало пикселей"));
+    }
+
+    [Fact(DisplayName = "После успешной индексации с лицами запрашиваются предложения связей с фигурантами (ТФ-ПЕР-09)")]
+    public async Task Successful_indexing_requests_person_suggestions()
+    {
+        var result = await Indexer().IndexAsync(AssetId);
+
+        result.Success.ShouldBeTrue();
+        await _suggester.Received(1).SuggestAsync(AssetId, SuggestionTrigger.Indexing, Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "Сбой предложений связей не отменяет уже записанную индексацию")]
+    public async Task Suggestion_failure_does_not_fail_indexing()
+    {
+        _suggester.SuggestAsync(AssetId, SuggestionTrigger.Indexing, Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<PersonSuggestionResult>(new InvalidOperationException("сбой базы")));
+
+        var result = await Indexer().IndexAsync(AssetId);
+
+        result.Success.ShouldBeTrue();
+        result.Faces.ShouldBe(3);
+        await _store.DidNotReceiveWithAnyArgs().FailIndexingAsync(default, default!, default);
     }
 
     [Fact(DisplayName = "Видео: 3 кадра, 3 лица (1 непригодно без шаблона), вырезки для всех, длительность = последний таймкод, аудит Ingest без субъекта")]
@@ -364,7 +387,7 @@ public sealed class MediaIndexerTests : IDisposable
 
     private MediaIndexer Indexer() =>
         new(_store, _files, _detector, _embedder, _quality, _imageTools, _frames, _audit, _caseScope,
-            new MediaSearchOptions(), _tempFiles, NullLogger<MediaIndexer>.Instance);
+            new MediaSearchOptions(), _tempFiles, _suggester, NullLogger<MediaIndexer>.Instance);
 
     private static async IAsyncEnumerable<VideoFrame> Frames(params VideoFrame[] frames)
     {

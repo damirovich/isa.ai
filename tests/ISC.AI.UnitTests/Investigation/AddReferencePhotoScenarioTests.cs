@@ -32,6 +32,7 @@ public sealed class AddReferencePhotoScenarioTests
     private readonly IMediaCatalog _catalog = Substitute.For<IMediaCatalog>();
     private readonly ISubjectProvider _subject = Substitute.For<ISubjectProvider>();
     private readonly IAccessContextProvider _access = Substitute.For<IAccessContextProvider>();
+    private readonly IPersonSuggestionScheduler _suggestions = Substitute.For<IPersonSuggestionScheduler>();
 
     private static readonly PersonRow Person = new(
         PersonId, CaseId, "Иванов", IsUnidentified: false, UnidentifiedNumber: null, RoleInCase: null, Notes: null,
@@ -234,8 +235,40 @@ public sealed class AddReferencePhotoScenarioTests
         ShouldBeReferenceNotFound(response);
     }
 
+    [Fact(DisplayName = "Эталон с лицом записан — материалы дела фигуранта ставятся в сверку с эталонами (ТФ-ПЕР-09)")]
+    public async Task Reference_with_face_schedules_case_sweep()
+    {
+        var response = await HandleAsync(new AddReferencePhotoCommand(PersonId, AssetId, FaceId));
+
+        response.Status.ShouldBeTrue();
+        await _suggestions.Received(1).ScheduleCaseSweepAsync(CaseId, Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "Эталон без лица или отказ хранилища — сверка не ставится")]
+    public async Task No_sweep_without_face_or_on_failure()
+    {
+        (await HandleAsync(new AddReferencePhotoCommand(PersonId, AssetId))).Status.ShouldBeTrue();
+
+        _persons.AddReferencePhotoAsync(Arg.Any<ReferencePhotoDraft>(), Arg.Any<int?>(), Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
+            .Returns((PersonWriteResult.NotFound, 0));
+        (await HandleAsync(new AddReferencePhotoCommand(PersonId, AssetId, FaceId))).Status.ShouldBeFalse();
+
+        await _suggestions.DidNotReceiveWithAnyArgs().ScheduleCaseSweepAsync(default, default);
+    }
+
+    [Fact(DisplayName = "Сверка не поставилась (планировщик вернул null) — эталон всё равно добавлен")]
+    public async Task Scheduling_failure_does_not_fail_reference()
+    {
+        _suggestions.ScheduleCaseSweepAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns((Guid?)null);
+
+        var response = await HandleAsync(new AddReferencePhotoCommand(PersonId, AssetId, FaceId));
+
+        response.Status.ShouldBeTrue();
+        response.Data.ShouldBe(99);
+    }
+
     private async Task<ResponseDto<int>> HandleAsync(AddReferencePhotoCommand command) =>
-        await new AddReferencePhotoCommand.Handler(_persons, _roles, _caseScope, _catalog, _subject, _access)
+        await new AddReferencePhotoCommand.Handler(_persons, _roles, _caseScope, _catalog, _subject, _access, _suggestions)
             .Handle(command, CancellationToken.None);
 
     private static void ShouldBeReferenceNotFound(ResponseDto<int> response)
