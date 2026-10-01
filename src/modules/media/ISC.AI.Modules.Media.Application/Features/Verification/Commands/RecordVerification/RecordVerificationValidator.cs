@@ -34,5 +34,11 @@ public sealed class RecordVerificationValidator : AbstractValidator<RecordVerifi
             .NotNull()
             .When(c => c.Stage == VerificationStage.Expert && c.Verdict == VerificationVerdict.Confirmed)
             .WithMessage(PersonRequiredMessage);
+
+        // ТФ-ВЕР-02, ADR-0036: руководитель снимает неопределённость — «неопределённо» ему не выбрать.
+        RuleFor(c => c.Verdict)
+            .Must(v => v is VerificationVerdict.Confirmed or VerificationVerdict.Rejected)
+            .When(c => c.Stage == VerificationStage.Supervisor)
+            .WithMessage("Руководитель выносит итог: «подтверждён» или «отклонён».");
     }
 }

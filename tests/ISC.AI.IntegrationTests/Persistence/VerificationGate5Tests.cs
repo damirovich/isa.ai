@@ -39,6 +39,7 @@ public sealed class VerificationGate5Tests : IAsyncLifetime
     private const int Expert = 40;
     private const int Verifier = 41;
     private const int SecondVerifier = 43;
+    private const int Head = 44;
     private const int NoRole = 50;
 
     private const short CaseClassification = 1;
@@ -83,7 +84,8 @@ public sealed class VerificationGate5Tests : IAsyncLifetime
             (Investigator, InvestigationRole.Investigator),
             (Expert, InvestigationRole.FaceExpert),
             (Verifier, InvestigationRole.Verifier),
-            (SecondVerifier, InvestigationRole.Verifier));
+            (SecondVerifier, InvestigationRole.Verifier),
+            (Head, InvestigationRole.Head));
 
         // Дело следователя 10 (гриф 1, подразделение 7) и его фигурант — через настоящие хранилища с решёткой.
         var cases = InvestigationTestKit.CreateCaseStore(_investigation, _core);
@@ -241,6 +243,42 @@ public sealed class VerificationGate5Tests : IAsyncLifetime
 
         (await CountDecisionsAsync(candidateId)).ShouldBe(2);
         (await _sessions.GetCandidateAsync(candidateId, Access(Investigator))).ShouldNotBeNull().Status.ShouldBe(CandidateStatus.Undetermined);
+    }
+
+    [Fact(DisplayName = "ТФ-ВЕР-02: расхождение — в очереди руководителя; его «подтверждён» при «подтверждён» эксперта даёт «следственную версию»; эксперт, верификатор и следователь итог не выносят; повтор стадии откатывается базой")]
+    public async Task Supervisor_resolves_disagreement()
+    {
+        var (sessionId, candidateId) = await CreateSessionAsync();
+        await DecideAsync(Expert, candidateId, VerificationStage.Expert, VerificationVerdict.Confirmed, _personId);
+        (await DecideAsync(Verifier, candidateId, VerificationStage.Verifier, VerificationVerdict.Rejected))
+            .Status.ShouldBe(CandidateStatus.Undetermined);
+
+        // Очередь руководителя — «неопределённые» дела; у верификатора кандидата больше нет.
+        (await _sessions.ListQueueAsync(VerificationStage.Supervisor, [_caseId], Access(Head))).ShouldHaveSingleItem().Id.ShouldBe(candidateId);
+        (await _sessions.ListQueueAsync(VerificationStage.Verifier, [_caseId], Access(Head))).ShouldBeEmpty();
+
+        // Право по матрице доступа по умолчанию: Руководитель — да; эксперт, верификатор, следователь — нет.
+        (await _policy.CanActAsync(VerificationStage.Supervisor, Head)).ShouldBeTrue();
+        (await _policy.CanActAsync(VerificationStage.Supervisor, Expert)).ShouldBeFalse();
+        (await _policy.CanActAsync(VerificationStage.Supervisor, Verifier)).ShouldBeFalse();
+        (await _policy.CanActAsync(VerificationStage.Supervisor, Investigator)).ShouldBeFalse();
+
+        var resolved = await DecideAsync(Head, candidateId, VerificationStage.Supervisor, VerificationVerdict.Confirmed);
+        resolved.Status.ShouldBe(CandidateStatus.Confirmed);
+        resolved.Decisions.Select(d => d.Stage).ShouldBe(
+            [VerificationStage.Expert, VerificationStage.Verifier, VerificationStage.Supervisor], ignoreOrder: true);
+        (await _sessions.ListQueueAsync(VerificationStage.Supervisor, [_caseId], Access(Head))).ShouldBeEmpty();
+
+        // Появление: первая подпись — подтвердивший эксперт, вторая — руководитель (профиль принимает двух разных людей).
+        await RecordAppearanceAsync(sessionId, resolved, Expert, Head);
+        (await CountAppearancesAsync(candidateId)).ShouldBe(1);
+
+        // Стадия руководителя одна: повтор правило отклоняет, а в обход правила — уникальный индекс базы.
+        TwoPersonRule.CanDecide(resolved.Decisions, VerificationStage.Supervisor, Head, out _).ShouldBeFalse();
+        var repeat = new VerificationDecision(Investigator, VerificationStage.Supervisor, VerificationVerdict.Rejected, Rationale, DateTime.UtcNow);
+        await Should.ThrowAsync<InvalidOperationException>(
+            () => _sessions.RecordDecisionAsync(candidateId, repeat, CandidateStatus.Rejected, personRef: null));
+        (await CountDecisionsAsync(candidateId)).ShouldBe(3);
     }
 
     [Fact(DisplayName = "GATE-5: кандидат с баллом 0,99 без решений людей остаётся «кандидатом» — ни повторный поиск, ни чтение сессии, очереди и кандидата статус не назначают")]

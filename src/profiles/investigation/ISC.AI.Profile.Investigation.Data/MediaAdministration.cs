@@ -65,7 +65,9 @@ public sealed class MediaAdministration(IUserRoleStore roles, ISubjectProvider s
 /// но не тем и другим сразу: второе решение от того же субъекта отклоняется и попадает в журнал как
 /// отклонённая попытка. То есть «два независимых сотрудника» остаются двумя живыми людьми, и полные
 /// права Администратора этого не отменяют.
-/// Руководитель утверждает результат организационно (ТФ-ВЕР-02) и решений стадий не пишет.
+/// Итог по расхождению («неопределённо») выносит стадия руководителя (ТФ-ВЕР-02, ADR-0036) — право матрицы
+/// «Верификация — решение при расхождении», по умолчанию Руководитель и Администратор; третьим лицом, а
+/// «подтверждён» — только вместе с положительным решением другого сотрудника (правило модуля).
 /// </remarks>
 public sealed class VerificationPolicy(IUserRoleStore roles) : IVerificationPolicy
 {
@@ -77,6 +79,8 @@ public sealed class VerificationPolicy(IUserRoleStore roles) : IVerificationPoli
                 PermissionRule.UserHasAsync(roles, userId, InvestigationPermissions.VerificationExpert, cancellationToken),
             VerificationStage.Verifier =>
                 PermissionRule.UserHasAsync(roles, userId, InvestigationPermissions.VerificationVerifier, cancellationToken),
+            VerificationStage.Supervisor =>
+                PermissionRule.UserHasAsync(roles, userId, InvestigationPermissions.VerificationResolve, cancellationToken),
             _ => Task.FromResult(false),
         };
 }

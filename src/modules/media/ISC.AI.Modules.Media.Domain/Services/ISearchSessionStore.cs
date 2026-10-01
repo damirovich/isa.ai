@@ -31,7 +31,8 @@ public interface ISearchSessionStore
 
     /// <summary>
     /// Очередь стадии: <see cref="VerificationStage.Expert"/> — статус <see cref="CandidateStatus.Candidate"/>,
-    /// <see cref="VerificationStage.Verifier"/> — <see cref="CandidateStatus.PendingVerifier"/>; только дела
+    /// <see cref="VerificationStage.Verifier"/> — <see cref="CandidateStatus.PendingVerifier"/>,
+    /// <see cref="VerificationStage.Supervisor"/> — <see cref="CandidateStatus.Undetermined"/> (ТФ-ВЕР-02); только дела
     /// из <paramref name="caseIds"/> и только в пределах допуска.
     /// </summary>
     Task<IReadOnlyList<SearchCandidateRow>> ListQueueAsync(VerificationStage stage, IReadOnlyCollection<int> caseIds, AccessContext access, CancellationToken cancellationToken = default);

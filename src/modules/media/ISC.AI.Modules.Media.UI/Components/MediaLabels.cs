@@ -115,6 +115,7 @@ public static class MediaLabels
     {
         VerificationStage.Expert => "эксперт",
         VerificationStage.Verifier => "верификатор",
+        VerificationStage.Supervisor => "руководитель",
         _ => stage.ToString(),
     };
 
