@@ -2,6 +2,7 @@ using FluentValidation;
 using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.Security;
+using ISC.AI.Modules.Media.Domain.Services;
 using ISC.AI.Profile.Investigation.Application.Features.Common;
 using ISC.AI.Profile.Investigation.Domain.Enums;
 using ISC.AI.Profile.Investigation.Domain.Services;
@@ -12,6 +13,8 @@ namespace ISC.AI.Profile.Investigation.Application.Features.Cases;
 /// <summary>
 /// Внести основание поиска по лицу в дело (ТБ-071): поручение следователя, постановление или номер ОРМ.
 /// Без основания поиск технически невозможен; реквизиты основания попадают в аудит каждого поиска (ТБ-072).
+/// С основанием дело становится пригодным для автоматической сверки (ТФ-ПЕР-09, ADR-0035): уже загруженные
+/// материалы дела сверяются с эталонами фигурантов в фоне.
 /// </summary>
 public sealed record AddSearchAuthorizationCommand(
     int CaseId,
@@ -30,7 +33,11 @@ public sealed record AddSearchAuthorizationCommand(
 
     /// <inheritdoc cref="AddSearchAuthorizationCommand" />
     public sealed class Handler(
-        ICaseStore cases, IUserRoleStore roles, ISubjectProvider subjectProvider, IAccessContextProvider accessProvider)
+        ICaseStore cases,
+        IUserRoleStore roles,
+        ISubjectProvider subjectProvider,
+        IAccessContextProvider accessProvider,
+        IPersonSuggestionScheduler suggestions)
         : IRequestHandler<AddSearchAuthorizationCommand, ResponseDto<int>>
     {
         /// <inheritdoc />
@@ -51,6 +58,13 @@ public sealed record AddSearchAuthorizationCommand(
                 string.IsNullOrWhiteSpace(command.Notes) ? null : command.Notes.Trim());
 
             var (result, authorizationId) = await cases.AddAuthorizationAsync(draft, access, cancellationToken);
+            if (result == CaseWriteResult.Ok)
+            {
+                // ТФ-ПЕР-09: материалы, загруженные до основания, сверяются с эталонами фигурантов дела в фоне;
+                // сбой постановки основание не отменяет (планировщик его журналирует).
+                await suggestions.ScheduleCaseSweepAsync(command.CaseId, cancellationToken);
+            }
+
             return result switch
             {
                 CaseWriteResult.Ok => ResponseDto<int>.Ok(authorizationId),

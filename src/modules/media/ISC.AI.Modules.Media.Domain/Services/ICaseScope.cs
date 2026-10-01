@@ -46,6 +46,45 @@ public sealed record ConfirmedAppearance(
     DateTime ConfirmedAtUtc);
 
 /// <summary>
+/// Дело, в котором после индексации носителя ищутся фигуранты (ТФ-ПЕР-09): режимные поля дела — потолок, под
+/// которым система сравнивает лица (не выше дела), основание поиска (ТБ-071) и действующие эталоны фигурантов.
+/// </summary>
+/// <param name="CaseId">Дело (непрозрачный идентификатор профиля).</param>
+/// <param name="Classification">Гриф дела — потолок допуска системы при сравнении (ТБ-020/070).</param>
+/// <param name="DivisionId">Подразделение дела — единственное подразделение в допуске системы.</param>
+/// <param name="AuthorizationRef">Реквизиты основания поиска для сессии и аудита (ТБ-071/072).</param>
+/// <param name="References">Действующие эталонные лица фигурантов дела.</param>
+public sealed record SuggestionTarget(
+    int CaseId,
+    short Classification,
+    int DivisionId,
+    string AuthorizationRef,
+    IReadOnlyList<SuggestionReference> References);
+
+/// <summary>Эталонное лицо фигуранта для автоматического предложения (ТФ-ПЕР-09).</summary>
+/// <param name="PersonId">Фигурант (непрозрачный идентификатор профиля).</param>
+/// <param name="FaceId">Лицо эталона в схеме <c>media</c>.</param>
+public sealed record SuggestionReference(int PersonId, int FaceId);
+
+/// <summary>
+/// Готово ли дело к автоматической сверке (ТФ-ПЕР-09) — для объяснения на карточке носителя. Правило то же, что у
+/// <see cref="SuggestionTarget"/>: открытое дело, основание поиска, действующие эталоны с лицом.
+/// </summary>
+/// <param name="CaseId">Дело.</param>
+/// <param name="CaseNumber">Номер дела для подписи.</param>
+/// <param name="IsOpen">Дело не закрыто.</param>
+/// <param name="HasBasis">Есть действующее основание поиска (или задание по объекту, ТБ-071).</param>
+/// <param name="ReferenceCount">Сколько действующих эталонов с лицом у фигурантов дела.</param>
+/// <param name="LatestReferenceAtUtc">Когда добавлен самый свежий из них — сверка раньше этого времени устарела.</param>
+public sealed record SuggestionReadiness(
+    int CaseId,
+    string CaseNumber,
+    bool IsOpen,
+    bool HasBasis,
+    int ReferenceCount,
+    DateTime? LatestReferenceAtUtc);
+
+/// <summary>
 /// ПОРТ ПРОФИЛЯ: область дел субъекта (ТБ-071, ТФ-ПЛ-05) и связь носителей/фигурантов с делами. Модуль
 /// понятия «дело» не имеет — он оперирует непрозрачными идентификаторами; всё про доступность дел по
 /// роли и владению знает только профиль. Без реализации приложение не стартует (ТС-013).
@@ -120,4 +159,32 @@ public interface ICaseScope
     /// фигуранта, второй записи не создаёт.
     /// </summary>
     Task RecordAppearanceAsync(ConfirmedAppearance appearance, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Дела только что проиндексированного носителя, в которых система предлагает связать найденные лица с
+    /// фигурантами (ТФ-ПЕР-09): только ОТКРЫТЫЕ дела, у которых есть основание поиска (ТБ-071) и хотя бы один
+    /// действующий эталон с лицом. Дело без основания в выдачу не попадает — без основания поиск невозможен.
+    /// </summary>
+    /// <remarks>
+    /// БЕЗ <see cref="AccessContext"/> намеренно, как <see cref="IsBiometricIndexingAllowedAsync"/>: вызывает фоновый
+    /// конвейер, субъекта у него нет. Наружу пользователю ответ не выдаётся; потолок, под которым система затем
+    /// сравнивает лица, — режимные поля самого дела, а сопоставление идёт только с фигурантами ТОГО ЖЕ дела
+    /// (Приложение В ТЗ, вопрос 20).
+    /// </remarks>
+    Task<IReadOnlyList<SuggestionTarget>> ListSuggestionTargetsAsync(int assetId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// То же правило для одного дела (ТФ-ПЕР-09): в деле появился эталон или основание — система сверяет с его
+    /// фигурантами уже загруженные материалы. <see langword="null"/> — дело закрыто, нет основания или эталонов.
+    /// </summary>
+    /// <remarks>Без <see cref="AccessContext"/> по той же причине, что <see cref="ListSuggestionTargetsAsync"/>.</remarks>
+    Task<SuggestionTarget?> GetSuggestionTargetAsync(int caseId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Готовность дел носителя к сверке (ТФ-ПЕР-09) — чтобы карточка носителя объяснила, почему система не
+    /// предлагала фигурантов: дело закрыто, нет основания, нет эталонов. Только дела, ДОСТУПНЫЕ субъекту
+    /// (роль и floor ядра, ТБ-012/021/071); чужие дела носителя наружу не раскрываются.
+    /// </summary>
+    Task<IReadOnlyList<SuggestionReadiness>> ListSuggestionReadinessAsync(
+        int assetId, AccessContext access, CancellationToken cancellationToken = default);
 }

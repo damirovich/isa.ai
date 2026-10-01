@@ -363,7 +363,7 @@ else
                     <MudTd DataLabel="Дата">@context.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudTd>
                     <MudTd DataLabel="Основание">@context.AuthorizationRef</MudTd>
                     <MudTd DataLabel="Область">@ScopeLabel(context.Scope)</MudTd>
-                    <MudTd DataLabel="Запросил">@UserName(context.RequestedByUserId)</MudTd>
+                    <MudTd DataLabel="Запросил">@(context.Origin == SessionOrigin.SystemSuggestion ? "система (предложение, ТФ-ПЕР-09)" : UserName(context.RequestedByUserId))</MudTd>
                     <MudTd DataLabel="Кандидатов" Style="text-align:right;">@context.CandidateCount</MudTd>
                     <MudTd DataLabel="Гриф"><ClassificationChip Value="@context.Classification" /></MudTd>
                 </RowTemplate>

@@ -89,6 +89,16 @@
     /// <summary>Размеры страницы на выбор — кратны 6 (столбцов сетки на широком экране), чтобы ряды были полными; по умолчанию — <see cref="ListVerificationQueueQuery.DefaultPageSize"/>.</summary>
     private static readonly int[] PageSizes = [14, 21, 35, 63, 85];
 
+    // Карточка решения. Эксперту — с фигурантом, которого предложила система (ТФ-ПЕР-09): он подставится в выбор,
+    // но решение и привязку делает эксперт. Верификатору фигурант не передаётся — проекция его и не содержит (ТФ-ВЕР-02).
+    private static string VerificationHref(VerificationQueueItem item, string stageName)
+    {
+        var href = "/media/verification/" + item.CandidateId.ToString(System.Globalization.CultureInfo.InvariantCulture) + "?stage=" + stageName;
+        return item.SuggestedPersonRef is { } person
+            ? href + "&person=" + person.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : href;
+    }
+
     private int _activeTab;
     private int _pageSize = ListVerificationQueueQuery.DefaultPageSize;
     private readonly Dictionary<VerificationStage, IReadOnlyList<VerificationQueueItem>> _items = [];
@@ -313,6 +323,13 @@
                         <div class="d-flex align-center gap-1 flex-wrap justify-center">
                             <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@current.Status.ChipColor()">@current.Status.Label()</MudChip>
                             <ClassificationChip Classification="@current.Classification" />
+                            @if (current.Origin == SessionOrigin.SystemSuggestion)
+                            {
+                                @* ТФ-ПЕР-08/09: кандидат предложен системой по эталону фигуранта дела; решает человек. *@
+                                <MudTooltip Text="Система сравнила лица нового материала с эталонами фигурантов дела. Подтверждение — только людьми (ТБ-073).">
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Secondary" Icon="@Icons.Material.Filled.AutoAwesome">предложено системой</MudChip>
+                                </MudTooltip>
+                            }
                         </div>
                         <MudText Typo="Typo.caption" Class="mud-text-secondary text-center">
                             дело № @current.CaseId · сессия № @current.SessionId · кандидат № @current.Rank
@@ -322,7 +339,7 @@
                             <MudText Typo="Typo.caption" Class="text-center">ваше решение: @own.Verdict.Label() · @own.DecidedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudText>
                         }
                         <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.FactCheck"
-                                   Href="@($"/media/verification/{current.CandidateId}?stage={stageName}")">
+                                   Href="@VerificationHref(current, stageName)">
                             @(current.OwnDecision is null ? "Принять решение" : "Открыть")
                         </MudButton>
                     </MudPaper>

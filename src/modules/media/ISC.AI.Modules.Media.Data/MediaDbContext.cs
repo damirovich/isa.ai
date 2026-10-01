@@ -46,6 +46,9 @@ public class MediaDbContext(DbContextOptions<MediaDbContext> options) : AuditedD
     /// <summary>Фрагменты расшифровки речи (ADR-0026) — первичный дословный слой под решёткой носителя.</summary>
     public DbSet<TranscriptSegment> TranscriptSegments { get; set; } = null!;
 
+    /// <summary>Журнал сверок носителей с эталонами фигурантов (ТФ-ПЕР-09, ADR-0035).</summary>
+    public DbSet<SuggestionRun> SuggestionRuns { get; set; } = null!;
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

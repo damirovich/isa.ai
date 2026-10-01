@@ -1,5 +1,6 @@
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.Media.Domain.Services;
+using ISC.AI.Profile.Investigation.Domain.Entities;
 using ISC.AI.Profile.Investigation.Domain.Enums;
 using ISC.AI.Profile.Investigation.Domain.Services;
 using Microsoft.EntityFrameworkCore;
@@ -196,6 +197,171 @@ public sealed class CaseScope(
 
         return persons.AddAppearanceAsync(draft, cancellationToken);
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// ОСНОВАНИЕ (ТБ-071): последнее действующее основание поиска дела (срок не истёк). У задания по объекту без
+    /// отдельного основания основанием служит само задание — «задание № …» (ТФ-ПЕР-09: «основание поиска — задание
+    /// дела»). Дело без основания в выдачу не попадает: система по нему не ищет.
+    /// </para>
+    /// <para>
+    /// ЭТАЛОНЫ: действующие (не заменённые, ТБ-077) и с выбранным лицом; лицо, которое у фигуранта встречается только в
+    /// отозванных появлениях (ADR-0034), эталоном не считается — то же правило, что у «Поиска по фигуранту».
+    /// ЗАКРЫТЫЕ дела пропускаются: по закрытому делу работа не ведётся, а шаблоны могли быть удалены регламентом.
+    /// </para>
+    /// </remarks>
+    public async Task<IReadOnlyList<SuggestionTarget>> ListSuggestionTargetsAsync(int assetId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var caseRows = await ReadSuggestionCasesAsync(
+            db.CaseMediaLinks.AsNoTracking()
+                .Where(l => l.MediaAssetId == assetId)
+                .Join(db.Cases.AsNoTracking(), l => l.CaseId, c => c.Id, (_, c) => c)
+                .Where(c => c.Status != CaseStatus.Closed),
+            cancellationToken);
+
+        var targets = new List<SuggestionTarget>(caseRows.Count);
+        foreach (var caseRow in caseRows)
+        {
+            var state = await ReadSuggestionStateAsync(db, caseRow, cancellationToken);
+            if (state.Basis is { } basis && state.References.Count > 0)
+            {
+                targets.Add(new SuggestionTarget(caseRow.Id, caseRow.Classification, caseRow.DivisionId, basis, state.References));
+            }
+        }
+
+        return targets;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>Правило — то же, что у <see cref="ListSuggestionTargetsAsync"/> (основание, эталоны, закрытые дела).</remarks>
+    public async Task<SuggestionTarget?> GetSuggestionTargetAsync(int caseId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var caseRow = (await ReadSuggestionCasesAsync(
+            db.Cases.AsNoTracking().Where(c => c.Id == caseId && c.Status != CaseStatus.Closed),
+            cancellationToken)).FirstOrDefault();
+        if (caseRow is null)
+        {
+            return null;
+        }
+
+        var state = await ReadSuggestionStateAsync(db, caseRow, cancellationToken);
+        return state.Basis is { } basis && state.References.Count > 0
+            ? new SuggestionTarget(caseRow.Id, caseRow.Classification, caseRow.DivisionId, basis, state.References)
+            : null;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Дела — только доступные субъекту по тому же правилу, что <see cref="IsAssetAccessibleAsync"/> (роль, floor
+    /// ядра; ТБ-012/021/071). Наружу уходят признаки и числа, без реквизитов основания и без эталонов.
+    /// </remarks>
+    public async Task<IReadOnlyList<SuggestionReadiness>> ListSuggestionReadinessAsync(
+        int assetId, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+
+        var role = await ResolveRoleAsync(access, cancellationToken);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var accessible = CaseAccessRule.Apply(db.Cases, access, policy, role);
+        var caseRows = await ReadSuggestionCasesAsync(
+            db.CaseMediaLinks.AsNoTracking()
+                .Where(l => l.MediaAssetId == assetId && accessible.Any(c => c.Id == l.CaseId))
+                .Join(db.Cases.AsNoTracking(), l => l.CaseId, c => c.Id, (_, c) => c),
+            cancellationToken);
+
+        var result = new List<SuggestionReadiness>(caseRows.Count);
+        foreach (var caseRow in caseRows)
+        {
+            var state = await ReadSuggestionStateAsync(db, caseRow, cancellationToken);
+            result.Add(new SuggestionReadiness(
+                caseRow.Id, caseRow.Number, caseRow.Status != CaseStatus.Closed, state.Basis is not null,
+                state.References.Count, state.LatestReferenceAtUtc));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Основание и действующие эталоны дела для сверки (ТФ-ПЕР-09) — ЕДИНСТВЕННОЕ место этого правила: по нему
+    /// система выбирает дела для сверки, а карточка носителя объясняет, почему сверки не было.
+    /// </summary>
+    /// <remarks>
+    /// ОСНОВАНИЕ (ТБ-071): последнее действующее основание (срок не истёк), у задания по объекту без основания —
+    /// само задание. ЭТАЛОНЫ: не заменённые (ТБ-077), с лицом; лицо, которое у фигуранта встречается только в
+    /// отозванных появлениях (ADR-0034), эталоном не служит.
+    /// </remarks>
+    private static async Task<SuggestionCaseState> ReadSuggestionStateAsync(
+        InvestigationDbContext db, SuggestionCaseRow caseRow, CancellationToken cancellationToken)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var basis = await db.SearchAuthorizations.AsNoTracking()
+            .Where(a => a.CaseId == caseRow.Id && (a.ValidUntil == null || a.ValidUntil >= today))
+            .OrderByDescending(a => a.IssuedAt)
+            .ThenByDescending(a => a.Id)
+            .Select(a => a.Reference)
+            .FirstOrDefaultAsync(cancellationToken);
+        basis ??= caseRow is { Kind: CaseKind.ObjectTask, TaskNumber: { } taskNumber } ? "задание № " + taskNumber : null;
+
+        var references = await db.ReferencePhotos.AsNoTracking()
+            .Where(r => r.SupersededById == null && r.MediaFaceId != null && r.Person!.CaseId == caseRow.Id)
+            .OrderBy(r => r.Id)
+            .Select(r => new { r.PersonId, FaceId = r.MediaFaceId!.Value, r.CreatedAt })
+            .ToListAsync(cancellationToken);
+        if (references.Count == 0)
+        {
+            return new SuggestionCaseState(basis, [], null);
+        }
+
+        var appearances = await db.Appearances.AsNoTracking()
+            .Where(a => a.CaseId == caseRow.Id)
+            .Select(a => new { a.PersonId, a.MediaFaceId, Revoked = a.RevokedAtUtc != null })
+            .ToListAsync(cancellationToken);
+        var revokedOnly = appearances
+            .GroupBy(a => (a.PersonId, a.MediaFaceId))
+            .Where(g => g.All(a => a.Revoked))
+            .Select(g => g.Key)
+            .ToHashSet();
+
+        var usable = references.Where(r => !revokedOnly.Contains((r.PersonId, r.FaceId))).ToList();
+        var latest = usable.Count == 0
+            ? (DateTime?)null
+            : DateTime.SpecifyKind(usable.Max(r => r.CreatedAt), DateTimeKind.Utc);
+        return new SuggestionCaseState(
+            basis,
+            usable.Select(r => new SuggestionReference(r.PersonId, r.FaceId)).Distinct().ToList(),
+            latest);
+    }
+
+    /// <summary>
+    /// Поля дел для правила сверки, без повторов и по порядку. Проекция — анонимная: сортировку по полям записи EF
+    /// не переводит в SQL; в запись — уже в памяти.
+    /// </summary>
+    private static async Task<List<SuggestionCaseRow>> ReadSuggestionCasesAsync(
+        IQueryable<CaseFile> cases, CancellationToken cancellationToken)
+    {
+        var rows = await cases
+            .Select(c => new { c.Id, c.Number, c.Classification, c.DivisionId, c.Kind, c.TaskNumber, c.Status })
+            .Distinct()
+            .OrderBy(c => c.Id)
+            .ToListAsync(cancellationToken);
+        return rows
+            .Select(c => new SuggestionCaseRow(c.Id, c.Number, c.Classification, c.DivisionId, c.Kind, c.TaskNumber, c.Status))
+            .ToList();
+    }
+
+    /// <summary>Поля дела, нужные правилу сверки.</summary>
+    private sealed record SuggestionCaseRow(
+        int Id, string Number, short Classification, int DivisionId, CaseKind Kind, string? TaskNumber, CaseStatus Status);
+
+    /// <summary>Основание (если есть), действующие эталоны и время самого свежего из них.</summary>
+    private sealed record SuggestionCaseState(
+        string? Basis, IReadOnlyList<SuggestionReference> References, DateTime? LatestReferenceAtUtc);
 
     // Роль для правила видимости дел: без права «Дашборд и реестр дел» (матрица доступа, ADR-0032) — null, и
     // CaseAccessRule вернёт пусто (ТБ-012/021).

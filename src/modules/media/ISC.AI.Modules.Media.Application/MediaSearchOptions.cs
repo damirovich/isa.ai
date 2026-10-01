@@ -18,6 +18,9 @@ namespace ISC.AI.Modules.Media.Application;
 /// <param name="ProbeCopyMaxBytes">До какого размера копия пробного изображения кладётся в аудит (ТБ-072).</param>
 /// <param name="SampleFps">Частота выборки кадров видео при индексации (ТО-мат-06).</param>
 /// <param name="HnswEfSearch">Ширина обхода HNSW, с которой ищет слой данных (фиксируется в сессии, ТО-инф-12).</param>
+/// <param name="AutoSuggestEnabled">Предлагать ли связи с фигурантами после индексации носителя (ТФ-ПЕР-09).</param>
+/// <param name="AutoSuggestMaxCosineDistance">Порог расстояния для предложений системы — строже ручного поиска: в очередь идут только близкие совпадения.</param>
+/// <param name="AutoSuggestCandidatesPerReference">Сколько ближайших лиц носителя предлагается на один эталон фигуранта.</param>
 public sealed record MediaSearchOptions(
     int CandidateListSize = MediaSearchOptions.DefaultCandidateListSize,
     int MinCandidateListSize = MediaSearchOptions.DefaultMinCandidateListSize,
@@ -26,7 +29,10 @@ public sealed record MediaSearchOptions(
     double MaxAllowedCosineDistance = MediaSearchOptions.DefaultMaxAllowedCosineDistance,
     long ProbeCopyMaxBytes = MediaSearchOptions.DefaultProbeCopyMaxBytes,
     double SampleFps = MediaSearchOptions.DefaultSampleFps,
-    int HnswEfSearch = MediaSearchOptions.DefaultHnswEfSearch)
+    int HnswEfSearch = MediaSearchOptions.DefaultHnswEfSearch,
+    bool AutoSuggestEnabled = true,
+    double AutoSuggestMaxCosineDistance = MediaSearchOptions.DefaultAutoSuggestMaxCosineDistance,
+    int AutoSuggestCandidatesPerReference = MediaSearchOptions.DefaultAutoSuggestCandidatesPerReference)
 {
     /// <summary>Ключ конфигурации: ширина кандидат-листа по умолчанию.</summary>
     public const string CandidateListSizeKey = "Media:Search:CandidateListSize";
@@ -73,6 +79,24 @@ public sealed record MediaSearchOptions(
     /// <summary>Ширина обхода HNSW по умолчанию (совпадает с умолчанием слоя данных).</summary>
     public const int DefaultHnswEfSearch = 200;
 
+    /// <summary>Ключ конфигурации: включены ли предложения связей с фигурантами (ТФ-ПЕР-09).</summary>
+    public const string AutoSuggestEnabledKey = "Media:Search:AutoSuggest:Enabled";
+
+    /// <summary>Ключ конфигурации: порог косинусного расстояния для предложений системы.</summary>
+    public const string AutoSuggestMaxCosineDistanceKey = "Media:Search:AutoSuggest:MaxCosineDistance";
+
+    /// <summary>Ключ конфигурации: сколько лиц носителя предлагать на один эталон.</summary>
+    public const string AutoSuggestCandidatesPerReferenceKey = "Media:Search:AutoSuggest:CandidatesPerReference";
+
+    /// <summary>
+    /// Порог предложений по умолчанию — косинусное расстояние 0,5 (схожесть 0,5): строже ручного поиска, чтобы
+    /// очередь не засорялась. Предварительное значение до калибровки на пилоте (ТО-мат-08).
+    /// </summary>
+    public const double DefaultAutoSuggestMaxCosineDistance = 0.5;
+
+    /// <summary>На эталон — до пяти ближайших лиц носителя (в видео один человек встречается во многих кадрах).</summary>
+    public const int DefaultAutoSuggestCandidatesPerReference = 5;
+
     /// <summary>
     /// Читает настройки из конфигурации; отсутствующие/мусорные значения заменяются умолчаниями, а
     /// границы кандидат-листа приводятся к согласованному виду (<c>1 ≤ Min ≤ Default ≤ Max</c>).
@@ -95,6 +119,14 @@ public sealed record MediaSearchOptions(
 
         var fps = ReadDouble(configuration, SampleFpsKey);
 
+        // ТФ-ПЕР-09: порог предложений не может быть дальше предела эксплуатанта — иначе система предлагала бы
+        // то, что оператору искать запрещено; выключение — только явным «false».
+        var suggestThreshold = Math.Min(
+            ReadDouble(configuration, AutoSuggestMaxCosineDistanceKey) ?? DefaultAutoSuggestMaxCosineDistance, maxAllowed);
+        var suggestEnabled = !bool.TryParse(configuration[AutoSuggestEnabledKey], out var enabled) || enabled;
+        var perReference = Math.Clamp(
+            ReadInt(configuration, AutoSuggestCandidatesPerReferenceKey, DefaultAutoSuggestCandidatesPerReference), 1, max);
+
         return new MediaSearchOptions(
             CandidateListSize: size,
             MinCandidateListSize: min,
@@ -103,8 +135,18 @@ public sealed record MediaSearchOptions(
             MaxAllowedCosineDistance: maxAllowed,
             ProbeCopyMaxBytes: ReadLong(configuration, ProbeCopyMaxBytesKey, DefaultProbeCopyMaxBytes),
             SampleFps: fps is { } f && f > 0 ? f : DefaultSampleFps,
-            HnswEfSearch: ReadInt(configuration, HnswEfSearchKey, DefaultHnswEfSearch));
+            HnswEfSearch: ReadInt(configuration, HnswEfSearchKey, DefaultHnswEfSearch),
+            AutoSuggestEnabled: suggestEnabled,
+            AutoSuggestMaxCosineDistance: suggestThreshold,
+            AutoSuggestCandidatesPerReference: perReference);
     }
+
+    /// <summary>
+    /// Порог предложений системы (ТФ-ПЕР-09): настроенный для предложений, но не мягче общего порога поиска, если
+    /// тот строже, и не дальше предела эксплуатанта.
+    /// </summary>
+    public double EffectiveAutoSuggestMaxCosineDistance =>
+        Math.Min(Math.Min(AutoSuggestMaxCosineDistance, MaxCosineDistance ?? double.MaxValue), MaxAllowedCosineDistance);
 
     /// <summary>Ширина кандидат-листа для запроса: запрошенная либо умолчание, зажатая в <c>[Min, Max]</c> (ТН-008).</summary>
     public int ClampTopK(int? requested) =>

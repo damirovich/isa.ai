@@ -3,6 +3,7 @@ using System;
 using ISC.AI.Modules.Media.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Pgvector;
@@ -12,9 +13,11 @@ using Pgvector;
 namespace ISC.AI.Modules.Media.Data.Migrations
 {
     [DbContext(typeof(MediaDbContext))]
-    partial class MediaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261001055237_PersonSuggestions")]
+    partial class PersonSuggestions
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -613,74 +616,6 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                     b.ToTable("search_session", "media");
                 });
 
-            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.SuggestionRun", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("AssetId")
-                        .HasColumnType("integer")
-                        .HasColumnName("asset_id");
-
-                    b.Property<int>("CandidatesCreated")
-                        .HasColumnType("integer")
-                        .HasColumnName("candidates_created");
-
-                    b.Property<int>("CaseId")
-                        .HasColumnType("integer")
-                        .HasColumnName("case_id");
-
-                    b.Property<short>("Classification")
-                        .HasColumnType("smallint")
-                        .HasColumnName("classification");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<int>("DivisionId")
-                        .HasColumnType("integer")
-                        .HasColumnName("division_id");
-
-                    b.Property<double>("MaxCosineDistance")
-                        .HasColumnType("double precision")
-                        .HasColumnName("max_cosine_distance");
-
-                    b.Property<int>("ReferencesChecked")
-                        .HasColumnType("integer")
-                        .HasColumnName("references_checked");
-
-                    b.Property<int>("SessionsCreated")
-                        .HasColumnType("integer")
-                        .HasColumnName("sessions_created");
-
-                    b.Property<int>("Trigger")
-                        .HasColumnType("integer")
-                        .HasColumnName("trigger");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id")
-                        .HasName("pk_suggestion_run");
-
-                    b.HasIndex("CaseId")
-                        .HasDatabaseName("ix_suggestion_run_case_id");
-
-                    b.HasIndex("Classification", "DivisionId")
-                        .HasDatabaseName("ix_suggestion_run_classification_division_id");
-
-                    b.HasIndex("AssetId", "CaseId", "CreatedAt")
-                        .HasDatabaseName("ix_suggestion_run_asset_id_case_id_created_at");
-
-                    b.ToTable("suggestion_run", "media");
-                });
-
             modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.TranscriptSegment", b =>
                 {
                     b.Property<int>("Id")
@@ -860,18 +795,6 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                         .HasConstraintName("fk_search_candidate_search_sessions_session_id");
 
                     b.Navigation("Session");
-                });
-
-            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.SuggestionRun", b =>
-                {
-                    b.HasOne("ISC.AI.Modules.Media.Data.Entities.MediaAsset", "Asset")
-                        .WithMany()
-                        .HasForeignKey("AssetId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_suggestion_run_asset_asset_id");
-
-                    b.Navigation("Asset");
                 });
 
             modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.TranscriptSegment", b =>

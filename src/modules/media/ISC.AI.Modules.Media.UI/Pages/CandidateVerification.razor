@@ -46,6 +46,10 @@ else
             <SimilarityChip Similarity="@item.Similarity" />
             <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@item.Status.ChipColor()">@item.Status.Label()</MudChip>
             <ClassificationChip Classification="@item.Classification" />
+            @if (item.Origin == SessionOrigin.SystemSuggestion)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Secondary" Icon="@Icons.Material.Filled.AutoAwesome">предложено системой</MudChip>
+            }
         </div>
         <div class="d-flex gap-4 flex-wrap justify-center mt-2">
             <MudText Typo="Typo.caption" Class="mud-text-secondary">дело <MudLink Href="@($"/media/cases/{item.CaseId}")" Typo="Typo.caption">№ @item.CaseId</MudLink></MudText>
@@ -112,7 +116,9 @@ else
                 @if (SuggestedPersonRef is { } suggested)
                 {
                     <MudText Typo="Typo.caption" Color="Color.Info" Class="d-block mt-1">
-                        Кандидат создан ручной привязкой к фигуранту № @suggested (ТФ-МЕД-03) —
+                        @(item.Origin == SessionOrigin.SystemSuggestion
+                            ? $"Система предложила фигуранта № {suggested}: лицо похоже на его эталон (ТФ-ПЕР-09) —"
+                            : $"Кандидат создан ручной привязкой к фигуранту № {suggested} (ТФ-МЕД-03) —")
                         @(_persons.Any(p => p.PersonId == suggested) ? "он подставлен в список; проверьте и при «подтверждён» оставьте его." : "в списке фигурантов дела его нет — выберите фигуранта вручную.")
                     </MudText>
                 }

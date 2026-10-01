@@ -56,6 +56,14 @@ else
                 {
                     <MudText Typo="Typo.caption" Class="mud-text-secondary">Инициатор: пользователь № @user</MudText>
                 }
+                @if (session.Origin == SessionOrigin.SystemSuggestion)
+                {
+                    @* ТФ-ПЕР-09: сессию создала система после индексации нового носителя; проба — эталон фигуранта дела. *@
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        Предложено системой после индексации нового материала: проба — эталон фигуранта № @session.SuggestedPersonRef.
+                        Подтверждает только человек, двумя подписями (ТБ-073).
+                    </MudText>
+                }
             </div>
         </div>
     </MudPaper>

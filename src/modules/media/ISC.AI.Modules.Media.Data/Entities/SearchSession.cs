@@ -56,6 +56,15 @@ public class SearchSession : BaseEntity, IClassified
     /// <summary>Подразделение дела (ТБ-070). NOT NULL.</summary>
     public int DivisionId { get; set; }
 
-    /// <summary>Кто запустил поиск — слабая ссылка на <c>core.app_user</c>.</summary>
+    /// <summary>Кто запустил поиск — слабая ссылка на <c>core.app_user</c>; у предложения системы — пусто.</summary>
     public int? RequestedByUserId { get; set; }
+
+    /// <summary>Происхождение: поиск сотрудника или автоматическое предложение системы (ТФ-ПЕР-09).</summary>
+    public SessionOrigin Origin { get; set; } = SessionOrigin.Operator;
+
+    /// <summary>
+    /// Фигурант, чей эталон был пробой предложения системы (значение из схемы профиля, без FK, ТО-инф-08);
+    /// подсказка эксперту, а не привязка — привязку ставит эксперт (ТФ-ВЕР-03).
+    /// </summary>
+    public int? SuggestedPersonRef { get; set; }
 }

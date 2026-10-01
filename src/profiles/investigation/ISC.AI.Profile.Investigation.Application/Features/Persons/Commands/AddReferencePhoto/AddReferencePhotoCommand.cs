@@ -25,6 +25,8 @@ namespace ISC.AI.Profile.Investigation.Application.Features.Persons;
 /// указано) принадлежит этому носителю (ТБ-071, ТФ-ДЕЛ-03, ТБ-077 — источник эталона должен быть из материалов
 /// дела). Иначе эталоном стал бы биометрический материал чужого дела/подразделения. Вид носителя —
 /// только из <see cref="ReferenceSourceKinds"/> (изображение, видео): аудиозапись лица не несёт (ADR-0026).
+/// После записи эталона с лицом уже загруженные материалы дела ставятся в фоновую сверку с эталонами фигурантов
+/// (ТФ-ПЕР-09, ADR-0035): материалы обычно загружают раньше, чем выбирают эталон.
 /// </remarks>
 public sealed record AddReferencePhotoCommand(
     int PersonId,
@@ -67,7 +69,8 @@ public sealed record AddReferencePhotoCommand(
         ICaseScope caseScope,
         IMediaCatalog catalog,
         ISubjectProvider subjectProvider,
-        IAccessContextProvider accessProvider)
+        IAccessContextProvider accessProvider,
+        IPersonSuggestionScheduler suggestions)
         : IRequestHandler<AddReferencePhotoCommand, ResponseDto<int>>
     {
         /// <inheritdoc />
@@ -143,9 +146,19 @@ public sealed record AddReferencePhotoCommand(
 
             var (result, photoId) = await persons.AddReferencePhotoAsync(
                 draft, command.SupersedesId, access, cancellationToken);
-            return result == PersonWriteResult.Ok
-                ? ResponseDto<int>.Ok(photoId)
-                : ResponseDto<int>.NotFound(PersonGuard.ReferenceNotFound);
+            if (result != PersonWriteResult.Ok)
+            {
+                return ResponseDto<int>.NotFound(PersonGuard.ReferenceNotFound);
+            }
+
+            // ТФ-ПЕР-09 (ADR-0035): материалы дела, загруженные раньше эталона, сверяются с ним в фоне. Эталон без
+            // лица сверять нечем; сбой постановки эталон не отменяет (планировщик его журналирует).
+            if (command.MediaFaceId is not null)
+            {
+                await suggestions.ScheduleCaseSweepAsync(person.CaseId, cancellationToken);
+            }
+
+            return ResponseDto<int>.Ok(photoId);
         }
     }
 }

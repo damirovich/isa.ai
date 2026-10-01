@@ -1,0 +1,335 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Блок «Сверка с фигурантами дела» карточки носителя (ТФ-ПЕР-09, ADR-0035): что система предложила по этому
+   носителю и где кандидат сейчас в двойной верификации, а если не предлагала — почему (дело закрыто, нет
+   основания, нет эталонов, ещё не сверялось). «Сверить сейчас» ставит сверку в фоновую очередь — для материалов,
+   загруженных раньше эталона или основания. Предложенного фигуранта блок НЕ называет: верификатор не должен узнать
+   предложение системы из карточки носителя в обход слепой проекции (ТФ-ВЕР-02); эксперт видит его, открыв кандидата.
+   Доступ проверяет сервер: только дела носителя, доступные сотруднику, и строки под решёткой (ТБ-020/021/071). *@
+@implements IAsyncDisposable
+@using System.Globalization
+@using ISC.AI.Modules.Media.Application.Features.Suggestions
+@using ISC.AI.Modules.Media.Domain.Model
+
+<MudPaper Outlined="true" Class="pa-4 my-4">
+    <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-1">
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Color="Color.Secondary" Size="Size.Small" />
+            <MudText Typo="Typo.subtitle1">Сверка с фигурантами дела</MudText>
+            <MudTooltip Text="Система сама сравнивает лица носителя с эталонами фигурантов того же дела и ставит похожие в очередь эксперта с пометкой «предложено системой» (ТФ-ПЕР-09). Сходство — оценка модели, не установление личности (ТЭ-006); связь подтверждают два сотрудника (ТБ-073).">
+                <MudIcon Icon="@Icons.Material.Outlined.Info" Size="Size.Small" Class="mud-text-secondary" />
+            </MudTooltip>
+        </div>
+        <div class="d-flex align-center gap-2">
+            @if (_status is { CanRequest: true } && IndexStatus == MediaIndexStatus.Indexed && FaceCount > 0)
+            {
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonSearch"
+                           Disabled="@(_busy || _awaitingSince is not null)" OnClick="RequestAsync">Сверить сейчас</MudButton>
+            }
+            <MudTooltip Text="Обновить">
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" Disabled="_busy" OnClick="RefreshAsync" />
+            </MudTooltip>
+        </div>
+    </div>
+    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-3">
+        Лица сравниваются с эталонами фигурантов дела@(_status is { } s ? $"; в очередь эксперта попадают совпадения от {SimilarityFloor(s)} %" : string.Empty).
+        Сходство — оценка модели, не установление личности; связь подтверждают два сотрудника.
+    </MudText>
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-2"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+    }
+    @if (_notice is not null)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-2"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _notice = null)">@_notice</MudAlert>
+    }
+
+    @if (_status is null)
+    {
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" Class="my-2" />
+        }
+    }
+    else
+    {
+        var status = _status;
+        @if (!status.Enabled)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2">
+                Автоматическая сверка выключена администратором (настройка Media:Search:AutoSuggest:Enabled).
+            </MudText>
+        }
+        else if (IndexStatus != MediaIndexStatus.Indexed)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2">Сверка пройдёт автоматически после обработки носителя.</MudText>
+        }
+        else if (FaceCount == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2">На носителе не найдено лиц — сверять нечего.</MudText>
+        }
+
+        @if (status.Suggestions.Count > 0)
+        {
+            <MudText Typo="Typo.overline" Class="mud-text-secondary d-block">Предложено системой: @status.Suggestions.Count</MudText>
+            @foreach (var suggestion in status.Suggestions)
+            {
+                var current = suggestion;
+                <MudPaper Outlined="true" Class="pa-2 mb-2 d-flex align-center gap-2 flex-wrap">
+                    <MudText Typo="Typo.body2">
+                        <b>Лицо № @current.FaceId</b> похоже на эталон фигуранта@(status.Cases.Count > 1 ? $" (дело {CaseNumber(status, current.CaseId)})" : string.Empty)
+                    </MudText>
+                    <SimilarityChip Similarity="@current.Similarity" />
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@current.Status.ChipColor()">@current.Status.Label()</MudChip>
+                    <MudSpacer />
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Primary" EndIcon="@Icons.Material.Filled.ArrowForward"
+                               Href="@CandidateHref(current)">@ActionLabel(current)</MudButton>
+                </MudPaper>
+            }
+        }
+
+        @if (status.Cases.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Носитель не привязан к доступному вам делу — сверять не с чем.</MudText>
+        }
+        @foreach (var item in status.Cases)
+        {
+            <div class="d-flex align-start gap-2 py-1">
+                <MudIcon Icon="@StateIcon(item.State)" Color="@StateColor(item.State)" Size="Size.Small" Style="margin-top:2px;" />
+                <MudText Typo="Typo.body2"><b>Дело @item.CaseNumber</b> — @CaseText(item, status)</MudText>
+            </div>
+        }
+    }
+</MudPaper>
+
+@code {
+    /// <summary>Как часто перечитывать итог после «Сверить сейчас», пока сверка идёт в фоне.</summary>
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(4);
+
+    /// <summary>Сколько ждать итога сверки, прежде чем перестать перечитывать (дальше — кнопка «Обновить»).</summary>
+    private static readonly TimeSpan PollLimit = TimeSpan.FromMinutes(2);
+
+    private readonly ComponentPoller _poller = new(PollInterval);
+
+    /// <summary>Носитель.</summary>
+    [Parameter, EditorRequired] public int AssetId { get; set; }
+
+    /// <summary>Состояние обработки носителя — от карточки: до обработки сверять нечего.</summary>
+    [Parameter] public MediaIndexStatus IndexStatus { get; set; }
+
+    /// <summary>Число лиц на носителе — от карточки.</summary>
+    [Parameter] public int FaceCount { get; set; }
+
+    private AssetSuggestionStatus? _status;
+    private (int AssetId, MediaIndexStatus Status, int Faces)? _loadedFor;
+    private bool _loading;
+    private bool _busy;
+    private string? _error;
+    private string? _notice;
+    private DateTime? _awaitingSince;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Предрендер: до интерактива ничего не грузим (карточка и так рисует блок только после загрузки).
+        if (!RendererInfo.IsInteractive)
+        {
+            return;
+        }
+
+        StartPolling();
+        var key = (AssetId, IndexStatus, FaceCount);
+        if (_loadedFor == key)
+        {
+            return;
+        }
+
+        if (_loadedFor?.AssetId != AssetId)
+        {
+            _status = null;
+            _error = null;
+            _notice = null;
+            _awaitingSince = null;
+        }
+
+        _loadedFor = key;
+        _loading = true;
+        await LoadAsync();
+    }
+
+    /// <summary>
+    /// Опрос итога после «Сверить сейчас»: тик перечитывает блок, только пока ждём итог, — иначе лишних запросов
+    /// нет. Запускается один раз и только в интерактиве (на предрендере таймер был бы сиротой).
+    /// </summary>
+    private void StartPolling()
+    {
+        _poller.Start(() => InvokeAsync(async () =>
+        {
+            if (_awaitingSince is not { } since || _busy)
+            {
+                return;
+            }
+
+            await LoadAsync();
+            if (_status is { } status && status.Cases.Any(c => c.LastRun is { } run && run.CreatedAtUtc >= since))
+            {
+                _awaitingSince = null;
+                _notice = "Сверка выполнена — итог ниже.";
+            }
+            else if (DateTime.UtcNow - since > PollLimit)
+            {
+                _awaitingSince = null;
+                _notice = "Сверка ещё в очереди — нажмите «Обновить» позже.";
+            }
+
+            StateHasChanged();
+        }));
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var response = await Dispatcher.Send(new GetAssetSuggestionStatusQuery(AssetId));
+            if (response is { Status: true, Data: { } status })
+            {
+                _status = status;
+            }
+            else
+            {
+                // Единый ответ «нет или нельзя» (ТБ-020/021) — показываем как есть.
+                _status = null;
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            await LoadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RequestAsync()
+    {
+        _busy = true;
+        _error = null;
+        _notice = null;
+        try
+        {
+            var requestedAt = DateTime.UtcNow;
+            var response = await Dispatcher.Send(new RequestPersonSuggestionCommand(AssetId));
+            if (response.Status)
+            {
+                _awaitingSince = requestedAt;
+                _notice = "Сверка поставлена в очередь — итог появится здесь через несколько секунд.";
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static int SimilarityFloor(AssetSuggestionStatus status) =>
+        (int)Math.Round(Math.Clamp(1 - status.MaxCosineDistance, 0, 1) * 100);
+
+    private static string CaseNumber(AssetSuggestionStatus status, int caseId) =>
+        status.Cases.FirstOrDefault(c => c.CaseId == caseId)?.CaseNumber ?? caseId.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Куда ведёт «Открыть»: ждёт эксперта — к его решению с подставленным фигурантом (как из очереди); ждёт
+    /// верификатора — к слепой проекции; решён — к сессии-предложению. Права проверяет сама страница.
+    /// </summary>
+    private static string CandidateHref(SuggestedCandidateRow row)
+    {
+        var id = row.CandidateId.ToString(CultureInfo.InvariantCulture);
+        return row.Status switch
+        {
+            CandidateStatus.Candidate => "/media/verification/" + id + "?stage=" + VerificationStage.Expert
+                + (row.SuggestedPersonRef is { } person ? "&person=" + person.ToString(CultureInfo.InvariantCulture) : string.Empty),
+            CandidateStatus.PendingVerifier => "/media/verification/" + id + "?stage=" + VerificationStage.Verifier,
+            _ => "/media/sessions/" + row.SessionId.ToString(CultureInfo.InvariantCulture),
+        };
+    }
+
+    /// <summary>Подпись кнопки перехода — по стадии кандидата, чтобы было ясно, куда она ведёт.</summary>
+    private static string ActionLabel(SuggestedCandidateRow row) => row.Status switch
+    {
+        CandidateStatus.Candidate => "К решению эксперта",
+        CandidateStatus.PendingVerifier => "К решению верификатора",
+        _ => "Открыть сессию",
+    };
+
+    private static string StateIcon(CaseSuggestionState state) => state switch
+    {
+        CaseSuggestionState.Checked => Icons.Material.Filled.CheckCircle,
+        CaseSuggestionState.NotChecked or CaseSuggestionState.Outdated => Icons.Material.Filled.Schedule,
+        CaseSuggestionState.Closed => Icons.Material.Filled.Lock,
+        _ => Icons.Material.Filled.ErrorOutline,
+    };
+
+    private static Color StateColor(CaseSuggestionState state) => state switch
+    {
+        CaseSuggestionState.Checked => Color.Success,
+        CaseSuggestionState.Closed => Color.Default,
+        _ => Color.Warning,
+    };
+
+    private static string CaseText(CaseSuggestionStatus item, AssetSuggestionStatus status) => item.State switch
+    {
+        CaseSuggestionState.Closed => "дело закрыто, сверка не проводится.",
+        CaseSuggestionState.NoBasis =>
+            "нет действующего основания поиска, без него система не сверяет (ТБ-071). "
+            + "Добавьте основание в карточке дела — материалы будут сверены автоматически.",
+        CaseSuggestionState.NoReferences =>
+            "у фигурантов нет эталонов, сравнивать не с чем. "
+            + "Добавьте эталон в карточке фигуранта — материалы будут сверены автоматически.",
+        CaseSuggestionState.NotChecked =>
+            $"ещё не сверялось (эталонов у фигурантов: {item.ReferenceCount}). Нажмите «Сверить сейчас».",
+        CaseSuggestionState.Outdated =>
+            $"сверено {Local(item.LastRun!.CreatedAtUtc)}, но потом у фигурантов появились эталоны. "
+            + "Сверка с ними идёт автоматически; если итог не обновился, нажмите «Сверить сейчас».",
+        CaseSuggestionState.Checked => CheckedText(item, status),
+        _ => string.Empty,
+    };
+
+    private static string CheckedText(CaseSuggestionStatus item, AssetSuggestionStatus status)
+    {
+        var run = item.LastRun!;
+        var head = $"сверено {Local(run.CreatedAtUtc)}, эталонов: {run.ReferencesChecked}. ";
+        if (run.CandidatesCreated > 0)
+        {
+            return head + $"Предложено кандидатов: {run.CandidatesCreated}.";
+        }
+
+        return status.Suggestions.Any(s => s.CaseId == item.CaseId)
+            ? head + "Новых совпадений нет, прежние предложения — выше."
+            : head + "Совпадений выше порога нет.";
+    }
+
+    private static string Local(DateTime utc) =>
+        DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture);
+
+    public async ValueTask DisposeAsync()
+    {
+        await _poller.DisposeAsync();
+    }
+}

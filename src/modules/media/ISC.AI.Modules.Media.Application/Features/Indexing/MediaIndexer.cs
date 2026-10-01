@@ -27,7 +27,8 @@ namespace ISC.AI.Modules.Media.Application.Features.Indexing;
 /// карточке (ТФ-МЕД-02); вырезки, сохранённые сорвавшимся прогоном, снимаются. Отмена — фиксируется как
 /// «индексация отменена» и пробрасывается (воркер останавливается штатно). Результат индексации —
 /// аудируемое событие (ТО-инф-11, ТБ-030): запись <see cref="AuditAction.Ingest"/> с грифом носителя, без
-/// субъекта (конвейер работает от имени системы).
+/// субъекта (конвейер работает от имени системы). После успешной индексации носителя с лицами — предложения
+/// связей с фигурантами его дела (<see cref="IPersonSuggester"/>, ТФ-ПЕР-09); их сбой индексацию не отменяет.
 /// </remarks>
 public sealed class MediaIndexer(
     IMediaStore store,
@@ -41,6 +42,7 @@ public sealed class MediaIndexer(
     ICaseScope caseScope,
     MediaSearchOptions options,
     MediaTempFiles tempFiles,
+    IPersonSuggester suggester,
     ILogger<MediaIndexer> logger) : IMediaIndexer
 {
     /// <summary>Причина отказа индексации аудиозаписи (результат задачи; статус носителя не меняется).</summary>
@@ -137,6 +139,14 @@ public sealed class MediaIndexer(
                 cancellationToken);
 
             MediaIndexerLog.Completed(logger, assetId, progress.Frames, progress.Faces.Count, progress.Rejected);
+
+            // ТФ-ПЕР-09: лица нового носителя — с эталонами фигурантов его дела; совпадения — в очередь верификации.
+            // Шаблоны уже записаны и в журнале: сбой предложений индексацию НЕ отменяет (их можно получить повтором).
+            if (progress.Faces.Count > 0)
+            {
+                await SuggestPersonsAsync(assetId, cancellationToken);
+            }
+
             return new MediaIndexResult(true, progress.Frames, progress.Faces.Count, progress.Rejected);
         }
         catch (OperationCanceledException)
@@ -162,6 +172,22 @@ public sealed class MediaIndexer(
             {
                 DeleteTempFile(assetId, tempPath);
             }
+        }
+    }
+
+    /// <summary>
+    /// Предложения связей с фигурантами (ТФ-ПЕР-09) после успешной индексации. Любой сбой, кроме отмены, только
+    /// журналируется: индексация уже зафиксирована, и откатывать её из-за подсказки нельзя.
+    /// </summary>
+    private async Task SuggestPersonsAsync(int assetId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await suggester.SuggestAsync(assetId, SuggestionTrigger.Indexing, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            MediaIndexerLog.SuggestionsFailed(logger, exception, assetId);
         }
     }
 
