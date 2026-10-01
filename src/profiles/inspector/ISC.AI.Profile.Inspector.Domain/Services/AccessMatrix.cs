@@ -98,6 +98,9 @@ public static class InspectorPermissions
     /// <summary>Типы документов и настройки документооборота.</summary>
     public const string DocFlowSettings = "docflow.settings";
 
+    /// <summary>Снятие поручения с контроля — финальный статус (ТЗ СКИД §4.2: «только Руководитель»).</summary>
+    public const string DocFlowClose = "docflow.close";
+
     /// <summary>Пользователи, роли и допуски.</summary>
     public const string AdminUsers = "admin.users";
 
@@ -136,6 +139,9 @@ public static class InspectorPermissions
         new(DocFlowView, PermissionSection.DocFlow, "Документы и отчёты",
             "Документы в пределах допуска: Администратор и Руководитель — все, Инспектор — где он инспектор, Исполнитель — где у него поручение",
             Roles(AllRoles)),
+        new(DocFlowClose, PermissionSection.DocFlow, "Снятие поручения с контроля",
+            "Финальный статус «Снято с контроля»: после него поручение не меняется. По правилам документооборота — Руководитель",
+            Roles(UserRole.Manager)),
         new(DocFlowSettings, PermissionSection.DocFlow, "Типы документов и настройки",
             "Настройка документооборота",
             Roles(UserRole.Administrator), OpenDuringInitialSetup: true),

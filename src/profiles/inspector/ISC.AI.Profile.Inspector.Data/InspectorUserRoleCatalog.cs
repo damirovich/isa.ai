@@ -15,8 +15,8 @@ namespace ISC.AI.Profile.Inspector.Data;
 /// на стороне пакета разъехалась бы с профилем незаметно.
 ///
 /// Назначение роли идёт с карточки сотрудника пакета (экран «Пользователи»): пакет проверяет право вызывающего,
-/// профиль — сам ключ и то, что учётная запись действующая. Правило снятия последнего Администратора у профиля
-/// «ИнспекторAI» прежнее: окно первичной настройки самовосстанавливается (<see cref="AdministrationRule"/>).
+/// профиль — сам ключ, то, что учётная запись действующая, и что не снимается последний Администратор
+/// (<see cref="RoleAssignmentRule"/>).
 /// </remarks>
 public sealed class InspectorUserRoleCatalog(IUserRoleStore roles) : IUserRoleCatalog
 {
@@ -63,6 +63,11 @@ public sealed class InspectorUserRoleCatalog(IUserRoleStore roles) : IUserRoleCa
         if (!(await roles.ListAsync(cancellationToken)).Any(row => row.UserId == userId))
         {
             return RoleAssignmentResult.Fail("Пользователь не найден или его учётная запись отключена.");
+        }
+
+        if (await RoleAssignmentRule.CheckAsync(roles, userId, role, cancellationToken) is { } refusal)
+        {
+            return RoleAssignmentResult.Fail(refusal);
         }
 
         await roles.SetRoleAsync(userId, role, cancellationToken);

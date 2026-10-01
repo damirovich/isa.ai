@@ -43,6 +43,8 @@ public sealed class InspectorAccessMatrixTests
         [InspectorPermissions.DivisionsManage] = AllRoles,
         [InspectorPermissions.DocFlowView] = AllRoles,
         [InspectorPermissions.DocFlowSettings] = [UserRole.Administrator],
+        // Новое право: прежде сервер снятие с контроля не проверял; по ТЗ СКИД §4.2 — только Руководитель.
+        [InspectorPermissions.DocFlowClose] = [UserRole.Manager],
         [InspectorPermissions.AdminUsers] = [UserRole.Administrator],
         [InspectorPermissions.AdminMatrix] = [UserRole.Administrator],
         [InspectorPermissions.AdminDirectories] = [UserRole.Administrator],
@@ -92,7 +94,7 @@ public sealed class InspectorAccessMatrixTests
         }
     }
 
-    [Fact(DisplayName = "Пока Администратора нет, без роли открыто всё, кроме документов (их фильтрует роль)")]
+    [Fact(DisplayName = "Пока Администратора нет, без роли открыто всё, кроме документов (их фильтрует роль) и снятия поручений с контроля")]
     public async Task Initial_setup_opens_everything_but_documents()
     {
         _roles.GetRoleAsync(Me, Arg.Any<CancellationToken>()).Returns((UserRole?)null);
@@ -100,7 +102,7 @@ public sealed class InspectorAccessMatrixTests
 
         foreach (var key in LegacyRules.Keys)
         {
-            (await PermissionRule.CallerHasAsync(_roles, _subject, key)).ShouldBe(key != InspectorPermissions.DocFlowView, key);
+            (await PermissionRule.CallerHasAsync(_roles, _subject, key)).ShouldBe(key is not (InspectorPermissions.DocFlowView or InspectorPermissions.DocFlowClose), key);
         }
     }
 

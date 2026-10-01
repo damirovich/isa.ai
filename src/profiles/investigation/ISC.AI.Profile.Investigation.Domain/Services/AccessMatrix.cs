@@ -104,6 +104,9 @@ public static class InvestigationPermissions
     /// <summary>Типы документов и настройки документооборота.</summary>
     public const string DocFlowSettings = "docflow.settings";
 
+    /// <summary>Снятие поручения с контроля — финальный статус (ТЗ СКИД §4.2: «только Руководитель»).</summary>
+    public const string DocFlowClose = "docflow.close";
+
     /// <summary>Решения по запросам на правку архивных сводок (ТФ-АДМ-06).</summary>
     public const string ReportPermits = "reports.permits";
 
@@ -158,6 +161,9 @@ public static class InvestigationPermissions
         new(DocFlowView, PermissionSection.DocFlow, "Документы и отчёты",
             "Документы документооборота в пределах допуска",
             Roles(AllRoles)),
+        new(DocFlowClose, PermissionSection.DocFlow, "Снятие поручения с контроля",
+            "Финальный статус «Снято с контроля»: после него поручение не меняется. По правилам документооборота — Руководитель",
+            Roles(InvestigationRole.Head)),
         new(DocFlowSettings, PermissionSection.DocFlow, "Типы документов и настройки",
             "Настройка документооборота",
             Roles(InvestigationRole.Administrator), OpenDuringInitialSetup: true),

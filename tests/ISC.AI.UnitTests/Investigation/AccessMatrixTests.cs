@@ -40,6 +40,8 @@ public sealed class AccessMatrixTests
         [InvestigationPermissions.VerificationRevoke] = [InvestigationRole.Head, InvestigationRole.Administrator],
         [InvestigationPermissions.DocFlowView] = AllRoles,
         [InvestigationPermissions.DocFlowSettings] = [InvestigationRole.Administrator],
+        // Новое право: прежде сервер снятие с контроля не проверял; по ТЗ СКИД §4.2 — только Руководитель.
+        [InvestigationPermissions.DocFlowClose] = [InvestigationRole.Head],
         [InvestigationPermissions.ReportPermits] = [InvestigationRole.Administrator],
         [InvestigationPermissions.AdminUsers] = [InvestigationRole.Administrator],
         [InvestigationPermissions.AdminMatrix] = [InvestigationRole.Administrator],

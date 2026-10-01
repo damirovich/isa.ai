@@ -44,7 +44,19 @@
             <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Dense="true">
                 @foreach (var next in StatusTransitionMatrix.AllowedFrom(context.Status))
                 {
-                    <MudMenuItem OnClick="@(() => _statusDialog?.Open(context, next))">→ @next.Label()</MudMenuItem>
+                    @* §4.2: «Снято с контроля» — только Руководитель. Пункт не прячем, а гасим с объяснением:
+                       пользователь не должен гадать, почему перехода нет. Решает всё равно сервер. *@
+                    @if (next == AssignmentStatus.Closed && !_canClose)
+                    {
+                        <MudMenuItem Disabled="true">
+                            → @next.Label()
+                            <MudText Typo="Typo.caption" Class="d-block">только Руководитель (ТЗ §4.2)</MudText>
+                        </MudMenuItem>
+                    }
+                    else
+                    {
+                        <MudMenuItem OnClick="@(() => _statusDialog?.Open(context, next))">→ @next.Label()</MudMenuItem>
+                    }
                 }
                 @if (context.Status != AssignmentStatus.Closed && context.Deadline is not null)
                 {
@@ -99,6 +111,9 @@
 
     private string? _error;
 
+    /// <summary>Вправе ли пользователь снимать с контроля (§4.2); до ответа сервера — нет (fail-closed).</summary>
+    private bool _canClose;
+
     private ChangeStatusDialog? _statusDialog;
     private ExtendDeadlineDialog? _extendDialog;
     private AddAssignmentDialog? _addDialog;
@@ -107,6 +122,21 @@
 
     /// <summary>Кандидаты в исполнители по подразделению (§4.1) — общий кэш с защитой от повторных запросов.</summary>
     private AssigneeCandidatesCache? _candidatesCache;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var response = await Dispatcher.Send(new GetAssignmentCloseRightQuery());
+            _canClose = response is { Status: true, Data: true };
+        }
+        catch (Exception)
+        {
+            // Сбой проверки права — пункт остаётся неактивным; сервер всё равно проверит при попытке.
+            _canClose = false;
+        }
+    }
 
     private string DivisionName(int id) =>
         DivisionNames.TryGetValue(id, out var name) ? name : $"подразделение №{id}";

@@ -13,4 +13,10 @@ public interface IDocFlowAdministration
 {
     /// <summary>Вправе ли ТЕКУЩИЙ субъект менять настройки и справочники модуля.</summary>
     Task<bool> CanManageAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Вправе ли ТЕКУЩИЙ субъект снимать назначение с контроля (финальный статус «Снято с контроля», ТЗ СКИД §4.2:
+    /// «только Руководитель»). Какая роль профиля считается Руководителем — решает профиль.
+    /// </summary>
+    Task<bool> CanCloseAssignmentsAsync(CancellationToken cancellationToken = default);
 }

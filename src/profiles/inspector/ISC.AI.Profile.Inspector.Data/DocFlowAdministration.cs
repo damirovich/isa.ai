@@ -20,4 +20,12 @@ public sealed class DocFlowAdministration(IUserRoleStore roles, ISubjectProvider
     /// </remarks>
     public Task<bool> CanManageAsync(CancellationToken cancellationToken = default) =>
         PermissionRule.CallerHasAsync(roles, subjectProvider, InspectorPermissions.DocFlowSettings, cancellationToken);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Право «Снятие поручения с контроля» матрицы доступа (ADR-0033): по умолчанию Руководитель (ТЗ СКИД §4.2). Режима
+    /// первичной настройки у права нет: снятие — не настройка, а без Руководителя его выдаёт Администратор в матрице.
+    /// </remarks>
+    public Task<bool> CanCloseAssignmentsAsync(CancellationToken cancellationToken = default) =>
+        PermissionRule.CallerHasAsync(roles, subjectProvider, InspectorPermissions.DocFlowClose, cancellationToken);
 }
