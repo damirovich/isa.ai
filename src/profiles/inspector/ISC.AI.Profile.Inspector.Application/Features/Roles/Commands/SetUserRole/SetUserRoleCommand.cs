@@ -30,6 +30,12 @@ public sealed record SetUserRoleCommand(int UserId, UserRole? Role) : IRequest<R
                 return ResponseDto<bool>.BadRequest("Назначение ролей доступно только Администратору.");
             }
 
+            // ИНВАРИАНТ: последнего действующего Администратора снять нельзя (RoleAssignmentRule).
+            if (await RoleAssignmentRule.CheckAsync(store, command.UserId, command.Role, cancellationToken) is { } refusal)
+            {
+                return ResponseDto<bool>.BadRequest(refusal);
+            }
+
             await store.SetRoleAsync(command.UserId, command.Role, cancellationToken);
             return ResponseDto<bool>.Ok(true);
         }

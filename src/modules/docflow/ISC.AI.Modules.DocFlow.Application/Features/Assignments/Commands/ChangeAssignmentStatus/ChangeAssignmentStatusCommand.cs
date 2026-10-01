@@ -11,6 +11,7 @@ namespace ISC.AI.Modules.DocFlow.Application.Features.Assignments;
 /// <summary>
 /// Сменить статус назначения (§4.2): матрица §4.5, «Просрочено» — только система, вход/выход
 /// «Контроля» фиксирует/сбрасывает контролёра, переход пишется в историю, агрегат пересчитывается.
+/// «Снято с контроля» — только Руководитель (§4.2): проверяет сервер, а не только меню.
 /// </summary>
 public sealed record ChangeAssignmentStatusCommand(
     int AssignmentId, AssignmentStatus NewStatus, string? Comment,
@@ -23,9 +24,14 @@ public sealed record ChangeAssignmentStatusCommand(
     /// <inheritdoc />
     public string? AuditSummary => $"docflow:assignment:{AssignmentId}:status:{NewStatus}";
 
+    /// <summary>Текст отказа: снять с контроля может только Руководитель (§4.2).</summary>
+    public const string CloseDenied =
+        "Снять поручение с контроля может только Руководитель (ТЗ §4.2). Если право нужно другой роли — его выдаёт Администратор в матрице доступа.";
+
     /// <inheritdoc cref="ChangeAssignmentStatusCommand" />
     public sealed class Handler(
-        IDocumentStore store, IAccessContextProvider accessProvider, DocFlowEventNotifier notifier)
+        IDocumentStore store, IAccessContextProvider accessProvider, DocFlowEventNotifier notifier,
+        IDocFlowAdministration administration)
         : IRequestHandler<ChangeAssignmentStatusCommand, ResponseDto<bool>>
     {
         /// <inheritdoc />
@@ -33,6 +39,15 @@ public sealed record ChangeAssignmentStatusCommand(
             ChangeAssignmentStatusCommand command, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(command);
+
+            // ИНВАРИАНТ §4.2: «Снято с контроля» — финальный статус, его ставит только Руководитель. Проверка до
+            // обращения к хранилищу: отказ не зависит от того, видно ли назначение, и не раскрывает его наличие.
+            if (command.NewStatus == AssignmentStatus.Closed
+                && !await administration.CanCloseAssignmentsAsync(cancellationToken))
+            {
+                return ResponseDto<bool>.BadRequest(CloseDenied);
+            }
+
             var access = await accessProvider.GetCurrentAsync(cancellationToken);
 
             var result = await store.ChangeAssignmentStatusAsync(
