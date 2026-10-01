@@ -73,6 +73,91 @@ public sealed class MediaCatalog(
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, FaceTrackSpan>> GetTrackSpansAsync(
+        IReadOnlyCollection<FaceTrackRequest> requests, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(requests);
+        if (requests.Count == 0)
+        {
+            return new Dictionary<int, FaceTrackSpan>();
+        }
+
+        var ids = requests.Select(r => r.FaceId).Distinct().ToArray();
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var visible = db.Faces.AsNoTracking().VisibleTo(access, accessPolicy);
+
+        // Лица, которые ещё есть: трек — свой (если видео проиндексировано уже с треками).
+        var existing = await visible
+            .Where(f => ids.Contains(f.Id))
+            .Select(f => new { f.Id, f.AssetId, f.TrackId })
+            .ToListAsync(cancellationToken);
+        var asked = existing
+            .Where(f => f.TrackId is not null)
+            .Select(f => (FaceId: f.Id, f.AssetId, TrackId: f.TrackId!.Value))
+            .ToList();
+
+        // Лица, которых больше нет (переиндексация): трек того же носителя на том же кадре — только если лицо там одно.
+        var existingIds = existing.Select(f => f.Id).ToHashSet();
+        var missing = requests
+            .Where(r => !existingIds.Contains(r.FaceId) && r.FrameTimestampMs is not null)
+            .DistinctBy(r => r.FaceId)
+            .ToList();
+        if (missing.Count > 0)
+        {
+            var missingAssets = missing.Select(r => r.AssetId).Distinct().ToArray();
+            var missingMoments = missing.Select(r => r.FrameTimestampMs!.Value).Distinct().ToArray();
+
+            // Единственность лица на кадре — по ВСЕМ лицам кадра, не только видимым: скрытое решёткой лицо иначе
+            // незаметно сделало бы выбор неоднозначным. Наружу отсюда ничего не уходит — только номер трека, а сам
+            // отрезок ниже считается по видимым кадрам (трек скрытого лица отрезка не даст).
+            var onFrames = await db.Faces.AsNoTracking()
+                .Where(f => missingAssets.Contains(f.AssetId) && f.Frame != null && missingMoments.Contains(f.Frame.TimestampMs))
+                .Select(f => new { f.AssetId, f.Frame!.TimestampMs, f.TrackId })
+                .ToListAsync(cancellationToken);
+            var single = onFrames
+                .GroupBy(f => (f.AssetId, f.TimestampMs))
+                .Where(g => g.Count() == 1 && g.Single().TrackId is not null)
+                .ToDictionary(g => g.Key, g => g.Single().TrackId!.Value);
+            asked.AddRange(missing
+                .Where(r => single.ContainsKey((r.AssetId, r.FrameTimestampMs!.Value)))
+                .Select(r => (r.FaceId, r.AssetId, single[(r.AssetId, r.FrameTimestampMs!.Value)])));
+        }
+
+        if (asked.Count == 0)
+        {
+            return new Dictionary<int, FaceTrackSpan>();
+        }
+
+        // Отрезок — по кадрам трека, видимым субъекту; пары «носитель × трек» сверяются в памяти (номер трека
+        // уникален только в пределах носителя).
+        var assetIds = asked.Select(f => f.AssetId).Distinct().ToArray();
+        var trackIds = asked.Select(f => f.TrackId).Distinct().ToArray();
+        var spans = await visible
+            .Where(f => assetIds.Contains(f.AssetId) && f.TrackId != null && trackIds.Contains(f.TrackId.Value) && f.Frame != null)
+            .GroupBy(f => new { f.AssetId, TrackId = f.TrackId!.Value })
+            .Select(g => new
+            {
+                g.Key.AssetId,
+                g.Key.TrackId,
+                Start = g.Min(f => f.Frame!.TimestampMs),
+                End = g.Max(f => f.Frame!.TimestampMs),
+                Frames = g.Select(f => f.FrameId).Distinct().Count(),
+            })
+            .ToListAsync(cancellationToken);
+
+        var byTrack = spans.ToDictionary(s => (s.AssetId, s.TrackId));
+        return asked
+            .Where(f => byTrack.ContainsKey((f.AssetId, f.TrackId)))
+            .ToDictionary(
+                f => f.FaceId,
+                f =>
+                {
+                    var span = byTrack[(f.AssetId, f.TrackId)];
+                    return new FaceTrackSpan(f.FaceId, f.TrackId, span.Start, span.End, span.Frames);
+                });
+    }
+
+    /// <inheritdoc />
     /// <remarks>
     /// Вектор отдаётся ТОЛЬКО для внутреннего сценария «этот человек в других материалах» (ТФ-ПЛ-03) и
     /// только если шаблон в допуске субъекта (ТБ-020/070). Экспорт векторов наружу запрещён (ТБ-076):

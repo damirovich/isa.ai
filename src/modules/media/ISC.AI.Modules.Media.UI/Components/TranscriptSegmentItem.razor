@@ -13,25 +13,21 @@
 
 @if (Clickable)
 {
-    <button type="button" id="@ElementId" class="d-flex align-start gap-3 px-2 py-1" style="@ButtonStyle"
+    <button type="button" id="@ElementId" class="transcript-row" style="@RowStyle"
             title="@Title" @onclick="PlayAsync">
-        <span class="mud-text-secondary" style="font-family:monospace;white-space:nowrap;">[@MediaLabels.ClockTimecode(StartMs)]</span>
-        <span class="mud-typography mud-typography-body2">@Text</span>
+        <span class="transcript-time">[@MediaLabels.ClockTimecode(StartMs)]</span>
+        <span class="transcript-text mud-typography mud-typography-body2">@Text</span>
     </button>
 }
 else
 {
-    <div id="@ElementId" class="d-flex align-start gap-3 px-2 py-1" style="@RowStyle">
-        <span class="mud-text-secondary" style="font-family:monospace;white-space:nowrap;">[@MediaLabels.ClockTimecode(StartMs)]</span>
-        <span class="mud-typography mud-typography-body2">@Text</span>
+    <div id="@ElementId" class="transcript-row" style="@RowStyle">
+        <span class="transcript-time">[@MediaLabels.ClockTimecode(StartMs)]</span>
+        <span class="transcript-text mud-typography mud-typography-body2">@Text</span>
     </div>
 }
 
 @code {
-    /// <summary>Сброс оформления кнопки браузера: строка выглядит как текст списка, а не как кнопка.</summary>
-    private const string ButtonReset =
-        "width:100%;text-align:left;border:0;background:none;font:inherit;color:inherit;cursor:pointer;";
-
     /// <summary>Номер фрагмента в расшифровке — передаётся в <see cref="OnPlay"/>.</summary>
     [Parameter, EditorRequired] public int Index { get; set; }
 
@@ -62,12 +58,11 @@ else
     private (int Index, string ElementId, long StartMs, string? Text, bool IsActive, bool Clickable, string Title) _shown;
     private bool _changed = true;
 
+    // Раскладка строки и сброс оформления кнопки — в TranscriptSegmentItem.razor.css; здесь только выделение активной.
     private string RowStyle =>
         IsActive
             ? "border-radius:4px;border-left:3px solid var(--mud-palette-primary);background:var(--mud-palette-background-grey);"
             : "border-radius:4px;border-left:3px solid transparent;";
-
-    private string ButtonStyle => ButtonReset + RowStyle;
 
     protected override void OnParametersSet()
     {

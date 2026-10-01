@@ -250,7 +250,9 @@ else
     {
         <MudPaper Outlined="true" Class="@(split ? "pa-4 mb-4" : "pa-4 my-4")">
             <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
-                <MudText Typo="Typo.subtitle1">Лица на носителе: @_details.Faces.Count</MudText>
+                <MudText Typo="Typo.subtitle1">
+                    Лица на носителе: @_details.Faces.Count@(asset.Kind == MediaKind.Video && _details.Faces.Any(f => f.TrackId is not null) ? $" · треков: {_tracks.Count}" : string.Empty)
+                </MudText>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">
                     Балл детектора — уверенность, что это лицо; непригодные для сравнения помечены с причиной (ТО-мат-07).
                 </MudText>
@@ -263,44 +265,76 @@ else
             }
             else if (asset.Kind == MediaKind.Video)
             {
-                <MudTable T="FaceRow" Items="_details.Faces" Dense="true" Hover="true" Elevation="0">
-                    <HeaderContent>
-                        <MudTh>Вырезка</MudTh><MudTh>Таймкод</MudTh><MudTh>Лицо</MudTh><MudTh>Детектор</MudTh><MudTh>Пригодность</MudTh><MudTh></MudTh>
-                    </HeaderContent>
-                    <RowTemplate>
-                        <MudTd DataLabel="Вырезка">
-                            <FaceCropTile Url="@CropUrl(context)" Size="64" Highlighted="@(HighlightFaceId == context.Id)" />
-                        </MudTd>
-                        <MudTd DataLabel="Таймкод">
-                            @if (context.FrameTimestampMs is { } ms)
-                            {
-                                @* «К кадру» работает в обоих режимах просмотрщика: перемотка <video> либо кадр с сервера. *@
-                                <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.PlayCircle"
-                                           OnClick="@(() => ShowFrameAsync(ms))">@MediaLabels.Timecode(ms)</MudButton>
-                            }
-                        </MudTd>
-                        <MudTd DataLabel="Лицо">№ @context.Id@(context.TrackId is { } track ? $" · трек {track}" : string.Empty)</MudTd>
-                        <MudTd DataLabel="Детектор">@context.DetectionScore.ToString("0.00")</MudTd>
-                        <MudTd DataLabel="Пригодность">
-                            @if (context.QualityAcceptable)
-                            {
-                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">пригодно · качество @context.QualityScore.ToString("0.00")</MudChip>
-                            }
-                            else
-                            {
-                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text">непригодно: @(context.QualityReason ?? "причина не указана")</MudChip>
-                            }
-                        </MudTd>
-                        <MudTd>
+                @* Лица видео — КАРТОЧКАМИ ПО ТРЕКАМ (ADR-0037): один человек на отрезке — одна карточка с лучшей вырезкой,
+                   отрезком и действиями; все кадры трека — по раскрытию. Вместо десятков строк — несколько карточек.
+                   Действия карточки — по лучшему пригодному лицу трека. Видео, проиндексированное до треков, — карточка
+                   на каждое лицо и подсказка переиндексировать. *@
+                @if (_details.Faces.All(f => f.TrackId is null))
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
+                        Лица этого видео ещё не связаны в треки — нажмите «Переиндексировать», и одинаковые лица соседних кадров
+                        соберутся в одну карточку.
+                    </MudText>
+                }
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;">
+                    @foreach (var group in _tracks)
+                    {
+                        var current = group;
+                        var best = current.Best;
+                        var expanded = _expandedTracks.Contains(current.Key) || current.Faces.Any(f => f.Id == HighlightFaceId);
+                        <MudPaper @key="current.Key" Outlined="true" Class="pa-3 d-flex flex-column gap-2"
+                                  Style="@(current.Faces.Any(f => f.Id == HighlightFaceId) ? "outline:2px solid var(--mud-palette-primary);" : null)">
+                            <div class="d-flex gap-3 align-start">
+                                <FaceCropTile Url="@CropUrl(best)" Size="96" Highlighted="@(HighlightFaceId == best.Id)"
+                                              Unusable="@(!best.QualityAcceptable)" UnusableReason="@best.QualityReason" />
+                                <div class="d-flex flex-column" style="min-width:0;">
+                                    <MudText Typo="Typo.subtitle2">@(current.TrackId is { } track ? $"Трек {track}" : $"Лицо № {best.Id}")</MudText>
+                                    <MudText Typo="Typo.body2">
+                                        @(current.EndMs > current.StartMs
+                                            ? $"{MediaLabels.Timecode(current.StartMs)} – {MediaLabels.Timecode(current.EndMs)}"
+                                            : MediaLabels.Timecode(current.StartMs))
+                                    </MudText>
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                        @FramesCaption(current.Faces.Count) · лучшее лицо № @best.Id · качество @best.QualityScore.ToString("0.00")
+                                    </MudText>
+                                    @* «К кадру» работает в обоих режимах просмотрщика: перемотка <video> либо кадр с сервера. *@
+                                    <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.PlayCircle" Class="align-self-start"
+                                               OnClick="@(() => ShowFrameAsync(current.StartMs))">к началу · @MediaLabels.Timecode(current.StartMs)</MudButton>
+                                </div>
+                            </div>
                             <div class="d-flex gap-1 flex-wrap">
                                 <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonSearch"
-                                           Disabled="@(!context.QualityAcceptable)" OnClick="@(() => SearchFace(context.Id))">Найти в других материалах</MudButton>
+                                           Disabled="@(!best.QualityAcceptable)" OnClick="@(() => SearchFace(best.Id))">Найти в других материалах</MudButton>
                                 <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonAdd"
-                                           Disabled="@(_busy || _details.CaseId is null)" OnClick="@(() => OpenLinkAsync(context))">Привязать к фигуранту</MudButton>
+                                           Disabled="@(_busy || _details.CaseId is null)" OnClick="@(() => OpenLinkAsync(best))">Привязать к фигуранту</MudButton>
                             </div>
-                        </MudTd>
-                    </RowTemplate>
-                </MudTable>
+                            @if (current.Faces.Count > 1)
+                            {
+                                <MudButton Variant="Variant.Text" Size="Size.Small" Class="align-self-start"
+                                           EndIcon="@(expanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                                           OnClick="@(() => ToggleTrack(current.Key))">@(expanded ? "Скрыть кадры" : $"Показать кадры ({current.Faces.Count})")</MudButton>
+                                @if (expanded)
+                                {
+                                    <div class="d-flex flex-wrap gap-2">
+                                        @foreach (var face in current.Faces)
+                                        {
+                                            var frameFace = face;
+                                            <div class="d-flex flex-column align-center" style="width:72px;">
+                                                <FaceCropTile Url="@CropUrl(frameFace)" Size="56" Highlighted="@(HighlightFaceId == frameFace.Id)"
+                                                              Unusable="@(!frameFace.QualityAcceptable)" UnusableReason="@frameFace.QualityReason" />
+                                                @if (frameFace.FrameTimestampMs is { } frameMs)
+                                                {
+                                                    <MudButton Variant="Variant.Text" Size="Size.Small" Style="min-width:0;padding:0 4px;"
+                                                               OnClick="@(() => ShowFrameAsync(frameMs))">@MediaLabels.Timecode(frameMs)</MudButton>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            }
+                        </MudPaper>
+                    }
+                </div>
             }
             else
             {
@@ -623,6 +657,53 @@ else
         _linkAuthorizationId = null;
         _linkPersonRef = null;
         _linkError = null;
+        _tracks = [];
+        _expandedTracks.Clear();
+    }
+
+    // --- Лица видео по трекам (ТФ-ПЕР-02, ADR-0037) ---
+
+    /// <summary>
+    /// Трек лица для карточки: лица трека по времени, лучшее (пригодное с наибольшим качеством, иначе просто с
+    /// наибольшим) и отрезок. <see cref="Key"/> — номер трека, а у лица без трека — отрицательный номер лица.
+    /// </summary>
+    private sealed record FaceTrackGroup(int Key, int? TrackId, IReadOnlyList<FaceRow> Faces, FaceRow Best, long StartMs, long EndMs);
+
+    private IReadOnlyList<FaceTrackGroup> _tracks = [];
+    private readonly HashSet<int> _expandedTracks = [];
+
+    private static IReadOnlyList<FaceTrackGroup> GroupByTrack(IReadOnlyList<FaceRow> faces) =>
+        faces
+            .GroupBy(f => f.TrackId ?? -f.Id)
+            .Select(g =>
+            {
+                var ordered = g.OrderBy(f => f.FrameTimestampMs ?? 0).ThenBy(f => f.Id).ToList();
+                var best = ordered.Where(f => f.QualityAcceptable).OrderByDescending(f => f.QualityScore).ThenBy(f => f.Id).FirstOrDefault()
+                    ?? ordered.OrderByDescending(f => f.QualityScore).ThenBy(f => f.Id).First();
+                return new FaceTrackGroup(
+                    g.Key, ordered[0].TrackId, ordered, best, ordered[0].FrameTimestampMs ?? 0, ordered[^1].FrameTimestampMs ?? 0);
+            })
+            .OrderBy(t => t.StartMs)
+            .ThenBy(t => t.Key)
+            .ToList();
+
+    private void ToggleTrack(int key)
+    {
+        if (!_expandedTracks.Remove(key))
+        {
+            _expandedTracks.Add(key);
+        }
+    }
+
+    // Склонение: 1 кадр, 2–4 кадра, 5–20 кадров, 21 кадр…
+    private static string FramesCaption(int count)
+    {
+        var lastTwo = count % 100;
+        var last = count % 10;
+        var word = last == 1 && lastTwo != 11 ? "кадр"
+            : last is >= 2 and <= 4 && lastTwo is < 12 or > 14 ? "кадра"
+            : "кадров";
+        return count.ToString(CultureInfo.InvariantCulture) + " " + word;
     }
 
     // --- Дата съёмки (ТФ-МЕД-17) ---
@@ -671,6 +752,7 @@ else
         if (response is { Status: true, Data: { } details })
         {
             _details = details;
+            _tracks = details.Asset.Kind == MediaKind.Video ? GroupByTrack(details.Faces) : [];
         }
         else
         {

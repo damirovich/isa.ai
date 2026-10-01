@@ -66,7 +66,10 @@ public sealed record PersonRow(
     int? LinkedToPersonId = null,
     int? LinkTypeId = null);
 
-/// <summary>Подтверждённое появление (ТФ-ПЕР-02).</summary>
+/// <summary>
+/// Подтверждённое появление (ТФ-ПЕР-02). Отрезок появления в видео (<c>TrackStartMs</c>..<c>TrackEndMs</c>, кадров —
+/// <c>TrackFrames</c>) заполняет сценарий чтения по треку лица пакета «Медиа» (ADR-0037); хранилище его не знает.
+/// </summary>
 public sealed record AppearanceRow(
     int Id,
     int PersonId,
@@ -84,7 +87,10 @@ public sealed record AppearanceRow(
     int VerifierUserId,
     DateTime? RevokedAtUtc = null,
     int? RevokedByUserId = null,
-    string? RevokeReason = null)
+    string? RevokeReason = null,
+    long? TrackStartMs = null,
+    long? TrackEndMs = null,
+    int? TrackFrames = null)
 {
     /// <summary>Появление отозвано как ошибочное.</summary>
     public bool IsRevoked => Status == AppearanceStatus.Revoked;

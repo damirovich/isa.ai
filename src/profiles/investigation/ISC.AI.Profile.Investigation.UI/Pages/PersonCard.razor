@@ -325,7 +325,24 @@ else
                 <RowTemplate>
                     @* Соглашение навигации пакета «Медиа»: ?face= подсвечивает лицо на карточке носителя (ТФ-ПЕР-02 «переход к кадру»). *@
                     <MudTd DataLabel="Носитель"><MudLink Href="@($"/media/assets/{context.MediaAssetId}?face={context.MediaFaceId}")">носитель № @context.MediaAssetId · лицо № @context.MediaFaceId</MudLink></MudTd>
-                    <MudTd DataLabel="Момент">@Moment(context)</MudTd>
+                    <MudTd DataLabel="Момент">
+                        @if (context.TrackStartMs is { } start && context.TrackEndMs is { } end)
+                        {
+                            @* ТФ-ПЕР-02, ADR-0037: отрезок — первый и последний кадр трека лица; ссылка открывает видео с начала отрезка. *@
+                            <MudLink Href="@($"/media/assets/{context.MediaAssetId}?t={start}&face={context.MediaFaceId}")">@Clock(start) – @Clock(end)</MudLink>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                                @SpanText(start, end, context.TrackFrames) · подтверждён кадр @Moment(context)
+                            </MudText>
+                        }
+                        else
+                        {
+                            @Moment(context)
+                            @if (context.FrameTimestampMs is not null)
+                            {
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">отрезок появится после «Переиндексировать» видео</MudText>
+                            }
+                        }
+                    </MudTd>
                     <MudTd DataLabel="Схожесть">
                         <MudTooltip Text="Вероятностная оценка алгоритма; не является подтверждением личности (ТЭ-006)">
                             <span>@Percent(context.Similarity)</span>
@@ -1258,6 +1275,32 @@ else
     {
         var percent = Math.Clamp(similarity * 100, 0, 100);
         return percent.ToString("0", CultureInfo.InvariantCulture) + " %";
+    }
+
+    private static string Clock(long milliseconds) =>
+        TimeSpan.FromMilliseconds(milliseconds).ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture);
+
+    // Длина отрезка появления: кадры выборки и примерная длительность; один кадр — так и пишем.
+    private static string SpanText(long startMs, long endMs, int? frames)
+    {
+        if (endMs <= startMs)
+        {
+            return "один кадр выборки";
+        }
+
+        var seconds = Math.Max(1, (int)Math.Round((endMs - startMs) / 1000.0));
+        return $"в кадре ≈ {seconds.ToString(CultureInfo.InvariantCulture)} с"
+            + (frames is { } count ? $" ({count.ToString(CultureInfo.InvariantCulture)} {FramesWord(count)} выборки)" : string.Empty);
+    }
+
+    // Склонение: 1 кадр, 2–4 кадра, 5–20 кадров, 21 кадр…
+    private static string FramesWord(int count)
+    {
+        var lastTwo = count % 100;
+        var last = count % 10;
+        return last == 1 && lastTwo != 11 ? "кадр"
+            : last is >= 2 and <= 4 && lastTwo is < 12 or > 14 ? "кадра"
+            : "кадров";
     }
 
     // Момент появления: для видео — таймкод кадра, для фото — «на фото».

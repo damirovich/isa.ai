@@ -15,7 +15,7 @@
        ВАЖНО: obj/ у хоста общий для обоих профилей — при смене профиля делать
        dotnet clean src/core/ISC.AI.Web, иначе в obj остаются артефакты прежнего профиля. -->
   <PropertyGroup>
-    <IscProfile Condition="'$(IscProfile)' == ''">inspector</IscProfile>
+    <IscProfile Condition="'$(IscProfile)' == ''">investigation</IscProfile>
   </PropertyGroup>
 
   <!-- Хост и единственная точка композиции. Ссылается на ядро И на выбранный профиль
