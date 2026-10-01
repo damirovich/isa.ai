@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.Security;
+using ISC.AI.Modules.Media.Application.Features.Verification;
 using ISC.AI.Modules.Media.Domain.Model;
 using ISC.AI.Modules.Media.Domain.Services;
 using Mediator;
@@ -20,7 +21,11 @@ namespace ISC.AI.Modules.Media.Application.Features.Search;
 /// слепота второй стадии (ТФ-ВЕР-02) не должна обходиться через страницу сессии. После итога
 /// (подтверждён / отклонён / неопределённо) решения обоих сотрудников видны всем, кому доступна сессия.
 /// </param>
-public sealed record SearchSessionDetails(SearchSessionRow Session, IReadOnlyList<SearchCandidateRow> Candidates);
+/// <param name="Materials">Когда, откуда и где снят материал кандидатов (ТФ-ПЛ-02), по носителю; носителя вне допуска нет.</param>
+public sealed record SearchSessionDetails(
+    SearchSessionRow Session,
+    IReadOnlyList<SearchCandidateRow> Candidates,
+    IReadOnlyDictionary<int, MaterialContext>? Materials = null);
 
 /// <summary>Сессия поиска по идентификатору (ТФ-ПЛ-07). Просмотр кандидат-листа аудируется (ТБ-030).</summary>
 public sealed record GetSearchSessionQuery(int SessionId) : IRequest<ResponseDto<SearchSessionDetails>>, IAuditableRequest
@@ -36,7 +41,8 @@ public sealed record GetSearchSessionQuery(int SessionId) : IRequest<ResponseDto
         IAccessContextProvider accessProvider,
         ISubjectProvider subjectProvider,
         ISearchSessionStore store,
-        ICaseScope caseScope)
+        ICaseScope caseScope,
+        IMaterialContextReader materials)
         : IRequestHandler<GetSearchSessionQuery, ResponseDto<SearchSessionDetails>>
     {
         /// <inheritdoc />
@@ -63,8 +69,11 @@ public sealed record GetSearchSessionQuery(int SessionId) : IRequest<ResponseDto
 
             var userId = await subjectProvider.GetCurrentUserIdAsync(cancellationToken);
             var candidates = await store.ListCandidatesAsync(session.Id, access, cancellationToken);
+
+            // ТФ-ПЛ-02: когда, откуда и где снят материал кандидатов — сведения о материале, слепоту не затрагивают.
+            var context = await materials.ReadAsync(candidates.Select(c => c.AssetId).ToList(), access, cancellationToken);
             return ResponseDto<SearchSessionDetails>.Ok(new SearchSessionDetails(
-                session, candidates.Select(c => Blind(c, userId)).ToList()));
+                session, candidates.Select(c => Blind(c, userId)).ToList(), context));
         }
 
         /// <summary>

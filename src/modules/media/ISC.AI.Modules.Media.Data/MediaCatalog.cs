@@ -73,6 +73,28 @@ public sealed class MediaCatalog(
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, AssetMaterialInfo>> ListMaterialInfoAsync(
+        IReadOnlyCollection<int> assetIds, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(assetIds);
+        if (assetIds.Count == 0)
+        {
+            return new Dictionary<int, AssetMaterialInfo>();
+        }
+
+        var ids = assetIds.Distinct().ToArray();
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var rows = await db.Assets.AsNoTracking()
+            .VisibleTo(access, accessPolicy)
+            .Where(a => ids.Contains(a.Id))
+            .Select(a => new { a.Id, a.CapturedAt, a.CreatedAt, a.Source })
+            .ToListAsync(cancellationToken);
+        return rows.ToDictionary(
+            r => r.Id,
+            r => new AssetMaterialInfo(r.Id, r.CapturedAt, DateTime.SpecifyKind(r.CreatedAt, DateTimeKind.Utc), r.Source));
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyDictionary<int, FaceTrackSpan>> GetTrackSpansAsync(
         IReadOnlyCollection<FaceTrackRequest> requests, AccessContext access, CancellationToken cancellationToken = default)
     {

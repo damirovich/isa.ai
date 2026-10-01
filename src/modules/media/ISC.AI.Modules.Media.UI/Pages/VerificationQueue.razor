@@ -351,6 +351,11 @@
                         <MudText Typo="Typo.caption" Class="mud-text-secondary text-center">
                             дело № @current.CaseId · сессия № @current.SessionId · кандидат № @current.Rank
                         </MudText>
+                        @if (current.Material is { } material)
+                        {
+                            @* ТФ-ПЛ-02: когда, откуда и где снят материал — помогает решению, не раскрывая чужих решений. *@
+                            <MudText Typo="Typo.caption" Class="text-center" title="@material.MaterialLine(withTime: true)">@material.MaterialLine()</MudText>
+                        }
                         @if (current.OwnDecision is { } own)
                         {
                             <MudText Typo="Typo.caption" Class="text-center">ваше решение: @own.Verdict.Label() · @own.DecidedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudText>

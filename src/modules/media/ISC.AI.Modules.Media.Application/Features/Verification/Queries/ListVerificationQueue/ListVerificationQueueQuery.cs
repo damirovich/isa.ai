@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentValidation;
@@ -50,7 +51,8 @@ public sealed record ListVerificationQueueQuery(
         IVerificationPolicy policy,
         IAccessContextProvider accessProvider,
         ICaseScope caseScope,
-        ISearchSessionStore store)
+        ISearchSessionStore store,
+        IMaterialContextReader materials)
         : IRequestHandler<ListVerificationQueueQuery, ResponseDto<IReadOnlyList<VerificationQueueItem>>>
     {
         /// <inheritdoc />
@@ -118,7 +120,10 @@ public sealed record ListVerificationQueueQuery(
                 items.Add(VerificationQueueItem.From(candidate, session, subjectId, query.Stage));
             }
 
-            return ResponseDto<IReadOnlyList<VerificationQueueItem>>.Ok(items, page.Total);
+            // ТФ-ПЛ-02: когда, откуда и где снят материал — одним чтением на страницу.
+            var context = await materials.ReadAsync(items.Select(i => i.AssetId).ToList(), access, cancellationToken);
+            var shown = items.Select(i => context.TryGetValue(i.AssetId, out var material) ? i with { Material = material } : i).ToList();
+            return ResponseDto<IReadOnlyList<VerificationQueueItem>>.Ok(shown, page.Total);
         }
     }
 }

@@ -114,6 +114,36 @@ public sealed class CaseScope(
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, string>> ListAssetPlacesAsync(
+        IReadOnlyCollection<int> assetIds, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(assetIds);
+        ArgumentNullException.ThrowIfNull(access);
+        if (assetIds.Count == 0)
+        {
+            return new Dictionary<int, string>();
+        }
+
+        var ids = assetIds.Distinct().ToArray();
+        var role = await ResolveRoleAsync(access, cancellationToken);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Место — только из привязок к делам субъекта (та же область, что у всех чтений по носителю, ТБ-071).
+        var accessible = CaseAccessRule.Apply(db.Cases, access, policy, role);
+        var links = await db.CaseMediaLinks.AsNoTracking()
+            .Where(l => ids.Contains(l.MediaAssetId) && l.Place != null && l.Place != ""
+                && accessible.Any(c => c.Id == l.CaseId))
+            .OrderBy(l => l.Id)
+            .Select(l => new { l.MediaAssetId, l.Place })
+            .ToListAsync(cancellationToken);
+
+        return links
+            .Where(l => !string.IsNullOrWhiteSpace(l.Place))
+            .GroupBy(l => l.MediaAssetId)
+            .ToDictionary(g => g.Key, g => g.First().Place!.Trim());
+    }
+
+    /// <inheritdoc />
     /// <remarks>
     /// БЕЗ решётки — и это правильно: вопрос задаёт фоновый конвейер от имени системы, ответ пользователю
     /// не показывается. Носитель без привязок индексируется (запрета нет); привязанный — пока ОТКРЫТО хотя

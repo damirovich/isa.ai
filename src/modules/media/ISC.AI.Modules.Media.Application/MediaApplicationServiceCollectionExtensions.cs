@@ -38,6 +38,9 @@ public static class MediaApplicationServiceCollectionExtensions
         // ТФ-ПЕР-09: предложения связей с фигурантами после индексации нового носителя (ADR-0035).
         services.AddScoped<IPersonSuggester, Features.Suggestions.PersonSuggester>();
         services.AddScoped<IPersonSuggestionScheduler, Features.Suggestions.PersonSuggestionScheduler>();
+
+        // ТФ-ПЛ-02: когда, откуда и где снят материал кандидата — для очереди, страницы решения и сессии поиска.
+        services.AddScoped<Features.Verification.IMaterialContextReader, Features.Verification.MaterialContextReader>();
         services.AddScoped<IMediaTranscriptionPipeline, MediaTranscriptionPipeline>();
         services.AddHostedService<MediaStartupMaintenance>();
         return services;

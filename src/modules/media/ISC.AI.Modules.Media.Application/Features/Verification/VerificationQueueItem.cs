@@ -33,6 +33,10 @@ namespace ISC.AI.Modules.Media.Application.Features.Verification;
 /// Фигурант, которого предложила система, — ТОЛЬКО на стадии эксперта (подсказка к выбору фигуранта, ТФ-ВЕР-03).
 /// Верификатору не выдаётся: его решение — по изображениям, без «кто это» (ТФ-ВЕР-02). Руководителю — выдаётся.
 /// </param>
+/// <param name="Material">
+/// Когда, откуда и где снят материал (ТФ-ПЛ-02) — сведения о материале, а не о решениях, видны всем стадиям; заполняет
+/// обработчик (<see cref="IMaterialContextReader"/>), <see langword="null"/> — носитель вне допуска.
+/// </param>
 public sealed record VerificationQueueItem(
     int CandidateId,
     int SessionId,
@@ -52,7 +56,8 @@ public sealed record VerificationQueueItem(
     CandidateStatus Status,
     VerificationDecision? OwnDecision,
     SessionOrigin Origin = SessionOrigin.Operator,
-    int? SuggestedPersonRef = null)
+    int? SuggestedPersonRef = null,
+    MaterialContext? Material = null)
 {
     /// <summary>
     /// Слепая проекция полной строки кандидата: из решений остаётся только решение <paramref name="userId"/>,

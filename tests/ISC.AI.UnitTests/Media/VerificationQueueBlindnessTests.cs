@@ -70,7 +70,7 @@ public sealed class VerificationQueueBlindnessTests
         store.GetAsync(5, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>()).Returns(Session());
         store.GetAsync(6, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>()).Returns((SearchSessionRow?)null);
 
-        var handler = new ListVerificationQueueQuery.Handler(subjects, policy, accessProvider, caseScope, store);
+        var handler = new ListVerificationQueueQuery.Handler(subjects, policy, accessProvider, caseScope, store, new MaterialContextReader(Substitute.For<IMediaCatalog>(), caseScope));
         var response = await handler.Handle(new ListVerificationQueueQuery(VerificationStage.Verifier), CancellationToken.None);
 
         response.Status.ShouldBeTrue();
@@ -90,7 +90,7 @@ public sealed class VerificationQueueBlindnessTests
         var caseScope = Substitute.For<ICaseScope>();
         var store = Substitute.For<ISearchSessionStore>();
 
-        var handler = new ListVerificationQueueQuery.Handler(subjects, policy, accessProvider, caseScope, store);
+        var handler = new ListVerificationQueueQuery.Handler(subjects, policy, accessProvider, caseScope, store, new MaterialContextReader(Substitute.For<IMediaCatalog>(), caseScope));
         var response = await handler.Handle(new ListVerificationQueueQuery(VerificationStage.Verifier), CancellationToken.None);
 
         response.Status.ShouldBeFalse();

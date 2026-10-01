@@ -40,6 +40,13 @@ public sealed record MediaAssetRow(
     int? SourceAssetId = null,
     long? SourceTimestampMs = null);
 
+/// <summary>Сведения о материале носителя для строки кандидата (ТФ-ПЛ-02): время съёмки, загрузки и источник.</summary>
+/// <param name="AssetId">Носитель.</param>
+/// <param name="CapturedAt">Время съёмки, если известно.</param>
+/// <param name="UploadedAtUtc">Время загрузки (UTC).</param>
+/// <param name="Source">Источник материала.</param>
+public sealed record AssetMaterialInfo(int AssetId, DateTimeOffset? CapturedAt, DateTime UploadedAtUtc, string? Source);
+
 /// <summary>Отрезок трека лица в видео (ТФ-ПЕР-02, ADR-0037): одно лицо на соседних кадрах выборки.</summary>
 /// <param name="FaceId">Лицо, по которому спросили.</param>
 /// <param name="TrackId">Номер трека в пределах носителя.</param>
@@ -90,6 +97,13 @@ public interface IMediaCatalog
 
     /// <summary>Одно лицо, если доступно.</summary>
     Task<FaceRow?> GetFaceAsync(int faceId, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Время съёмки, загрузки и источник носителей (ТФ-ПЛ-02) — одним запросом на страницу кандидатов; под решёткой
+    /// (ТБ-020/021): носитель выше допуска в ответ не попадает.
+    /// </summary>
+    Task<IReadOnlyDictionary<int, AssetMaterialInfo>> ListMaterialInfoAsync(
+        IReadOnlyCollection<int> assetIds, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Отрезки треков лиц из <paramref name="requests"/> (ТФ-ПЕР-02, ADR-0037): первый и последний кадр трека и число
