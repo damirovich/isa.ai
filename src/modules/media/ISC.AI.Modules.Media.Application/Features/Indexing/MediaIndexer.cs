@@ -17,7 +17,9 @@ namespace ISC.AI.Modules.Media.Application.Features.Indexing;
 /// Конвейер индексации носителя (ТП-005, ТО-мат-05): исходник из хранилища → (для видео) проба потоков — без
 /// видеопотока носитель переводится в аудиозаписи (ADR-0026), иначе носитель получает нативную частоту кадров, точную
 /// длительность и размер кадра (ADR-0028) — и раскадровка (ТО-мат-06) → детекция лиц → оценка качества (ТО-мат-07) →
-/// векторизация пригодных → вырезки → атомарная запись шаблонов с грифом носителя (ТБ-070). Исполняется фоновой очередью ядра из
+/// векторизация пригодных → вырезки → атомарная запись шаблонов с грифом носителя (ТБ-070). Из тех же кадров раскадровки
+/// видео собирается лента кадров для показа под проигрывателем (ADR-0038) — без второго прохода по файлу; её сбой
+/// индексацию не валит. Исполняется фоновой очередью ядра из
 /// per-operation scope; повторный запуск идемпотентен — шаблоны перезаписываются хранилищем одной
 /// транзакцией, прежние вырезки снимаются ПОСЛЕ её фиксации (половинчатого состояния нет, ТП-005).
 /// </summary>
@@ -45,6 +47,9 @@ public sealed class MediaIndexer(
     IPersonSuggester suggester,
     ILogger<MediaIndexer> logger) : IMediaIndexer
 {
+    /// <summary>Высота плитки ленты кадров, пиксели (ADR-0038): лента показывается высотой ~56 px, запас — на плотные экраны.</summary>
+    public const int FilmstripTileHeight = 72;
+
     /// <summary>Причина отказа индексации аудиозаписи (результат задачи; статус носителя не меняется).</summary>
     public const string NotApplicableToAudioError = "Поиск по лицу к аудиозаписи неприменим: лиц в ней нет.";
 
@@ -116,14 +121,26 @@ public sealed class MediaIndexer(
 
             long? durationMs = await ProcessSourceAsync(info, tempPath, subPath, progress, cancellationToken);
 
+            // ADR-0038: лента кадров — до фиксации строк (имя файла пишется той же транзакцией); сбой — без ленты.
+            var filmstrip = info.Kind == MediaKind.Video
+                ? await TrySaveFilmstripAsync(assetId, subPath, progress, cancellationToken)
+                : null;
+
             // Строки лиц/шаблонов заменяются одной транзакцией; ТОЛЬКО после её фиксации снимаем вырезки
             // прежнего прогона (ТП-005: файл без строки безвреден, строка без файла — нет; при сбое до этой
             // точки старые лица остаются с файлами, а новые вырезки — сироты — удаляются в catch).
             // Длительность по раскадровке — запасной источник (пишется, только если у носителя её ещё нет);
             // проба — поверх прежних значений (переиндексация обновляет их).
             await store.CompleteIndexingAsync(
-                assetId, progress.Faces, detector.ModelVersion, embedder.ModelVersion, durationMs, probe, cancellationToken);
+                assetId, progress.Faces, detector.ModelVersion, embedder.ModelVersion, durationMs, probe, filmstrip, cancellationToken);
             await DeleteCropsAsync(assetId, subPath, info.ExistingCropFileNames);
+
+            // Прежняя лента — только если записана новая: не собралась новая — в носителе осталась прежняя, и она верна.
+            if (filmstrip is not null && info.ExistingFilmstripFileName is { } previousFilmstrip
+                && previousFilmstrip != filmstrip.StoredFileName)
+            {
+                await DeleteFileAsync(assetId, subPath, previousFilmstrip, MediaFileCategories.Filmstrips);
+            }
 
             // ТО-инф-11: факт индексации биометрии — в неизменяемый журнал с грифом/подразделением носителя.
             await auditWriter.WriteAsync(
@@ -155,6 +172,7 @@ public sealed class MediaIndexer(
             // ТФ-МЕД-02), снимаем новые вырезки-сироты и пробрасываем, чтобы воркер остановился штатно.
             MediaIndexerLog.Cancelled(logger, assetId, progress.Frames);
             await DeleteCropsAsync(assetId, subPath, NewCropNames(progress));
+            await DeleteNewFilmstripAsync(assetId, subPath, progress);
             await store.FailIndexingAsync(assetId, "индексация отменена", CancellationToken.None);
             throw;
         }
@@ -162,6 +180,7 @@ public sealed class MediaIndexer(
         {
             MediaIndexerLog.Failed(logger, exception, assetId, progress.Frames);
             await DeleteCropsAsync(assetId, subPath, NewCropNames(progress));
+            await DeleteNewFilmstripAsync(assetId, subPath, progress);
             await store.FailIndexingAsync(assetId, exception.Message, cancellationToken);
             return new MediaIndexResult(false, progress.Frames, progress.Faces.Count, progress.Rejected, exception.Message);
         }
@@ -214,18 +233,30 @@ public sealed class MediaIndexer(
     {
         foreach (var crop in cropFileNames)
         {
-            try
-            {
-                await fileStorage.DeleteAsync(crop, MediaFileCategories.FaceCrops, subPath, CancellationToken.None);
-            }
-            catch (IOException exception)
-            {
-                MediaIndexerLog.CropNotDeleted(logger, exception, assetId, crop);
-            }
-            catch (UnauthorizedAccessException exception)
-            {
-                MediaIndexerLog.CropNotDeleted(logger, exception, assetId, crop);
-            }
+            await DeleteFileAsync(assetId, subPath, crop, MediaFileCategories.FaceCrops);
+        }
+    }
+
+    /// <summary>Лента, записанная сорвавшимся прогоном (до фиксации строк), — сирота: снимаем, как и вырезки.</summary>
+    private Task DeleteNewFilmstripAsync(int assetId, string subPath, Progress progress) =>
+        progress.FilmstripFileName is { } name
+            ? DeleteFileAsync(assetId, subPath, name, MediaFileCategories.Filmstrips)
+            : Task.CompletedTask;
+
+    /// <summary>Снимает файл производной носителя без отмены и без проброса (см. <see cref="DeleteCropsAsync"/>).</summary>
+    private async Task DeleteFileAsync(int assetId, string subPath, string storedFileName, string category)
+    {
+        try
+        {
+            await fileStorage.DeleteAsync(storedFileName, category, subPath, CancellationToken.None);
+        }
+        catch (IOException exception)
+        {
+            MediaIndexerLog.CropNotDeleted(logger, exception, assetId, storedFileName);
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            MediaIndexerLog.CropNotDeleted(logger, exception, assetId, storedFileName);
         }
     }
 
@@ -284,6 +315,7 @@ public sealed class MediaIndexer(
             progress.Frames++;
             var timestampMs = (long)frame.Timestamp.TotalMilliseconds;
             durationMs = timestampMs;
+            OfferFilmstripFrame(info.AssetId, frame.JpegBytes, timestampMs, progress);
             await ProcessImageAsync(frame.JpegBytes, frame.Index, timestampMs, subPath, progress, cancellationToken);
         }
 
@@ -293,6 +325,96 @@ public sealed class MediaIndexer(
         progress.Faces.AddRange(tracked);
 
         return durationMs;
+    }
+
+    /// <summary>
+    /// Кадр раскадровки — в ленту (ADR-0038), если сборщик его отобрал: уменьшается до плитки, размер которой задаёт
+    /// первый кадр (пропорции видео после автоповорота). Любой сбой уменьшения выключает ленту на этот прогон и
+    /// пишется в журнал — поиск лиц продолжается: лента лишь подсказка для навигации, не материал дела.
+    /// </summary>
+    private void OfferFilmstripFrame(int assetId, byte[] jpegBytes, long timestampMs, Progress progress)
+    {
+        if (progress.FilmstripFailed || !progress.Filmstrip.Offer())
+        {
+            return;
+        }
+
+        try
+        {
+            if (progress.FilmstripTileWidth == 0)
+            {
+                progress.FilmstripTileWidth = FilmstripTileWidth(imageTools.ReadSize(jpegBytes));
+            }
+
+            var tile = imageTools.ThumbnailJpeg(jpegBytes, progress.FilmstripTileWidth, FilmstripTileHeight);
+            if (tile is not { Length: > 0 })
+            {
+                throw new InvalidOperationException("Плитка ленты кадров пуста.");
+            }
+
+            progress.Filmstrip.Add(timestampMs, tile);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            progress.FilmstripFailed = true;
+            MediaIndexerLog.FilmstripFailed(logger, exception, assetId);
+        }
+    }
+
+    /// <summary>
+    /// Ширина плитки по пропорциям кадра при высоте <see cref="FilmstripTileHeight"/>; крайние пропорции (панорама,
+    /// «столбик») зажаты, чтобы плитка оставалась узнаваемой. Размер неизвестен — 16:9.
+    /// </summary>
+    public static int FilmstripTileWidth(ImageSize frame) =>
+        frame.Width <= 0 || frame.Height <= 0
+            ? (int)Math.Round(FilmstripTileHeight * 16.0 / 9.0)
+            : Math.Clamp(
+                (int)Math.Round((double)FilmstripTileHeight * frame.Width / frame.Height),
+                FilmstripTileHeight / 2,
+                FilmstripTileHeight * 3);
+
+    /// <summary>
+    /// Собирает отобранные кадры в одну картинку и кладёт её в хранилище (категория ленты, подкаталог носителя).
+    /// Сбой — без ленты (в журнал), отмена — пробрасывается. Имя записанного файла запоминается в прогоне, чтобы при
+    /// сбое ДО фиксации строк снять сироту.
+    /// </summary>
+    private async Task<FilmstripDraft?> TrySaveFilmstripAsync(
+        int assetId, string subPath, Progress progress, CancellationToken cancellationToken)
+    {
+        var tiles = progress.Filmstrip.Tiles;
+        if (progress.FilmstripFailed || tiles.Count == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            var jpegTiles = new List<byte[]>(tiles.Count);
+            foreach (var tile in tiles)
+            {
+                jpegTiles.Add(tile.Jpeg);
+            }
+
+            var strip = imageTools.ComposeStripJpeg(jpegTiles, progress.FilmstripTileWidth, FilmstripTileHeight);
+            if (strip is not { Length: > 0 })
+            {
+                throw new InvalidOperationException("Картинка ленты кадров пуста.");
+            }
+
+            string name;
+            using (var stream = new MemoryStream(strip))
+            {
+                name = await fileStorage.SaveAsync(stream, ".jpg", MediaFileCategories.Filmstrips, subPath, cancellationToken);
+            }
+
+            progress.FilmstripFileName = name;
+            return new FilmstripDraft(name, tiles.Count, progress.Filmstrip.StepMs);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            MediaIndexerLog.FilmstripFailed(logger, exception, assetId);
+            return null;
+        }
     }
 
     /// <summary>
@@ -366,5 +488,17 @@ public sealed class MediaIndexer(
         public int Rejected { get; set; }
 
         public List<IndexedFace> Faces { get; } = [];
+
+        /// <summary>Отбор кадров в ленту (ADR-0038).</summary>
+        public FilmstripCollector Filmstrip { get; } = new();
+
+        /// <summary>Ширина плитки ленты (по первому кадру); 0 — ещё не известна.</summary>
+        public int FilmstripTileWidth { get; set; }
+
+        /// <summary>Лента в этом прогоне не собирается (сбой уменьшения кадра).</summary>
+        public bool FilmstripFailed { get; set; }
+
+        /// <summary>Записанная этим прогоном лента — для компенсации при сбое до фиксации строк.</summary>
+        public string? FilmstripFileName { get; set; }
     }
 }

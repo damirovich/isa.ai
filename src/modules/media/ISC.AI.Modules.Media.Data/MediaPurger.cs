@@ -47,7 +47,7 @@ public sealed class MediaPurger(
 
         var asset = await db.Assets
             .Where(a => a.Id == assetId)
-            .Select(a => new { a.Classification, a.DivisionId, a.StoredFileName })
+            .Select(a => new { a.Classification, a.DivisionId, a.StoredFileName, a.FilmstripStoredFileName })
             .FirstOrDefaultAsync(cancellationToken);
 
         if (asset is null)
@@ -76,7 +76,9 @@ public sealed class MediaPurger(
                 DivisionId: asset.DivisionId,
                 PayloadSensitive:
                     $"Гарантированное удаление носителя и биометрических производных: лиц {faceCount}, вырезок {crops.Count}, "
-                    + $"фрагментов расшифровки {segmentCount} (ТБ-064/075, ADR-0026)."),
+                    + $"фрагментов расшифровки {segmentCount}"
+                    + (asset.FilmstripStoredFileName is null ? string.Empty : ", ленты кадров")
+                    + " (ТБ-064/075, ADR-0026, ADR-0038)."),
             cancellationToken);
 
         // Атомарно и в той же транзакции под блокировкой: носитель → кадры/лица/шаблоны/фрагменты расшифровки
@@ -92,6 +94,13 @@ public sealed class MediaPurger(
         foreach (var crop in crops)
         {
             await fileStorage.DeleteAsync(crop, MediaFileCategories.FaceCrops, subPath, cancellationToken);
+            filesRemoved++;
+        }
+
+        // Лента кадров видео (ADR-0038) — уменьшенные кадры носителя: уничтожается вместе с ним (ТБ-064/075).
+        if (asset.FilmstripStoredFileName is { } filmstrip)
+        {
+            await fileStorage.DeleteAsync(filmstrip, MediaFileCategories.Filmstrips, subPath, cancellationToken);
             filesRemoved++;
         }
 

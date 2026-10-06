@@ -112,6 +112,13 @@ public enum AppearanceRevokeResult
     OwnDecision = 3,
 }
 
+/// <summary>Действующее появление фигуранта на носителе — для отметок на ленте видео (ADR-0038).</summary>
+/// <param name="PersonId">Фигурант.</param>
+/// <param name="DisplayName">Подпись фигуранта.</param>
+/// <param name="FaceId">Лицо носителя, как его запомнило появление.</param>
+/// <param name="FrameTimestampMs">Момент кадра лица, мс; у фото — <see langword="null"/>.</param>
+public sealed record AssetAppearanceRow(int PersonId, string DisplayName, int FaceId, long? FrameTimestampMs);
+
 /// <summary>Черновик появления — из подтверждённого кандидата модуля «Медиа».</summary>
 public sealed record AppearanceDraft(
     int PersonId,
@@ -196,6 +203,13 @@ public interface IPersonStore
     /// </summary>
     Task<IReadOnlyCollection<int>> ListPersonsConfirmedOnFaceAsync(
         int caseId, int faceId, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Действующие (не отозванные) появления фигурантов на носителе — для отметок на ленте видео (ADR-0038). Только
+    /// фигуранты, доступные субъекту по полной решётке и роли, и появления под floor'ом (ТБ-020/021).
+    /// </summary>
+    Task<IReadOnlyList<AssetAppearanceRow>> ListAppearancesOnAssetAsync(
+        int assetId, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>Эталоны фигуранта.</summary>
     Task<IReadOnlyList<ReferencePhotoRow>> ListReferencePhotosAsync(int personId, AccessContext access, CancellationToken cancellationToken = default);

@@ -28,6 +28,16 @@ public sealed record CasePersonItem(int PersonId, string DisplayName, bool Confi
 /// <summary>Основание поиска в деле (ТБ-071): непрозрачный идентификатор профиля и реквизиты для аудита.</summary>
 public sealed record CaseAuthorizationItem(int AuthorizationId, string Reference);
 
+/// <summary>
+/// Подтверждённое появление фигуранта на носителе (ТФ-ПЕР-02) — для отметок на ленте видео (ADR-0038): кто и на каком
+/// лице подтверждён двумя сотрудниками (ТБ-073). Отозванные появления сюда не попадают.
+/// </summary>
+/// <param name="PersonId">Фигурант.</param>
+/// <param name="DisplayName">Подпись фигуранта.</param>
+/// <param name="FaceId">Лицо носителя, как его запомнило появление (после переиндексации — прежний номер).</param>
+/// <param name="FrameTimestampMs">Момент кадра лица, мс (для поиска трека после переиндексации); у фото — <see langword="null"/>.</param>
+public sealed record AssetAppearanceItem(int PersonId, string DisplayName, int FaceId, long? FrameTimestampMs);
+
 /// <summary>Подтверждённый кандидат (два «подтверждён» разных субъектов, ТБ-073) — материал для «появления» фигуранта (ТФ-ПЕР-02).</summary>
 public sealed record ConfirmedAppearance(
     int CaseId,
@@ -167,6 +177,14 @@ public interface ICaseScope
     /// фигуранта, второй записи не создаёт.
     /// </summary>
     Task RecordAppearanceAsync(ConfirmedAppearance appearance, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Подтверждённые (не отозванные) появления фигурантов на носителе — отметки фигурантов на ленте видео (ADR-0038).
+    /// Только фигуранты, доступные субъекту по полной решётке и роли, и появления под floor'ом (ТБ-020/021): недоступный
+    /// фигурант не раскрывается ни именем, ни самим фактом отметки.
+    /// </summary>
+    Task<IReadOnlyList<AssetAppearanceItem>> ListAssetAppearancesAsync(
+        int assetId, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Дела только что проиндексированного носителя, в которых система предлагает связать найденные лица с

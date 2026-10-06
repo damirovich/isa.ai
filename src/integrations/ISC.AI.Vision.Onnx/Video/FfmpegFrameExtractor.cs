@@ -133,6 +133,8 @@ public sealed class FfmpegFrameExtractor(VisionOptions options) : IFrameExtracto
     /// высота меняются местами) — так же кадр отдаёт <see cref="ExtractFrameAsync"/>, а раскадровка показывает его
     /// «прямо».</para>
     /// <para>Проба занимает слот того же предела одновременных процессов, что и вырезка кадра, под тем же таймаутом.</para>
+    /// <para>«Встроенное» время начала записи (ТФ-МЕД-11, ADR-0038) — из тегов контейнера и видеопотока по правилу
+    /// <see cref="RecordTimeMetadata.TryParse"/>; значение без пояса (AVI) считается временем пояса сервера.</para>
     /// </remarks>
     public async Task<VideoProbe?> ProbeAsync(string videoPath, CancellationToken cancellationToken = default)
     {
@@ -195,7 +197,8 @@ public sealed class FfmpegFrameExtractor(VisionOptions options) : IFrameExtracto
             ? (stream.Height, stream.Width)
             : (stream.Width, stream.Height);
 
-        return new VideoProbe(frameRate.Value, duration, width, height);
+        var recordedAt = RecordTimeMetadata.TryParse(analysis.Format.Tags, stream.Tags, TimeZoneInfo.Local, DateTimeOffset.UtcNow);
+        return new VideoProbe(frameRate.Value, duration, width, height, recordedAt);
     }
 
     /// <inheritdoc />

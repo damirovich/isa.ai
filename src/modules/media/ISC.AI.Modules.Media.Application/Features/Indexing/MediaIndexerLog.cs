@@ -39,7 +39,7 @@ internal static partial class MediaIndexerLog
     public static partial void TempFileNotDeleted(ILogger logger, Exception exception, int assetId, string tempPath);
 
     [LoggerMessage(Level = LogLevel.Warning,
-        Message = "Индексация носителя {AssetId}: вырезка «{CropStoredFileName}» не удалена — остаётся сиротой в хранилище.")]
+        Message = "Индексация носителя {AssetId}: файл «{CropStoredFileName}» (вырезка лица или лента кадров) не удалён — остаётся сиротой в хранилище.")]
     public static partial void CropNotDeleted(ILogger logger, Exception exception, int assetId, string cropStoredFileName);
 
     [LoggerMessage(Level = LogLevel.Warning,
@@ -49,4 +49,8 @@ internal static partial class MediaIndexerLog
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Носитель {AssetId} проиндексирован, но предложения связей с фигурантами не составлены (ТФ-ПЕР-09) — индексация не отменяется; повтор — переиндексацией.")]
     public static partial void SuggestionsFailed(ILogger logger, Exception exception, int assetId);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Индексация носителя {AssetId}: лента кадров не собрана — поиск лиц продолжается, у видео останется прежняя лента либо её не будет (ADR-0038).")]
+    public static partial void FilmstripFailed(ILogger logger, Exception exception, int assetId);
 }

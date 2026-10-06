@@ -12,6 +12,10 @@ namespace ISC.AI.Modules.Media.Domain.Services;
 /// номер кадра; <see langword="null"/> — не видео или до пробы, интерфейс показывает шаг 40 мс с пометкой),
 /// <c>FrameWidth</c>/<c>FrameHeight</c> — размер кадра после автоповорота, <c>SourceAssetId</c>/<c>SourceTimestampMs</c> —
 /// происхождение снимка кадра (видео-источник и момент записи; у обычных загрузок <see langword="null"/>).
+/// Хвост ADR-0038: <c>FilmstripStoredFileName</c>/<c>FilmstripTileCount</c>/<c>FilmstripStepMs</c> — лента кадров видео
+/// (картинка в категории <c>media-filmstrips</c>, число кадров и шаг между ними; до переиндексации — <see langword="null"/>),
+/// <c>RecordedAt</c> — «встроенное» время начала записи из метаданных файла (ТФ-МЕД-11; не путать с подтверждённой
+/// оператором датой съёмки <c>CapturedAt</c>).
 /// </remarks>
 public sealed record MediaAssetRow(
     int Id,
@@ -38,7 +42,11 @@ public sealed record MediaAssetRow(
     int? FrameWidth = null,
     int? FrameHeight = null,
     int? SourceAssetId = null,
-    long? SourceTimestampMs = null);
+    long? SourceTimestampMs = null,
+    string? FilmstripStoredFileName = null,
+    int? FilmstripTileCount = null,
+    long? FilmstripStepMs = null,
+    DateTimeOffset? RecordedAt = null);
 
 /// <summary>Сведения о материале носителя для строки кандидата (ТФ-ПЛ-02): время съёмки, загрузки и источник.</summary>
 /// <param name="AssetId">Носитель.</param>

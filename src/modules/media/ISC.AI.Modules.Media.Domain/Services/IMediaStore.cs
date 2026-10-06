@@ -49,6 +49,8 @@ public interface IMediaStore
     /// <param name="probe">Проба видеопотока (ADR-0028): точная длительность, нативная частота кадров и размер
     /// кадра — записываются ПОВЕРХ прежних значений (переиндексация обновляет их). <see langword="null"/> — не
     /// видео или проба не удалась: поля не меняются.</param>
+    /// <param name="filmstrip">Лента кадров видео (ADR-0038) — записывается ПОВЕРХ прежней; <see langword="null"/> —
+    /// собрать не удалось или не видео: прежняя лента (если была) остаётся.</param>
     /// <param name="cancellationToken">Отмена.</param>
     Task CompleteIndexingAsync(
         int assetId,
@@ -57,6 +59,7 @@ public interface IMediaStore
         string embedderVersion,
         long? durationMs = null,
         VideoProbe? probe = null,
+        FilmstripDraft? filmstrip = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>Фиксирует неудачу индексации с причиной (статус <see cref="MediaIndexStatus.Failed"/>).</summary>

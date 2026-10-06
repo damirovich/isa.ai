@@ -5,6 +5,8 @@
    детектора; у видео — таймкоды с кнопкой «к кадру». ВИДЕО показывает VideoFrameViewer (ADR-0028): mp4/webm —
    браузерный <video> с шагом по кадрам в браузере; контейнеры MKV/AVI/MOV/3GP, которые браузер не воспроизводит, —
    кадрами JPEG с сервера (/media/frames/{id}?t=…, та же решётка доступа), «к кадру» работает в обоих режимах.
+   Под видео — ЛЕНТА (ADR-0038): шкала, лента кадров, отметки подтверждённых фигурантов, время записи по
+   метаданным файла (ТФ-МЕД-11); в реквизитах — то же время из файла с «применить как дату съёмки».
    «Снимок кадра» — SnapshotFrameCommand: кадр из ОРИГИНАЛА (PNG, ТЭ-007) становится новым фото-носителем того же
    дела с реквизитами происхождения; после снимка карточка НЕ перечитывается (повторный GetMediaAssetQuery —
    вторая запись View в журнале, ТБ-030). У снимка в шапке — ссылка на носитель-источник и момент.
@@ -142,6 +144,24 @@ else
                 Съёмка: @(asset.CapturedAt is { } captured ? captured.ToLocalTime().ToString("dd.MM.yyyy HH:mm") : "не указана")
                 <MudLink Typo="Typo.caption" Class="ml-1" OnClick="OpenCapturedAt" Disabled="_busy">@(asset.CapturedAt is null ? "указать" : "изменить")</MudLink>
             </MudText>
+            @if (asset.Kind == MediaKind.Video && asset.RecordedAt is { } recorded)
+            {
+                @* ТФ-МЕД-11: время начала записи из метаданных файла — подсказка оператору, а не дата съёмки: её подтверждает
+                   человек (ТФ-МЕД-17). «Применить» записывает его датой съёмки той же аудируемой командой, что и диалог. *@
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    <span title="Время начала записи из метаданных файла — как его записала камера. Часы камеры могли быть сбиты, метаданные — изменены: это сведения из файла, не доказательство.">
+                        В файле: @recorded.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture)
+                    </span>
+                    @if (asset.CapturedAt is null)
+                    {
+                        <MudLink Typo="Typo.caption" Class="ml-1" OnClick="@(() => ApplyRecordedAtAsync(recorded))" Disabled="_busy">применить как дату съёмки</MudLink>
+                    }
+                    else if (RecordedDiffers(asset.CapturedAt.Value, recorded))
+                    {
+                        <span class="mud-warning-text"> · не совпадает с датой съёмки</span>
+                    }
+                </MudText>
+            }
             @if (!string.IsNullOrWhiteSpace(asset.Source))
             {
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">Источник: @asset.Source</MudText>
@@ -199,7 +219,11 @@ else
             <VideoFrameViewer @key="asset.Id" @ref="_viewer" AssetId="@asset.Id" StoredFileName="@asset.StoredFileName" OriginalFileName="@asset.OriginalFileName"
                               ContentType="@asset.ContentType" Playable="@IsBrowserPlayable(asset.ContentType)"
                               FrameRate="@asset.FrameRate" DurationMs="@asset.DurationMs" StartMs="@(StartAtMs ?? 0)"
-                              CanSnapshot="@(_details.CaseId is not null)" OnSnapshotRequested="SnapshotAsync" />
+                              CanSnapshot="@(_details.CaseId is not null)" OnSnapshotRequested="SnapshotAsync"
+                              FilmstripUrl="@(asset.FilmstripStoredFileName is { } strip ? MediaFileUrl.Filmstrip(asset.Id, strip) : null)"
+                              FilmstripTileCount="@(asset.FilmstripTileCount ?? 0)" FilmstripStepMs="@(asset.FilmstripStepMs ?? 0)"
+                              TileAspect="@TileAspect(asset)" FilmstripHint="@FilmstripHint(asset)"
+                              RecordClock="@_recordClock" TimelineLanes="@_lanes" />
         }
         else
         {
@@ -659,6 +683,8 @@ else
         _linkError = null;
         _tracks = [];
         _expandedTracks.Clear();
+        _lanes = [];
+        _recordClock = null;
     }
 
     // --- Лица видео по трекам (ТФ-ПЕР-02, ADR-0037) ---
@@ -704,6 +730,82 @@ else
             : last is >= 2 and <= 4 && lastTwo is < 12 or > 14 ? "кадра"
             : "кадров";
         return count.ToString(CultureInfo.InvariantCulture) + " " + word;
+    }
+
+    // --- Лента под видео (ADR-0038) ---
+
+    /// <summary>Дорожки отметок ленты — собираются один раз при загрузке карточки (стабильная ссылка для просмотрщика).</summary>
+    private IReadOnlyList<TimelineLane> _lanes = [];
+
+    /// <summary>Опора часов записи: метаданные файла, иначе дата съёмки (приблизительно).</summary>
+    private RecordClock? _recordClock;
+
+    /// <summary>
+    /// Дорожки ленты: по дорожке на каждого подтверждённого фигуранта (свой цвет, по порядку первого появления).
+    /// Фигуранты — только доступные сотруднику (их отбирает сервер). Треки всех найденных лиц на ленту не выводятся:
+    /// их много, и они загромождают ленту, — они есть карточками ниже.
+    /// </summary>
+    private static IReadOnlyList<TimelineLane> BuildLanes(MediaAssetDetails details)
+    {
+        var lanes = new List<TimelineLane>();
+        var persons = (details.PersonSpans ?? [])
+            .GroupBy(s => s.PersonId)
+            .OrderBy(g => g.Min(s => s.StartMs))
+            .ThenBy(g => g.Key)
+            .ToList();
+        for (var i = 0; i < persons.Count; i++)
+        {
+            var name = persons[i].First().DisplayName;
+            lanes.Add(new TimelineLane(
+                "person-" + persons[i].Key.ToString(CultureInfo.InvariantCulture),
+                name,
+                VideoTimelineModel.PersonColor(i),
+                persons[i].Select(s => new TimelineSpan(s.StartMs, s.EndMs, name + " · " + SpanText(s.StartMs, s.EndMs))).ToList()));
+        }
+
+        return lanes;
+    }
+
+    private static string SpanText(long startMs, long endMs) =>
+        endMs > startMs ? $"{MediaLabels.Timecode(startMs)} – {MediaLabels.Timecode(endMs)}" : MediaLabels.Timecode(startMs);
+
+    /// <summary>Пропорции кадра для плиток ленты: по пробе видео, без неё — 16:9.</summary>
+    private static double TileAspect(MediaAssetRow asset) =>
+        asset is { FrameWidth: > 0, FrameHeight: > 0 } ? (double)asset.FrameWidth.Value / asset.FrameHeight.Value : 16.0 / 9.0;
+
+    /// <summary>Пояснение вместо ленты кадров: видео ещё обрабатывается — лента появится сама; иначе — общая подсказка.</summary>
+    private static string? FilmstripHint(MediaAssetRow asset) =>
+        asset.IndexStatus is MediaIndexStatus.Uploaded or MediaIndexStatus.Processing
+            ? "Лента кадров появится, когда видео будет обработано."
+            : null;
+
+    /// <summary>Время из файла расходится с датой съёмки больше чем на минуту (оператор указывает её до минуты).</summary>
+    private static bool RecordedDiffers(DateTimeOffset capturedAt, DateTimeOffset recordedAt) =>
+        Math.Abs((capturedAt - recordedAt).TotalSeconds) >= 60;
+
+    /// <summary>
+    /// «Применить как дату съёмки» (ТФ-МЕД-11/17): время начала записи из метаданных файла записывается датой съёмки
+    /// той же командой, что и диалог, — с проверкой прав и записью в журнал на сервере.
+    /// </summary>
+    private async Task ApplyRecordedAtAsync(DateTimeOffset recordedAt)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new SetAssetCapturedAtCommand(Id, recordedAt.ToUniversalTime()));
+            if (!response.Status)
+            {
+                _error = response.StatusMessage;
+                return;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
     }
 
     // --- Дата съёмки (ТФ-МЕД-17) ---
@@ -753,6 +855,8 @@ else
         {
             _details = details;
             _tracks = details.Asset.Kind == MediaKind.Video ? GroupByTrack(details.Faces) : [];
+            _lanes = details.Asset.Kind == MediaKind.Video ? BuildLanes(details) : [];
+            _recordClock = VideoTimelineModel.ClockBase(details.Asset.RecordedAt, details.Asset.CapturedAt, TimeZoneInfo.Local);
         }
         else
         {

@@ -46,6 +46,19 @@ public sealed class MediaFileAccessResolver(IDbContextFactory<MediaDbContext> co
                         storedFileName, category, subPath, "image/jpeg", face.Classification, face.DivisionId);
             }
 
+            case MediaFileCategories.Filmstrips:
+            {
+                // Лента кадров (ADR-0038) — производная носителя: режим и область дел — носителя, как у вырезок лиц.
+                var asset = await db.Assets
+                    .Where(a => a.Id == assetId && a.FilmstripStoredFileName == storedFileName)
+                    .Select(a => new { a.Classification, a.DivisionId })
+                    .FirstOrDefaultAsync(cancellationToken);
+                return asset is null
+                    ? null
+                    : new MediaFileDescriptor(
+                        storedFileName, category, subPath, "image/jpeg", asset.Classification, asset.DivisionId);
+            }
+
             case MediaFileCategories.Probes:
             {
                 // Вырезка пробы принадлежит СЕССИИ: параметр маршрута — идентификатор сессии, режим — сессии
