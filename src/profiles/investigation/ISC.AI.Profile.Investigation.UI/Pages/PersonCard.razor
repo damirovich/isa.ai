@@ -9,6 +9,8 @@
 @using ISC.AI.Profile.Investigation.Application.Features.References
 @using ISC.AI.Profile.Investigation.Domain.Enums
 @using ISC.AI.Profile.Investigation.Domain.Services
+@using ISC.AI.Modules.Media.Application.Features.Scope
+@using ISC.AI.Modules.Media.Domain.Services
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
 
@@ -76,6 +78,30 @@ else
             <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit"
                        OnClick="OpenEdit" Disabled="_busy">Изменить</MudButton>
         </div>
+        <div class="d-flex gap-4 flex-wrap align-start">
+        @* Фото анкеты (ТФ-ПЕР-05): актуальный эталон с лицом (последний добавленный). Загрузка — прямо отсюда: окно
+           эталона открывается сразу на загрузке, файл ложится в материалы дела, лицо выбирается само, если оно одно;
+           прежнее фото не удаляется, а помечается заменённым (ТБ-077). *@
+        <div class="d-flex flex-column align-center gap-1" style="width:132px;">
+            <div class="rounded mud-elevation-1 overflow-hidden d-flex align-center justify-center"
+                 style="width:120px;height:160px;background:var(--mud-palette-background-gray);">
+                @if (_headerPhotoUrl is { } photoUrl)
+                {
+                    <img src="@photoUrl" alt="фото фигуранта" style="width:120px;height:160px;object-fit:cover;display:block;" />
+                }
+                else
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Large" Class="mud-text-secondary" />
+                }
+            </div>
+            @if (HeaderPhoto is { } headerPhoto)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">эталон № @headerPhoto.Id</MudText>
+            }
+            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.AddAPhoto"
+                       OnClick="OpenQuestionnairePhoto" Disabled="_busy">@(HeaderPhoto is null ? "Загрузить фото" : "Заменить фото")</MudButton>
+        </div>
+        <div style="flex:1 1 360px;min-width:0;">
         <MudSimpleTable Dense="true" Elevation="0">
             <tbody>
                 <tr><td class="mud-text-secondary">ФИО</td><td>@_person.DisplayName</td></tr>
@@ -104,7 +130,7 @@ else
                         </td>
                     </tr>
                 }
-                @* Анкета (ТФ-ПЕР-05). Фотография объекта — актуальный эталон на вкладке «Эталоны» (ТБ-077). *@
+                @* Анкета (ТФ-ПЕР-05). Фотография — слева, это актуальный эталон (ТБ-077); история эталонов — на вкладке «Эталоны». *@
                 <tr><td class="mud-text-secondary">Псевдоним</td><td>@QuestionnaireLabels.OrDash(Q.Alias)</td></tr>
                 <tr><td class="mud-text-secondary">Пол</td><td>@(Q.Sex?.Label() ?? "—")</td></tr>
                 <tr><td class="mud-text-secondary">Дата (год) рождения</td><td>@QuestionnaireLabels.Birth(Q)</td></tr>
@@ -115,6 +141,8 @@ else
                 <tr><td class="mud-text-secondary">Эталонов / появлений</td><td>@_person.ReferencePhotoCount / @_person.AppearanceCount</td></tr>
             </tbody>
         </MudSimpleTable>
+        </div>
+        </div>
     </MudPaper>
 
     @* --- Пересечения (ТФ-ПЕР-07, ТБ-084, ADR-0029): совпадения госномера, адреса, ФИО + даты рождения с ДРУГИМИ
@@ -553,7 +581,7 @@ else
         }
         @if (_photoOpen && _person is { } owner)
         {
-            <ReferencePhotoPicker CaseId="owner.CaseId" UploadSource="@_photoSource"
+            <ReferencePhotoPicker CaseId="owner.CaseId" UploadSource="@_photoSource" StartWithUpload="_photoStartUpload"
                                   SelectionChanged="@(pick => _photoPick = pick)" />
         }
         <MudGrid Spacing="2">
@@ -931,6 +959,7 @@ else
             _photos.Clear();
             if (photos is { Status: true, Data: { } p }) { _photos.AddRange(p); }
             else { _photosError = photos.StatusMessage; }
+            await LoadHeaderPhotoAsync();
 
             if (await Dispatcher.Send(new GetPersonSearchContextQuery(person.CaseId)) is { Status: true, Data: { } searchContext })
             {
@@ -1214,7 +1243,46 @@ else
         _photoLegalBasis = null;
         _photoReviewDueAt = null;
         _photoSupersedesId = null;
+        _photoStartUpload = false;
         _photoOpen = true;
+    }
+
+    // --- Фото анкеты (ТФ-ПЕР-05) ---
+
+    /// <summary>Подпись источника для фото, загруженного из анкеты.</summary>
+    private const string QuestionnairePhotoSource = "Фото из анкеты";
+
+    /// <summary>Окно эталона открыто из анкеты — сразу на вкладке загрузки.</summary>
+    private bool _photoStartUpload;
+
+    /// <summary>Вырезка лица фото анкеты (защищённый эндпоинт раздачи; недоступное — 404).</summary>
+    private string? _headerPhotoUrl;
+
+    /// <summary>Фото анкеты — актуальный эталон с лицом, последний добавленный.</summary>
+    private ReferencePhotoRow? HeaderPhoto => ReferencePickerRules.QuestionnairePhoto(_photos);
+
+    /// <summary>«Загрузить / заменить фото» из анкеты: окно эталона на загрузке, замена — прежнего фото анкеты.</summary>
+    private void OpenQuestionnairePhoto()
+    {
+        OpenAddPhoto();
+        _photoSource = QuestionnairePhotoSource;
+        _photoSupersedesId = HeaderPhoto?.Id;
+        _photoStartUpload = true;
+    }
+
+    /// <summary>Вырезка лица фото анкеты: файл берётся у лица (пакет «Медиа», под решёткой).</summary>
+    private async Task LoadHeaderPhotoAsync()
+    {
+        _headerPhotoUrl = null;
+        if (HeaderPhoto is not { MediaFaceId: { } faceId } photo)
+        {
+            return;
+        }
+
+        if (await Dispatcher.Send(new GetFaceQuery(faceId)) is { Status: true, Data: { CropStoredFileName: { } crop } })
+        {
+            _headerPhotoUrl = MediaFileRoutes.Build(MediaFileCategories.FaceCrops, photo.MediaAssetId, crop);
+        }
     }
 
     private async Task SavePhotoAsync()

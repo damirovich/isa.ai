@@ -208,6 +208,9 @@ else if (_asset is { } current)
     /// <summary>Выбранные носитель и лицо; <see langword="null"/> — выбор снят.</summary>
     [Parameter] public EventCallback<ReferencePick?> SelectionChanged { get; set; }
 
+    /// <summary>Открыть сразу на загрузке нового фото (фото из анкеты фигуранта, ТФ-ПЕР-05).</summary>
+    [Parameter] public bool StartWithUpload { get; set; }
+
     private int _tab;
     private List<MediaAssetRow>? _assets;
     private string? _listError;
@@ -228,9 +231,14 @@ else if (_asset is { } current)
     private bool _uploading;
     private string? _uploadError;
 
-    protected override Task OnInitializedAsync() =>
+    protected override Task OnInitializedAsync()
+    {
+        // Из анкеты — сразу вкладка загрузки (вкладки: 0 — из материалов дела, 1 — загрузить новое фото).
+        _tab = StartWithUpload ? 1 : 0;
+
         // ТБ-030 «одно открытие — одна запись»: на предрендере не грузим.
-        RendererInfo.IsInteractive ? LoadAssetsAsync() : Task.CompletedTask;
+        return RendererInfo.IsInteractive ? LoadAssetsAsync() : Task.CompletedTask;
+    }
 
     private async Task LoadAssetsAsync()
     {
