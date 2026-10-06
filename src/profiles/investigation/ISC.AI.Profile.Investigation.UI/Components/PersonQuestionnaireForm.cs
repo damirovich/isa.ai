@@ -75,6 +75,31 @@ public static class QuestionnaireLabels
         _ => "—",
     };
 
+    /// <summary>
+    /// Дата рождения с возрастом на <paramref name="today"/>: «01.02.1998 · 28 лет». Возраст — только при точной дате:
+    /// по одному году он был бы неточен на год, и это не показывается; без даты — как <see cref="Birth"/>.
+    /// </summary>
+    public static string BirthWithAge(PersonQuestionnaire? questionnaire, DateOnly today)
+    {
+        if (questionnaire?.BirthDate is not { } date || date > today)
+        {
+            return Birth(questionnaire);
+        }
+
+        var age = today.Year - date.Year - (today < date.AddYears(today.Year - date.Year) ? 1 : 0);
+        return Birth(questionnaire) + " · " + age.ToString(CultureInfo.InvariantCulture) + " " + YearsWord(age);
+    }
+
     /// <summary>Значение или «—».</summary>
     public static string OrDash(string? value) => string.IsNullOrWhiteSpace(value) ? "—" : value;
+
+    // Склонение: 1 год, 2–4 года, 5–20 лет, 21 год…
+    private static string YearsWord(int years)
+    {
+        var lastTwo = years % 100;
+        var last = years % 10;
+        return last == 1 && lastTwo != 11 ? "год"
+            : last is >= 2 and <= 4 && lastTwo is < 12 or > 14 ? "года"
+            : "лет";
+    }
 }

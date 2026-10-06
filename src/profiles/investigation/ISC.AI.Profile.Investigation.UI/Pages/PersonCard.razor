@@ -72,76 +72,83 @@ else
                   ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
     }
 
+    @* Анкета фигуранта (ТФ-ПЕР-05) — карточкой: слева фото, справа поля сеткой «подпись над значением». ФИО и роль уже
+       в заголовке страницы, поэтому ФИО здесь не повторяется. *@
     <MudPaper Outlined="true" Class="pa-4 mb-3">
-        <div class="d-flex align-center justify-space-between mb-2">
-            <MudText Typo="Typo.subtitle1">Реквизиты</MudText>
-            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit"
-                       OnClick="OpenEdit" Disabled="_busy">Изменить</MudButton>
-        </div>
-        <div class="d-flex gap-4 flex-wrap align-start">
-        @* Фото анкеты (ТФ-ПЕР-05): актуальный эталон с лицом (последний добавленный). Загрузка — прямо отсюда: окно
-           эталона открывается сразу на загрузке, файл ложится в материалы дела, лицо выбирается само, если оно одно;
-           прежнее фото не удаляется, а помечается заменённым (ТБ-077). *@
-        <div class="d-flex flex-column align-center gap-1" style="width:132px;">
-            <div class="rounded mud-elevation-1 overflow-hidden d-flex align-center justify-center"
-                 style="width:120px;height:160px;background:var(--mud-palette-background-gray);">
-                @if (_headerPhotoUrl is { } photoUrl)
+        <div class="d-flex gap-6 flex-wrap align-start">
+            @* Фото анкеты: актуальный эталон с лицом (последний добавленный). Загрузка — прямо отсюда: окно эталона
+               открывается сразу на загрузке, файл ложится в материалы дела, лицо выбирается само, если оно одно;
+               прежнее фото не удаляется, а помечается заменённым (ТБ-077). *@
+            <div class="d-flex flex-column align-center gap-2" style="width:152px;">
+                <div class="rounded-lg mud-elevation-2 overflow-hidden d-flex align-center justify-center"
+                     style="width:152px;height:200px;background:var(--mud-palette-background-gray);">
+                    @if (_headerPhotoUrl is { } photoUrl)
+                    {
+                        <img src="@photoUrl" alt="фото фигуранта" style="width:152px;height:200px;object-fit:cover;display:block;" />
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.Person" Class="mud-text-secondary" Style="font-size:72px;" />
+                    }
+                </div>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" FullWidth="true" StartIcon="@Icons.Material.Filled.AddAPhoto"
+                           Style="text-transform:none;white-space:nowrap;" OnClick="OpenQuestionnairePhoto" Disabled="_busy">
+                    @(HeaderPhoto is null ? "Загрузить фото" : "Заменить фото")
+                </MudButton>
+                @if (HeaderPhoto is { } headerPhoto)
                 {
-                    <img src="@photoUrl" alt="фото фигуранта" style="width:120px;height:160px;object-fit:cover;display:block;" />
-                }
-                else
-                {
-                    <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Large" Class="mud-text-secondary" />
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">эталон № @headerPhoto.Id</MudText>
                 }
             </div>
-            @if (HeaderPhoto is { } headerPhoto)
-            {
-                <MudText Typo="Typo.caption" Class="mud-text-secondary">эталон № @headerPhoto.Id</MudText>
-            }
-            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.AddAPhoto"
-                       OnClick="OpenQuestionnairePhoto" Disabled="_busy">@(HeaderPhoto is null ? "Загрузить фото" : "Заменить фото")</MudButton>
-        </div>
-        <div style="flex:1 1 360px;min-width:0;">
-        <MudSimpleTable Dense="true" Elevation="0">
-            <tbody>
-                <tr><td class="mud-text-secondary">ФИО</td><td>@_person.DisplayName</td></tr>
-                @if (_person.UnidentifiedNumber is { } number)
+
+            <div style="flex:1 1 420px;min-width:0;">
+                <div class="d-flex align-center justify-space-between mb-4">
+                    <MudText Typo="Typo.subtitle1">Анкета</MudText>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit"
+                               OnClick="OpenEdit" Disabled="_busy">Изменить</MudButton>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:18px 32px;">
+                    @QuestionnaireField("Роль в деле", _person.Role.Label() + (_person.RoleInCase is { } roleText ? $" · {roleText}" : string.Empty))
+                    @if (_person.UnidentifiedNumber is { } number)
+                    {
+                        @QuestionnaireField("Неустановленное лицо", $"№ {number}")
+                    }
+                    @if (_person.Role == PersonRole.Link)
+                    {
+                        <div>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">Связь с</MudText>
+                            <MudText Typo="Typo.body1">
+                                @if (_person.LinkedToPersonId is { } linkedId)
+                                {
+                                    <MudLink Href="@($"/persons/{linkedId}")">@PersonName(linkedId)</MudLink>
+                                }
+                                else
+                                {
+                                    <span>—</span>
+                                }
+                                @if (_person.LinkTypeId is not null)
+                                {
+                                    <span class="mud-text-secondary"> · @ReferenceLookup.Name(_references, _person.LinkTypeId)</span>
+                                }
+                            </MudText>
+                        </div>
+                    }
+                    @QuestionnaireField("Псевдоним", QuestionnaireLabels.OrDash(Q.Alias))
+                    @QuestionnaireField("Пол", Q.Sex?.Label() ?? "—")
+                    @QuestionnaireField("Дата рождения", QuestionnaireLabels.BirthWithAge(Q, DateOnly.FromDateTime(DateTime.Today)))
+                    @QuestionnaireField("Место рождения", QuestionnaireLabels.OrDash(Q.BirthPlace))
+                    @QuestionnaireField("Место работы", QuestionnaireLabels.OrDash(Q.WorkPlace))
+                    @QuestionnaireField("Место жительства", QuestionnaireLabels.OrDash(Q.Residence))
+                    @QuestionnaireField("Эталонов / появлений", $"{_person.ReferencePhotoCount} / {_person.AppearanceCount}")
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_person.Notes))
                 {
-                    <tr><td class="mud-text-secondary">Номер неустановленного лица</td><td>№ @number</td></tr>
+                    <div class="mt-5">
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">Примечания</MudText>
+                        <MudText Typo="Typo.body1" Style="white-space:pre-wrap;">@_person.Notes</MudText>
+                    </div>
                 }
-                <tr><td class="mud-text-secondary">Роль в деле</td><td>@_person.Role.Label()@(_person.RoleInCase is { } roleText ? $" · {roleText}" : string.Empty)</td></tr>
-                @if (_person.Role == PersonRole.Link)
-                {
-                    <tr>
-                        <td class="mud-text-secondary">Связь с</td>
-                        <td>
-                            @if (_person.LinkedToPersonId is { } linkedId)
-                            {
-                                <MudLink Href="@($"/persons/{linkedId}")">@PersonName(linkedId)</MudLink>
-                            }
-                            else
-                            {
-                                <span>—</span>
-                            }
-                            @if (_person.LinkTypeId is not null)
-                            {
-                                <span class="mud-text-secondary"> · @ReferenceLookup.Name(_references, _person.LinkTypeId)</span>
-                            }
-                        </td>
-                    </tr>
-                }
-                @* Анкета (ТФ-ПЕР-05). Фотография — слева, это актуальный эталон (ТБ-077); история эталонов — на вкладке «Эталоны». *@
-                <tr><td class="mud-text-secondary">Псевдоним</td><td>@QuestionnaireLabels.OrDash(Q.Alias)</td></tr>
-                <tr><td class="mud-text-secondary">Пол</td><td>@(Q.Sex?.Label() ?? "—")</td></tr>
-                <tr><td class="mud-text-secondary">Дата (год) рождения</td><td>@QuestionnaireLabels.Birth(Q)</td></tr>
-                <tr><td class="mud-text-secondary">Место рождения</td><td>@QuestionnaireLabels.OrDash(Q.BirthPlace)</td></tr>
-                <tr><td class="mud-text-secondary">Место работы</td><td>@QuestionnaireLabels.OrDash(Q.WorkPlace)</td></tr>
-                <tr><td class="mud-text-secondary">Место жительства</td><td>@QuestionnaireLabels.OrDash(Q.Residence)</td></tr>
-                <tr><td class="mud-text-secondary">Примечания</td><td style="white-space:pre-wrap;">@(string.IsNullOrWhiteSpace(_person.Notes) ? "—" : _person.Notes)</td></tr>
-                <tr><td class="mud-text-secondary">Эталонов / появлений</td><td>@_person.ReferencePhotoCount / @_person.AppearanceCount</td></tr>
-            </tbody>
-        </MudSimpleTable>
-        </div>
+            </div>
         </div>
     </MudPaper>
 
@@ -1246,6 +1253,13 @@ else
         _photoStartUpload = false;
         _photoOpen = true;
     }
+
+    /// <summary>Поле анкеты карточкой: подпись мелким серым над значением.</summary>
+    private static RenderFragment QuestionnaireField(string label, string value) =>
+        @<div>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">@label</MudText>
+            <MudText Typo="Typo.body1">@value</MudText>
+        </div>;
 
     // --- Фото анкеты (ТФ-ПЕР-05) ---
 

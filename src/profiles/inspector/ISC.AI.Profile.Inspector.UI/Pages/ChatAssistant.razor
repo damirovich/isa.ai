@@ -299,7 +299,7 @@
     private static string BubbleStyle(ConversationMessageRole role) =>
         role == ConversationMessageRole.User
             ? "max-width:78%; background: var(--mud-palette-primary); color: var(--mud-palette-primary-text);"
-            : "max-width:78%; background: var(--mud-palette-background-grey);";
+            : "max-width:78%; background: var(--mud-palette-background-gray);";
 
     // Один ответ может опираться на несколько фрагментов одного документа — источник показываем один раз.
     private static IEnumerable<RetrievedChunk> DistinctSources(IReadOnlyList<RetrievedChunk> fragments) =>
