@@ -197,6 +197,16 @@ public sealed class CaseScope(
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<AssetAppearanceItem>> ListAssetAppearancesAsync(
+        int assetId, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+
+        var rows = await persons.ListAppearancesOnAssetAsync(assetId, access, cancellationToken);
+        return rows.Select(r => new AssetAppearanceItem(r.PersonId, r.DisplayName, r.FaceId, r.FrameTimestampMs)).ToList();
+    }
+
+    /// <inheritdoc />
     public Task RecordAppearanceAsync(ConfirmedAppearance appearance, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(appearance);

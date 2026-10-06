@@ -16,6 +16,7 @@ public sealed partial class MediaStore
         string embedderVersion,
         long? durationMs = null,
         VideoProbe? probe = null,
+        FilmstripDraft? filmstrip = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(faces);
@@ -115,12 +116,25 @@ public sealed partial class MediaStore
             asset.FrameWidth = probe.Width;
             asset.FrameHeight = probe.Height;
             asset.DurationMs = probe.DurationMs;
+
+            // Встроенное время записи (ТФ-МЕД-11, ADR-0038) — тоже по пробе и тоже поверх: исчезло из файла при
+            // повторной пробе (другой ffprobe) — значит, его и нет; дату съёмки оператора (CapturedAt) не трогаем.
+            asset.RecordedAt = probe.RecordedAt;
         }
         else if (asset.FrameRate is null)
         {
             // Пробы нет и раньше не было: оценка по раскадровке. Если проба была (частота известна), точную
             // длительность оценкой не перетирать — сбой пробы при переиндексации не должен огрублять данные.
             asset.DurationMs = durationMs ?? asset.DurationMs;
+        }
+
+        if (filmstrip is not null)
+        {
+            // Лента кадров (ADR-0038) — поверх прежней; прежний файл индексатор снимет ПОСЛЕ фиксации. Не собралась —
+            // прежняя лента остаётся: она снята с того же оригинала и по-прежнему верна.
+            asset.FilmstripStoredFileName = filmstrip.StoredFileName;
+            asset.FilmstripTileCount = filmstrip.TileCount;
+            asset.FilmstripStepMs = filmstrip.StepMs;
         }
 
         asset.IndexedAt = DateTime.UtcNow;

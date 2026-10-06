@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using ISC.AI.Modules.Media.Domain.Model;
 using ISC.AI.Modules.Media.Domain.Services;
 using ISC.AI.Vision.Onnx.Imaging;
@@ -33,6 +34,24 @@ public sealed class SkiaImageToolsTests
         var tools = new SkiaImageTools();
         tools.ReadSize(Png(200, 100)).ShouldBe(new ImageSize(200, 100));
         Should.Throw<InvalidOperationException>(() => tools.ReadSize([1, 2, 3, 4]));
+    }
+
+    [Fact(DisplayName = "ThumbnailJpeg: кадр ровно заданного размера, JPEG; ComposeStripJpeg: плитки в ряд — ширина = число × ширина плитки (ADR-0038)")]
+    public void Thumbnail_and_strip_have_exact_sizes()
+    {
+        var tools = new SkiaImageTools();
+
+        var tile = tools.ThumbnailJpeg(Png(1920, 1080), 128, 72);
+        tile[0].ShouldBe((byte)0xFF);
+        tile[1].ShouldBe((byte)0xD8);
+        tools.ReadSize(tile).ShouldBe(new ImageSize(128, 72));
+
+        var strip = tools.ComposeStripJpeg([tile, tile, tile], 128, 72);
+        tools.ReadSize(strip).ShouldBe(new ImageSize(384, 72));
+
+        Should.Throw<ArgumentException>(() => tools.ComposeStripJpeg([], 128, 72));
+        Should.Throw<ArgumentException>(() => tools.ComposeStripJpeg(new byte[600][].Select(_ => tile).ToArray(), 128, 72)); // шире 65 535
+        Should.Throw<ArgumentOutOfRangeException>(() => tools.ThumbnailJpeg(tile, 0, 72));
     }
 
     [Fact(DisplayName = "CropJpeg: поля 25 %, обрезка по границам, ужатие до maxSide по большей стороне, выход — JPEG")]

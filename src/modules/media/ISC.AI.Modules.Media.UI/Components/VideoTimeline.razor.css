@@ -1,0 +1,186 @@
+/* Лента под видео (ADR-0038). Плитки ленты кадров создаёт media.js — у них нет атрибута изоляции стилей, поэтому
+   их оформление задаётся там же, строкой стиля; здесь — всё, что рисует разметка компонента. */
+.vt {
+    margin-top: 8px;
+    text-align: left;
+    user-select: none;
+}
+
+.vt-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    margin-bottom: 4px;
+    font-size: 0.8125rem;
+}
+
+.vt-times {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+}
+
+.vt-clock {
+    font-family: monospace;
+    font-size: 0.875rem;
+}
+
+.vt-record {
+    color: var(--mud-palette-text-secondary);
+    cursor: help;
+}
+
+.vt-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    color: var(--mud-palette-text-secondary);
+}
+
+.vt-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.vt-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+}
+
+/* Область ленты: щелчок и перетаскивание — переход к моменту (обработчики указателя — media.js). */
+.vt-area {
+    position: relative;
+    overflow: hidden;
+    padding-bottom: 6px;
+    border-radius: 6px;
+    background: var(--mud-palette-background-gray);
+    cursor: pointer;
+    touch-action: none;
+}
+
+.vt-ruler {
+    position: relative;
+    height: 18px;
+    border-bottom: 1px solid var(--mud-palette-lines-default);
+}
+
+.vt-tick {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-left: 1px solid var(--mud-palette-lines-default);
+}
+
+.vt-tick-label {
+    position: absolute;
+    top: 2px;
+    left: 3px;
+    font-size: 10px;
+    line-height: 1;
+    white-space: nowrap;
+    color: var(--mud-palette-text-secondary);
+}
+
+.vt-strip {
+    position: relative;
+    height: 56px;
+    margin-top: 4px;
+    overflow: hidden;
+    background: #000;
+}
+
+.vt-strip-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 56px;
+    margin-top: 4px;
+    padding: 0 8px;
+    font-size: 12px;
+    text-align: center;
+    color: var(--mud-palette-text-secondary);
+    border: 1px dashed var(--mud-palette-lines-default);
+}
+
+/* Дорожка фигуранта — одна строка. */
+.vt-lane {
+    position: relative;
+    height: 14px;
+    margin-top: 4px;
+}
+
+/* Отметка — плашка: полупрозрачная заливка и рамка цветом дорожки, имя фигуранта внутри.
+   Точка (одно появление на кадре) — не уже минимальной ширины, чтобы по ней можно было попасть. */
+.vt-mark {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    min-width: 12px;
+    box-sizing: border-box;
+    overflow: hidden;
+    border: 1px solid;
+    border-radius: 7px;
+    cursor: pointer;
+}
+
+.vt-mark:hover {
+    z-index: 1;
+    box-shadow: 0 0 0 1px var(--mud-palette-text-primary);
+}
+
+.vt-mark-label {
+    padding: 0 6px;
+    overflow: hidden;
+    font-size: 11px;
+    line-height: 1;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--mud-palette-text-primary);
+    pointer-events: none;
+}
+
+/* Бегунок — во всю высоту ленты, с «ручкой» сверху; события указателя проходят сквозь него к ленте. */
+.vt-playhead {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 2px;
+    margin-left: -1px;
+    background: var(--mud-palette-error);
+    pointer-events: none;
+}
+
+.vt-playhead::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -4px;
+    width: 10px;
+    height: 10px;
+    border-radius: 0 0 5px 5px;
+    background: var(--mud-palette-error);
+}
+
+.vt-hover {
+    display: none;
+    position: absolute;
+    top: 20px;
+    transform: translateX(-50%);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11px;
+    white-space: nowrap;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.75);
+    pointer-events: none;
+    z-index: 2;
+}

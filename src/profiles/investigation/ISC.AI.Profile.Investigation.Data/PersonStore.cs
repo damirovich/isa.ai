@@ -349,6 +349,44 @@ public sealed class PersonStore(
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<AssetAppearanceRow>> ListAppearancesOnAssetAsync(
+        int assetId, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+
+        var role = await ResolveRoleAsync(access, cancellationToken);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Как ListPersonsConfirmedOnFaceAsync: фигурант — по полной решётке и роли, появление — под floor'ом строки.
+        // Недоступный фигурант не раскрывается ни именем, ни самим фактом отметки (ТБ-020/021). Имена — вторым
+        // запросом по той же видимости: соединение с запросом видимости (подзапрос по делам) EF не переводит.
+        var visible = AccessiblePersons(db, access, role);
+        var appearances = await db.Appearances.AsNoTracking()
+            .Where(BaselineAccess.Filter<Appearance>(access))
+            .Where(policy.BuildFilter<Appearance>(access))
+            .Where(a => a.MediaAssetId == assetId && a.Status != AppearanceStatus.Revoked && visible.Any(p => p.Id == a.PersonId))
+            .Select(a => new { a.PersonId, a.MediaFaceId, a.FrameTimestampMs })
+            .ToListAsync(cancellationToken);
+        if (appearances.Count == 0)
+        {
+            return [];
+        }
+
+        var personIds = appearances.Select(a => a.PersonId).Distinct().ToList();
+        var names = await visible
+            .Where(p => personIds.Contains(p.Id))
+            .Select(p => new { p.Id, p.DisplayName })
+            .ToDictionaryAsync(p => p.Id, p => p.DisplayName, cancellationToken);
+
+        return appearances
+            .Where(a => names.ContainsKey(a.PersonId))
+            .Select(a => new AssetAppearanceRow(a.PersonId, names[a.PersonId], a.MediaFaceId, a.FrameTimestampMs))
+            .OrderBy(r => r.PersonId)
+            .ThenBy(r => r.FaceId)
+            .ToList();
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<ReferencePhotoRow>> ListReferencePhotosAsync(int personId, AccessContext access, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(access);

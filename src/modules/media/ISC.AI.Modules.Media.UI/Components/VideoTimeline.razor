@@ -1,0 +1,288 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Лента под видео (ADR-0038, ТФ-МЕД-11) — часть просмотрщика VideoFrameViewer. Сверху — текущий момент «мм:сс.ммм /
+   длительность» и время записи (встроенное время начала из метаданных файла + смещение; без него — приблизительно по
+   дате съёмки), справа — легенда. Ниже — шкала делений, ЛЕНТА КАДРОВ (одна картинка из уменьшенных кадров
+   раскадровки, раздаётся под решёткой носителя) и дорожки отметок подтверждённых фигурантов — своим цветом, имя внутри
+   отметки (треки всех найденных лиц на ленту не выводятся: их много, и они загромождают её — они есть карточками
+   ниже). Щелчок или перетаскивание по ленте — переход к моменту; щелчок по отметке — к её началу.
+   Это навигация и ничего больше: инструментов правки записи (вырезать, удалить) нет и не будет — материал дела не
+   меняется (ТЭ-007).
+   КТО ЧЕМ ВЛАДЕЕТ. Деления, отметки и легенду рисует Blazor — процентами от длительности, им ширина экрана не нужна.
+   Плитки ленты (их число зависит от ширины), бегунок, подпись под курсором, текущий момент и время записи ведёт
+   media.js (initTimeline): у этих элементов НЕТ детей в разметке Blazor, поэтому диф Blazor их не трогает. В режиме
+   браузерного <video> лента сама следит за проигрывателем (timeupdate/seeked и кадры анимации при воспроизведении,
+   без обращений к серверу); в режиме кадров с сервера положение приходит параметром CurrentMs, а переход с ленты
+   уходит на сервер ОДИН раз — при отпускании кнопки мыши (перетаскивание не плодит процессы ffmpeg). *@
+@implements IAsyncDisposable
+@using System
+@using System.Collections.Generic
+@using System.Threading.Tasks
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.JSInterop
+
+<div id="@RootId" class="vt" role="group" aria-label="Лента видео">
+    <div class="vt-head">
+        <div class="vt-times">
+            <span class="vt-clock" data-vt-clock></span>
+            @if (Clock is { } clock)
+            {
+                <span class="vt-record" data-vt-record title="@VideoTimelineModel.RecordClockHint(clock)"></span>
+            }
+        </div>
+        @if (Lanes.Count > 0)
+        {
+            <div class="vt-legend">
+                @foreach (var lane in Lanes)
+                {
+                    <span class="vt-legend-item" @key="lane.Key">
+                        <span class="vt-dot" style="@($"background:{lane.Color};")"></span>@lane.Title
+                    </span>
+                }
+            </div>
+        }
+    </div>
+
+    <div class="vt-area" data-vt-area>
+        <div class="vt-ruler">
+            @foreach (var tick in _ticks)
+            {
+                <div class="vt-tick" style="@($"left:{VideoTimelineModel.Css(VideoTimelineModel.Percent(tick.Ms, Duration))};")">
+                    @if (tick.Label.Length > 0)
+                    {
+                        <span class="vt-tick-label">@tick.Label</span>
+                    }
+                </div>
+            }
+        </div>
+
+        @if (HasFilmstrip)
+        {
+            <div class="vt-strip" data-vt-strip></div>
+        }
+        else
+        {
+            <div class="vt-strip-empty">@(FilmstripHint ?? "Ленты кадров у этого видео нет — она появится после «Переиндексировать».")</div>
+        }
+
+        @foreach (var lane in Lanes)
+        {
+            <div class="vt-lane" @key="lane.Key">
+                @foreach (var span in lane.Spans)
+                {
+                    var target = span.StartMs;
+                    <div class="vt-mark" data-vt-mark title="@span.Tooltip"
+                         style="@MarkStyle(span, lane.Color)" @onclick="@(() => SeekAsync(target))">
+                        <span class="vt-mark-label">@lane.Title</span>
+                    </div>
+                }
+            </div>
+        }
+
+        <div class="vt-playhead" data-vt-playhead></div>
+        <div class="vt-hover" data-vt-hover></div>
+    </div>
+</div>
+
+@code {
+    private const string MediaModulePath = "./_content/ISC.AI.Modules.Media.UI/js/media.js";
+
+    /// <summary>Носитель — для уникальных id элементов ленты.</summary>
+    [Parameter, EditorRequired] public int AssetId { get; set; }
+
+    /// <summary>Длительность записи, мс (> 0; без неё просмотрщик ленту не показывает).</summary>
+    [Parameter, EditorRequired] public long DurationMs { get; set; }
+
+    /// <summary>Режим браузерного &lt;video&gt;: лента сама следит за проигрывателем <see cref="VideoElementId"/>.</summary>
+    [Parameter] public bool Playable { get; set; }
+
+    /// <summary>Id элемента &lt;video&gt; (режим <see cref="Playable"/>).</summary>
+    [Parameter] public string? VideoElementId { get; set; }
+
+    /// <summary>Показанный момент, мс — в режиме кадров с сервера по нему ставится бегунок.</summary>
+    [Parameter] public long CurrentMs { get; set; }
+
+    /// <summary>Ссылка на картинку ленты кадров; <see langword="null"/> — ленты нет (см. <see cref="FilmstripHint"/>).</summary>
+    [Parameter] public string? FilmstripUrl { get; set; }
+
+    /// <summary>Сколько кадров в картинке ленты.</summary>
+    [Parameter] public int FilmstripTileCount { get; set; }
+
+    /// <summary>Шаг между кадрами ленты, мс.</summary>
+    [Parameter] public long FilmstripStepMs { get; set; }
+
+    /// <summary>Пропорции кадра (ширина / высота) — по ним считается, сколько плиток помещается в ширину ленты.</summary>
+    [Parameter] public double TileAspect { get; set; } = 16.0 / 9.0;
+
+    /// <summary>Пояснение вместо ленты кадров, когда её нет (например, «появится после обработки»).</summary>
+    [Parameter] public string? FilmstripHint { get; set; }
+
+    /// <summary>Опора часов записи; <see langword="null"/> — время записи не известно и не показывается.</summary>
+    [Parameter] public RecordClock? Clock { get; set; }
+
+    /// <summary>Дорожки отметок (фигуранты, лица).</summary>
+    [Parameter] public IReadOnlyList<TimelineLane> Lanes { get; set; } = [];
+
+    /// <summary>Переход к моменту (мс): щелчок по отметке в любом режиме, по ленте — в режиме кадров с сервера.</summary>
+    [Parameter] public EventCallback<long> OnSeek { get; set; }
+
+    private IReadOnlyList<TimelineTick> _ticks = [];
+    private IJSObjectReference? _module;
+    private bool _moduleFailed;
+    private DotNetObjectReference<VideoTimeline>? _selfRef;
+    private TimelineOptions? _applied;
+    private long _positionSent = -1;
+    private (long DurationMs, string? FilmstripUrl, int TileCount, long StepMs, double Aspect, string? Hint, RecordClock? Clock,
+        IReadOnlyList<TimelineLane> Lanes, bool Playable, string? VideoElementId) _shown;
+
+    private string RootId => "media-timeline-" + AssetId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private long Duration => Math.Max(1, DurationMs);
+
+    private bool HasFilmstrip => FilmstripUrl is not null && FilmstripTileCount > 0;
+
+    /// <summary>Настройки ленты для media.js (сериализуются в camelCase).</summary>
+    private sealed record TimelineOptions(
+        long DurationMs, bool Playable, string? VideoId, string? FilmstripUrl, int TileCount, long StepMs, double TileAspect,
+        long? RecordStartMs, bool RecordApproximate, long StartMs);
+
+    protected override void OnParametersSet() => _ticks = VideoTimelineModel.Ticks(DurationMs);
+
+    /// <summary>
+    /// Перерисовка — только при смене самой ленты (длительность, картинка, часы, отметки, режим): смена момента
+    /// (<see cref="CurrentMs"/>) разметку не меняет — бегунок двигает media.js.
+    /// </summary>
+    protected override bool ShouldRender()
+    {
+        var current = (DurationMs, FilmstripUrl, FilmstripTileCount, FilmstripStepMs, TileAspect, FilmstripHint, Clock, Lanes,
+            Playable, VideoElementId);
+        if (current == _shown)
+        {
+            return false;
+        }
+
+        _shown = current;
+        return true;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Режим кадров с сервера: момент меняет просмотрщик (шаг, «к кадру», ответ на переход с ленты) — бегунок за ним.
+        if (_applied is not null && !Playable && CurrentMs != _positionSent)
+        {
+            _positionSent = CurrentMs;
+            await CallAsync("setTimelinePosition", RootId, CurrentMs);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!RendererInfo.IsInteractive)
+        {
+            return;
+        }
+
+        var options = new TimelineOptions(
+            DurationMs, Playable, Playable ? VideoElementId : null, HasFilmstrip ? FilmstripUrl : null, FilmstripTileCount,
+            FilmstripStepMs, TileAspect > 0 ? TileAspect : 16.0 / 9.0, Clock?.WallClockEpochMs, Clock?.Approximate ?? false,
+            CurrentMs);
+
+        // Начальный момент — только для первой привязки: смена показанного момента ленту заново не привязывает
+        // (бегунок двигает setTimelinePosition), заново — только смена самой ленты.
+        if (_applied is not null && options with { StartMs = _applied.StartMs } == _applied)
+        {
+            return;
+        }
+
+        _selfRef ??= DotNetObjectReference.Create(this);
+        var method = _applied is null ? "initTimeline" : "updateTimeline";
+        if (await CallAsync(method, RootId, options, _selfRef))
+        {
+            _applied = options;
+            _positionSent = CurrentMs;
+        }
+    }
+
+    /// <summary>
+    /// Переход с ленты в режиме кадров с сервера (вызывает media.js при отпускании кнопки мыши). Публичный и с
+    /// атрибутом — требование JS-interop.
+    /// </summary>
+    /// <param name="milliseconds">Момент под курсором, мс.</param>
+    [JSInvokable]
+    public Task OnTimelineSeek(long milliseconds) => SeekAsync(milliseconds);
+
+    private Task SeekAsync(long milliseconds) => OnSeek.InvokeAsync(Math.Clamp(milliseconds, 0, Duration));
+
+    /// <summary>
+    /// Отметка: положение и ширина в процентах длительности (точка — минимальной ширины из стилей), полупрозрачная
+    /// заливка и рамка цветом дорожки.
+    /// </summary>
+    private string MarkStyle(TimelineSpan span, string color)
+    {
+        var left = VideoTimelineModel.Percent(span.StartMs, Duration);
+        var width = VideoTimelineModel.Percent(Math.Max(0, span.EndMs - span.StartMs), Duration);
+        return $"left:{VideoTimelineModel.Css(left)};width:{VideoTimelineModel.Css(width)};"
+            + $"background:{VideoTimelineModel.Fill(color)};border-color:{color};";
+    }
+
+    /// <summary>Вызов media.js без проброса сбоев: без модуля лента остаётся шкалой с отметками (переход — по отметкам).</summary>
+    private async Task<bool> CallAsync(string method, params object?[] args)
+    {
+        if (_module is null && !_moduleFailed)
+        {
+            try
+            {
+                _module = await JS.InvokeAsync<IJSObjectReference>("import", MediaModulePath);
+            }
+            catch (JSException)
+            {
+                _moduleFailed = true;
+            }
+            catch (JSDisconnectedException)
+            {
+                _moduleFailed = true;
+            }
+        }
+
+        if (_module is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return await _module.InvokeAsync<bool>(method, args);
+        }
+        catch (JSException)
+        {
+            return false;
+        }
+        catch (JSDisconnectedException)
+        {
+            return false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try
+            {
+                // Снять слушатели проигрывателя, указателя и наблюдатель размера — иначе они переживут страницу.
+                await _module.InvokeAsync<bool>("disposeTimeline", RootId);
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit уже закрыт — освобождать на клиенте нечего.
+            }
+            catch (JSException)
+            {
+                // Сбой очистки не должен ронять уход со страницы.
+            }
+        }
+
+        _selfRef?.Dispose();
+    }
+}

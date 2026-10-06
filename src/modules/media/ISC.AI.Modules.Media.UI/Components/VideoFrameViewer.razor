@@ -19,9 +19,12 @@
    последнему кадру записи (VideoProbe.LastFrameIndex), если длительность известна: за концом кадра нет.
    Параметры — только примитивы, ОДИН колбэк OnSnapshotRequested (момент, мс); перерисовка — только при смене
    параметров или собственного состояния (ShouldRender по кортежу): страница карточки перерисовывается часто,
-   а <video> трогать без нужды не стоит. Сам снимок делает страница (команда, аудит, сообщение). *@
+   а <video> трогать без нужды не стоит. Сам снимок делает страница (команда, аудит, сообщение).
+   ЛЕНТА ПОД ВИДЕО (ADR-0038) — VideoTimeline: шкала, лента кадров, отметки фигурантов и лиц, время записи; показывается,
+   когда длительность известна. Переход с ленты идёт через ShowMomentAsync — так же, как «к кадру» у лиц. *@
 @implements IAsyncDisposable
 @using System
+@using System.Collections.Generic
 @using System.Globalization
 @using System.Threading.Tasks
 @using Microsoft.AspNetCore.Components
@@ -49,6 +52,14 @@ else
              style="max-width:100%;max-height:70vh;display:block;margin:0 auto;"
              @onload="OnFrameLoaded" @onerror="OnFrameFailed" />
     </div>
+}
+
+@if (DurationMs is { } timelineDuration && timelineDuration > 0)
+{
+    <VideoTimeline AssetId="@AssetId" DurationMs="@timelineDuration" Playable="@Playable" VideoElementId="@VideoElementId"
+                   CurrentMs="@_currentMs" FilmstripUrl="@FilmstripUrl" FilmstripTileCount="@FilmstripTileCount"
+                   FilmstripStepMs="@FilmstripStepMs" TileAspect="@TileAspect" FilmstripHint="@FilmstripHint"
+                   Clock="@RecordClock" Lanes="@TimelineLanes" OnSeek="ShowMomentAsync" />
 }
 
 <div class="d-flex align-center justify-center flex-wrap gap-2 mt-2">
@@ -152,6 +163,27 @@ else
     /// <summary>«Снимок кадра»: номинальный момент кадра, мс. Сам снимок (команда, сообщение) делает страница.</summary>
     [Parameter] public EventCallback<long> OnSnapshotRequested { get; set; }
 
+    /// <summary>Ссылка на ленту кадров (ADR-0038); <see langword="null"/> — ленты нет (см. <see cref="FilmstripHint"/>).</summary>
+    [Parameter] public string? FilmstripUrl { get; set; }
+
+    /// <summary>Сколько кадров в ленте.</summary>
+    [Parameter] public int FilmstripTileCount { get; set; }
+
+    /// <summary>Шаг между кадрами ленты, мс.</summary>
+    [Parameter] public long FilmstripStepMs { get; set; }
+
+    /// <summary>Пропорции кадра (ширина / высота) для плиток ленты.</summary>
+    [Parameter] public double TileAspect { get; set; } = 16.0 / 9.0;
+
+    /// <summary>Пояснение вместо ленты кадров, когда её нет.</summary>
+    [Parameter] public string? FilmstripHint { get; set; }
+
+    /// <summary>Опора часов записи (ТФ-МЕД-11); <see langword="null"/> — время записи не показывается.</summary>
+    [Parameter] public RecordClock? RecordClock { get; set; }
+
+    /// <summary>Дорожки отметок ленты (фигуранты, лица) — страница собирает их один раз при загрузке карточки.</summary>
+    [Parameter] public IReadOnlyList<TimelineLane> TimelineLanes { get; set; } = [];
+
     private long _currentMs;
     private long _previousMs;
     private long? _appliedStartMs;
@@ -166,7 +198,8 @@ else
     private string? _boundElementId;
     private double? _boundFrameSeconds;
     private (int AssetId, string StoredFileName, string? OriginalFileName, string ContentType, bool Playable, double? FrameRate,
-        long? DurationMs, bool CanSnapshot, long CurrentMs, bool SnapshotBusy, string? Notice) _shown;
+        long? DurationMs, bool CanSnapshot, long CurrentMs, bool SnapshotBusy, string? Notice,
+        (string? Url, int Tiles, long StepMs, double Aspect, string? Hint, RecordClock? Clock, IReadOnlyList<TimelineLane> Lanes) Timeline) _shown;
 
     /// <summary>Id элемента &lt;video&gt; (режим Playable) — по нему панель расшифровки перематывает запись.</summary>
     public string VideoElementId => "media-video-" + AssetId.ToString(CultureInfo.InvariantCulture);
@@ -200,7 +233,8 @@ else
     protected override bool ShouldRender()
     {
         var current = (AssetId, StoredFileName, OriginalFileName, ContentType, Playable, FrameRate, DurationMs, CanSnapshot,
-            _currentMs, _snapshotBusy, _notice);
+            _currentMs, _snapshotBusy, _notice,
+            (FilmstripUrl, FilmstripTileCount, FilmstripStepMs, TileAspect, FilmstripHint, RecordClock, TimelineLanes));
         if (current == _shown)
         {
             return false;

@@ -17,4 +17,16 @@ public interface IImageTools
 
     /// <summary>Вырезка лица с полями (<paramref name="marginRatio"/> от размера рамки), ужатая до <paramref name="maxSide"/> по большей стороне.</summary>
     byte[] CropJpeg(byte[] imageBytes, BoundingBox box, float marginRatio = 0.25f, int maxSide = 256, int quality = 85);
+
+    /// <summary>
+    /// Кадр, уменьшенный ровно до <paramref name="width"/>×<paramref name="height"/> (JPEG), — плитка ленты кадров
+    /// (ADR-0038). Размер плитки задаёт вызывающий по пропорциям кадра, поэтому искажения нет; только масштаб (ТЭ-007).
+    /// </summary>
+    byte[] ThumbnailJpeg(byte[] imageBytes, int width, int height, int quality = 80);
+
+    /// <summary>
+    /// Плитки одного размера (JPEG, <paramref name="tileWidth"/>×<paramref name="tileHeight"/>) — в одну картинку-ряд
+    /// слева направо (лента кадров, ADR-0038): ширина результата — число плиток × ширина плитки.
+    /// </summary>
+    byte[] ComposeStripJpeg(IReadOnlyList<byte[]> tiles, int tileWidth, int tileHeight, int quality = 80);
 }

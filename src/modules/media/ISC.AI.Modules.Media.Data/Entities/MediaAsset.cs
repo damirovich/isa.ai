@@ -103,4 +103,22 @@ public class MediaAsset : AuditableEntity, IClassified
 
     /// <summary>Момент записи источника, мс, из которого снят кадр (для снимка кадра).</summary>
     public long? SourceTimestampMs { get; set; }
+
+    /// <summary>
+    /// Лента кадров видео (ADR-0038): имя картинки в хранилище (категория <c>media-filmstrips</c>, подкаталог =
+    /// идентификатор). <see langword="null"/> — не видео либо проиндексировано до ленты (появится при «Переиндексировать»).
+    /// </summary>
+    public string? FilmstripStoredFileName { get; set; }
+
+    /// <summary>Сколько кадров в ленте (плиток в ряду).</summary>
+    public int? FilmstripTileCount { get; set; }
+
+    /// <summary>Шаг между кадрами ленты, мс: плитка <c>i</c> — кадр в момент ≈ <c>i · шаг</c>.</summary>
+    public long? FilmstripStepMs { get; set; }
+
+    /// <summary>
+    /// «Встроенное» время начала записи из метаданных файла (ТФ-МЕД-11, проба ffprobe при индексации, ADR-0038).
+    /// Не путать с <see cref="CapturedAt"/>: ту подтверждает оператор, эта — как записала камера (не доказательство).
+    /// </summary>
+    public DateTimeOffset? RecordedAt { get; set; }
 }

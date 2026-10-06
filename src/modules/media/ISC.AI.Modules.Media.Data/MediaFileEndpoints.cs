@@ -14,7 +14,7 @@ namespace ISC.AI.Modules.Media.Data;
 
 /// <summary>
 /// Раздача файлов пакета «Медиа» (ТС-010, ТБ-073): исходники носителей, вырезки лиц для показа в
-/// выдаче и вырезки проб поисковых сессий (категория <c>media-probes</c>; сегмент «носитель» маршрута — идентификатор сессии). Перед стримом байтов проверяется ДОПУСК субъекта против грифа/подразделения носителя
+/// выдаче, ленты кадров видео (категория <c>media-filmstrips</c>, ADR-0038 — под решёткой носителя, как вырезки) и вырезки проб поисковых сессий (категория <c>media-probes</c>; сегмент «носитель» маршрута — идентификатор сессии). Перед стримом байтов проверяется ДОПУСК субъекта против грифа/подразделения носителя
 /// (fail-closed ТБ-020/021) — биометрический материал несёт ту же чувствительность, что и сам носитель —
 /// и ПОВЕРХ него область дел субъекта через порт профиля <see cref="ICaseScope"/> (ТБ-071).
 /// Причина отказа наружу не различается: единый 404 (не подтверждаем существование файла тому, кому
@@ -71,7 +71,8 @@ public static class MediaFileEndpoints
     {
         httpContext.Response.Headers.Append("X-Content-Type-Options", "nosniff");
 
-        if (category is not (MediaFileCategories.Originals or MediaFileCategories.FaceCrops or MediaFileCategories.Probes)
+        if (category is not (MediaFileCategories.Originals or MediaFileCategories.FaceCrops or MediaFileCategories.Probes
+                or MediaFileCategories.Filmstrips)
             || !StoredFileNamePattern.IsMatch(storedFileName))
         {
             MediaFileEndpointsLog.RejectedBadRoute(logger, category, storedFileName);

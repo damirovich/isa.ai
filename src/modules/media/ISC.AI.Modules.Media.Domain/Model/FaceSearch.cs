@@ -150,6 +150,9 @@ public sealed record CaseSearchPurgeResult(int SessionsRemoved, int CandidatesRe
 /// <param name="Classification">Гриф носителя — наследуется лицами и шаблонами (ТБ-070).</param>
 /// <param name="DivisionId">Подразделение.</param>
 /// <param name="ExistingCropFileNames">Имена вырезок прежней индексации — удалить с диска перед перезаписью.</param>
+/// <param name="ExistingFilmstripFileName">
+/// Лента кадров прежней индексации (ADR-0038) — удаляется с диска, когда новая записана; <see langword="null"/> — её не было.
+/// </param>
 public sealed record MediaAssetIndexingInfo(
     int AssetId,
     MediaKind Kind,
@@ -157,4 +160,5 @@ public sealed record MediaAssetIndexingInfo(
     string ContentType,
     short Classification,
     int DivisionId,
-    IReadOnlyList<string> ExistingCropFileNames);
+    IReadOnlyList<string> ExistingCropFileNames,
+    string? ExistingFilmstripFileName = null);

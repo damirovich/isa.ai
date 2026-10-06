@@ -341,7 +341,12 @@ public sealed class MediaCatalog(
             a.FrameWidth,
             a.FrameHeight,
             a.SourceAssetId,
-            a.SourceTimestampMs));
+            a.SourceTimestampMs,
+            // Лента кадров и встроенное время записи (ADR-0038): у носителей до переиндексации — null.
+            a.FilmstripStoredFileName,
+            a.FilmstripTileCount,
+            a.FilmstripStepMs,
+            a.RecordedAt));
 
     private static IQueryable<FaceRow> ProjectFaces(IQueryable<Face> faces) =>
         faces.Select(f => new FaceRow(

@@ -177,6 +177,46 @@ public sealed class InvestigationPersonStoreTests : IAsyncLifetime
         (await persons.GetAsync(person.PersonId, owner)).ShouldNotBeNull().AppearanceCount.ShouldBe(2);
     }
 
+    [Fact(DisplayName = "Появления на носителе для ленты видео (ADR-0038): действующие появления доступных фигурантов; отозванное, другой носитель и чужой субъект — нет")]
+    public async Task Appearances_on_asset_for_timeline()
+    {
+        var factory = new InvestigationContextFactory(_postgres.GetConnectionString());
+        var core = new CoreContextFactory(_postgres.GetConnectionString());
+        await InvestigationTestKit.MigrateAsync(factory);
+        await InvestigationTestKit.AssignRolesAsync(factory,
+            (10, InvestigationRole.Investigator),
+            (11, InvestigationRole.Investigator));
+
+        var cases = InvestigationTestKit.CreateCaseStore(factory, core);
+        var persons = InvestigationTestKit.CreatePersonStore(factory, core);
+        var owner = InvestigationTestKit.Access(10, 9, 5);
+
+        var caseA = await cases.CreateAsync(InvestigationTestKit.Draft("A-1", 5, 1, 10), owner);
+        var ivanov = (await persons.CreateAsync(new PersonDraft(caseA.CaseId, "Иванов", false, null, null), owner)).PersonId;
+        var petrov = (await persons.CreateAsync(new PersonDraft(caseA.CaseId, "Петров", false, null, null), owner)).PersonId;
+
+        var first = new AppearanceDraft(ivanov, caseA.CaseId, 100, 1000, 300, 12_000, 7, 71, 0.81,
+            new DateTime(2026, 9, 1, 10, 0, 0, DateTimeKind.Utc), ExpertUserId: 40, VerifierUserId: 41, 1, 5);
+        await persons.AddAppearanceAsync(first);
+        var petrovAppearance = await persons.AddAppearanceAsync(
+            first with { PersonId = petrov, CandidateId = 72, MediaFaceId = 1001, FrameTimestampMs = 30_000 });
+        await persons.AddAppearanceAsync(first with { CandidateId = 73, MediaAssetId = 200, MediaFaceId = 2000 });
+
+        (await persons.ListAppearancesOnAssetAsync(100, owner)).ShouldBe(
+        [
+            new AssetAppearanceRow(ivanov, "Иванов", 1000, 12_000),
+            new AssetAppearanceRow(petrov, "Петров", 1001, 30_000),
+        ]);
+
+        // Отозванное появление (ADR-0034) отметкой на ленте не остаётся.
+        (await persons.RevokeAppearanceAsync(petrovAppearance, "ошибка верификации", owner)).ShouldBe(AppearanceRevokeResult.Ok);
+        (await persons.ListAppearancesOnAssetAsync(100, owner)).ShouldBe([new AssetAppearanceRow(ivanov, "Иванов", 1000, 12_000)]);
+
+        // Следователь чужого дела не видит ни имён, ни самого факта отметок (ТБ-020/021, ТБ-071).
+        (await persons.ListAppearancesOnAssetAsync(100, InvestigationTestKit.Access(11, 9, 5))).ShouldBeEmpty();
+        (await persons.ListAppearancesOnAssetAsync(999, owner)).ShouldBeEmpty();
+    }
+
     [Fact(DisplayName = "Одно появление на пару «фигурант — лицо»: повторное подтверждение из другой сессии и параллельные подтверждения не дублируют")]
     public async Task Same_face_confirmed_again_does_not_duplicate_appearance()
     {

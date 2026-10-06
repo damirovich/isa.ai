@@ -15,6 +15,7 @@ public sealed class MediaAssetConfiguration : IEntityTypeConfiguration<MediaAsse
 
         builder.Property(a => a.OriginalFileName).HasMaxLength(260).IsRequired();
         builder.Property(a => a.StoredFileName).HasMaxLength(64).IsRequired();
+        builder.Property(a => a.FilmstripStoredFileName).HasMaxLength(64);
         builder.Property(a => a.ContentType).HasMaxLength(100).IsRequired();
         builder.Property(a => a.ContentHash).HasMaxLength(64).IsRequired();
         builder.Property(a => a.Source).HasMaxLength(500);

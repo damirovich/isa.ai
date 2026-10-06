@@ -20,6 +20,10 @@ public static class MediaFileUrl
     public static string FaceCrop(int assetId, string storedFileName) =>
         MediaFileRoutes.Build(MediaFileCategories.FaceCrops, assetId, storedFileName);
 
+    /// <summary>Лента кадров видео (ADR-0038): одна картинка JPEG, подкаталог — носитель.</summary>
+    public static string Filmstrip(int assetId, string storedFileName) =>
+        MediaFileRoutes.Build(MediaFileCategories.Filmstrips, assetId, storedFileName);
+
     /// <summary>Вырезка пробы поисковой сессии: сегмент «носитель» маршрута — идентификатор СЕССИИ.</summary>
     public static string ProbeCrop(int sessionId, string storedFileName) =>
         MediaFileRoutes.Build(MediaFileCategories.Probes, sessionId, storedFileName);

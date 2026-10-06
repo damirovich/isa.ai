@@ -31,7 +31,12 @@ public sealed record FrameSamplingOptions(double FramesPerSecond = 1.0, int? Max
 /// </param>
 /// <param name="Width">Ширина кадра после автоповорота, пиксели.</param>
 /// <param name="Height">Высота кадра после автоповорота, пиксели.</param>
-public sealed record VideoProbe(double FrameRate, TimeSpan? Duration, int Width, int Height)
+/// <param name="RecordedAt">
+/// «Встроенное» время начала записи из метаданных файла (ТФ-МЕД-11, ADR-0038) — по правилу
+/// <see cref="RecordTimeMetadata.TryParse"/>; <see langword="null"/> — в файле его нет или оно неправдоподобно.
+/// Это сведения из файла, а не доказательство: их легко сбить часами камеры или подделать.
+/// </param>
+public sealed record VideoProbe(double FrameRate, TimeSpan? Duration, int Width, int Height, DateTimeOffset? RecordedAt = null)
 {
     /// <summary>Длительность, мс (для хранения у носителя); <see langword="null"/> — неизвестна.</summary>
     public long? DurationMs => Duration is { } duration && duration > TimeSpan.Zero

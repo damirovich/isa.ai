@@ -127,7 +127,7 @@ public sealed partial class MediaStore(
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
         var asset = await db.Assets.AsNoTracking()
             .Where(a => a.Id == assetId)
-            .Select(a => new { a.Id, a.Kind, a.StoredFileName, a.ContentType, a.Classification, a.DivisionId })
+            .Select(a => new { a.Id, a.Kind, a.StoredFileName, a.ContentType, a.Classification, a.DivisionId, a.FilmstripStoredFileName })
             .FirstOrDefaultAsync(cancellationToken);
         if (asset is null)
         {
@@ -141,7 +141,8 @@ public sealed partial class MediaStore(
             .ToListAsync(cancellationToken);
 
         return new MediaAssetIndexingInfo(
-            asset.Id, asset.Kind, asset.StoredFileName, asset.ContentType, asset.Classification, asset.DivisionId, crops);
+            asset.Id, asset.Kind, asset.StoredFileName, asset.ContentType, asset.Classification, asset.DivisionId, crops,
+            asset.FilmstripStoredFileName);
     }
 
     /// <inheritdoc />
