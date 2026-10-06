@@ -2,6 +2,7 @@ using System;
 using ISC.AI.Modules.Media.Domain.Model;
 using ISC.AI.Modules.Media.Domain.Services;
 using ISC.AI.Profile.Investigation.UI;
+using ReferencePhoto = ISC.AI.Profile.Investigation.Domain.Services.ReferencePhotoRow;
 using Shouldly;
 using Xunit;
 
@@ -48,6 +49,26 @@ public sealed class ReferencePickerRulesTests
     private static MediaAssetRow Asset(int id, MediaKind kind, DateTime createdAt) => new(
         id, kind, $"f{id}", $"s{id}", "image/jpeg", 1, null, null, null, 1, 1, null,
         MediaIndexStatus.Indexed, null, null, null, null, createdAt, 1);
+
+    [Fact(DisplayName = "Фото анкеты (ТФ-ПЕР-05): последний актуальный эталон с лицом; заменённый и без лица — не фото анкеты")]
+    public void Questionnaire_photo_is_latest_active_reference_with_face()
+    {
+        ReferencePhoto[] photos =
+        [
+            Photo(1, faceId: 70, supersededBy: 3),   // заменён — история
+            Photo(2, faceId: 71, supersededBy: null),
+            Photo(3, faceId: null, supersededBy: null), // лицо ещё не выбрано — показать нечего
+        ];
+
+        ReferencePickerRules.QuestionnairePhoto(photos).ShouldNotBeNull().Id.ShouldBe(2);
+        ReferencePickerRules.QuestionnairePhoto([.. photos, Photo(4, faceId: 72, supersededBy: null)]).ShouldNotBeNull().Id.ShouldBe(4);
+        ReferencePickerRules.QuestionnairePhoto([Photo(5, faceId: null, supersededBy: null)]).ShouldBeNull();
+        ReferencePickerRules.QuestionnairePhoto([]).ShouldBeNull();
+    }
+
+    private static ReferencePhoto Photo(int id, int? faceId, int? supersededBy) => new(
+        id, PersonId: 11, MediaAssetId: 27, MediaFaceId: faceId, QualityScore: 0.9f, Source: "Фото из анкеты",
+        LegalBasis: null, ReviewDueAt: null, AddedByUserId: 1, SupersededById: supersededBy, CreatedAt: DateTime.UtcNow);
 
     private static FaceRow Face(int id, bool acceptable) => new(
         id, 10, null, null, 0, 0, 10, 10, 0.9f, acceptable ? 0.8f : 0.1f, acceptable, acceptable ? null : "размыто", "c.jpg", null, 1, 1);

@@ -1,5 +1,6 @@
 using ISC.AI.Modules.Media.Domain.Model;
 using ISC.AI.Modules.Media.Domain.Services;
+using ISC.AI.Profile.Investigation.Domain.Services;
 
 namespace ISC.AI.Profile.Investigation.UI;
 
@@ -47,4 +48,11 @@ public static class ReferencePickerRules
     /// </summary>
     public static FaceRow? AutoPick(IReadOnlyList<FaceRow> faces) =>
         faces.Count(CanPick) == 1 ? faces.Single(CanPick) : null;
+
+    /// <summary>
+    /// Фото анкеты фигуранта (ТФ-ПЕР-05): актуальный (не заменённый, ТБ-077) эталон с выбранным лицом, последний
+    /// добавленный. Эталон без лица фото анкеты не служит — показать нечего; нет такого — <see langword="null"/>.
+    /// </summary>
+    public static ReferencePhotoRow? QuestionnairePhoto(IEnumerable<ReferencePhotoRow> photos) =>
+        photos.Where(p => p.SupersededById is null && p.MediaFaceId is not null).MaxBy(p => p.Id);
 }
