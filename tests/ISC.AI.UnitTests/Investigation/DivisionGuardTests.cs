@@ -21,8 +21,8 @@ public sealed class DivisionGuardTests
     public DivisionGuardTests()
     {
         _subject.GetCurrentUserIdAsync(Arg.Any<CancellationToken>()).Returns((int?)42);
-        _store.CreateAsync(Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<int?>(), Arg.Any<CancellationToken>()).Returns(11);
-        _store.RenameAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+        _store.CreateAsync(Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<int?>(), Arg.Any<CaseDirection?>(), Arg.Any<CancellationToken>()).Returns(11);
+        _store.RenameAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CaseDirection?>(), Arg.Any<CancellationToken>())
             .Returns(DivisionWriteResult.Ok);
         _store.SetActiveAsync(Arg.Any<int>(), Arg.Any<bool>(), Arg.Any<CancellationToken>()).Returns(DivisionWriteResult.Ok);
     }
@@ -39,7 +39,7 @@ public sealed class DivisionGuardTests
         response.Status.ShouldBeFalse();
         response.StatusMessage.ShouldBe(RoleGuard.DirectoriesDenied);
         await _store.DidNotReceive().CreateAsync(
-            Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<int?>(), Arg.Any<CancellationToken>());
+            Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<int?>(), Arg.Any<CaseDirection?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact(DisplayName = "Не-Администратор: переименование и выключение тоже отклоняются")]
@@ -56,7 +56,7 @@ public sealed class DivisionGuardTests
         rename.Status.ShouldBeFalse();
         deactivate.Status.ShouldBeFalse();
         await _store.DidNotReceive().RenameAsync(
-            Arg.Any<int>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+            Arg.Any<int>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CaseDirection?>(), Arg.Any<CancellationToken>());
         await _store.DidNotReceive().SetActiveAsync(Arg.Any<int>(), Arg.Any<bool>(), Arg.Any<CancellationToken>());
     }
 

@@ -1,5 +1,6 @@
 using ISC.AI.Persistence;
 using ISC.AI.Profile.Investigation.Domain.Entities;
+using ISC.AI.Profile.Investigation.Domain.Enums;
 using ISC.AI.Profile.Investigation.Domain.Services;
 using Microsoft.EntityFrameworkCore;
 
@@ -17,7 +18,7 @@ public sealed class DivisionAdminStore(
 
         var divisions = await db.Divisions.AsNoTracking()
             .OrderBy(d => d.Name)
-            .Select(d => new { d.Id, d.Name, d.Code, d.ParentId, d.IsActive })
+            .Select(d => new { d.Id, d.Name, d.Code, d.ParentId, d.IsActive, d.Direction })
             .ToListAsync(cancellationToken);
 
         var users = await CountUsersByDivisionAsync(cancellationToken);
@@ -25,7 +26,8 @@ public sealed class DivisionAdminStore(
         return divisions
             .Select(d => new DivisionNode(
                 d.Id, d.Name, d.Code, d.ParentId, d.IsActive,
-                users.TryGetValue(d.Id, out var count) ? count : 0))
+                users.TryGetValue(d.Id, out var count) ? count : 0,
+                d.Direction))
             .ToList();
     }
 
@@ -37,7 +39,7 @@ public sealed class DivisionAdminStore(
     }
 
     /// <inheritdoc />
-    public async Task<int> CreateAsync(string name, string? code, int? parentId, CancellationToken cancellationToken = default)
+    public async Task<int> CreateAsync(string name, string? code, int? parentId, CaseDirection? direction, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
@@ -48,6 +50,7 @@ public sealed class DivisionAdminStore(
             Name = name.Trim(),
             Code = string.IsNullOrWhiteSpace(code) ? null : code.Trim(),
             ParentId = parentId,
+            Direction = direction,
         };
         db.Divisions.Add(division);
         await db.SaveChangesAsync(cancellationToken);
@@ -55,7 +58,7 @@ public sealed class DivisionAdminStore(
     }
 
     /// <inheritdoc />
-    public async Task<DivisionWriteResult> RenameAsync(int id, string name, string? code, CancellationToken cancellationToken = default)
+    public async Task<DivisionWriteResult> RenameAsync(int id, string name, string? code, CaseDirection? direction, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
@@ -69,6 +72,7 @@ public sealed class DivisionAdminStore(
 
         division.Name = name.Trim();
         division.Code = string.IsNullOrWhiteSpace(code) ? null : code.Trim();
+        division.Direction = direction;
         await db.SaveChangesAsync(cancellationToken);
         return DivisionWriteResult.Ok;
     }

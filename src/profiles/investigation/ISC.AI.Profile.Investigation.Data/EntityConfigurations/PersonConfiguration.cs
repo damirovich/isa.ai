@@ -39,7 +39,7 @@ public class PersonConfiguration : IEntityTypeConfiguration<Person>
         builder.Property(e => e.Alias).HasMaxLength(200);
 
         // Нормализованные реквизиты для пересечений (ТО-мат-11, ТФ-ПЕР-07): индексы — под поиск совпадений
-        // по всем делам ОН+УН на следующем шаге; решётка применяется к строкам поверх индекса.
+        // по всем делам ОН+ОУ на следующем шаге; решётка применяется к строкам поверх индекса.
         builder.Property(e => e.NameNormalized).HasMaxLength(500);
         builder.Property(e => e.ResidenceNormalized).HasMaxLength(1000);
         builder.HasIndex(e => e.NameNormalized);

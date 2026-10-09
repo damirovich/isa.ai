@@ -1,0 +1,99 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@* Стартовая страница профиля ОПУ (ТЭ-008, ADR-0039; ТЗ Заказчика §1.3) — хост рисует её вместо своей визитки
+   (IProfile.HomeComponent): наименование «Оперативно-поисковое управление» и плитки отделов. Вход — одной учётной
+   записью; плитка отдела активна, только если в допуске сотрудника есть подразделение этого отдела (отметку ОН/ОУ
+   ставят в справочнике подразделений). Плитка лишь открывает список дел с отбором по отделу — какие дела видны,
+   по-прежнему решает допуск по подразделениям, гриф и роль на сервере (ТБ-020). ОТМ — отдельный изолированный
+   экземпляр (ТС-014): здесь только надпись, без ссылки и без адреса, чтобы стартовая страница ОН/ОУ не вела в
+   контур ОТМ. *@
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using Microsoft.AspNetCore.Components
+@using ISC.AI.Profile.Investigation.Application.Features.Scope
+@using ISC.AI.Profile.Investigation.Domain.Enums
+@inject NavigationManager Navigation
+
+<div class="d-flex flex-column align-center text-center my-8">
+    <MudIcon Icon="@Icons.Material.Filled.Shield" Color="Color.Primary" Size="Size.Large" Class="mb-3" />
+    <MudText Typo="Typo.h3" GutterBottom="true">@OrganizationName</MudText>
+    <MudText Typo="Typo.subtitle1" Color="Color.Primary" Class="mb-6">Выберите отдел</MudText>
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-4">@_error</MudAlert>
+    }
+
+    <div class="home-tiles">
+        @foreach (var direction in Directions)
+        {
+            var current = direction;
+            @if (_available.Contains(current))
+            {
+                <button type="button" class="home-tile" @onclick="@(() => Navigation.NavigateTo(DirectionQuery.CasesUri(current)))">
+                    <span class="home-tile-code">@current.ShortLabel()</span>
+                    <span class="home-tile-name">@current.Label()</span>
+                </button>
+            }
+            else
+            {
+                @* Не кнопка: подразделений этого отдела в допуске нет (или страница ещё загружается). *@
+                <div class="home-tile home-tile-off">
+                    <span class="home-tile-code">@current.ShortLabel()</span>
+                    <span class="home-tile-name">@current.Label()</span>
+                    <span class="home-tile-note">@(_loaded ? "Нет в вашем допуске" : "Загрузка…")</span>
+                </div>
+            }
+        }
+        <div class="home-tile home-tile-off" title="Отдел ОТМ работает в отдельном изолированном контуре">
+            <span class="home-tile-code">ОТМ</span>
+            <span class="home-tile-name">Оперативно-технические мероприятия</span>
+            <span class="home-tile-note">Вход с рабочих мест контура ОТМ</span>
+        </div>
+    </div>
+
+    <MudButton Variant="Variant.Text" Class="mt-4" StartIcon="@Icons.Material.Filled.FolderOpen" Href="/cases">
+        Все доступные дела
+    </MudButton>
+
+    @if (_loaded && _error is null && _available.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Color="Color.Warning" Class="mt-4" Style="max-width:680px;">
+            Подразделения вашего допуска не отнесены ни к ОН, ни к ОУ. Обратитесь к администратору: отдел отмечается
+            в справочнике подразделений.
+        </MudText>
+    }
+
+    <MudText Typo="Typo.body2" Class="mud-text-secondary mt-4" Style="max-width:680px;">
+        Отдел дела определяется его подразделением. Какие дела вам видны, решает ваш допуск по подразделениям.
+    </MudText>
+</div>
+
+@code {
+    /// <summary>Наименование эксплуатанта на стартовой странице (ТЗ Заказчика §1.3).</summary>
+    public const string OrganizationName = "Оперативно-поисковое управление";
+
+    private static readonly CaseDirection[] Directions = [CaseDirection.Surveillance, CaseDirection.Establishment];
+
+    private readonly HashSet<CaseDirection> _available = [];
+    private bool _loaded;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // На предрендере допуск не запрашиваем — только после подключения страницы (как остальные экраны профиля).
+        if (!RendererInfo.IsInteractive) { return; }
+
+        var scope = await Dispatcher.Send(new GetAccessScopeQuery());
+        if (scope is { Status: true, Data: { } data })
+        {
+            _available.UnionWith(data.Directions ?? []);
+        }
+        else
+        {
+            _error = scope.StatusMessage;
+        }
+
+        _loaded = true;
+    }
+}

@@ -60,6 +60,15 @@ public sealed class CaseStore(
             query = query.Where(c => c.InvestigatorUserId == investigatorUserId);
         }
 
+        // Отдел ОН/ОУ (ТЭ-008, ADR-0039): отметка стоит на подразделении (группы наследуют её от отдела), поэтому
+        // отбор — по подразделениям этого отдела. Это сужение внутри допуска: решётка выше уже применена (ТБ-020).
+        var directions = await ResolveDirectionsAsync(db, cancellationToken);
+        if (filter.Direction is { } direction)
+        {
+            var divisionIds = directions.Where(d => d.Value == direction).Select(d => d.Key).ToList();
+            query = query.Where(c => divisionIds.Contains(c.DivisionId));
+        }
+
         var total = await query.CountAsync(cancellationToken);
 
         var pageSize = Math.Max(1, filter.PageSize);
@@ -79,7 +88,7 @@ public sealed class CaseStore(
                 c.InitiatorUnitId))
             .ToListAsync(cancellationToken);
 
-        return new CasePage(rows, total);
+        return new CasePage(rows.Select(r => r with { Direction = DirectionOf(directions, r.DivisionId) }).ToList(), total);
     }
 
     /// <inheritdoc />
@@ -114,7 +123,8 @@ public sealed class CaseStore(
         return new CaseDetails(
             entity.Id, entity.Number, entity.Title, entity.Kind, entity.Status, entity.OpenedAt,
             entity.InvestigatorUserId, entity.DivisionId, entity.Classification, entity.Basis,
-            entity.ClosedAt, entity.CreatedAt, media, authorizations, ToTaskRequisites(entity));
+            entity.ClosedAt, entity.CreatedAt, media, authorizations, ToTaskRequisites(entity),
+            DirectionOf(await ResolveDirectionsAsync(db, cancellationToken), entity.DivisionId));
     }
 
     /// <inheritdoc />
@@ -538,6 +548,22 @@ public sealed class CaseStore(
             : null;
 
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    /// <summary>
+    /// Отдел ОН/ОУ каждого подразделения справочника (ТЭ-008, ADR-0039) — по правилу <see cref="DivisionDirections"/>.
+    /// Справочник мал (десятки строк), поэтому разбирается в памяти; рекурсивный запрос по дереву здесь не окупается.
+    /// </summary>
+    private static async Task<IReadOnlyDictionary<int, CaseDirection>> ResolveDirectionsAsync(
+        InvestigationDbContext db, CancellationToken cancellationToken)
+    {
+        var divisions = await db.Divisions.AsNoTracking()
+            .Select(d => new { d.Id, d.ParentId, d.Direction })
+            .ToListAsync(cancellationToken);
+        return DivisionDirections.Resolve(divisions.Select(d => (d.Id, d.ParentId, d.Direction)));
+    }
+
+    private static CaseDirection? DirectionOf(IReadOnlyDictionary<int, CaseDirection> directions, int divisionId) =>
+        directions.TryGetValue(divisionId, out var direction) ? direction : null;
 
     // Роль для правила видимости дел: без права «Дашборд и реестр дел» (матрица доступа, ADR-0032) — null, и
     // CaseAccessRule вернёт пусто (ТБ-012/021).

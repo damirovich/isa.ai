@@ -3,20 +3,25 @@ using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Profile.Investigation.Application.Features.Common;
+using ISC.AI.Profile.Investigation.Domain.Enums;
 using ISC.AI.Profile.Investigation.Domain.Services;
 using Mediator;
 
 namespace ISC.AI.Profile.Investigation.Application.Features.Divisions;
 
 /// <summary>Создать подразделение (корневое либо дочернее к <paramref name="ParentId"/>) (ТФ-АДМ-01).</summary>
-public sealed record CreateDivisionCommand(string Name, string? Code = null, int? ParentId = null)
+/// <remarks>
+/// <paramref name="Direction"/> — отметка отдела ОН/ОУ (ТЭ-008, ADR-0039); <see langword="null"/> — без своей отметки,
+/// отдел берётся у вышестоящего.
+/// </remarks>
+public sealed record CreateDivisionCommand(string Name, string? Code = null, int? ParentId = null, CaseDirection? Direction = null)
     : IRequest<ResponseDto<int>>, IAuditableRequest
 {
     /// <inheritdoc />
     public AuditAction AuditAction => AuditAction.Modify;
 
     /// <inheritdoc />
-    public string? AuditSummary => $"investigation:division:create:{Name}";
+    public string? AuditSummary => $"investigation:division:create:{Name}:direction={Direction?.ToString() ?? "-"}";
 
     /// <inheritdoc cref="CreateDivisionCommand" />
     public sealed class Handler(IDivisionAdminStore store, IUserRoleStore roles, ISubjectProvider subjectProvider)
@@ -36,13 +41,13 @@ public sealed record CreateDivisionCommand(string Name, string? Code = null, int
             var id = await store.CreateAsync(
                 command.Name.Trim(),
                 string.IsNullOrWhiteSpace(command.Code) ? null : command.Code.Trim(),
-                command.ParentId, cancellationToken);
+                command.ParentId, command.Direction, cancellationToken);
             return ResponseDto<int>.Ok(id);
         }
     }
 }
 
-/// <summary>Правила формы подразделения: имя обязательно ≤500; код ≤100; родитель положительный.</summary>
+/// <summary>Правила формы подразделения: имя обязательно ≤500; код ≤100; родитель положительный; отдел — ОН или ОУ.</summary>
 public sealed class CreateDivisionValidator : AbstractValidator<CreateDivisionCommand>
 {
     /// <inheritdoc cref="CreateDivisionValidator" />
@@ -51,5 +56,9 @@ public sealed class CreateDivisionValidator : AbstractValidator<CreateDivisionCo
         RuleFor(c => c.Name).NotEmpty().WithMessage("Укажите наименование подразделения.").MaximumLength(500);
         RuleFor(c => c.Code).MaximumLength(100);
         RuleFor(c => c.ParentId).GreaterThan(0).When(c => c.ParentId is not null);
+        RuleFor(c => c.Direction).IsInEnum().WithMessage(DirectionInvalid);
     }
+
+    /// <summary>Отметка вне перечня ОН/ОУ (база такую не примет — ограничение <c>ck_division_direction</c>).</summary>
+    public const string DirectionInvalid = "Отдел подразделения — ОН или ОУ.";
 }
