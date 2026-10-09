@@ -83,6 +83,12 @@ public class Division : AuditableEntity
 
     /// <summary>Действующее.</summary>
     public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// Отметка отдела ОН/ОУ (ТЭ-008, ADR-0039); <see langword="null"/> — своей отметки нет, действует отметка
+    /// ближайшего вышестоящего (см. <see cref="Services.DivisionDirections"/>). Дела подразделения относятся к этому отделу.
+    /// </summary>
+    public CaseDirection? Direction { get; set; }
 }
 
 /// <summary>Назначение роли пользователю (<c>investigation.user_role_assignment</c>, ТП-004): одна роль на пользователя, слабая ссылка на <c>core.app_user</c>.</summary>

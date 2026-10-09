@@ -19,6 +19,21 @@ public enum CaseKind
     ObjectTask = 4,
 }
 
+/// <summary>
+/// Направление работы — отдел ОПУ (ТЭ-008, ТФ-ДЕЛ-01; ТЗ Заказчика §1.3, §2.1). Отметкой направления помечается
+/// ПОДРАЗДЕЛЕНИЕ справочника (вложенные получают её от вышестоящего), а дело относится к отделу через своё
+/// подразделение — отдельного поля у дела нет (ADR-0039). Видимость дел решает допуск по подразделениям, гриф и роль
+/// (ТБ-020); отметка сама доступа не открывает и не закрывает. ОТМ — отдельный экземпляр (ТС-014) и сюда не входит.
+/// </summary>
+public enum CaseDirection
+{
+    /// <summary>ОН — оперативное наблюдение.</summary>
+    Surveillance = 1,
+
+    /// <summary>ОУ — оперативная установка.</summary>
+    Establishment = 2,
+}
+
 /// <summary>Статус дела (ТФ-ДЕЛ-01). Закрытие запускает регламент удаления шаблонов (ТФ-ДЕЛ-04, ТБ-074).</summary>
 public enum CaseStatus
 {
@@ -69,6 +84,22 @@ public static class CaseLabels
         CaseKind.OperativeMeasure => "ОРМ",
         CaseKind.ObjectTask => "Задание по объекту",
         _ => kind.ToString(),
+    };
+
+    /// <summary>Краткая подпись направления: «ОН», «ОУ».</summary>
+    public static string ShortLabel(this CaseDirection direction) => direction switch
+    {
+        CaseDirection.Surveillance => "ОН",
+        CaseDirection.Establishment => "ОУ",
+        _ => direction.ToString(),
+    };
+
+    /// <summary>Полное название направления: «Оперативное наблюдение», «Оперативная установка».</summary>
+    public static string Label(this CaseDirection direction) => direction switch
+    {
+        CaseDirection.Surveillance => "Оперативное наблюдение",
+        CaseDirection.Establishment => "Оперативная установка",
+        _ => direction.ToString(),
     };
 
     /// <summary>Подпись статуса дела.</summary>

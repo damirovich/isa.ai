@@ -11,11 +11,16 @@ namespace ISC.AI.Profile.Investigation.Application.Features.Scope;
 /// <param name="OwnerDivisions">Подразделения справочника, входящие в допуск субъекта.</param>
 /// <param name="Role">Роль профиля; <see langword="null"/> — не назначена.</param>
 /// <param name="UserId">Идентификатор пользователя ядра; <see langword="null"/> — не отображается в реестр.</param>
+/// <param name="Directions">
+/// Отделы ОН/ОУ, к которым относятся подразделения допуска (ТЭ-008, ADR-0039) — для стартовой страницы: плитка отдела
+/// активна, только если в допуске есть его подразделение. <see langword="null"/> или пусто — ни одно не отмечено.
+/// </param>
 public sealed record AccessScope(
     short MaxClassification,
     IReadOnlyList<DivisionNode> OwnerDivisions,
     InvestigationRole? Role,
-    int? UserId);
+    int? UserId,
+    IReadOnlyList<CaseDirection>? Directions = null);
 
 /// <summary>
 /// Пределы субъекта — чтобы форма дела не предлагала заведомо запрещённые гриф/подразделение (ТБ-024).
@@ -54,9 +59,20 @@ public sealed record GetAccessScopeQuery : IRequest<ResponseDto<AccessScope>>
             var userId = await subjectProvider.GetCurrentUserIdAsync(cancellationToken);
             var role = userId is { } id ? await roles.GetRoleAsync(id, cancellationToken) : null;
             var allowed = access.AllowedDivisions;
-            var own = (await divisions.ListAsync(cancellationToken)).Where(d => allowed.Contains(d.Id)).ToList();
+            var all = await divisions.ListAsync(cancellationToken);
+            var own = all.Where(d => allowed.Contains(d.Id)).ToList();
 
-            return ResponseDto<AccessScope>.Ok(new AccessScope(access.MaxClassification, own, role, userId));
+            // Отдел подразделения — с учётом вышестоящих (отметку ставят на отдел, группы её наследуют), поэтому
+            // разбирается по ВСЕМУ справочнику: вышестоящее может и не входить в допуск сотрудника.
+            var resolved = DivisionDirections.Resolve(all);
+            var directions = own
+                .Where(d => resolved.ContainsKey(d.Id))
+                .Select(d => resolved[d.Id])
+                .Distinct()
+                .Order()
+                .ToList();
+
+            return ResponseDto<AccessScope>.Ok(new AccessScope(access.MaxClassification, own, role, userId, directions));
         }
     }
 }

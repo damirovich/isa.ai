@@ -4,7 +4,8 @@
    разрешимым. Ведёт роль с правом «Подразделения и справочники» (матрица доступа, ADR-0032; режим первичной
    настройки — любой вошедший); право проверяет обработчик, отказ показывается. Родитель задаётся при создании
    («Добавить дочернее» на строке) и не меняется. Выключение — с подтверждением: видно, у скольких сотрудников
-   подразделение в допуске. *@
+   подразделение в допуске. Отдел ОН/ОУ (ТЭ-008, ADR-0039) отмечается на подразделении; вложенные без своей отметки
+   получают её от вышестоящего, и все их дела относятся к этому отделу. Отметка доступа не меняет — его решает допуск. *@
 @page "/admin/divisions"
 @rendermode InteractiveServer
 @inject IDialogService DialogService
@@ -12,6 +13,7 @@
 @using System.Net
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Profile.Investigation.Application.Features.Divisions
+@using ISC.AI.Profile.Investigation.Domain.Enums
 @using ISC.AI.Profile.Investigation.Domain.Services
 
 <PageHeader Title="Подразделения" Subtitle="Иерархия подразделений — определяет, какие дела и документы видит сотрудник по допуску"
@@ -63,12 +65,22 @@
                     @(current.Node.Users == 0 ? "ни у кого нет в допуске" : $"в допуске у сотрудников: {current.Node.Users}")
                 </MudText>
             </div>
+            @if (current.Node.Direction is { } own)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Info" Class="ma-0 division-direction"
+                         title="@($"Отдел: {own.Label()}")">@own.ShortLabel()</MudChip>
+            }
+            else if (_resolved.TryGetValue(current.Node.Id, out var inherited))
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" Class="ma-0 division-direction"
+                         title="@($"Отдел: {inherited.Label()} — по вышестоящему подразделению")">@inherited.ShortLabel()</MudChip>
+            }
             @if (!current.Node.IsActive)
             {
                 <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0">выключено</MudChip>
             }
             <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Dense="true" Disabled="_busy" aria-label="Действия">
-                <MudMenuItem Icon="@Icons.Material.Filled.Edit" OnClick="@(() => OpenRename(current.Node))">Переименовать</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.Edit" OnClick="@(() => OpenRename(current.Node))">Изменить</MudMenuItem>
                 @if (current.Node.IsActive)
                 {
                     <MudMenuItem Icon="@Icons.Material.Filled.SubdirectoryArrowRight" OnClick="@(() => OpenCreate(current.Node))">Добавить дочернее</MudMenuItem>
@@ -97,9 +109,9 @@
     </div>
 </MudPaper>
 
-@* Одна форма на создание и переименование (_formId is null → создание); родитель — только при создании. *@
+@* Одна форма на создание и изменение (_formId is null → создание); родитель — только при создании. *@
 <MudDialog @bind-Visible="_formOpen" Options="FormDialogOptions">
-    <TitleContent><MudText Typo="Typo.h6">@(_formId is null ? "Новое подразделение" : "Переименовать подразделение")</MudText></TitleContent>
+    <TitleContent><MudText Typo="Typo.h6">@(_formId is null ? "Новое подразделение" : "Изменить подразделение")</MudText></TitleContent>
     <DialogContent>
         @if (_formError is not null)
         {
@@ -122,6 +134,17 @@
                     }
                 </MudSelect>
             </MudItem>
+            <MudItem xs="12">
+                @* Своя отметка отдела; пусто — как у вышестоящего (ADR-0039). *@
+                <MudSelect T="CaseDirection?" @bind-Value="_formDirection" Label="Отдел" Variant="Variant.Outlined" Dense="true"
+                           Clearable="true" Placeholder="@InheritedPlaceholder"
+                           HelperText="Дела этого подразделения и вложенных без своей отметки относятся к выбранному отделу">
+                    @foreach (var direction in Enum.GetValues<CaseDirection>())
+                    {
+                        <MudSelectItem T="CaseDirection?" Value="@direction">@direction.ShortLabel() — @direction.Label()</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
         </MudGrid>
     </DialogContent>
     <DialogActions>
@@ -139,6 +162,7 @@
         new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true };
 
     private readonly List<DivisionNode> _nodes = [];
+    private IReadOnlyDictionary<int, CaseDirection> _resolved = new Dictionary<int, CaseDirection>();
     private readonly HashSet<int> _collapsed = [];
     private string? _search;
     private bool _showInactive = true;
@@ -151,6 +175,12 @@
     private string? _formName;
     private string? _formCode;
     private int? _formParentId;
+    private CaseDirection? _formDirection;
+
+    // Без своей отметки действует отметка вышестоящего — подсказка показывает какая.
+    private string InheritedPlaceholder => _formParentId is { } parent && _resolved.TryGetValue(parent, out var direction)
+        ? $"Как у вышестоящего: {direction.ShortLabel()}"
+        : "Не отнесено к ОН или ОУ";
 
     private IReadOnlyList<DivisionTreeRow> Rows => DivisionTree.Build(_nodes, _collapsed, _search, _showInactive);
 
@@ -197,6 +227,8 @@
             {
                 _error = response.StatusMessage;
             }
+
+            _resolved = DivisionDirections.Resolve(_nodes);
         }
         finally
         {
@@ -210,6 +242,7 @@
         _formName = null;
         _formCode = null;
         _formParentId = parent?.Id;
+        _formDirection = null;
         _formError = null;
         _formOpen = true;
     }
@@ -220,6 +253,7 @@
         _formName = node.Name;
         _formCode = node.Code;
         _formParentId = node.ParentId;
+        _formDirection = node.Direction;
         _formError = null;
         _formOpen = true;
     }
@@ -234,8 +268,8 @@
             var name = _formName.Trim();
             var code = string.IsNullOrWhiteSpace(_formCode) ? null : _formCode.Trim();
             IResponseDto response = _formId is { } id
-                ? await Dispatcher.Send(new RenameDivisionCommand(id, name, code))
-                : await Dispatcher.Send(new CreateDivisionCommand(name, code, _formParentId));
+                ? await Dispatcher.Send(new RenameDivisionCommand(id, name, code, _formDirection))
+                : await Dispatcher.Send(new CreateDivisionCommand(name, code, _formParentId, _formDirection));
             if (!response.Status)
             {
                 _formError = response.StatusMessage;

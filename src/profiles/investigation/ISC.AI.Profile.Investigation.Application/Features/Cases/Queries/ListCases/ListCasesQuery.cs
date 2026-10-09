@@ -10,7 +10,8 @@ namespace ISC.AI.Profile.Investigation.Application.Features.Cases;
 
 /// <summary>
 /// Список дел субъекта (ТФ-ДЕЛ-03): следователь — свои дела, руководитель — дела подразделения; решётка
-/// гриф/подразделение применяется хранилищем на стороне БД (ТБ-020).
+/// гриф/подразделение применяется хранилищем на стороне БД (ТБ-020). Отдел ОН/ОУ (ТЭ-008, ADR-0039) — отбор по
+/// отметке подразделений внутри допуска, а не граница доступа (см. <see cref="CaseFilter"/>).
 /// </summary>
 public sealed record ListCasesQuery(
     string? Text = null,
@@ -19,7 +20,8 @@ public sealed record ListCasesQuery(
     int? DivisionId = null,
     int? InvestigatorUserId = null,
     int Page = 1,
-    int PageSize = 25)
+    int PageSize = 25,
+    CaseDirection? Direction = null)
     : IRequest<ResponseDto<CasePage>>, IAuditableRequest
 {
     /// <inheritdoc />
@@ -30,7 +32,8 @@ public sealed record ListCasesQuery(
     public string? AuditSummary =>
         $"investigation:cases:list:text={(string.IsNullOrWhiteSpace(Text) ? "-" : "*")};kind={Kind?.ToString() ?? "-"};"
         + $"status={Status?.ToString() ?? "-"};division={DivisionId?.ToString(CultureInfo.InvariantCulture) ?? "-"};"
-        + $"investigator={InvestigatorUserId?.ToString(CultureInfo.InvariantCulture) ?? "-"}";
+        + $"investigator={InvestigatorUserId?.ToString(CultureInfo.InvariantCulture) ?? "-"};"
+        + $"direction={Direction?.ToString() ?? "-"}";
 
     /// <inheritdoc cref="ListCasesQuery" />
     public sealed class Handler(ICaseStore cases, IAccessContextProvider accessProvider)
@@ -46,7 +49,7 @@ public sealed record ListCasesQuery(
             var page = await cases.ListAsync(
                 new CaseFilter(
                     query.Text, query.Kind, query.Status, query.DivisionId, query.InvestigatorUserId,
-                    query.Page, query.PageSize),
+                    query.Page, query.PageSize, query.Direction),
                 access,
                 cancellationToken);
             return ResponseDto<CasePage>.Ok(page, page.TotalCount);

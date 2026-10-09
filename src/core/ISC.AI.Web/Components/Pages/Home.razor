@@ -3,10 +3,17 @@
 @inject IProfile Profile
 
 @* Главная хоста — доменно-НЕЙТРАЛЬНА: герб, название и подзаголовок берутся из манифеста профиля
-   (ТС-003, ТС-007). При смене профиля (напр. на «АИС ЕРП») экран меняется сам, без правок хоста. *@
+   (ТС-003, ТС-007). При смене профиля (напр. на «АИС ЕРП») экран меняется сам, без правок хоста.
+   Если профиль объявил свою главную (IProfile.HomeComponent, ADR-0039) — рисуется она: хост знает только тип. *@
 
 <PageTitle>@Profile.DisplayName</PageTitle>
 
+@if (Profile.HomeComponent is { } profileHome)
+{
+    <DynamicComponent Type="profileHome" />
+}
+else
+{
 <div class="d-flex flex-column align-center text-center my-8">
     @if (Profile.EmblemUrl is { } emblemUrl)
     {
@@ -28,6 +35,8 @@
         остаются за сотрудником.
     </MudText>
 </div>
+
+}
 
 @* Плитки-карточки модулей убраны (решение заказчика 2026-08-25): навигация — меню слева,
    дашборд — отдельный экран (/dashboard). Главная — строгая визитка с гербом. *@

@@ -70,7 +70,10 @@ public class DivisionConfiguration : IEntityTypeConfiguration<Division>
     /// <inheritdoc />
     public void Configure(EntityTypeBuilder<Division> builder)
     {
-        builder.ToTable("division", InvestigationDbContext.Schema);
+        // Отметка отдела (ТЭ-008, ADR-0039): только ОН (1) или ОУ (2); без отметки — по вышестоящему. ОТМ — не здесь:
+        // это отдельный экземпляр (ТС-014), и база экземпляра ОН/ОУ не примет значение вне перечня.
+        builder.ToTable("division", InvestigationDbContext.Schema,
+            t => t.HasCheckConstraint("ck_division_direction", "direction IS NULL OR direction IN (1, 2)"));
         builder.HasKey(e => e.Id);
 
         builder.Property(e => e.Name).HasMaxLength(500).IsRequired();

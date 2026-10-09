@@ -13,7 +13,7 @@ public sealed record SummaryEvent(string? Time, string? Place, string? Descripti
 
 /// <summary>
 /// Поля бланка (ТФ-ДДЛ-04, ADR-0031 п. 1–2). Один тип на оба вида: «Сводка ОН» заполняет <see cref="Events"/>,
-/// «Справка УН» — разделы справки; <see cref="Conclusion"/> — у обоих. Хранится в <c>jsonb</c> редакции;
+/// «Справка ОУ» — разделы справки; <see cref="Conclusion"/> — у обоих. Хранится в <c>jsonb</c> редакции;
 /// формат расширяется только ДОБАВЛЕНИЕМ полей — старые редакции читаются с новыми полями пустыми.
 /// </summary>
 /// <param name="Events">Хронология событий (сводка).</param>

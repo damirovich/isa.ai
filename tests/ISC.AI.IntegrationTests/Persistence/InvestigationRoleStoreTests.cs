@@ -180,12 +180,12 @@ public sealed class InvestigationRoleStoreTests : IAsyncLifetime
         var (factory, core) = await MigrateBothAsync();
 
         var divisions = new DivisionAdminStore(factory, core);
-        var root = await divisions.CreateAsync("Главное управление", "ГУ", parentId: null);
-        var child = await divisions.CreateAsync("Отдел № 1", null, parentId: root);
-        var retired = await divisions.CreateAsync("Расформированный", "Р", parentId: root);
+        var root = await divisions.CreateAsync("Главное управление", "ГУ", parentId: null, direction: null);
+        var child = await divisions.CreateAsync("Отдел № 1", null, parentId: root, direction: null);
+        var retired = await divisions.CreateAsync("Расформированный", "Р", parentId: root, direction: null);
         (await divisions.SetActiveAsync(retired, false)).ShouldBe(DivisionWriteResult.Ok);
         (await divisions.SetActiveAsync(999_999, false)).ShouldBe(DivisionWriteResult.NotFound);
-        (await divisions.RenameAsync(child, "Отдел № 1 (следственный)", "О1")).ShouldBe(DivisionWriteResult.Ok);
+        (await divisions.RenameAsync(child, "Отдел № 1 (следственный)", "О1", direction: null)).ShouldBe(DivisionWriteResult.Ok);
 
         await using (var db = core.CreateDbContext())
         {

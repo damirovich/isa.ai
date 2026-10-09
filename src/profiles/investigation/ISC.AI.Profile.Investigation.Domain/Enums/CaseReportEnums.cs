@@ -6,7 +6,7 @@ public enum CaseReportKind
     /// <summary>«Сводка ОН» («Жыйынтык маалыматы»): хронология событий, адреса, маршруты, лица и транспорт.</summary>
     SummaryOn = 1,
 
-    /// <summary>«Справка УН» («Аныктоо»): установочные данные, адреса, род занятий, связи, характеризующие материалы.</summary>
+    /// <summary>«Справка ОУ» («Аныктоо»): установочные данные, адреса, род занятий, связи, характеризующие материалы.</summary>
     ReferenceUn = 2,
 }
 
@@ -46,7 +46,7 @@ public static class CaseReportLabels
     public static string Label(this CaseReportKind kind) => kind switch
     {
         CaseReportKind.SummaryOn => "Сводка ОН",
-        CaseReportKind.ReferenceUn => "Справка УН",
+        CaseReportKind.ReferenceUn => "Справка ОУ",
         _ => kind.ToString(),
     };
 

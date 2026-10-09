@@ -1,0 +1,55 @@
+/* Плитки отделов стартовой страницы (ТЭ-008): доступные — нативные кнопки (Enter и пробел работают сами). */
+.home-tiles {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 16px;
+    max-width: 900px;
+}
+
+.home-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 240px;
+    min-height: 150px;
+    padding: 20px 16px;
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: 12px;
+    background: var(--mud-palette-surface);
+    color: var(--mud-palette-text-primary);
+    font: inherit;
+    text-align: center;
+}
+
+button.home-tile {
+    cursor: pointer;
+}
+
+button.home-tile:hover,
+button.home-tile:focus-visible {
+    border-color: var(--mud-palette-primary);
+    box-shadow: 0 0 0 1px var(--mud-palette-primary);
+    outline: none;
+}
+
+.home-tile-off {
+    opacity: 0.6;
+}
+
+.home-tile-code {
+    font-size: 2rem;
+    font-weight: 600;
+    line-height: 1.1;
+}
+
+.home-tile-name {
+    font-size: 1rem;
+}
+
+.home-tile-note {
+    font-size: 0.75rem;
+    color: var(--mud-palette-text-secondary);
+}

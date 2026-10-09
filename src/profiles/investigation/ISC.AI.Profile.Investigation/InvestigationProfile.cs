@@ -121,6 +121,10 @@ public sealed class InvestigationProfile : IProfile
     ];
 
     /// <inheritdoc />
+    /// <remarks>Стартовая страница ОПУ с входом в отделы ОН/ОУ по допуску (ТЭ-008, ADR-0039) вместо визитки хоста.</remarks>
+    public Type? HomeComponent => typeof(InvestigationHome);
+
+    /// <inheritdoc />
     /// <remarks>Языковых моделей профиль не использует (ADR-0021): распознавание лиц — конвейер пакета «Медиа».</remarks>
     public IReadOnlyList<IModelContributor> ModelContributors { get; } = [];
 

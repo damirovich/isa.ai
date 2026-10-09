@@ -17,7 +17,11 @@
    дела. В форме гриф и подразделение — В ПРЕДЕЛАХ допуска субъекта (GetAccessScopeQuery) и гриф
    БЕЗ умолчания (ТБ-024): это удобство, серверная проверка в CreateCaseCommand остаётся. Кнопку
    «Новое дело» видят все — право ведения дел проверяет обработчик (RoleGuard), отказ показывается.
-   У вида «Задание по объекту» форма требует реквизиты задания (ТФ-ДЕЛ-05) из справочников профиля. *@
+   У вида «Задание по объекту» форма требует реквизиты задания (ТФ-ДЕЛ-05) из справочников профиля.
+   Отдел ОН/ОУ (ТЭ-008, ADR-0039) — по подразделению дела: отметку ставят в справочнике подразделений, отдельного
+   поля у дела нет. Отбор по отделу приходит со стартовой страницы (?direction=on|ou) и сужает список внутри допуска,
+   а не открывает чужое (ТБ-020). Новое дело получает подразделение, а с ним и отдел, автоматически, если в допуске
+   одно подразделение. *@
 
 <PageHeader Title="Дела" Subtitle="Уголовные дела, материалы, ОРМ и задания по объектам · только в пределах допуска и роли"
             Icon="@Icons.Material.Filled.FolderOpen">
@@ -36,6 +40,14 @@
         <MudTextField @bind-Value="_filterText" Label="Номер, № задания или название" Variant="Variant.Outlined" Immediate="true"
                       Style="min-width:260px;" Class="flex-grow-1"
                       OnKeyDown="@(async e => { if (e.Key == "Enter") { await SearchAsync(); } })" />
+        <MudSelect T="CaseDirection?" Value="_filterDirection" ValueChanged="@(async (CaseDirection? v) => { _filterDirection = v; await SearchAsync(); })"
+                   Label="Отдел" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:170px;"
+                   Placeholder="Все отделы">
+            @foreach (var direction in Enum.GetValues<CaseDirection>())
+            {
+                <MudSelectItem T="CaseDirection?" Value="@direction">@direction.ShortLabel() — @direction.Label()</MudSelectItem>
+            }
+        </MudSelect>
         <MudSelect T="CaseKind?" Value="_filterKind" ValueChanged="@(async (CaseKind? v) => { _filterKind = v; await SearchAsync(); })"
                    Label="Вид" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:180px;">
             @foreach (var kind in Enum.GetValues<CaseKind>())
@@ -65,6 +77,7 @@
           LoadingProgressColor="Color.Primary" OnRowClick="@(row => Open(row.Item!))" RowClass="cursor-pointer">
     <HeaderContent>
         <MudTh>Номер</MudTh>
+        <MudTh>Отдел</MudTh>
         <MudTh>Название</MudTh>
         <MudTh>Вид</MudTh>
         <MudTh>Статус</MudTh>
@@ -81,6 +94,16 @@
             @if (context.TaskNumber is { } taskNumber)
             {
                 <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">задание № @taskNumber</MudText>
+            }
+        </MudTd>
+        <MudTd DataLabel="Отдел">
+            @if (context.Direction is { } direction)
+            {
+                <span title="@direction.Label()">@direction.ShortLabel()</span>
+            }
+            else
+            {
+                <span class="mud-text-secondary" title="@NoDirectionHint">—</span>
             }
         </MudTd>
         <MudTd DataLabel="Название">@context.Title</MudTd>
@@ -143,8 +166,9 @@
                 <MudTextField @bind-Value="_formTitle" Label="Название *" Variant="Variant.Outlined" MaxLength="@CreateCaseValidator.MaxTitleLength" Immediate="true" />
             </MudItem>
             <MudItem xs="12" sm="6">
+                @* Отдел дела — по подразделению (ADR-0039): подсказка показывает, к какому отделу оно отнесётся. *@
                 <MudSelect T="int?" @bind-Value="_formDivisionId" Label="Подразделение *" Variant="Variant.Outlined" Dense="true"
-                           Placeholder="Из вашего допуска" Disabled="_scope is null">
+                           Placeholder="Из вашего допуска" Disabled="_scope is null" HelperText="@FormDirectionHint">
                     @foreach (var d in _ownerDivisions)
                     {
                         <MudSelectItem T="int?" Value="@d.Id">@d.Name</MudSelectItem>
@@ -208,6 +232,16 @@
     private CaseKind? _filterKind;
     private CaseStatus? _filterStatus;
     private int? _filterDivisionId;
+
+    // Отбор по отделу ОН/ОУ (ADR-0039): null — все отделы допуска.
+    private CaseDirection? _filterDirection;
+    private IReadOnlyDictionary<int, CaseDirection> _divisionDirections = new Dictionary<int, CaseDirection>();
+
+    private const string NoDirectionHint = "Подразделение дела не отнесено к ОН или ОУ — отметьте его в справочнике подразделений";
+
+    /// <summary>Отдел со стартовой страницы: <c>?direction=on</c> или <c>?direction=ou</c> (см. <see cref="DirectionQuery"/>).</summary>
+    [SupplyParameterFromQuery(Name = DirectionQuery.Name)]
+    public string? DirectionParameter { get; set; }
     private int _page = 1;
     private int _total;
     private bool _busy = true; // «загрузка…» до первой интерактивной загрузки (предрендер данных не грузит)
@@ -252,9 +286,14 @@
         // таблица показывает состояние «загрузка…» (_busy = true с начала).
         if (!RendererInfo.IsInteractive) { return; }
 
+        // Отдел со стартовой страницы (ТЭ-008); дальше его меняют отбором «Отдел».
+        _filterDirection = DirectionQuery.Parse(DirectionParameter);
+
         var divisions = await Dispatcher.Send(new ListDivisionsQuery());
         if (divisions is { Status: true, Data: { } list })
         {
+            // Отдел — по всему справочнику: отметку несёт и выключенное вышестоящее.
+            _divisionDirections = DivisionDirections.Resolve(list);
             _divisions.AddRange(list.Where(d => d.IsActive));
         }
 
@@ -292,7 +331,7 @@
         try
         {
             var response = await Dispatcher.Send(new ListCasesQuery(
-                _filterText, _filterKind, _filterStatus, _filterDivisionId, null, _page, PageSize));
+                _filterText, _filterKind, _filterStatus, _filterDivisionId, null, _page, PageSize, _filterDirection));
             _rows.Clear();
             if (response is { Status: true, Data: { } data })
             {
@@ -321,6 +360,13 @@
     }
 
     private void Open(CaseRow row) => Navigation.NavigateTo($"/cases/{row.Id}");
+
+    // Подсказка под подразделением в форме: к какому отделу отнесётся дело (ADR-0039).
+    private string? FormDirectionHint => _formDivisionId is not { } id
+        ? null
+        : _divisionDirections.TryGetValue(id, out var direction)
+            ? $"Отдел: {direction.ShortLabel()} — {direction.Label()}"
+            : "Подразделение не отнесено к ОН или ОУ";
 
     private async Task OpenCreateAsync()
     {

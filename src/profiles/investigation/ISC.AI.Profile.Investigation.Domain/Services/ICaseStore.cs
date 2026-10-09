@@ -44,6 +44,11 @@ public sealed record CaseDraft(
     TaskRequisites? TaskRequisites = null);
 
 /// <summary>Фильтр списка дел.</summary>
+/// <remarks>
+/// <paramref name="Direction"/> — отдел ОН/ОУ (ТЭ-008, ADR-0039): дела подразделений, отнесённых к этому отделу
+/// (своей отметкой или через вышестоящее). Это отбор внутри допуска, а не граница доступа: чужие подразделения уже
+/// отсекла решётка (ТБ-020).
+/// </remarks>
 public sealed record CaseFilter(
     string? Text = null,
     CaseKind? Kind = null,
@@ -51,9 +56,14 @@ public sealed record CaseFilter(
     int? DivisionId = null,
     int? InvestigatorUserId = null,
     int Page = 1,
-    int PageSize = 25);
+    int PageSize = 25,
+    CaseDirection? Direction = null);
 
 /// <summary>Строка списка дел; у задания — ещё № задания и подразделение-инициатор (ТФ-ДЕЛ-05).</summary>
+/// <remarks>
+/// <paramref name="Direction"/> — отдел ОН/ОУ по подразделению дела (ADR-0039); <see langword="null"/> — подразделение
+/// не отнесено к отделу.
+/// </remarks>
 public sealed record CaseRow(
     int Id,
     string Number,
@@ -67,12 +77,17 @@ public sealed record CaseRow(
     int MediaCount,
     int PersonCount,
     string? TaskNumber = null,
-    int? InitiatorUnitId = null);
+    int? InitiatorUnitId = null,
+    CaseDirection? Direction = null);
 
 /// <summary>Страница дел.</summary>
 public sealed record CasePage(IReadOnlyList<CaseRow> Rows, int TotalCount);
 
 /// <summary>Карточка дела (ТФ-ДЕЛ-02).</summary>
+/// <remarks>
+/// <paramref name="Direction"/> — отдел ОН/ОУ по подразделению дела (ADR-0039); <see langword="null"/> — подразделение
+/// не отнесено к отделу.
+/// </remarks>
 public sealed record CaseDetails(
     int Id,
     string Number,
@@ -88,7 +103,8 @@ public sealed record CaseDetails(
     DateTime CreatedAt,
     IReadOnlyList<CaseMediaLinkRow> Media,
     IReadOnlyList<SearchAuthorizationRow> Authorizations,
-    TaskRequisites? TaskRequisites = null);
+    TaskRequisites? TaskRequisites = null,
+    CaseDirection? Direction = null);
 
 /// <summary>Привязанный носитель (идентификатор в схеме <c>media</c> — по значению).</summary>
 public sealed record CaseMediaLinkRow(int MediaAssetId, string? Place, int? LinkedByUserId, DateTime LinkedAt);

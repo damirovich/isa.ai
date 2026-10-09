@@ -61,6 +61,11 @@ else if (_case is null)
 else
 {
     <PageHeader Title="@($"Дело {_case.Number}")" Subtitle="@_case.Title" Icon="@Icons.Material.Filled.FolderOpen">
+        @* Отдел ОН/ОУ — по подразделению дела (ТЭ-008, ADR-0039); у неотмеченного подразделения чипа нет. *@
+        @if (_case.Direction is { } caseDirection)
+        {
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" title="@caseDirection.Label()">@caseDirection.ShortLabel()</MudChip>
+        }
         <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@_case.Kind.Label()</MudChip>
         <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@Dashboard.StatusColor(_case.Status)">@_case.Status.Label()</MudChip>
         <ClassificationChip Value="@_case.Classification" Prefix="гриф " />
@@ -90,6 +95,7 @@ else
                 <MudSimpleTable Dense="true" Elevation="0" Class="requisites">
                     <tbody>
                         <tr><td class="mud-text-secondary">Номер</td><td>@_case.Number</td></tr>
+                        <tr><td class="mud-text-secondary">Отдел</td><td>@(_case.Direction is { } direction ? $"{direction.ShortLabel()} — {direction.Label()}" : "подразделение не отнесено к ОН или ОУ")</td></tr>
                         <tr><td class="mud-text-secondary">Вид</td><td>@_case.Kind.Label()</td></tr>
                         <tr><td class="mud-text-secondary">Дата открытия</td><td>@_case.OpenedAt.ToString("dd.MM.yyyy")</td></tr>
                         <tr><td class="mud-text-secondary">Следователь</td><td>@UserName(_case.InvestigatorUserId)</td></tr>
