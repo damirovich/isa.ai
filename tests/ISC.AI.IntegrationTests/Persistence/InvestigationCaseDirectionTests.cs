@@ -83,10 +83,23 @@ public sealed class InvestigationCaseDirectionTests : IAsyncLifetime
         // Без роли — ничего (default-deny), отбор этого не меняет.
         (await Numbers(new CaseFilter(Direction: CaseDirection.Establishment), InvestigationTestKit.Access(99, 9, ou))).ShouldBeEmpty();
 
-        // База не принимает отметок, кроме ОН (1) и ОУ (2).
+        // ОТМ (ТС-014, решение от 12.10.2026): третий отдел той же базы с логическим разделением. Без допуска к его
+        // подразделениям дела ОТМ не видны ни в каком отборе и не открываются; руководитель ОТМ видит только их.
+        var otm = await divisions.CreateAsync("Отдел ОТМ", "ОТМ", root, CaseDirection.Technical);
+        var otmCase = await store.CreateAsync(InvestigationTestKit.Draft("ОТМ-1", otm, 1, 10), InvestigationTestKit.Access(10, 9, otm));
+        (await Numbers(new CaseFilter(), owner)).ShouldNotContain("ОТМ-1");
+        (await Numbers(new CaseFilter(Direction: CaseDirection.Technical), owner)).ShouldBeEmpty();
+        (await store.GetAsync(otmCase.CaseId, owner)).ShouldBeNull();
+
+        var otmHead = InvestigationTestKit.Access(20, 9, otm);
+        (await Numbers(new CaseFilter(), otmHead)).ShouldBe(["ОТМ-1"]);
+        (await Numbers(new CaseFilter(Direction: CaseDirection.Technical), otmHead)).ShouldBe(["ОТМ-1"]);
+        (await store.GetAsync(otmCase.CaseId, otmHead)).ShouldNotBeNull().Direction.ShouldBe(CaseDirection.Technical);
+
+        // База принимает только ОН (1), ОУ (2) и ОТМ (3).
         await using var db = factory.CreateDbContext();
         var violation = await Should.ThrowAsync<PostgresException>(() =>
-            db.Database.ExecuteSqlInterpolatedAsync($"UPDATE investigation.division SET direction = 3 WHERE id = {on}"));
+            db.Database.ExecuteSqlInterpolatedAsync($"UPDATE investigation.division SET direction = 4 WHERE id = {on}"));
         violation.ConstraintName.ShouldBe("ck_division_direction");
     }
 }

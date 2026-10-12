@@ -675,7 +675,7 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
 
                     b.ToTable("division", "investigation", t =>
                         {
-                            t.HasCheckConstraint("ck_division_direction", "direction IS NULL OR direction IN (1, 2)");
+                            t.HasCheckConstraint("ck_division_direction", "direction IS NULL OR direction IN (1, 2, 3)");
                         });
                 });
 

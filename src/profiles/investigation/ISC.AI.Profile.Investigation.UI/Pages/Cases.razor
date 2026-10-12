@@ -237,7 +237,7 @@
     private CaseDirection? _filterDirection;
     private IReadOnlyDictionary<int, CaseDirection> _divisionDirections = new Dictionary<int, CaseDirection>();
 
-    private const string NoDirectionHint = "Подразделение дела не отнесено к ОН или ОУ — отметьте его в справочнике подразделений";
+    private const string NoDirectionHint = "Подразделение дела не отнесено ни к одному отделу — отметьте его в справочнике подразделений";
 
     /// <summary>Отдел со стартовой страницы: <c>?direction=on</c> или <c>?direction=ou</c> (см. <see cref="DirectionQuery"/>).</summary>
     [SupplyParameterFromQuery(Name = DirectionQuery.Name)]
@@ -366,7 +366,7 @@
         ? null
         : _divisionDirections.TryGetValue(id, out var direction)
             ? $"Отдел: {direction.ShortLabel()} — {direction.Label()}"
-            : "Подразделение не отнесено к ОН или ОУ";
+            : "Подразделение не отнесено ни к одному отделу";
 
     private async Task OpenCreateAsync()
     {

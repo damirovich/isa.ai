@@ -23,7 +23,8 @@ public enum CaseKind
 /// Направление работы — отдел ОПУ (ТЭ-008, ТФ-ДЕЛ-01; ТЗ Заказчика §1.3, §2.1). Отметкой направления помечается
 /// ПОДРАЗДЕЛЕНИЕ справочника (вложенные получают её от вышестоящего), а дело относится к отделу через своё
 /// подразделение — отдельного поля у дела нет (ADR-0039). Видимость дел решает допуск по подразделениям, гриф и роль
-/// (ТБ-020); отметка сама доступа не открывает и не закрывает. ОТМ — отдельный экземпляр (ТС-014) и сюда не входит.
+/// (ТБ-020); отметка сама доступа не открывает и не закрывает. ОН, ОУ и ОТМ Офиса №1 — одна база с логическим
+/// разделением (ТС-014, решение от 12.10.2026): дела ОТМ видит только тот, кому выдан допуск к подразделениям ОТМ.
 /// </summary>
 public enum CaseDirection
 {
@@ -32,6 +33,9 @@ public enum CaseDirection
 
     /// <summary>ОУ — оперативная установка.</summary>
     Establishment = 2,
+
+    /// <summary>ОТМ — оперативно-технические мероприятия.</summary>
+    Technical = 3,
 }
 
 /// <summary>Статус дела (ТФ-ДЕЛ-01). Закрытие запускает регламент удаления шаблонов (ТФ-ДЕЛ-04, ТБ-074).</summary>
@@ -86,19 +90,21 @@ public static class CaseLabels
         _ => kind.ToString(),
     };
 
-    /// <summary>Краткая подпись направления: «ОН», «ОУ».</summary>
+    /// <summary>Краткая подпись направления: «ОН», «ОУ», «ОТМ».</summary>
     public static string ShortLabel(this CaseDirection direction) => direction switch
     {
         CaseDirection.Surveillance => "ОН",
         CaseDirection.Establishment => "ОУ",
+        CaseDirection.Technical => "ОТМ",
         _ => direction.ToString(),
     };
 
-    /// <summary>Полное название направления: «Оперативное наблюдение», «Оперативная установка».</summary>
+    /// <summary>Полное название направления: «Оперативное наблюдение», «Оперативная установка», «Оперативно-технические мероприятия».</summary>
     public static string Label(this CaseDirection direction) => direction switch
     {
         CaseDirection.Surveillance => "Оперативное наблюдение",
         CaseDirection.Establishment => "Оперативная установка",
+        CaseDirection.Technical => "Оперативно-технические мероприятия",
         _ => direction.ToString(),
     };
 

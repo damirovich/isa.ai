@@ -52,7 +52,7 @@ public sealed record RenameDivisionCommand(int Id, string Name, string? Code = n
 /// <inheritdoc cref="CreateDivisionValidator" />
 public sealed class RenameDivisionValidator : AbstractValidator<RenameDivisionCommand>
 {
-    /// <summary>Идентификатор положительный; имя обязательно ≤500; код ≤100; отдел — ОН или ОУ.</summary>
+    /// <summary>Идентификатор положительный; имя обязательно ≤500; код ≤100; отдел — ОН, ОУ или ОТМ.</summary>
     public RenameDivisionValidator()
     {
         RuleFor(c => c.Id).GreaterThan(0);

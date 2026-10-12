@@ -69,7 +69,7 @@ public sealed class CaseDirectionUiTests : BunitContext, IAsyncLifetime
     private void Scope(IReadOnlyList<DivisionNode> owner, params CaseDirection[] directions) =>
         RespondOk<GetAccessScopeQuery, AccessScope>(new AccessScope(2, owner, InvestigationRole.Investigator, 7, directions));
 
-    [Fact(DisplayName = "Стартовая страница: «Оперативно-поисковое управление»; ОН в допуске — кнопка, ОУ — «Нет в вашем допуске», ОТМ — без перехода")]
+    [Fact(DisplayName = "Стартовая страница: «Оперативно-поисковое управление»; ОН в допуске — кнопка, ОУ и ОТМ — «Нет в вашем допуске»")]
     public void Home_enables_only_departments_in_clearance()
     {
         Scope([OnGroup], CaseDirection.Surveillance);
@@ -81,10 +81,23 @@ public sealed class CaseDirectionUiTests : BunitContext, IAsyncLifetime
         var off = cut.FindAll(".home-tile-off");
         off.Select(t => t.QuerySelector(".home-tile-code")!.TextContent).ShouldBe(["ОУ", "ОТМ"]);
         off.ShouldAllBe(t => t.TagName == "DIV"); // не кнопка и не ссылка
-        off[0].TextContent.ShouldContain("Нет в вашем допуске");
-        off[1].TextContent.ShouldContain("Вход с рабочих мест контура ОТМ");
-        // Единственная ссылка — «Все доступные дела»: в контур ОТМ страница не ведёт.
+        off.ShouldAllBe(t => t.TextContent.Contains("Нет в вашем допуске"));
+        cut.Markup.ShouldNotContain("Вход с рабочих мест контура ОТМ");
         cut.FindAll("a").Select(a => a.GetAttribute("href")).ShouldBe(["/cases"]);
+    }
+
+    [Fact(DisplayName = "ОТМ (решение от 12.10.2026): подразделение ОТМ в допуске — плитка ОТМ активна и открывает /cases?direction=otm")]
+    public void Otm_tile_works_by_clearance_like_others()
+    {
+        Scope([OnGroup], CaseDirection.Technical);
+        var cut = Render<InvestigationHome>();
+
+        cut.FindAll("button.home-tile").Select(b => b.QuerySelector(".home-tile-code")!.TextContent).ShouldBe(["ОТМ"]);
+        cut.FindAll(".home-tile-off").Select(t => t.QuerySelector(".home-tile-code")!.TextContent).ShouldBe(["ОН", "ОУ"]);
+
+        cut.Find("button.home-tile").Click();
+
+        Services.GetRequiredService<NavigationManager>().Uri.ShouldEndWith("/cases?direction=otm");
     }
 
     [Fact(DisplayName = "Плитка ОН открывает список дел с отбором по отделу: /cases?direction=on")]
@@ -98,7 +111,7 @@ public sealed class CaseDirectionUiTests : BunitContext, IAsyncLifetime
         Services.GetRequiredService<NavigationManager>().Uri.ShouldEndWith("/cases?direction=on");
     }
 
-    [Fact(DisplayName = "Подразделения допуска не отнесены к отделам — обе плитки неактивны и есть подсказка обратиться к администратору")]
+    [Fact(DisplayName = "Подразделения допуска не отнесены к отделам — все три плитки неактивны и есть подсказка обратиться к администратору")]
     public void Home_explains_unmarked_divisions()
     {
         Scope([Root]);
@@ -106,7 +119,8 @@ public sealed class CaseDirectionUiTests : BunitContext, IAsyncLifetime
         var cut = Render<InvestigationHome>();
 
         cut.FindAll("button.home-tile").ShouldBeEmpty();
-        cut.Markup.ShouldContain("не отнесены ни к ОН, ни к ОУ");
+        // Текст подсказки переносится строкой — сравниваем с пробелами, как показывает браузер.
+        System.Text.RegularExpressions.Regex.Replace(cut.Markup, @"\s+", " ").ShouldContain("не отнесены ни к одному отделу — ОН, ОУ или ОТМ");
     }
 
     [Fact(DisplayName = "Список дел: отбор по отделу из адреса (?direction=ou); отдел дела — по подразделению, неотмеченное — прочерк")]
@@ -122,7 +136,7 @@ public sealed class CaseDirectionUiTests : BunitContext, IAsyncLifetime
         var cells = cut.FindAll("td[data-label='Отдел']");
         cells[0].TextContent.Trim().ShouldBe("ОН");
         cells[1].TextContent.Trim().ShouldBe("—");
-        cells[1].QuerySelector("span")!.GetAttribute("title")!.ShouldContain("не отнесено к ОН или ОУ");
+        cells[1].QuerySelector("span")!.GetAttribute("title")!.ShouldContain("не отнесено ни к одному отделу");
     }
 
     [Fact(DisplayName = "Новое дело: единственное подразделение допуска подставлено само и показывает отдел «ОН» (по вышестоящему)")]
