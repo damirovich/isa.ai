@@ -18,6 +18,9 @@ public sealed partial class MediaStore(
     IDbContextFactory<MediaDbContext> contextFactory,
     IFileStorage fileStorage) : IMediaStore
 {
+    /// <summary>Буфер копирования при приёме — 1 МБ: файл в гигабайты не держится в памяти (ADR-0040).</summary>
+    private const int CopyBufferBytes = 1024 * 1024;
+
     /// <inheritdoc />
     public async Task<MediaAssetReceipt> ReceiveAsync(
         MediaAssetDraft draft, Stream content, CancellationToken cancellationToken = default)
@@ -25,19 +28,28 @@ public sealed partial class MediaStore(
         ArgumentNullException.ThrowIfNull(draft);
         ArgumentNullException.ThrowIfNull(content);
 
-        // Хеш считается по ПОЛНОМУ потоку до записи: дубликат не должен занимать место на диске.
-        // Поток буферизуется во временный файл, чтобы читать дважды (сеть/браузер не перематываются).
+        // Хеш считается по ПОЛНОМУ потоку до записи в хранилище: дубликат не должен занимать место на диске.
+        // Поток буферизуется во временный файл (сеть/браузер не перематываются), а хеш считается ПО ХОДУ записи —
+        // файл в гигабайты не перечитывается ради хеша (ADR-0040). В памяти — только буфер копирования.
         var tempPath = Path.Combine(Path.GetTempPath(), "iscai-media-" + Guid.NewGuid().ToString("N"));
         try
         {
             string hash;
             long size;
-            await using (var temp = File.Create(tempPath))
+            await using (var temp = new FileStream(
+                tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, CopyBufferBytes, FileOptions.Asynchronous))
+            using (var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256))
             {
-                await content.CopyToAsync(temp, cancellationToken);
+                var buffer = new byte[CopyBufferBytes];
+                int read;
+                while ((read = await content.ReadAsync(buffer, cancellationToken)) > 0)
+                {
+                    hasher.AppendData(buffer, 0, read);
+                    await temp.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                }
+
                 size = temp.Length;
-                temp.Position = 0;
-                hash = Convert.ToHexString(await SHA256.HashDataAsync(temp, cancellationToken));
+                hash = Convert.ToHexString(hasher.GetHashAndReset());
             }
 
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);

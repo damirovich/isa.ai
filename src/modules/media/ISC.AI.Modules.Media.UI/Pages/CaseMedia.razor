@@ -7,12 +7,17 @@
    «Поиск по расшифровкам дела» — слова в расшифровках носителей ЭТОГО дела (SearchTranscriptsQuery: решётка на
    стороне БД, сужение по делу, запрос аудируется, ТБ-020/021/030/071), выдача — фрагменты с переходом к месту
    записи в карточке (?t=<мс>). Найденное выделяется разбиением строки (TranscriptHighlight), НЕ MarkupString:
-   текст фрагмента и искомое — пользовательские данные. *@
+   текст фрагмента и искомое — пользовательские данные.
+   БОЛЬШИЕ ФАЙЛЫ (ADR-0040): файл уходит в команду потоком, без чтения в память; предел — по виду носителя
+   (MediaUploadOptions); ход загрузки показывается полосой, загрузку можно остановить, уход со страницы её прерывает. *@
 @page "/media/cases/{CaseId:int}"
 @rendermode InteractiveServer
 @implements IAsyncDisposable
 @inject NavigationManager Navigation
+@inject MediaUploadOptions UploadOptions
+@using System.Diagnostics
 @using System.Globalization
+@using ISC.AI.Modules.Media.Application
 @using Microsoft.AspNetCore.Components.Forms
 @using ISC.AI.Modules.Media.Application.Features.Assets
 @using ISC.AI.Modules.Media.Application.Features.Scope
@@ -101,7 +106,8 @@ else
                 (в браузере воспроизводятся только .mp4/.webm; остальные — скачать в проигрыватель; голосовые .3gp без картинки
                 распознаются как аудио автоматически).
                 Аудио: @MediaUploadTypes.AudioExtensionsHint (AMR браузер не воспроизводит — только скачать; расшифровываются все).
-                До 20 файлов за раз, каждый не более @MediaLabels.FormatSize(MediaFileRules.MaxFileBytes).
+                До 20 файлов за раз. Фото — не более @MediaFileRules.DescribeSize(MediaFileRules.MaxImageBytes),
+                видео и аудио — не более @MediaFileRules.DescribeSize(UploadOptions.MaxStreamedFileBytes).
             </MudText>
         </div>
 
@@ -176,7 +182,22 @@ else
             </div>
         }
 
-        @if (_busy)
+        @if (_busy && _uploadTotalBytes > 0)
+        {
+            @* Ход загрузки текущего файла (ADR-0040): для файла в гигабайты загрузка идёт минутами. *@
+            <div class="my-2">
+                <MudProgressLinear Color="Color.Primary" Value="@UploadPercent" />
+                <div class="d-flex align-center gap-3 flex-wrap mt-1">
+                    <MudText Typo="Typo.caption">
+                        Загружается «@_uploadFileName» (@_uploadIndex из @_uploadCount):
+                        @MediaFileRules.DescribeSize(_uploadedBytes) из @MediaFileRules.DescribeSize(_uploadTotalBytes)
+                    </MudText>
+                    <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error" OnClick="StopUpload"
+                               Disabled="@(_uploadCancellation?.IsCancellationRequested ?? true)">Остановить загрузку</MudButton>
+                </div>
+            </div>
+        }
+        else if (_busy)
         {
             <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-2" />
         }
@@ -382,6 +403,17 @@ else
     private readonly List<UploadOutcome> _uploadResults = [];
     private readonly ComponentPoller _poller = new(TimeSpan.FromSeconds(5));
 
+    // Ход загрузки (ADR-0040): текущий файл, его объём и прочитанное; экран обновляется не чаще раза в 300 мс.
+    private CancellationTokenSource? _uploadCancellation;
+    private string? _uploadFileName;
+    private int _uploadIndex;
+    private int _uploadCount;
+    private long _uploadedBytes;
+    private long _uploadTotalBytes;
+    private readonly Stopwatch _uploadRedraw = new();
+
+    private double UploadPercent => _uploadTotalBytes > 0 ? Math.Min(100d, _uploadedBytes * 100d / _uploadTotalBytes) : 0d;
+
     private CaseScopeItem? _case;
     private bool _caseChecked;
     private bool _busy;
@@ -543,7 +575,8 @@ else
         try
         {
             var head = new byte[(int)Math.Min(CaptureTimeProbe.HeadBytes, file.Size)];
-            await using var stream = file.OpenReadStream(MediaFileRules.MaxFileBytes);
+            // Предел чтения — сам размер файла: читается только начало, а файл бывает в гигабайты (ADR-0040).
+            await using var stream = file.OpenReadStream(Math.Max(1, file.Size));
             var read = await stream.ReadAtLeastAsync(head, head.Length, throwOnEndOfStream: false);
             return CaptureTimeProbe.TryRead(head.AsSpan(0, read), TimeZoneInfo.Local, DateTimeOffset.UtcNow);
         }
@@ -572,32 +605,52 @@ else
         _busy = true;
         _error = null;
         _uploadResults.Clear();
+        _uploadCancellation?.Dispose();
+        _uploadCancellation = new CancellationTokenSource();
+        var cancellation = _uploadCancellation.Token;
+        var queue = _pendingFiles.ToList();
+        _uploadCount = queue.Count;
+        _uploadIndex = 0;
         try
         {
-            foreach (var pending in _pendingFiles.ToList())
+            foreach (var pending in queue)
             {
                 var file = pending.File;
+                _uploadIndex++;
+                if (cancellation.IsCancellationRequested)
+                {
+                    _uploadResults.Add(new UploadOutcome(file.Name, false, false, "загрузка остановлена — файл не отправлен", null));
+                    continue;
+                }
+
                 // Столбец captured_at — timestamptz: Npgsql принимает DateTimeOffset ТОЛЬКО со смещением 0 —
                 // местные дата и время переводятся в UTC (PendingUpload.CapturedAtUtc), показ — ToLocalTime.
                 var capturedAt = pending.CapturedAtUtc;
+
+                // Тип — от браузера; если он пуст или не из allowlist (голосовые .amr, .3gp без типа) — тип по
+                // расширению (MediaUploadTypes: звук; .3gp — видео, голосовой 3GP без картинки индексатор сам
+                // переведёт в аудио). Семейство файла сервер всё равно проверяет по байтам (ТС-010).
+                var contentType = MediaUploadTypes.Resolve(file.Name, file.ContentType);
+                var maxBytes = UploadOptions.MaxBytesFor(MediaFileRules.KindOf(contentType) ?? MediaKind.Image);
+                if (file.Size > maxBytes)
+                {
+                    _uploadResults.Add(new UploadOutcome(file.Name, false, false,
+                        $"файл больше допустимых {MediaFileRules.DescribeSize(maxBytes)}", null));
+                    continue;
+                }
+
+                BeginFileProgress(file);
                 try
                 {
-                    // Предел размера — из правил пакета; OpenReadStream без maxAllowedSize ограничен 512 КБ.
-                    byte[] content;
-                    using (var buffer = new MemoryStream())
-                    {
-                        await using var stream = file.OpenReadStream(MediaFileRules.MaxFileBytes);
-                        await stream.CopyToAsync(buffer);
-                        content = buffer.ToArray();
-                    }
-
-                    // Тип — от браузера; если он пуст или не из allowlist (голосовые .amr, .3gp без типа) — тип по
-                    // расширению (MediaUploadTypes: звук; .3gp — видео, голосовой 3GP без картинки индексатор сам
-                    // переведёт в аудио). Семейство файла сервер всё равно проверяет по байтам (ТС-010).
+                    // Поток из браузера идёт в команду как есть (ADR-0040): сервер читает его по частям и пишет во
+                    // временный файл, в памяти файл целиком не бывает. Предел потока — заявленный размер файла:
+                    // больше браузер не пришлёт, а настоящий предел проверяет команда.
+                    await using var browserStream = file.OpenReadStream(Math.Max(1, file.Size), cancellation);
+                    await using var stream = new ProgressReadStream(browserStream, OnUploadProgress);
                     var response = await Dispatcher.Send(new UploadMediaCommand(
-                        CaseId, file.Name, MediaUploadTypes.Resolve(file.Name, file.ContentType), content,
+                        CaseId, file.Name, contentType, MediaUploadContent.FromStream(stream, file.Size),
                         string.IsNullOrWhiteSpace(_source) ? null : _source, capturedAt,
-                        string.IsNullOrWhiteSpace(_place) ? null : _place));
+                        string.IsNullOrWhiteSpace(_place) ? null : _place), cancellation);
 
                     if (response is { Status: true, Data: { } receipt })
                     {
@@ -610,21 +663,56 @@ else
                         _uploadResults.Add(new UploadOutcome(file.Name, false, false, response.StatusMessage, null));
                     }
                 }
+                catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+                {
+                    // Остановлено человеком или уходом со страницы: временный файл сервер уже удалил, в деле ничего нет.
+                    _uploadResults.Add(new UploadOutcome(file.Name, false, false, "загрузка остановлена — файл не принят", null));
+                }
                 catch (IOException)
                 {
-                    // Blazor бросает IOException при превышении maxAllowedSize — говорим человеку, а не «поток».
+                    // Чтение из браузера прервалось (вкладка, сеть) или сервер не смог записать временный файл.
                     _uploadResults.Add(new UploadOutcome(file.Name, false, false,
-                        $"файл больше допустимых {MediaLabels.FormatSize(MediaFileRules.MaxFileBytes)} или не прочитан", null));
+                        "файл не прочитан до конца: прервалась связь с браузером или не хватило места на сервере", null));
+                }
+                catch (JSDisconnectedException)
+                {
+                    _uploadResults.Add(new UploadOutcome(file.Name, false, false, "связь с браузером прервалась — файл не принят", null));
                 }
             }
         }
         finally
         {
             _busy = false;
+            _uploadTotalBytes = 0;
+            _uploadFileName = null;
         }
 
         await ReloadAsync();
     }
+
+    /// <summary>Начало загрузки очередного файла: имя и объём для полосы хода.</summary>
+    private void BeginFileProgress(IBrowserFile file)
+    {
+        _uploadFileName = file.Name;
+        _uploadTotalBytes = Math.Max(1, file.Size);
+        _uploadedBytes = 0;
+        _uploadRedraw.Restart();
+        StateHasChanged();
+    }
+
+    /// <summary>Прочитано ещё сколько-то байтов: экран перерисовывается не чаще раза в 300 мс.</summary>
+    private void OnUploadProgress(long readBytes)
+    {
+        _uploadedBytes = readBytes;
+        if (_uploadRedraw.ElapsedMilliseconds >= 300 || readBytes >= _uploadTotalBytes)
+        {
+            _uploadRedraw.Restart();
+            _ = InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>Кнопка «Остановить загрузку»: текущий файл прерывается, оставшиеся не отправляются.</summary>
+    private void StopUpload() => _uploadCancellation?.Cancel();
 
     private async Task ReindexAsync(int assetId)
     {
@@ -749,6 +837,13 @@ else
 
     public async ValueTask DisposeAsync()
     {
+        // Уход со страницы прерывает загрузку: иначе многогигабайтный поток читался бы для закрытой вкладки.
+        if (_uploadCancellation is not null)
+        {
+            await _uploadCancellation.CancelAsync();
+            _uploadCancellation.Dispose();
+        }
+
         await _poller.DisposeAsync();
         if (_mediaModule is not null)
         {

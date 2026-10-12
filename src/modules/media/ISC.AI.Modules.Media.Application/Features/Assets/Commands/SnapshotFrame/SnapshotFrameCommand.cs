@@ -132,8 +132,8 @@ public sealed record SnapshotFrameCommand(int AssetId, long TimestampMs)
             string? tempPath = null;
             try
             {
-                // Оригинал читается НА МЕСТЕ (ADR-0028 п.4): ffmpeg получает путь только на чтение, без копии до
-                // 200 МБ. Хранилище без локальных путей — временная копия в управляемом каталоге: удаляется в
+                // Оригинал читается НА МЕСТЕ (ADR-0028 п.4): ffmpeg получает путь только на чтение, без копии
+                // файла в гигабайты (ADR-0040). Хранилище без локальных путей — временная копия в управляемом каталоге: удаляется в
                 // finally, а после аварийной остановки хоста — уборкой при старте (ТБ-064).
                 var path = fileLocator?.TryGetLocalPath(asset.StoredFileName, MediaFileCategories.Originals, subPath);
                 if (path is null)

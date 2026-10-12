@@ -1,10 +1,15 @@
+using System;
 using FluentValidation;
 using ISC.AI.Modules.Media.Domain.Model;
 
 namespace ISC.AI.Modules.Media.Application.Features.Assets;
 
 /// <summary>Правила загрузки носителя (ТС-010, ТФ-МЕД-01; аудио — ADR-0026): дело, имя, allowlist формата, размер, длины реквизитов.</summary>
-/// <remarks>Пределы длин — публичные константы: интерфейс берёт <c>MaxLength</c> отсюда, а не дублирует числа.</remarks>
+/// <remarks>
+/// Пределы длин — публичные константы: интерфейс берёт <c>MaxLength</c> отсюда, а не дублирует числа. Предел размера —
+/// по виду носителя (<see cref="MediaUploadOptions"/>, ADR-0040); здесь проверяется заявленная длина, фактическую
+/// проверяет обработчик при чтении.
+/// </remarks>
 public sealed class UploadMediaValidator : AbstractValidator<UploadMediaCommand>
 {
     /// <summary>Предел длины поля «Источник/происхождение».</summary>
@@ -15,7 +20,16 @@ public sealed class UploadMediaValidator : AbstractValidator<UploadMediaCommand>
 
     /// <inheritdoc cref="UploadMediaValidator" />
     public UploadMediaValidator()
+        : this(MediaUploadOptions.Default)
     {
+    }
+
+    /// <inheritdoc cref="UploadMediaValidator" />
+    /// <param name="options">Пределы приёма из конфигурации.</param>
+    public UploadMediaValidator(MediaUploadOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
         RuleFor(c => c.CaseId).GreaterThan(0);
         RuleFor(c => c.FileName).NotEmpty().MaximumLength(MediaFileRules.MaxFileNameLength);
         RuleFor(c => c.ContentType).NotEmpty().MaximumLength(200)
@@ -23,8 +37,13 @@ public sealed class UploadMediaValidator : AbstractValidator<UploadMediaCommand>
             .WithMessage("Допустимые форматы носителя: JPEG, PNG, BMP, WebP, MP4, WebM, MKV, MOV, AVI; "
                 + "аудио — MP3, M4A, AAC, OGG/Opus, WAV, WebM, FLAC, AMR, 3GP.");
         RuleFor(c => c.Content)
-            .Must(content => content is { LongLength: > 0 and <= MediaFileRules.MaxFileBytes })
-            .WithMessage("Файл пуст или больше 200 МБ.");
+            .Must(content => content is { Length: > 0 })
+            .WithMessage("Файл пуст.");
+        RuleFor(c => c.Content)
+            .Must((command, content) => content is null
+                || MediaFileRules.KindOf(command.ContentType) is not { } kind
+                || content.Length <= options.MaxBytesFor(kind))
+            .WithMessage(command => $"Файл больше допустимых {MediaFileRules.DescribeSize(options.MaxBytesFor(MediaFileRules.KindOf(command.ContentType) ?? MediaKind.Image))}.");
         // ТФ-МЕД-17: у фото и видео дата и время съёмки ОБЯЗАТЕЛЬНЫ (оператор подтверждает значение из метаданных
         // или вводит вручную); у аудио — по желанию. Дата из будущего — ошибка ввода (сутки — запас на пояса).
         RuleFor(c => c.CapturedAt)
