@@ -47,7 +47,7 @@ public sealed record CreateDivisionCommand(string Name, string? Code = null, int
     }
 }
 
-/// <summary>Правила формы подразделения: имя обязательно ≤500; код ≤100; родитель положительный; отдел — ОН или ОУ.</summary>
+/// <summary>Правила формы подразделения: имя обязательно ≤500; код ≤100; родитель положительный; отдел — ОН, ОУ или ОТМ.</summary>
 public sealed class CreateDivisionValidator : AbstractValidator<CreateDivisionCommand>
 {
     /// <inheritdoc cref="CreateDivisionValidator" />
@@ -59,6 +59,6 @@ public sealed class CreateDivisionValidator : AbstractValidator<CreateDivisionCo
         RuleFor(c => c.Direction).IsInEnum().WithMessage(DirectionInvalid);
     }
 
-    /// <summary>Отметка вне перечня ОН/ОУ (база такую не примет — ограничение <c>ck_division_direction</c>).</summary>
-    public const string DirectionInvalid = "Отдел подразделения — ОН или ОУ.";
+    /// <summary>Отметка вне перечня ОН/ОУ/ОТМ (база такую не примет — ограничение <c>ck_division_direction</c>).</summary>
+    public const string DirectionInvalid = "Отдел подразделения — ОН, ОУ или ОТМ.";
 }

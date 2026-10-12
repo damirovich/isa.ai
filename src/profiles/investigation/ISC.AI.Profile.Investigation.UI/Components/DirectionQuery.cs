@@ -3,8 +3,8 @@ using ISC.AI.Profile.Investigation.Domain.Enums;
 namespace ISC.AI.Profile.Investigation.UI;
 
 /// <summary>
-/// Отдел ОН/ОУ в адресе списка дел (ТЭ-008, ADR-0039): стартовая страница открывает <c>/cases?direction=on</c> или
-/// <c>?direction=ou</c>, а список берёт отсюда отбор по отделу. Это только отбор внутри допуска — подставленное в адрес
+/// Отдел ОН/ОУ/ОТМ в адресе списка дел (ТЭ-008, ADR-0039): стартовая страница открывает <c>/cases?direction=on</c>,
+/// <c>?direction=ou</c> или <c>?direction=otm</c>, а список берёт отсюда отбор по отделу. Это только отбор внутри допуска — подставленное в адрес
 /// значение ничего не открывает (ТБ-020), поэтому неизвестное значение просто означает «все отделы».
 /// </summary>
 public static class DirectionQuery
@@ -12,11 +12,12 @@ public static class DirectionQuery
     /// <summary>Имя параметра адреса.</summary>
     public const string Name = "direction";
 
-    /// <summary>Значение параметра для отдела: «on» — ОН, «ou» — ОУ.</summary>
+    /// <summary>Значение параметра для отдела: «on» — ОН, «ou» — ОУ, «otm» — ОТМ.</summary>
     public static string Code(CaseDirection direction) => direction switch
     {
         CaseDirection.Surveillance => "on",
         CaseDirection.Establishment => "ou",
+        CaseDirection.Technical => "otm",
         _ => direction.ToString(),
     };
 
@@ -28,6 +29,7 @@ public static class DirectionQuery
     {
         "on" => CaseDirection.Surveillance,
         "ou" => CaseDirection.Establishment,
+        "otm" => CaseDirection.Technical,
         _ => null,
     };
 }

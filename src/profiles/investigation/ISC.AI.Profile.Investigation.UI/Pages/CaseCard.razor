@@ -95,7 +95,7 @@ else
                 <MudSimpleTable Dense="true" Elevation="0" Class="requisites">
                     <tbody>
                         <tr><td class="mud-text-secondary">Номер</td><td>@_case.Number</td></tr>
-                        <tr><td class="mud-text-secondary">Отдел</td><td>@(_case.Direction is { } direction ? $"{direction.ShortLabel()} — {direction.Label()}" : "подразделение не отнесено к ОН или ОУ")</td></tr>
+                        <tr><td class="mud-text-secondary">Отдел</td><td>@(_case.Direction is { } direction ? $"{direction.ShortLabel()} — {direction.Label()}" : "подразделение не отнесено ни к одному отделу")</td></tr>
                         <tr><td class="mud-text-secondary">Вид</td><td>@_case.Kind.Label()</td></tr>
                         <tr><td class="mud-text-secondary">Дата открытия</td><td>@_case.OpenedAt.ToString("dd.MM.yyyy")</td></tr>
                         <tr><td class="mud-text-secondary">Следователь</td><td>@UserName(_case.InvestigatorUserId)</td></tr>

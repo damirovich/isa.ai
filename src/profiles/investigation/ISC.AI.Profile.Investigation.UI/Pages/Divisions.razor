@@ -180,7 +180,7 @@
     // Без своей отметки действует отметка вышестоящего — подсказка показывает какая.
     private string InheritedPlaceholder => _formParentId is { } parent && _resolved.TryGetValue(parent, out var direction)
         ? $"Как у вышестоящего: {direction.ShortLabel()}"
-        : "Не отнесено к ОН или ОУ";
+        : "Не отнесено ни к одному отделу";
 
     private IReadOnlyList<DivisionTreeRow> Rows => DivisionTree.Build(_nodes, _collapsed, _search, _showInactive);
 

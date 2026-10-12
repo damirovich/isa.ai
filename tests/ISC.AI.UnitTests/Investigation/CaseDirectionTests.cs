@@ -64,17 +64,19 @@ public sealed class CaseDirectionTests
         resolved.ContainsKey(5).ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Форма подразделения: отдел — ОН, ОУ или пусто; иное значение отклоняется с текстом «ОН или ОУ»")]
+    [Fact(DisplayName = "Форма подразделения: отдел — ОН, ОУ, ОТМ или пусто; иное значение отклоняется с текстом «ОН, ОУ или ОТМ»")]
     public void Division_direction_is_validated()
     {
         new CreateDivisionValidator().Validate(new CreateDivisionCommand("Отдел", Direction: null)).IsValid.ShouldBeTrue();
         new CreateDivisionValidator().Validate(new CreateDivisionCommand("Отдел", Direction: Ou)).IsValid.ShouldBeTrue();
+        new CreateDivisionValidator().Validate(new CreateDivisionCommand("Отдел", Direction: CaseDirection.Technical)).IsValid.ShouldBeTrue();
+        CreateDivisionValidator.DirectionInvalid.ShouldBe("Отдел подразделения — ОН, ОУ или ОТМ.");
         new RenameDivisionValidator().Validate(new RenameDivisionCommand(3, "Отдел", Direction: On)).IsValid.ShouldBeTrue();
 
         var create = new CreateDivisionValidator().Validate(new CreateDivisionCommand("Отдел", Direction: (CaseDirection)7));
         create.IsValid.ShouldBeFalse();
         create.Errors.ShouldContain(e => e.ErrorMessage == CreateDivisionValidator.DirectionInvalid);
-        new RenameDivisionValidator().Validate(new RenameDivisionCommand(3, "Отдел", Direction: (CaseDirection)3)).IsValid.ShouldBeFalse();
+        new RenameDivisionValidator().Validate(new RenameDivisionCommand(3, "Отдел", Direction: (CaseDirection)4)).IsValid.ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Журнал: отметка отдела при создании и правке подразделения и отбор списка дел по отделу записываются")]
@@ -94,26 +96,29 @@ public sealed class CaseDirectionTests
     [InlineData(null, null)]
     [InlineData("", null)]
     [InlineData("1", null)]
+    [InlineData("otm", CaseDirection.Technical)]
+    [InlineData("OTM", CaseDirection.Technical)]
     [InlineData("отм", null)]
     public void Direction_query_is_parsed_safely(string? value, CaseDirection? expected) =>
         DirectionQuery.Parse(value).ShouldBe(expected);
 
-    [Fact(DisplayName = "Адрес плитки: /cases?direction=on и /cases?direction=ou — и разбирается обратно")]
+    [Fact(DisplayName = "Адрес плитки: /cases?direction=on, =ou, =otm — и разбирается обратно")]
     public void Direction_query_round_trips()
     {
         DirectionQuery.CasesUri(On).ShouldBe("/cases?direction=on");
         DirectionQuery.CasesUri(Ou).ShouldBe("/cases?direction=ou");
+        DirectionQuery.CasesUri(CaseDirection.Technical).ShouldBe("/cases?direction=otm");
         foreach (var direction in Enum.GetValues<CaseDirection>())
         {
             DirectionQuery.Parse(DirectionQuery.Code(direction)).ShouldBe(direction);
         }
     }
 
-    [Fact(DisplayName = "Подписи отделов: «ОН — Оперативное наблюдение», «ОУ — Оперативная установка»")]
+    [Fact(DisplayName = "Подписи отделов: «ОН — Оперативное наблюдение», «ОУ — Оперативная установка», «ОТМ — Оперативно-технические мероприятия»")]
     public void Direction_labels()
     {
         Enum.GetValues<CaseDirection>().Select(d => d.ShortLabel() + " — " + d.Label())
-            .ShouldBe(["ОН — Оперативное наблюдение", "ОУ — Оперативная установка"]);
+            .ShouldBe(["ОН — Оперативное наблюдение", "ОУ — Оперативная установка", "ОТМ — Оперативно-технические мероприятия"]);
     }
 
     [Fact(DisplayName = "Отделы допуска: группа в допуске получает отдел от вышестоящего, даже если само вышестоящее вне допуска")]
