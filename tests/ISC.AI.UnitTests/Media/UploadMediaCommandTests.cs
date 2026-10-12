@@ -143,7 +143,7 @@ public sealed class UploadMediaCommandTests
         var videoDeclared = await HandleAsync(new UploadMediaCommand(3, "clip.mp4", "video/mp4", Jpeg));
         videoDeclared.StatusCode.ShouldBe(ResponseStatusCode.BadRequest);
 
-        var unknown = await HandleAsync(new UploadMediaCommand(3, "a.jpg", "image/jpeg", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]));
+        var unknown = await HandleAsync(new UploadMediaCommand(3, "a.jpg", "image/jpeg", new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 }));
         unknown.StatusCode.ShouldBe(ResponseStatusCode.BadRequest);
         unknown.StatusMessage.ShouldContain("не распознано");
 
@@ -244,7 +244,7 @@ public sealed class UploadMediaCommandTests
 
         (await HandleAsync(new UploadMediaCommand(3, "voice.m4a", "audio/x-m4a", M4a))).Status.ShouldBeTrue();
         (await HandleAsync(new UploadMediaCommand(3, "voice.3gp", "audio/3gpp", M4a))).Status.ShouldBeTrue();
-        (await HandleAsync(new UploadMediaCommand(3, "voice.webm", "audio/webm", [0x1A, 0x45, 0xDF, 0xA3, 0, 0, 0, 0]))).Status.ShouldBeTrue();
+        (await HandleAsync(new UploadMediaCommand(3, "voice.webm", "audio/webm", new byte[] { 0x1A, 0x45, 0xDF, 0xA3, 0, 0, 0, 0 }))).Status.ShouldBeTrue();
 
         await _store.Received(3).ReceiveAsync(
             Arg.Is<MediaAssetDraft>(d => d.Kind == MediaKind.Audio), Arg.Any<Stream>(), Arg.Any<CancellationToken>());

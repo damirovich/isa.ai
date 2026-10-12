@@ -135,6 +135,94 @@ public sealed class MediaStoreReceiveTests : IAsyncLifetime
         }
     }
 
+    [Fact(DisplayName = "ADR-0040: файл больше буфера приёма из неперематываемого потока — хеш и размер верны, в хранилище те же байты")]
+    public async Task Large_non_seekable_stream_is_hashed_while_copying()
+    {
+        var factory = new MediaContextFactory(_postgres.GetConnectionString());
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+        }
+
+        // 5 МБ — больше буфера приёма (1 МБ): хеш считается по ходу записи, файл не перечитывается.
+        var content = new byte[5 * 1024 * 1024 + 123];
+        new Random(40).NextBytes(content);
+        var storage = new CapturingFileStorage();
+        var store = new MediaStore(factory, storage);
+
+        var receipt = await store.ReceiveAsync(Draft("big.mp4", classification: 0), new ForwardOnlyStream(content));
+
+        await using (var db = factory.CreateDbContext())
+        {
+            var stored = await db.Assets.AsNoTracking().SingleAsync(a => a.Id == receipt.AssetId);
+            stored.ByteSize.ShouldBe(content.LongLength);
+            stored.ContentHash.ShouldBe(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)));
+        }
+
+        storage.Saved.ShouldBe(content);
+    }
+
+    /// <summary>Хранилище, запоминающее сохранённые байты.</summary>
+    private sealed class CapturingFileStorage : ISC.AI.Abstractions.Storage.IFileStorage
+    {
+        public byte[]? Saved { get; private set; }
+
+        public async Task<string> SaveAsync(
+            Stream content, string extension, string category, string subPath, CancellationToken cancellationToken = default)
+        {
+            using var copy = new MemoryStream();
+            await content.CopyToAsync(copy, cancellationToken);
+            Saved = copy.ToArray();
+            return Guid.NewGuid().ToString("N") + extension;
+        }
+
+        public Task<Stream> OpenReadAsync(
+            string storedFileName, string category, string subPath, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("Этот тест не читает файлы.");
+
+        public Task DeleteAsync(
+            string storedFileName, string category, string subPath, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+    }
+
+    /// <summary>Неперематываемый поток (как из браузера): ни длины, ни позиции.</summary>
+    private sealed class ForwardOnlyStream(byte[] content) : Stream
+    {
+        private int _position;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var take = Math.Min(Math.Min(count, 64 * 1024), content.Length - _position);
+            Array.Copy(content, _position, buffer, offset, take);
+            _position += take;
+            return take;
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
     private static MediaAssetDraft Draft(string fileName, short classification) => new(
         OriginalFileName: fileName,
         ContentType: "image/png",

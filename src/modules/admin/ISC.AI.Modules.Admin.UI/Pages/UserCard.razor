@@ -148,13 +148,58 @@ else
                             </MudSelect>
                         </MudItem>
                         <MudItem xs="12" sm="7">
-                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-1">Разрешённые подразделения</MudText>
-                            <div class="d-flex flex-wrap gap-1">
-                                @foreach (var division in _card.DivisionCatalog)
+                            @* Подразделения деревом (ТБ-011/020): отступ вместо склеенных «Управление / Отдел». Допуск — ровно
+                               отмеченные номера, вложенные НЕ наследуются: это сказано прямо и есть «+ вложенные» для ветки. *@
+                            <div class="d-flex align-center gap-2 flex-wrap mb-1">
+                                <MudText Typo="Typo.body2" Style="font-weight:600;">Разрешённые подразделения</MudText>
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0">
+                                    отмечено @_draftDivisions.Count(id => _card.DivisionCatalog.Any(d => d.Id == id)) из @_card.DivisionCatalog.Count
+                                </MudChip>
+                                <MudSpacer />
+                                <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="@(_busy || !account.IsActive)"
+                                           OnClick="SelectAllDivisions">Отметить все</MudButton>
+                                <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="@(_busy || !account.IsActive || _draftDivisions.Count == 0)"
+                                           OnClick="@(() => _draftDivisions.Clear())">Снять все</MudButton>
+                            </div>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
+                                Сотрудник видит дела и документы только отмеченных подразделений. Галочка у управления или отдела
+                                не открывает вложенные в него — их отмечают отдельно или кнопкой «+ вложенные».
+                            </MudText>
+                            @if (_card.DivisionCatalog.Count > 8)
+                            {
+                                <MudTextField T="string" @bind-Value="_divisionSearch" Placeholder="Найти подразделение" Variant="Variant.Outlined"
+                                              Margin="Margin.Dense" Immediate="true" Clearable="true" Class="mb-2"
+                                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
+                            }
+                            <div class="clearance-tree" style="border:1px solid var(--mud-palette-lines-default); border-radius:6px; padding:4px 8px; max-height:360px; overflow:auto;">
+                                @foreach (var row in ClearanceDivisionTree.Visible(ClearanceDivisionTree.Build(_card.DivisionCatalog), _divisionSearch))
                                 {
-                                    var id = division.Id;
-                                    <MudCheckBox T="bool" Dense="true" Size="Size.Small" Label="@division.Name" Disabled="@(_busy || !account.IsActive)"
-                                                 Value="@_draftDivisions.Contains(id)" ValueChanged="@(on => ToggleDivision(id, on))" />
+                                    var current = row;
+                                    var id = current.Division.Id;
+                                    <div class="d-flex align-center gap-1 clearance-row" style="@($"padding-left:{current.Depth * 24}px; min-height:34px;")">
+                                        @if (current.Depth > 0)
+                                        {
+                                            <MudIcon Icon="@Icons.Material.Filled.SubdirectoryArrowRight" Size="Size.Small" Class="mud-text-secondary" />
+                                        }
+                                        <MudCheckBox T="bool" Dense="true" Size="Size.Small" Label="@current.Title" Disabled="@(_busy || !account.IsActive)"
+                                                     Value="@_draftDivisions.Contains(id)" ValueChanged="@(on => ToggleDivision(id, on))"
+                                                     Style="@(current.Depth == 0 ? "font-weight:600;" : null)" />
+                                        @if (current.Division.Badge is { } badge)
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" Class="ma-0 clearance-badge">@badge</MudChip>
+                                        }
+                                        @if (!current.Division.IsActive)
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0">выключено</MudChip>
+                                        }
+                                        @if (current.HasChildren)
+                                        {
+                                            <MudButton Size="Size.Small" Variant="Variant.Text" Class="ml-auto clearance-branch" Disabled="@(_busy || !account.IsActive)"
+                                                       OnClick="@(() => ToggleBranch(current))">
+                                                @(BranchChecked(current) ? "− вложенные" : "+ вложенные")
+                                            </MudButton>
+                                        }
+                                    </div>
                                 }
                             </div>
                         </MudItem>
@@ -322,6 +367,7 @@ else
     // Черновик допуска: правки видны сразу, применяются только «Сохранить допуск» после подтверждения.
     private short? _draftGrif;
     private readonly HashSet<int> _draftDivisions = [];
+    private string? _divisionSearch;
 
     private bool _editOpen;
     private string? _editName;
@@ -413,6 +459,27 @@ else
     private void ToggleDivision(int id, bool on)
     {
         if (on) { _draftDivisions.Add(id); } else { _draftDivisions.Remove(id); }
+    }
+
+    // «Отметить все» — все подразделения справочника, включая выключенные: в их делах может лежать история.
+    private void SelectAllDivisions() => _draftDivisions.UnionWith(_card?.DivisionCatalog.Select(d => d.Id) ?? []);
+
+    // Ветка отмечена целиком: само подразделение и все вложенные.
+    private bool BranchChecked(ClearanceTreeRow row) =>
+        _draftDivisions.Contains(row.Division.Id) && row.DescendantIds.All(_draftDivisions.Contains);
+
+    // «+ вложенные» отмечает подразделение со всей веткой; «− вложенные» снимает только вложенные, само остаётся.
+    private void ToggleBranch(ClearanceTreeRow row)
+    {
+        if (BranchChecked(row))
+        {
+            _draftDivisions.ExceptWith(row.DescendantIds);
+        }
+        else
+        {
+            _draftDivisions.Add(row.Division.Id);
+            _draftDivisions.UnionWith(row.DescendantIds);
+        }
     }
 
     private static string RoleCardStyle(bool selected, bool enabled) =>

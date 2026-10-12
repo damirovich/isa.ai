@@ -39,6 +39,7 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
         _module.Mode = JSRuntimeMode.Loose;
         Services.AddMudServices();
         Services.AddSingleton(_mediator);
+        Services.AddSingleton(ISC.AI.Modules.Media.Application.MediaUploadOptions.Default);
         SetRendererInfo(new RendererInfo("Server", true));
 
         // Блок «Сверка с фигурантами дела» (ТФ-ПЕР-09) есть на каждой карточке с лицами: по умолчанию — пустое состояние.
@@ -862,6 +863,10 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
         cut.Markup.ShouldContain("аудио");
         cut.Markup.ShouldNotContain("Переиндексировать (повторно найти лица)");
         cut.Find("input[type=file]").GetAttribute("accept")!.ShouldContain("audio/amr");
+
+        // ADR-0040: пределы по видам носителя — фото 200 МБ, видео и аудио из настройки (по умолчанию 16 ГБ).
+        cut.Markup.ShouldContain("Фото — не более 200 МБ");
+        cut.Markup.ShouldContain("видео и аудио — не более 16 ГБ");
 
         var input = cut.Find("input[maxlength='200']");
         input.Input("ү");

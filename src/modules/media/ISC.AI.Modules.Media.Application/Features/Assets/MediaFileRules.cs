@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using ISC.AI.Modules.Media.Domain.Model;
 
 namespace ISC.AI.Modules.Media.Application.Features.Assets;
 
 /// <summary>
 /// Правила приёма файлов носителей (ТС-010, ТФ-МЕД-01; аудио — ADR-0026, предлагаемый ТФ-МЕД-07): allowlist
-/// форматов и предел размера.
+/// форматов и предел размера фото. Предел видео и аудио настраивается — <see cref="MediaUploadOptions"/> (ADR-0040).
 /// </summary>
 /// <remarks>
 /// TIFF и HEIC в allowlist НЕ входят: декодер конвейера (Skia) их не читает — носитель гарантированно уходил бы
@@ -17,11 +18,11 @@ namespace ISC.AI.Modules.Media.Application.Features.Assets;
 public static class MediaFileRules
 {
     /// <summary>
-    /// Максимальный размер файла носителя — 200 МБ. Содержимое команды приходит массивом байт (как у
-    /// документооборота), т.е. файл целиком в памяти сервера на время приёма: предел — это и защита
-    /// памяти Blazor Server, а не только дисковой квоты. Потоковый приём — отдельная задача.
+    /// Максимальный размер фото — 200 МБ. Файл принимается потоком (ADR-0040), но индексатор раскодирует
+    /// изображение в памяти целиком: предел защищает память сервера. Видео и аудио — до
+    /// <see cref="MediaUploadOptions.MaxStreamedFileBytes"/>.
     /// </summary>
-    public const long MaxFileBytes = 200L * 1024 * 1024;
+    public const long MaxImageBytes = 200L * 1024 * 1024;
 
     /// <summary>Максимальная длина исходного имени файла (для отображения; на диске — GUID).</summary>
     public const int MaxFileNameLength = 260;
@@ -54,6 +55,17 @@ public static class MediaFileRules
         "audio/mpeg", "audio/mp4", "audio/x-m4a", "audio/aac", "audio/ogg", "audio/opus",
         "audio/wav", "audio/x-wav", "audio/webm", "audio/flac", "audio/amr", "audio/3gpp",
     };
+
+    /// <summary>Размер для сообщений человеку: «200 МБ», «16 ГБ», «1,5 ГБ».</summary>
+    public static string DescribeSize(long bytes)
+    {
+        const double Megabyte = 1024d * 1024;
+        const double Gigabyte = Megabyte * 1024;
+        var culture = CultureInfo.GetCultureInfo("ru-RU");
+        return bytes >= Gigabyte
+            ? (bytes / Gigabyte).ToString("0.#", culture) + " ГБ"
+            : (bytes / Megabyte).ToString("0.#", culture) + " МБ";
+    }
 
     /// <summary>Формат допустим к приёму.</summary>
     public static bool IsAllowed(string? contentType) => KindOf(contentType) is not null;

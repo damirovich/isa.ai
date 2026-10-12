@@ -1,10 +1,20 @@
 namespace ISC.AI.Modules.Admin.Domain.Services;
 
-/// <summary>Подразделение справочника профиля: номер, наименование и признак действующего.</summary>
+/// <summary>Подразделение справочника профиля: номер, наименование, место в иерархии и признак действующего.</summary>
 /// <param name="Id">Номер — тот же, что попадает в допуск субъекта (<c>core.clearance.division_scope</c>).</param>
-/// <param name="Name">Наименование для интерфейса.</param>
+/// <param name="Name">
+/// Полное наименование для журнала и списков — с вышестоящим («Управление / Отдел»), чтобы одноимённые отделы
+/// разных управлений различались без дерева.
+/// </param>
 /// <param name="IsActive">Действующее ли подразделение.</param>
-public sealed record DivisionCatalogItem(int Id, string Name, bool IsActive);
+/// <param name="ParentId">Вышестоящее подразделение; <see langword="null"/> — верхний уровень. По нему экран допуска строит дерево.</param>
+/// <param name="OwnName">Собственное наименование без вышестоящего — для строки дерева; <see langword="null"/> — как <paramref name="Name"/>.</param>
+/// <param name="Badge">
+/// Короткая метка профиля рядом с подразделением (у «Следствия» — отдел «ОН»/«ОУ», ADR-0039); пакету она непрозрачна
+/// и только показывается. <see langword="null"/> — метки нет.
+/// </param>
+public sealed record DivisionCatalogItem(
+    int Id, string Name, bool IsActive, int? ParentId = null, string? OwnName = null, string? Badge = null);
 
 /// <summary>
 /// ПОРТ ПРОФИЛЯ: наименования подразделений для экрана допусков. Ядро знает подразделение только как

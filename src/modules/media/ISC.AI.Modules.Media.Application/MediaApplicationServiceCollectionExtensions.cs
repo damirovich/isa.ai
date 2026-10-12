@@ -16,7 +16,8 @@ namespace ISC.AI.Modules.Media.Application;
 public static class MediaApplicationServiceCollectionExtensions
 {
     /// <summary>
-    /// Регистрирует валидаторы, настройки поиска (<see cref="MediaSearchOptions"/>, singleton), конвейер
+    /// Регистрирует валидаторы, настройки поиска (<see cref="MediaSearchOptions"/>, singleton), пределы приёма файлов
+    /// (<see cref="MediaUploadOptions"/>, singleton, ADR-0040), конвейер
     /// индексации (<see cref="IMediaIndexer"/> → <see cref="MediaIndexer"/>) и конвейер расшифровки речи
     /// (<see cref="IMediaTranscriptionPipeline"/> → <see cref="MediaTranscriptionPipeline"/>, ADR-0026) —
     /// оба scoped: исполняются из per-operation scope фоновой очереди. Их временные копии — в управляемом
@@ -32,6 +33,7 @@ public static class MediaApplicationServiceCollectionExtensions
 
         services.AddValidatorsFromAssembly(typeof(MediaApplicationServiceCollectionExtensions).Assembly);
         services.AddSingleton(MediaSearchOptions.Read(configuration));
+        services.AddSingleton(MediaUploadOptions.Read(configuration));
         services.AddSingleton(new MediaTempFiles());
         services.AddScoped<IMediaIndexer, MediaIndexer>();
 
