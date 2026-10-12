@@ -60,7 +60,7 @@ public sealed record GetUserAccountQuery(int UserId) : IRequest<ResponseDto<User
             var roleLabel = roleKey is null ? null : roles.FirstOrDefault(r => r.Key == roleKey)?.Label;
 
             var catalog = (await divisions.ListAsync(cancellationToken))
-                .Select(d => new ClearanceDivision(d.Id, d.Name))
+                .Select(d => new ClearanceDivision(d.Id, d.Name, d.ParentId, d.OwnName, d.Badge, d.IsActive))
                 .ToList();
             var names = catalog.ToDictionary(d => d.Id, d => d.Name);
             var granted = (row.Divisions ?? [])

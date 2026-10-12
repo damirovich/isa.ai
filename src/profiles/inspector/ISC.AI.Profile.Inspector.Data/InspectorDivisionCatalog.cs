@@ -30,7 +30,10 @@ public sealed class InspectorDivisionCatalog(IDbContextFactory<InspectorDbContex
             .Select(d => new DivisionCatalogItem(
                 d.Id,
                 d.Parent != null ? d.Parent.Name + " / " + d.Name : d.Name,
-                d.IsActive))
+                d.IsActive,
+                d.ParentId,
+                d.Name,
+                null))
             .ToListAsync(cancellationToken);
     }
 }

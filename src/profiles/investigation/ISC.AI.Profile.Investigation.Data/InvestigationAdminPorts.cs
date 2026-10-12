@@ -62,12 +62,15 @@ public sealed class InvestigationDivisionCatalog(IDbContextFactory<Investigation
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
 
         var all = await db.Divisions.AsNoTracking()
-            .Select(d => new { d.Id, d.Name, d.ParentId, d.IsActive })
+            .Select(d => new { d.Id, d.Name, d.ParentId, d.IsActive, d.Direction })
             .ToListAsync(cancellationToken);
 
-        // Иерархия разворачивается плоско «Родитель / Дочернее»: в допуске лежит номер, и различить
-        // одноимённые отделы разных управлений иначе нечем.
+        // Полное наименование «Родитель / Дочернее» — для журнала и списков: в допуске лежит номер, и различить
+        // одноимённые отделы разных управлений иначе нечем. Родитель и собственное имя — для дерева экрана допуска.
         var names = all.ToDictionary(d => d.Id, d => d.Name);
+
+        // Метка — отдел ОН/ОУ с учётом вышестоящих (ADR-0039): администратор видит, к какому отделу открывает доступ.
+        var directions = DivisionDirections.Resolve(all.Select(d => (d.Id, d.ParentId, d.Direction)));
 
         return all
             .Select(d => new DivisionCatalogItem(
@@ -75,7 +78,10 @@ public sealed class InvestigationDivisionCatalog(IDbContextFactory<Investigation
                 d.ParentId is { } parentId && names.TryGetValue(parentId, out var parent)
                     ? parent + " / " + d.Name
                     : d.Name,
-                d.IsActive))
+                d.IsActive,
+                d.ParentId,
+                d.Name,
+                directions.TryGetValue(d.Id, out var direction) ? direction.ShortLabel() : null))
             .OrderBy(d => d.Name, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
     }
