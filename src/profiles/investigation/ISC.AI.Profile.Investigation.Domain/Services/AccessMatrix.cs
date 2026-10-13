@@ -83,6 +83,9 @@ public static class InvestigationPermissions
     /// <summary>Загрузка материалов в дело.</summary>
     public const string MediaUpload = "media.upload";
 
+    /// <summary>Импорт архива материалов с диска сервера по описи (ADR-0041).</summary>
+    public const string MediaImport = "media.import";
+
     /// <summary>Поиск по лицу.</summary>
     public const string MediaSearch = "media.search";
 
@@ -145,6 +148,9 @@ public static class InvestigationPermissions
         new(MediaUpload, PermissionSection.Media, "Загрузка материалов",
             "Фото, видео и аудио в дело",
             Roles(InvestigationRole.Investigator, InvestigationRole.Administrator)),
+        new(MediaImport, PermissionSection.Media, "Импорт архива материалов",
+            "Пакетный ввод с диска сервера по описи: гриф и подразделение — от дел, только в дела в пределах допуска",
+            Roles(InvestigationRole.Administrator)),
         new(MediaSearch, PermissionSection.Media, "Поиск по лицу",
             "По основанию поиска, в пределах доступных дел",
             Roles(InvestigationRole.Investigator, InvestigationRole.FaceExpert, InvestigationRole.Administrator)),
@@ -205,6 +211,7 @@ public static class InvestigationPermissions
         new("cases", "Дела", [CasesView]),
         new("media-search", "Поиск по лицу", [MediaSearch]),
         new("media-verification", "Верификация", [VerificationExpert, VerificationVerifier, VerificationResolve]),
+        new("media-import", "Импорт архива", [MediaImport]),
         new("docflow-documents", "Документы", [DocFlowView]),
         new("docflow-reports", "Отчёты", [DocFlowView]),
         new("docflow-types", "Типы документов", [DocFlowSettings]),

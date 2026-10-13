@@ -59,6 +59,57 @@ public sealed class CaseScope(
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ТБ-020/071: дела — только прошедшие полную решётку и роль (<see cref="CaseAccessRule.Apply"/>), одним запросом на
+    /// все номера описи. Номер сравнивается без пробелов по краям. Подпись отдела — с учётом вышестоящих подразделений
+    /// (<see cref="DivisionDirections"/>, ADR-0039): оператор подтверждает пачкой, что материалы ОТМ ложатся в дела ОТМ
+    /// (ТС-014).
+    /// </remarks>
+    public async Task<IReadOnlyList<CaseImportTarget>> FindCasesByNumberAsync(
+        IReadOnlyCollection<string> numbers, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(numbers);
+        ArgumentNullException.ThrowIfNull(access);
+
+        var wanted = numbers
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Select(n => n.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (wanted.Length == 0)
+        {
+            return [];
+        }
+
+        var role = await ResolveRoleAsync(access, cancellationToken);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var rows = await CaseAccessRule.Apply(db.Cases, access, policy, role)
+            .AsNoTracking()
+            .Where(c => wanted.Contains(c.Number.Trim()))
+            .Select(c => new { c.Id, c.Number, c.Title, c.Classification, c.DivisionId, c.Status })
+            .ToListAsync(cancellationToken);
+        if (rows.Count == 0)
+        {
+            return [];
+        }
+
+        var divisions = await db.Divisions.AsNoTracking()
+            .Select(d => new { d.Id, d.Name, d.Code, d.ParentId, d.Direction })
+            .ToListAsync(cancellationToken);
+        var byId = divisions.ToDictionary(d => d.Id);
+        var directions = DivisionDirections.Resolve(divisions.Select(d => (d.Id, d.ParentId, d.Direction)));
+
+        return rows
+            .Select(r => new CaseImportTarget(
+                new CaseScopeItem(r.Id, r.Number, r.Title, r.Classification, r.DivisionId, r.Status == CaseStatus.Closed),
+                byId.TryGetValue(r.DivisionId, out var division) ? division.Name : "подразделение " + r.DivisionId,
+                byId.TryGetValue(r.DivisionId, out var coded) ? coded.Code : null,
+                directions.TryGetValue(r.DivisionId, out var direction) ? direction.ShortLabel() + " — " + direction.Label() : null))
+            .ToList();
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<CaseAuthorizationItem>> ListAuthorizationsAsync(int caseId, AccessContext access, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(access);

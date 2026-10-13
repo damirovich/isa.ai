@@ -59,7 +59,12 @@ public sealed class MediaContractTests
         MediaModule.RequiredCoreServices.ShouldContain(typeof(IAccessContextProvider));
         MediaModule.RequiredCoreServices.ShouldContain(typeof(ISubjectProvider));
         MediaModule.RequiredCoreServices.ShouldContain(typeof(Abstractions.BackgroundTasks.IBackgroundTaskQueue));
-        MediaModule.RequiredCoreServices.Count.ShouldBe(6);
+
+        // ADR-0041: импорт архива читает допуск оператора задания по идентификатору перед каждым файлом и следит за
+        // фоновыми задачами, чтобы подавать носители архива в обработку порциями.
+        MediaModule.RequiredCoreServices.ShouldContain(typeof(IUserAccessReader));
+        MediaModule.RequiredCoreServices.ShouldContain(typeof(Abstractions.BackgroundTasks.IBackgroundTaskStore));
+        MediaModule.RequiredCoreServices.Count.ShouldBe(8);
     }
 
     [Fact(DisplayName = "Порты пакета не тянут типы профиля — нейтральность не на словах")]
@@ -98,6 +103,9 @@ public sealed class MediaContractTests
         MediaModule.ConfigurationKeys.ShouldContain("Media:Search:MaxAllowedCosineDistance");
         MediaModule.ConfigurationKeys.ShouldContain("Media:Video:SampleFps");
         MediaModule.ConfigurationKeys.ShouldContain("Media:Search:ProbeCopyMaxBytes");
+        MediaModule.ConfigurationKeys.ShouldContain(MediaUploadOptions.MaxStreamedFileBytesKey);
+        MediaModule.ConfigurationKeys.ShouldContain(MediaImportOptions.RootsKey);
+        MediaModule.ConfigurationKeys.ShouldContain(MediaImportOptions.ProcessingSlotsKey);
     }
 
     [Fact(DisplayName = "ADR-0026: ключи распознавания речи — процесс-распознаватель и пути с пинами SHA-256 трёх файлов модели — в манифесте, без повторов")]

@@ -16,6 +16,17 @@ namespace ISC.AI.Modules.Media.Domain.Services;
 public sealed record CaseScopeItem(
     int CaseId, string Number, string Title, short Classification, int DivisionId, bool IsClosed = false);
 
+/// <summary>
+/// Дело для раскладки архива по описи (ADR-0041): доступное субъекту дело и то, что оператор должен увидеть перед
+/// подтверждением грифа и подразделения пачкой (ТБ-024) — наименование и код подразделения и отдел (у «Следствия» —
+/// ОН, ОУ или ОТМ: материалы ОТМ должны лечь в дела ОТМ, ТС-014).
+/// </summary>
+/// <param name="Case">Дело с режимными полями.</param>
+/// <param name="DivisionName">Наименование подразделения дела.</param>
+/// <param name="DivisionCode">Код подразделения — им в описи различают одинаковые номера дел разных подразделений.</param>
+/// <param name="DepartmentLabel">Подпись отдела подразделения или <see langword="null"/>, если отдел не определён.</param>
+public sealed record CaseImportTarget(CaseScopeItem Case, string DivisionName, string? DivisionCode, string? DepartmentLabel);
+
 /// <summary>Фигурант дела для привязки кандидата (ТФ-ВЕР-03); модуль знает только идентификатор и подпись.</summary>
 /// <param name="PersonId">Фигурант.</param>
 /// <param name="DisplayName">Подпись.</param>
@@ -111,6 +122,15 @@ public interface ICaseScope
 
     /// <summary>Дело, если оно доступно субъекту; иначе <see langword="null"/>.</summary>
     Task<CaseScopeItem?> GetCaseAsync(int caseId, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Дела с указанными номерами среди ДОСТУПНЫХ субъекту (решётка и роль, ТБ-020/071) — для раскладки архива по
+    /// описи (ADR-0041). Номер сравнивается точно, без учёта пробелов по краям. Номер может повторяться в разных
+    /// подразделениях — тогда в ответе несколько дел, и опись различает их кодом подразделения. Недоступные дела в
+    /// ответ не попадают и неотличимы от несуществующих (ТБ-021).
+    /// </summary>
+    Task<IReadOnlyList<CaseImportTarget>> FindCasesByNumberAsync(
+        IReadOnlyCollection<string> numbers, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>Основания поиска дела (поручения, постановления, ОРМ), если дело доступно; иначе пусто.</summary>
     Task<IReadOnlyList<CaseAuthorizationItem>> ListAuthorizationsAsync(int caseId, AccessContext access, CancellationToken cancellationToken = default);

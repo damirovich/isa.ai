@@ -54,6 +54,11 @@ public static class MediaModule
         typeof(Abstractions.Security.IAccessContextProvider),
         typeof(Abstractions.Security.ISubjectProvider),
         typeof(Abstractions.BackgroundTasks.IBackgroundTaskQueue),
+
+        // Импорт архива (ADR-0041): допуск оператора задания по идентификатору перед каждым файлом и статусы фоновых
+        // задач — подача носителей архива в обработку порциями.
+        typeof(Abstractions.Security.IUserAccessReader),
+        typeof(Abstractions.BackgroundTasks.IBackgroundTaskStore),
     ];
 
     /// <summary>
@@ -85,6 +90,9 @@ public static class MediaModule
         MediaSearchOptions.AutoSuggestCandidatesPerReferenceKey,
         MediaSearchOptions.TrackMinSimilarityKey,
         MediaSearchOptions.TrackMaxGapSecondsKey,
+        MediaUploadOptions.MaxStreamedFileBytesKey,
+        MediaImportOptions.RootsKey,
+        MediaImportOptions.ProcessingSlotsKey,
     ];
 
     /// <summary>Политика доступа страниц пакета (регистрируется хостом из реестра профиля).</summary>
@@ -92,7 +100,7 @@ public static class MediaModule
 
     /// <summary>
     /// Реестр страниц пакета (ЭС3-02, проект <c>ISC.AI.Modules.Media.UI</c>): пункты меню — поиск по лицу
-    /// (ТФ-ПЛ-01) и очередь двойной верификации (ТФ-ВЕР-01). Медиатека дела (<c>/media/cases/{id}</c>),
+    /// (ТФ-ПЛ-01), очередь двойной верификации (ТФ-ВЕР-01) и импорт архива (ТФ-МЕД-06, ADR-0041). Медиатека дела (<c>/media/cases/{id}</c>),
     /// карточка носителя (<c>/media/assets/{id}</c>), сессия поиска (<c>/media/sessions/{id}</c>) и карточка
     /// решения (<c>/media/verification/{id}</c>) — без пунктов меню: они живут в той же сборке и попадают
     /// в маршрутизацию хоста через <c>ComponentType</c> этих записей (Routes.razor, AddAdditionalAssemblies).
@@ -104,6 +112,10 @@ public static class MediaModule
             Icons.Material.Filled.PersonSearch, typeof(FaceSearch), ReadPolicy, MenuGroup),
         new ModuleDescriptor("media-verification", "/media/verification", "Верификация",
             Icons.Material.Filled.FactCheck, typeof(VerificationQueue), ReadPolicy, MenuGroup),
+
+        // Импорт архива с описью (ТФ-МЕД-06, ADR-0041); страница задания (/media/import/{id}) — без пункта меню.
+        new ModuleDescriptor("media-import", "/media/import", "Импорт архива",
+            Icons.Material.Filled.DriveFolderUpload, typeof(MediaImport), ReadPolicy, MenuGroup),
     ];
 
     /// <summary>Виджеты оболочки — пакету не нужны (очередь верификации — пунктом меню).</summary>

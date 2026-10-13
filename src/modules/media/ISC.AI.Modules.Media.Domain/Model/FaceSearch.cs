@@ -70,6 +70,14 @@ public sealed record FaceCandidate(
 /// уничтожение видео снимок не трогает — у него своя запись журнала и своя привязка к делу (ТБ-064/075).
 /// </param>
 /// <param name="SourceTimestampMs">Момент записи источника, мс, из которого взят кадр (снимок кадра).</param>
+/// <param name="ExpectedContentHash">
+/// Контрольная сумма SHA-256 из описи импорта (ADR-0041): хранилище сверяет её с посчитанной при приёме ДО записи
+/// файла в хранилище, расхождение — <see cref="MediaContentHashMismatchException"/>, и файл не сохраняется.
+/// </param>
+/// <param name="ImportItemId">
+/// Строка задания импорта, которой принят носитель (ADR-0041): происхождение для цепочки хранения (ТБ-077) и
+/// восстановления после аварии посреди приёма. Слабая ссылка — у обычной загрузки <see langword="null"/>.
+/// </param>
 public sealed record MediaAssetDraft(
     string OriginalFileName,
     string ContentType,
@@ -80,7 +88,9 @@ public sealed record MediaAssetDraft(
     DateTimeOffset? CapturedAt = null,
     int? UploadedByUserId = null,
     int? SourceAssetId = null,
-    long? SourceTimestampMs = null);
+    long? SourceTimestampMs = null,
+    string? ExpectedContentHash = null,
+    int? ImportItemId = null);
 
 /// <summary>Результат приёма носителя: идентификатор и признак «такой файл уже был» (дедуп по хешу).</summary>
 /// <param name="AssetId">Носитель в схеме <c>media</c>.</param>
@@ -88,7 +98,8 @@ public sealed record MediaAssetDraft(
 /// <see langword="true"/> — файл с тем же SHA-256 уже хранится в том же подразделении; новая
 /// запись не создана, возвращён существующий носитель.
 /// </param>
-public sealed record MediaAssetReceipt(int AssetId, bool Duplicate);
+/// <param name="ContentHash">SHA-256 принятого файла (hex, верхний регистр) — для отчёта импорта и журнала (ТБ-077).</param>
+public sealed record MediaAssetReceipt(int AssetId, bool Duplicate, string? ContentHash = null);
 
 /// <summary>
 /// Лицо, найденное конвейером, вместе с шаблоном — единица записи результата индексации (ТП-005).

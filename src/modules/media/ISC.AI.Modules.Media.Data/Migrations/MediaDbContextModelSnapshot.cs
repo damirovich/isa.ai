@@ -283,6 +283,10 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("frame_width");
 
+                    b.Property<int?>("ImportItemId")
+                        .HasColumnType("integer")
+                        .HasColumnName("import_item_id");
+
                     b.Property<string>("IndexError")
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)")
@@ -364,6 +368,10 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                     b.HasKey("Id")
                         .HasName("pk_asset");
 
+                    b.HasIndex("ImportItemId")
+                        .HasDatabaseName("ix_asset_import_item_id")
+                        .HasFilter("import_item_id IS NOT NULL");
+
                     b.HasIndex("IndexStatus")
                         .HasDatabaseName("ix_asset_index_status");
 
@@ -422,6 +430,234 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                         .HasDatabaseName("ix_frame_asset_id_index");
 
                     b.ToTable("frame", "media");
+                });
+
+            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.MediaImportItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("AssetId")
+                        .HasColumnType("integer")
+                        .HasColumnName("asset_id");
+
+                    b.Property<long>("ByteSize")
+                        .HasColumnType("bigint")
+                        .HasColumnName("byte_size");
+
+                    b.Property<DateTimeOffset?>("CapturedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("captured_at");
+
+                    b.Property<bool>("CapturedDateOnly")
+                        .HasColumnType("boolean")
+                        .HasColumnName("captured_date_only");
+
+                    b.Property<int>("CaseId")
+                        .HasColumnType("integer")
+                        .HasColumnName("case_id");
+
+                    b.Property<string>("CaseNumber")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("case_number");
+
+                    b.Property<short>("Classification")
+                        .HasColumnType("smallint")
+                        .HasColumnName("classification");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<string>("ContentSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("content_sha256");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("content_type");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("DivisionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("division_id");
+
+                    b.Property<string>("ExpectedSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("expected_sha256");
+
+                    b.Property<Guid?>("IndexTaskId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("index_task_id");
+
+                    b.Property<int>("JobId")
+                        .HasColumnType("integer")
+                        .HasColumnName("job_id");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("Place")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("place");
+
+                    b.Property<int>("Processing")
+                        .HasColumnType("integer")
+                        .HasColumnName("processing");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("reason");
+
+                    b.Property<string>("RelativePath")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("relative_path");
+
+                    b.Property<int>("RowNumber")
+                        .HasColumnType("integer")
+                        .HasColumnName("row_number");
+
+                    b.Property<string>("Source")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("source");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.Property<Guid?>("TranscriptTaskId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("transcript_task_id");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_import_item");
+
+                    b.HasIndex("AssetId")
+                        .HasDatabaseName("ix_import_item_asset_id")
+                        .HasFilter("asset_id IS NOT NULL");
+
+                    b.HasIndex("Classification", "DivisionId")
+                        .HasDatabaseName("ix_import_item_classification_division_id");
+
+                    b.HasIndex("JobId", "RowNumber")
+                        .IsUnique()
+                        .HasDatabaseName("ix_import_item_job_id_row_number");
+
+                    b.HasIndex("JobId", "Status", "RowNumber")
+                        .HasDatabaseName("ix_import_item_job_id_status_row_number");
+
+                    b.HasIndex("Processing", "JobId", "RowNumber")
+                        .HasDatabaseName("ix_import_item_processing_job_id_row_number");
+
+                    b.ToTable("import_item", "media");
+                });
+
+            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.MediaImportJob", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AcceptedCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("accepted_count");
+
+                    b.Property<long>("BytesDone")
+                        .HasColumnType("bigint")
+                        .HasColumnName("bytes_done");
+
+                    b.Property<long>("BytesTotal")
+                        .HasColumnType("bigint")
+                        .HasColumnName("bytes_total");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("DuplicateCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("duplicate_count");
+
+                    b.Property<DateTime?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("finished_at");
+
+                    b.Property<string>("FolderPath")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("folder_path");
+
+                    b.Property<string>("ManifestFileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)")
+                        .HasColumnName("manifest_file_name");
+
+                    b.Property<string>("ManifestSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("manifest_sha256");
+
+                    b.Property<int>("OperatorUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("operator_user_id");
+
+                    b.Property<int>("RejectedCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("rejected_count");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.Property<string>("StopReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("stop_reason");
+
+                    b.Property<int>("TotalCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("total_count");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_import_job");
+
+                    b.HasIndex("Status", "Id")
+                        .HasDatabaseName("ix_import_job_status_id");
+
+                    b.ToTable("import_job", "media");
                 });
 
             modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.SearchCandidate", b =>
@@ -867,6 +1103,26 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                     b.Navigation("Asset");
                 });
 
+            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.MediaImportItem", b =>
+                {
+                    b.HasOne("ISC.AI.Modules.Media.Data.Entities.MediaAsset", "Asset")
+                        .WithMany()
+                        .HasForeignKey("AssetId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_import_item_asset_asset_id");
+
+                    b.HasOne("ISC.AI.Modules.Media.Data.Entities.MediaImportJob", "Job")
+                        .WithMany("Items")
+                        .HasForeignKey("JobId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_import_item_import_jobs_job_id");
+
+                    b.Navigation("Asset");
+
+                    b.Navigation("Job");
+                });
+
             modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.SearchCandidate", b =>
                 {
                     b.HasOne("ISC.AI.Modules.Media.Data.Entities.SearchSession", "Session")
@@ -911,6 +1167,11 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_verification_decision_search_candidate_candidate_id");
+                });
+
+            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.MediaImportJob", b =>
+                {
+                    b.Navigation("Items");
                 });
 #pragma warning restore 612, 618
         }

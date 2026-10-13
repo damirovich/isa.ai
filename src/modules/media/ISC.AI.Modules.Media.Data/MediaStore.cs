@@ -52,6 +52,14 @@ public sealed partial class MediaStore(
                 hash = Convert.ToHexString(hasher.GetHashAndReset());
             }
 
+            // Контрольная сумма из описи импорта (ADR-0041) — до любой записи: повреждённый при переносе файл не
+            // должен ни лечь в хранилище, ни «совпасть» как дубликат с целым.
+            if (draft.ExpectedContentHash is { Length: > 0 } expected
+                && !string.Equals(expected.Trim(), hash, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new MediaContentHashMismatchException(expected.Trim().ToUpperInvariant(), hash);
+            }
+
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
 
             // Ключ дедупликации — (подразделение, ГРИФ, хеш): гриф носителя равен грифу дела (ТБ-070), поэтому тот же
@@ -66,7 +74,7 @@ public sealed partial class MediaStore(
                 .FirstOrDefaultAsync(cancellationToken);
             if (existingId is { } duplicateId)
             {
-                return new MediaAssetReceipt(duplicateId, Duplicate: true);
+                return new MediaAssetReceipt(duplicateId, Duplicate: true, hash);
             }
 
             // Идентификатор носителя нужен как подкаталог хранилища — строка создаётся первой, файл
@@ -91,6 +99,9 @@ public sealed partial class MediaStore(
                 // Слабая ссылка без FK: строка источника может быть уже уничтожена (ТБ-064), снимок живёт своей жизнью.
                 SourceAssetId = draft.SourceAssetId,
                 SourceTimestampMs = draft.SourceTimestampMs,
+
+                // Происхождение из импорта архива (ADR-0041): какой строкой задания принят файл (ТБ-077).
+                ImportItemId = draft.ImportItemId,
 
                 // Два независимых конвейера (ADR-0026): лица — для фото и видео; к аудио поиск по лицу
                 // НЕПРИМЕНИМ (не «проиндексировано с нулём лиц» — иначе журнал утверждал бы, что биометрия
@@ -122,7 +133,7 @@ public sealed partial class MediaStore(
                 throw;
             }
 
-            return new MediaAssetReceipt(asset.Id, Duplicate: false);
+            return new MediaAssetReceipt(asset.Id, Duplicate: false, hash);
         }
         finally
         {

@@ -1,0 +1,559 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Импорт архива с описью (ТФ-МЕД-06, ADR-0041). Шаги: папка архива на диске сервера (только каталоги из настройки
+   Media:Import:Roots) → опись CSV (черновик по папке можно скачать) → проверка без записи: итог по делам с грифом,
+   подразделением и отделом, ошибки по строкам → подтверждение грифа и подразделения пачкой (ТБ-024) → запуск. Файлы
+   принимает фоновая служба от имени оператора; ход задания — на его странице. Права и решётку проверяет сервер:
+   экран лишь показывает отказ текстом. *@
+@page "/media/import"
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@inject NavigationManager Navigation
+@using System.Globalization
+@using ISC.AI.Modules.Media.Application
+@using ISC.AI.Modules.Media.Application.Features.Assets
+@using ISC.AI.Modules.Media.Application.Features.Import
+@using ISC.AI.Modules.Media.Domain.Model
+@using Microsoft.AspNetCore.Components.Forms
+
+<PageTitle>Импорт архива</PageTitle>
+
+<div class="d-flex align-center justify-space-between flex-wrap gap-2">
+    <div>
+        <MudText Typo="Typo.h5">Импорт архива</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            Перенос накопленных материалов с диска сервера по описи: каждый файл ложится в своё дело с грифом и
+            подразделением этого дела; обработка архива идёт в фоне и не задерживает новые материалы
+        </MudText>
+    </div>
+    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ReloadJobsAsync">Обновить</MudButton>
+</div>
+
+@if (_setupError is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mt-3">@_setupError</MudAlert>
+}
+else if (_setup is not null)
+{
+    @if (UsableRoots.Count == 0)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mt-3">
+            Каталоги для импорта не настроены. Эксплуатант задаёт их ключом <b>@MediaImportOptions.RootsKey</b> в настройках
+            сервера — например, папку подключённого диска с архивом. Каталог не может лежать внутри хранилища материалов
+            или временного каталога.
+        </MudAlert>
+    }
+
+    @foreach (var root in _setup.Roots.Where(r => !r.IsUsable))
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-2">
+            Каталог «@root.Path» не используется: @root.Problem.
+        </MudAlert>
+    }
+
+    @* --- Задания --- *@
+    <MudPaper Outlined="true" Class="pa-3 mt-3">
+        <MudText Typo="Typo.h6">Задания</MudText>
+        @if (_jobs.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary mt-1">Заданий импорта ещё не было.</MudText>
+        }
+        else
+        {
+            <MudSimpleTable Dense="true" Hover="true" Class="mt-2">
+                <thead>
+                    <tr>
+                        <th>№</th>
+                        <th>Запущено</th>
+                        <th>Папка и опись</th>
+                        <th>Состояние</th>
+                        <th>Разобрано</th>
+                        <th>Обработка</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var job in _jobs)
+                    {
+                        <tr>
+                            <td><MudLink Href="@($"/media/import/{job.JobId}")">@job.JobId</MudLink></td>
+                            <td>@job.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td>
+                                <div>@job.FolderPath</div>
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">@job.ManifestFileName</MudText>
+                            </td>
+                            <td><MudChip T="string" Size="Size.Small" Color="@job.Status.ChipColor()">@job.Status.Label()</MudChip></td>
+                            <td>
+                                @job.Processed из @job.Total
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                                    принято @job.Accepted · дубликатов @job.Duplicates · отказов @job.Rejected
+                                </MudText>
+                            </td>
+                            <td>
+                                <MudText Typo="Typo.caption" Class="d-block">
+                                    обработано @job.ProcessingDone · в обработке @job.ProcessingQueued · ждут @job.ProcessingWaiting
+                                </MudText>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        }
+    </MudPaper>
+
+    @if (UsableRoots.Count > 0)
+    {
+        @* --- Шаг 1. Папка --- *@
+        <MudPaper Outlined="true" Class="pa-3 mt-3">
+            <MudText Typo="Typo.h6">1. Папка архива</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                Пути в описи указываются относительно этой папки. Архив только читается — в его папки система ничего не пишет.
+            </MudText>
+            <div class="d-flex gap-3 align-end flex-wrap mt-2">
+                <MudSelect T="string" Value="_root" ValueChanged="OnRootChangedAsync" Label="Каталог" Variant="Variant.Outlined"
+                           Margin="Margin.Dense" Style="min-width:280px;" Disabled="_busy">
+                    @foreach (var root in UsableRoots)
+                    {
+                        <MudSelectItem T="string" Value="@root">@root</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudText Typo="Typo.body2">Папка: <b>@(string.IsNullOrEmpty(_folder) ? "(весь каталог)" : _folder)</b></MudText>
+                @if (!string.IsNullOrEmpty(_folder))
+                {
+                    <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.ArrowUpward"
+                               Disabled="_busy" OnClick="GoUpAsync">Вверх</MudButton>
+                }
+            </div>
+            @if (_folderError is not null)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mt-2">@_folderError</MudAlert>
+            }
+            else if (_subfolders.Count > 0)
+            {
+                <div class="d-flex gap-2 flex-wrap mt-2">
+                    @foreach (var name in _subfolders)
+                    {
+                        <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.Folder" Disabled="_busy"
+                                 OnClick="@(() => EnterAsync(name))">@name</MudChip>
+                    }
+                </div>
+                @if (_subfoldersTruncated)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">Показаны первые @MediaImportFolders.MaxSubfolders папок.</MudText>
+                }
+            }
+        </MudPaper>
+
+        @* --- Шаг 2. Опись --- *@
+        <MudPaper Outlined="true" Class="pa-3 mt-3">
+            <MudText Typo="Typo.h6">2. Опись</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                Таблица CSV из Excel. Обязательные столбцы: <b>файл</b> (путь относительно папки) и <b>дело</b> (номер дела).
+                Необязательные: <b>подразделение</b> (код — если номер дела повторяется в разных подразделениях),
+                <b>дата съёмки</b> (например, 14.05.2023 13:45; нет — берётся из метаданных файла), <b>источник</b>,
+                <b>место</b>, <b>sha256</b> (контрольная сумма — сверяется при приёме). Дела должны быть заведены заранее.
+            </MudText>
+            <div class="d-flex gap-3 align-center flex-wrap mt-2">
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" Disabled="_busy"
+                           OnClick="DownloadDraftAsync">Скачать черновик описи по этой папке</MudButton>
+                <MudCheckBox T="bool" @bind-Value="_caseFromFolder" Disabled="_busy" Dense="true"
+                             Label="Заполнить «дело» именем папки первого уровня" />
+            </div>
+            <div class="d-flex gap-3 align-center flex-wrap mt-2">
+                <MudFileUpload T="IBrowserFile" FilesChanged="OnManifestSelectedAsync" Accept=".csv,.txt" Disabled="_busy">
+                    <CustomContent Context="upload">
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="_busy"
+                                   StartIcon="@Icons.Material.Filled.UploadFile"
+                                   OnClick="@(() => upload.OpenFilePickerAsync())">Загрузить опись…</MudButton>
+                    </CustomContent>
+                </MudFileUpload>
+                @if (_manifestName is not null)
+                {
+                    <MudText Typo="Typo.body2">Опись: <b>@_manifestName</b> (@MediaFileRules.DescribeSize(_manifest?.LongLength ?? 0))</MudText>
+                }
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FactCheck"
+                           Disabled="@(_busy || _manifest is null || _root is null)" OnClick="CheckAsync">Проверить</MudButton>
+            </div>
+            @if (_busy && _progressText is not null)
+            {
+                <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mt-2" />
+                <MudText Typo="Typo.caption">@_progressText</MudText>
+            }
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mt-2">@_error</MudAlert>
+            }
+        </MudPaper>
+
+        @* --- Шаг 3. Итог проверки и запуск --- *@
+        @if (_check?.Plan is { } plan)
+        {
+            <MudPaper Outlined="true" Class="pa-3 mt-3">
+                <MudText Typo="Typo.h6">3. Итог проверки</MudText>
+                <MudText Typo="Typo.body1" Class="mt-1">
+                    Будет принято <b>@plan.Items.Count</b> файлов (@MediaFileRules.DescribeSize(plan.TotalBytes)) в <b>@plan.Cases.Count</b> дел.
+                    С ошибками — <b>@plan.Problems.Count</b> строк: они не импортируются.
+                </MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                    Кодировка описи: @plan.EncodingName.
+                    @if (plan.IgnoredColumns.Count > 0)
+                    {
+                        <span> Не используются столбцы: @string.Join(", ", plan.IgnoredColumns).</span>
+                    }
+                </MudText>
+                @if (plan.DateFromMetadataCount > 0)
+                {
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-2">
+                        У @plan.DateFromMetadataCount фото и видео дата съёмки в описи не указана — она будет взята из метаданных
+                        файла. Если в файле её нет, файл не примется (дата съёмки обязательна, ТФ-МЕД-17) — тогда допишите её в опись.
+                    </MudAlert>
+                }
+                @if (plan.DateOnlyCount > 0)
+                {
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-2">
+                        У @plan.DateOnlyCount строк указана только дата, без времени — время будет 00:00.
+                    </MudAlert>
+                }
+
+                @if (plan.Cases.Count > 0)
+                {
+                    <MudText Typo="Typo.subtitle1" Class="mt-3">Дела — проверьте гриф, подразделение и отдел</MudText>
+                    <MudSimpleTable Dense="true" Class="mt-1">
+                        <thead>
+                            <tr><th>Дело</th><th>Подразделение</th><th>Отдел</th><th>Гриф</th><th>Файлов</th><th>Объём</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in plan.Cases)
+                            {
+                                <tr>
+                                    <td>
+                                        № @item.Target.Case.Number · @item.Target.Case.Title
+                                        @if (item.Target.Case.IsClosed)
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text">закрыто</MudChip>
+                                        }
+                                    </td>
+                                    <td>@item.Target.DivisionName @(item.Target.DivisionCode is { } code ? $"({code})" : string.Empty)</td>
+                                    <td>@(item.Target.DepartmentLabel ?? "не отнесено")</td>
+                                    <td><ClassificationChip Classification="@item.Target.Case.Classification" /></td>
+                                    <td>@item.FileCount</td>
+                                    <td>@MediaFileRules.DescribeSize(item.Bytes)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+
+                @if (plan.Problems.Count > 0)
+                {
+                    <div class="d-flex align-center justify-space-between flex-wrap gap-2 mt-3">
+                        <MudText Typo="Typo.subtitle1">Строки с ошибками</MudText>
+                        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Download"
+                                   OnClick="DownloadProblemsAsync">Скачать их в формате описи</MudButton>
+                    </div>
+                    <MudSimpleTable Dense="true" Class="mt-1">
+                        <thead><tr><th>Строка</th><th>Файл</th><th>Дело</th><th>Что не так</th></tr></thead>
+                        <tbody>
+                            @foreach (var problem in plan.Problems.Take(ProblemsShown))
+                            {
+                                <tr>
+                                    <td>@problem.Row.RowNumber</td>
+                                    <td>@problem.Row.File</td>
+                                    <td>@problem.Row.CaseNumber</td>
+                                    <td>@problem.Message</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                    @if (plan.Problems.Count > ProblemsShown)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            Показаны первые @ProblemsShown из @plan.Problems.Count — все есть в скачанном файле.
+                        </MudText>
+                    }
+                }
+
+                @if (plan.Items.Count > 0)
+                {
+                    <MudDivider Class="my-3" />
+                    <MudCheckBox T="bool" @bind-Value="_confirmed" Disabled="_busy"
+                                 Label="Гриф и подразделение каждого дела проверены: каждый файл получит гриф и подразделение своего дела (ТБ-024). Даты съёмки из метаданных файлов принимаю." />
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow" Class="mt-2"
+                               Disabled="@(_busy || !_confirmed)" OnClick="StartAsync">Запустить импорт</MudButton>
+                }
+            </MudPaper>
+        }
+    }
+}
+
+@code {
+    private const int ProblemsShown = 200;
+
+    private readonly ComponentPoller _poller = new(TimeSpan.FromSeconds(5));
+    private MediaImportSetup? _setup;
+    private string? _setupError;
+    private IReadOnlyList<MediaImportJobSummary> _jobs = [];
+
+    private string? _root;
+    private string _folder = string.Empty;
+    private IReadOnlyList<string> _subfolders = [];
+    private bool _subfoldersTruncated;
+    private string? _folderError;
+
+    private bool _caseFromFolder;
+    private string? _manifestName;
+    private byte[]? _manifest;
+    private MediaImportCheck? _check;
+    private bool _confirmed;
+
+    private bool _busy;
+    private string? _progressText;
+    private string? _error;
+
+    private IReadOnlyList<string> UsableRoots =>
+        _setup?.Roots.Where(r => r.IsUsable).Select(r => r.Path).ToList() ?? (IReadOnlyList<string>)[];
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        if (!RendererInfo.IsInteractive)
+        {
+            return;
+        }
+
+        var setup = await Dispatcher.Send(new GetMediaImportSetupQuery());
+        if (!setup.Status || setup.Data is null)
+        {
+            _setupError = setup.StatusMessage;
+            return;
+        }
+
+        _setup = setup.Data;
+        _root = UsableRoots.FirstOrDefault();
+        await ReloadJobsAsync();
+        await LoadFoldersAsync();
+        _poller.Start(() => InvokeAsync(async () =>
+        {
+            if (_jobs.Any(j => j.Status is MediaImportJobStatus.Running or MediaImportJobStatus.Queued
+                || j.ProcessingWaiting + j.ProcessingQueued > 0))
+            {
+                await ReloadJobsAsync();
+                StateHasChanged();
+            }
+        }));
+    }
+
+    private async Task ReloadJobsAsync()
+    {
+        var jobs = await Dispatcher.Send(new ListMediaImportJobsQuery());
+        if (jobs.Status && jobs.Data is not null)
+        {
+            _jobs = jobs.Data;
+        }
+    }
+
+    private async Task OnRootChangedAsync(string root)
+    {
+        _root = root;
+        _folder = string.Empty;
+        ResetCheck();
+        await LoadFoldersAsync();
+    }
+
+    private async Task EnterAsync(string name)
+    {
+        _folder = string.IsNullOrEmpty(_folder) ? name : _folder + "/" + name;
+        ResetCheck();
+        await LoadFoldersAsync();
+    }
+
+    private async Task GoUpAsync()
+    {
+        var slash = _folder.LastIndexOf('/');
+        _folder = slash > 0 ? _folder[..slash] : string.Empty;
+        ResetCheck();
+        await LoadFoldersAsync();
+    }
+
+    private async Task LoadFoldersAsync()
+    {
+        _subfolders = [];
+        _subfoldersTruncated = false;
+        _folderError = null;
+        if (_root is null)
+        {
+            return;
+        }
+
+        var listing = await Dispatcher.Send(new ListMediaImportFoldersQuery(_root, _folder));
+        if (!listing.Status || listing.Data is null)
+        {
+            _folderError = listing.StatusMessage;
+            return;
+        }
+
+        _subfolders = listing.Data.Subfolders;
+        _subfoldersTruncated = listing.Data.Truncated;
+    }
+
+    private async Task DownloadDraftAsync()
+    {
+        if (_root is null)
+        {
+            return;
+        }
+
+        await RunBusyAsync("Составляю черновик описи по папке…", async () =>
+        {
+            var draft = await Task.Run(() => Dispatcher.Send(new BuildMediaImportDraftQuery(_root, _folder, _caseFromFolder)).AsTask());
+            if (!draft.Status || draft.Data is null)
+            {
+                _error = draft.StatusMessage;
+                return;
+            }
+
+            if (draft.Data.Truncated)
+            {
+                _error = $"Файлов в папке больше {ImportManifest.MaxRows} — в черновик записаны первые. Импортируйте папку частями.";
+            }
+
+            await DownloadAsync(draft.Data);
+        });
+    }
+
+    private async Task OnManifestSelectedAsync(IBrowserFile? file)
+    {
+        ResetCheck();
+        _manifest = null;
+        _manifestName = null;
+        if (file is null)
+        {
+            return;
+        }
+
+        if (file.Size > ImportManifest.MaxBytes)
+        {
+            _error = $"Опись больше {ImportManifest.MaxBytes / (1024 * 1024)} МБ — разделите её на несколько файлов.";
+            return;
+        }
+
+        try
+        {
+            await using var stream = file.OpenReadStream(ImportManifest.MaxBytes);
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer);
+            _manifest = buffer.ToArray();
+            _manifestName = file.Name;
+        }
+        catch (IOException exception)
+        {
+            _error = "Опись не прочитана: " + exception.Message;
+        }
+    }
+
+    private async Task CheckAsync()
+    {
+        if (_root is null || _manifest is null || _manifestName is null)
+        {
+            return;
+        }
+
+        ResetCheck();
+        var progress = new Progress<int>(rows =>
+        {
+            _progressText = $"Проверено строк: {rows.ToString("N0", CultureInfo.GetCultureInfo("ru-RU"))}…";
+            _ = InvokeAsync(StateHasChanged);
+        });
+        var query = new CheckMediaImportQuery(_root, _folder, _manifestName, _manifest) { Progress = progress };
+        await RunBusyAsync("Проверяю опись…", async () =>
+        {
+            // Проверка сотен тысяч строк — вне потока отрисовки, чтобы ход был виден.
+            var result = await Task.Run(() => Dispatcher.Send(query).AsTask());
+            if (!result.Status || result.Data is null)
+            {
+                _error = result.StatusMessage;
+                return;
+            }
+
+            _check = result.Data;
+            if (result.Data.Manifest.Error is not null)
+            {
+                _error = result.Data.Manifest.Error;
+            }
+        });
+    }
+
+    private async Task DownloadProblemsAsync()
+    {
+        if (_check?.Plan is not { } plan)
+        {
+            return;
+        }
+
+        using var output = new MemoryStream();
+        await ImportManifest.WriteAsync(output, ToAsync(plan.Problems.Select(p => p.Row)));
+        var name = Path.GetFileNameWithoutExtension(plan.ManifestFileName) + "-ошибки.csv";
+        await DownloadAsync(new MediaImportFile(output.ToArray(), name, plan.Problems.Count));
+    }
+
+    private async Task StartAsync()
+    {
+        if (_root is null || _manifest is null || _manifestName is null || _check?.Plan is not { } plan)
+        {
+            return;
+        }
+
+        var command = new StartMediaImportCommand(_root, _folder, _manifestName, _manifest, plan.Fingerprint, _confirmed);
+        await RunBusyAsync("Проверяю опись ещё раз и запускаю…", async () =>
+        {
+            var started = await Task.Run(() => Dispatcher.Send(command).AsTask());
+            if (!started.Status)
+            {
+                _error = started.StatusMessage;
+                return;
+            }
+
+            Navigation.NavigateTo($"/media/import/{started.Data}");
+        });
+    }
+
+    private async Task RunBusyAsync(string progressText, Func<Task> work)
+    {
+        _busy = true;
+        _error = null;
+        _progressText = progressText;
+        try
+        {
+            await work();
+        }
+        finally
+        {
+            _busy = false;
+            _progressText = null;
+        }
+    }
+
+    private async Task DownloadAsync(MediaImportFile file)
+    {
+        using var stream = new DotNetStreamReference(new MemoryStream(file.Content));
+        await JS.InvokeVoidAsync("downloadFileFromStream", file.FileName, stream);
+    }
+
+    private void ResetCheck()
+    {
+        _check = null;
+        _confirmed = false;
+        _error = null;
+    }
+
+    private static async IAsyncEnumerable<ManifestRow> ToAsync(IEnumerable<ManifestRow> rows)
+    {
+        foreach (var row in rows)
+        {
+            yield return row;
+        }
+
+        await Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public ValueTask DisposeAsync() => _poller.DisposeAsync();
+}

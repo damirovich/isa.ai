@@ -32,6 +32,8 @@ public sealed class AccessMatrixTests
         [InvestigationPermissions.CasesEdit] = [InvestigationRole.Investigator, InvestigationRole.Head, InvestigationRole.Administrator],
         [InvestigationPermissions.CasesPurge] = [InvestigationRole.Administrator],
         [InvestigationPermissions.MediaUpload] = [InvestigationRole.Investigator, InvestigationRole.Administrator],
+        // Новое право (ADR-0041): пакетного импорта прежде не было; по умолчанию — Администратор (диск сервера, архив всех дел).
+        [InvestigationPermissions.MediaImport] = [InvestigationRole.Administrator],
         [InvestigationPermissions.MediaSearch] = [InvestigationRole.Investigator, InvestigationRole.FaceExpert, InvestigationRole.Administrator],
         [InvestigationPermissions.MediaPurge] = [InvestigationRole.Administrator, InvestigationRole.Head],
         [InvestigationPermissions.VerificationExpert] = [InvestigationRole.FaceExpert, InvestigationRole.Administrator],

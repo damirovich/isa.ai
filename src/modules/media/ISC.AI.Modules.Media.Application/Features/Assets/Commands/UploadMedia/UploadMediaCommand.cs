@@ -40,13 +40,13 @@ public sealed record UploadMediaCommand(
     : IRequest<ResponseDto<MediaAssetReceipt>>, IAuditableRequest
 {
     /// <summary>Вид фоновой задачи индексации лиц (показывается в списке задач).</summary>
-    public const string IndexingTaskKind = "Индексация носителя (распознавание лиц)";
+    public const string IndexingTaskKind = MediaProcessing.IndexingTaskKind;
 
     /// <summary>Вид фоновой задачи расшифровки речи (ADR-0026).</summary>
-    public const string TranscriptionTaskKind = "Расшифровка речи носителя";
+    public const string TranscriptionTaskKind = MediaProcessing.TranscriptionTaskKind;
 
     /// <summary>Сколько байтов начала файла читается для проверки сигнатуры (с запасом над <see cref="ContentSniffer.SignatureLength"/>).</summary>
-    public const int HeaderBytes = 4096;
+    public const int HeaderBytes = MediaIntake.SignatureHeaderBytes;
 
     /// <inheritdoc />
     public AuditAction AuditAction => AuditAction.Ingest;
@@ -83,93 +83,33 @@ public sealed record UploadMediaCommand(
                 return ResponseDto<MediaAssetReceipt>.NotFound("Дело не найдено или недоступно.");
             }
 
-            var kind = MediaFileRules.KindOf(command.ContentType);
-            if (kind is null)
+            // Общий приём (ADR-0040/0041): формат, предел по виду, сигнатура содержимого, хеш, дедупликация, привязка
+            // к делу. Гриф и подразделение — дела (ТБ-070).
+            var intake = new MediaIntake(store, caseScope, uploadOptions);
+            var result = await intake.ReceiveAsync(
+                new MediaIntakeRequest(
+                    caseItem,
+                    command.FileName,
+                    command.ContentType,
+                    command.Content.Length,
+                    command.Source,
+                    command.CapturedAt,
+                    command.Place,
+                    access.NumericSubjectId),
+                command.Content.TakeStream(),
+                cancellationToken);
+            if (result.Receipt is not { } receipt)
             {
-                return ResponseDto<MediaAssetReceipt>.BadRequest("Формат файла не поддерживается.");
+                return ResponseDto<MediaAssetReceipt>.BadRequest(result.Message ?? MediaIntake.UnsupportedFormatMessage);
             }
 
-            // Предел — по виду носителя (ADR-0040): заявленная длина отсекает заведомо большой файл до чтения,
-            // фактическая проверяется при чтении (UploadContentStream).
-            var maxBytes = (uploadOptions ?? MediaUploadOptions.Default).MaxBytesFor(kind.Value);
-            if (command.Content.Length > maxBytes)
-            {
-                return ResponseDto<MediaAssetReceipt>.BadRequest(TooLargeMessage(maxBytes));
-            }
-
-            await using var source = command.Content.TakeStream();
-
-            // ТС-010: семейство — по сигнатуре байтов, не со слов клиента; расхождение или неизвестная сигнатура — отказ.
-            // Читается только начало файла; остальное пойдёт в хранилище вслед за ним, без второго чтения.
-            // Универсальные контейнеры (m4a/3gp/webm) допускаются и как аудио — см. ContentSniffer.IsCompatible.
-            var header = new byte[HeaderBytes];
-            var headerLength = await source.ReadAtLeastAsync(header, header.Length, throwOnEndOfStream: false, cancellationToken);
-            if (ContentSniffer.Sniff(header.AsSpan(0, headerLength)) is null)
-            {
-                return ResponseDto<MediaAssetReceipt>.BadRequest(
-                    "Содержимое файла не распознано как изображение, видео или аудио поддерживаемого формата.");
-            }
-
-            if (!ContentSniffer.IsCompatible(header.AsSpan(0, headerLength), kind.Value))
-            {
-                return ResponseDto<MediaAssetReceipt>.BadRequest("Содержимое файла не соответствует заявленному типу.");
-            }
-
-            var draft = new MediaAssetDraft(
-                command.FileName,
-                command.ContentType,
-                kind.Value,
-                caseItem.Classification,
-                caseItem.DivisionId,
-                command.Source,
-                command.CapturedAt,
-                access.NumericSubjectId);
-
-            MediaAssetReceipt receipt;
-            try
-            {
-                await using var content = new UploadContentStream(header, headerLength, source, maxBytes);
-                receipt = await store.ReceiveAsync(draft, content, cancellationToken);
-            }
-            catch (MediaUploadTooLargeException)
-            {
-                // Источник заявил меньше, чем прислал: временный файл хранилище уже удалило, в деле ничего нет.
-                return ResponseDto<MediaAssetReceipt>.BadRequest(TooLargeMessage(maxBytes));
-            }
-
-            await caseScope.LinkAssetAsync(
-                command.CaseId, receipt.AssetId, command.Place, access.NumericSubjectId, cancellationToken);
-
+            // Дубликат к делу привязан, но повторно не обрабатывается.
             if (!receipt.Duplicate)
             {
-                // Захватываем только примитив: scope текущего запроса к моменту выполнения уже закрыт.
-                var assetId = receipt.AssetId;
-
-                // Лица — только там, где они могут быть (фото, видео). К аудио конвейер биометрии не
-                // запускается вовсе: статус носителя уже «неприменимо» (ADR-0026).
-                if (kind is MediaKind.Image or MediaKind.Video)
-                {
-                    await queue.EnqueueAsync(
-                        IndexingTaskKind,
-                        async (sp, ct) => await sp.GetRequiredService<IMediaIndexer>().IndexAsync(assetId, ct),
-                        cancellationToken);
-                }
-
-                // Речь — аудио и звуковая дорожка видео (ADR-0026). Отдельная задача: сбой одного конвейера
-                // не мешает другому, и у каждого свой статус в карточке.
-                if (kind is MediaKind.Audio or MediaKind.Video)
-                {
-                    await queue.EnqueueAsync(
-                        TranscriptionTaskKind,
-                        async (sp, ct) => await sp.GetRequiredService<IMediaTranscriptionPipeline>().TranscribeAsync(assetId, ct),
-                        cancellationToken);
-                }
+                await MediaProcessing.EnqueueAsync(queue, receipt.AssetId, result.Kind!.Value, cancellationToken);
             }
 
             return ResponseDto<MediaAssetReceipt>.Ok(receipt);
         }
-
-        private static string TooLargeMessage(long maxBytes) =>
-            $"Файл больше допустимых {MediaFileRules.DescribeSize(maxBytes)}.";
     }
 }

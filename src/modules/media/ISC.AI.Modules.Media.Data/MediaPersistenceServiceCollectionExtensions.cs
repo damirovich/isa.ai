@@ -60,6 +60,9 @@ public static class MediaPersistenceServiceCollectionExtensions
         services.AddScoped<ISearchSessionStore, SearchSessionStore>();
         services.AddScoped<ISuggestionRunStore, SuggestionRunStore>();
 
+        // Задания пакетного импорта архива (ADR-0041): переживают перезапуск, строки — под решёткой смотрящего.
+        services.AddScoped<IMediaImportStore, MediaImportStore>();
+
         return services;
     }
 }
