@@ -1,5 +1,5 @@
 @namespace ISC.AI.Modules.Media.UI
-@* Импорт архива с описью (ТФ-МЕД-06, ADR-0041). Шаги: папка архива на диске сервера (только каталоги из настройки
+@* Импорт архива с описью (ТФ-МЕД-06, ADR-0041; документы — ADR-0042). Шаги: папка архива на диске сервера (только каталоги из настройки
    Media:Import:Roots) → опись CSV (черновик по папке можно скачать) → проверка без записи: итог по делам с грифом,
    подразделением и отделом, ошибки по строкам → подтверждение грифа и подразделения пачкой (ТБ-024) → запуск. Файлы
    принимает фоновая служба от имени оператора; ход задания — на его странице. Права и решётку проверяет сервер:
@@ -151,6 +151,35 @@ else if (_setup is not null)
                 <b>дата съёмки</b> (например, 14.05.2023 13:45; нет — берётся из метаданных файла), <b>источник</b>,
                 <b>место</b>, <b>sha256</b> (контрольная сумма — сверяется при приёме). Дела должны быть заведены заранее.
             </MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary mt-1">
+                Документы <b>.docx, .doc, .pdf</b> из той же папки становятся документами документооборота, прикреплёнными к
+                делу, с грифом дела; их текст попадает в поиск. Для них в описи: <b>тип документа</b>, <b>рег. номер</b>,
+                <b>дата документа</b> (нет — дата изменения файла), <b>название</b> (нет — имя файла).
+            </MudText>
+            @if (_setup.DocumentTypes is null)
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-2">
+                    Документы этот экземпляр не принимает: в нём нет документооборота. Строки с документами получат отказ.
+                </MudAlert>
+            }
+            else if (_setup.DocumentTypes.Count == 0)
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-2">
+                    Нет типов документов группы «Хранение» — заведите их в «Документооборот» → «Типы документов», иначе
+                    документы архива не примутся.
+                </MudAlert>
+            }
+            else
+            {
+                <MudSelect T="int?" Value="_documentTypeId" ValueChanged="OnDocumentTypeChanged" Label="Тип для документов без типа в описи"
+                           Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Placeholder="Не выбран"
+                           Class="mt-2" Style="max-width:420px;" Disabled="_busy">
+                    @foreach (var type in _setup.DocumentTypes)
+                    {
+                        <MudSelectItem T="int?" Value="@type.Id">@type.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            }
             <div class="d-flex gap-3 align-center flex-wrap mt-2">
                 <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" Disabled="_busy"
                            OnClick="DownloadDraftAsync">Скачать черновик описи по этой папке</MudButton>
@@ -189,21 +218,37 @@ else if (_setup is not null)
             <MudPaper Outlined="true" Class="pa-3 mt-3">
                 <MudText Typo="Typo.h6">3. Итог проверки</MudText>
                 <MudText Typo="Typo.body1" Class="mt-1">
-                    Будет принято <b>@plan.Items.Count</b> файлов (@MediaFileRules.DescribeSize(plan.TotalBytes)) в <b>@plan.Cases.Count</b> дел.
+                    Будет принято <b>@plan.Items.Count</b> файлов (@MediaFileRules.DescribeSize(plan.TotalBytes)) в <b>@plan.Cases.Count</b> дел,
+                    из них документов — <b>@plan.DocumentCount</b>.
                     С ошибками — <b>@plan.Problems.Count</b> строк: они не импортируются.
                 </MudText>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
-                    Кодировка описи: @plan.EncodingName.
+                    Папка архива: @plan.FolderPath. Кодировка описи: @plan.EncodingName.
                     @if (plan.IgnoredColumns.Count > 0)
                     {
                         <span> Не используются столбцы: @string.Join(", ", plan.IgnoredColumns).</span>
                     }
                 </MudText>
+                @if (NothingFound(plan))
+                {
+                    @* Частая ошибка: выбрана не та папка (обычно — не вошли в подпапку архива), и пути описи ведут в никуда. *@
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-2">
+                        Ни один файл описи не найден в папке «@plan.FolderPath». Пути в описи записываются относительно папки,
+                        выбранной в шаге 1, — выберите папку, в которой лежит архив (войдите в подпапку щелчком по её имени),
+                        загрузите опись и проверьте снова.
+                    </MudAlert>
+                }
                 @if (plan.DateFromMetadataCount > 0)
                 {
                     <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-2">
                         У @plan.DateFromMetadataCount фото и видео дата съёмки в описи не указана — она будет взята из метаданных
                         файла. Если в файле её нет, файл не примется (дата съёмки обязательна, ТФ-МЕД-17) — тогда допишите её в опись.
+                    </MudAlert>
+                }
+                @if (plan.DocumentDateFromFileCount > 0)
+                {
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-2">
+                        У @plan.DocumentDateFromFileCount документов дата в описи не указана — датой документа станет дата изменения файла.
                     </MudAlert>
                 }
                 @if (plan.DateOnlyCount > 0)
@@ -218,7 +263,7 @@ else if (_setup is not null)
                     <MudText Typo="Typo.subtitle1" Class="mt-3">Дела — проверьте гриф, подразделение и отдел</MudText>
                     <MudSimpleTable Dense="true" Class="mt-1">
                         <thead>
-                            <tr><th>Дело</th><th>Подразделение</th><th>Отдел</th><th>Гриф</th><th>Файлов</th><th>Объём</th></tr>
+                            <tr><th>Дело</th><th>Подразделение</th><th>Отдел</th><th>Гриф</th><th>Файлов</th><th>Из них документов</th><th>Объём</th></tr>
                         </thead>
                         <tbody>
                             @foreach (var item in plan.Cases)
@@ -235,6 +280,7 @@ else if (_setup is not null)
                                     <td>@(item.Target.DepartmentLabel ?? "не отнесено")</td>
                                     <td><ClassificationChip Classification="@item.Target.Case.Classification" /></td>
                                     <td>@item.FileCount</td>
+                                    <td>@item.DocumentCount</td>
                                     <td>@MediaFileRules.DescribeSize(item.Bytes)</td>
                                 </tr>
                             }
@@ -299,6 +345,7 @@ else if (_setup is not null)
     private string? _folderError;
 
     private bool _caseFromFolder;
+    private int? _documentTypeId;
     private string? _manifestName;
     private byte[]? _manifest;
     private MediaImportCheck? _check;
@@ -462,7 +509,7 @@ else if (_setup is not null)
             _progressText = $"Проверено строк: {rows.ToString("N0", CultureInfo.GetCultureInfo("ru-RU"))}…";
             _ = InvokeAsync(StateHasChanged);
         });
-        var query = new CheckMediaImportQuery(_root, _folder, _manifestName, _manifest) { Progress = progress };
+        var query = new CheckMediaImportQuery(_root, _folder, _manifestName, _manifest, _documentTypeId) { Progress = progress };
         await RunBusyAsync("Проверяю опись…", async () =>
         {
             // Проверка сотен тысяч строк — вне потока отрисовки, чтобы ход был виден.
@@ -501,7 +548,7 @@ else if (_setup is not null)
             return;
         }
 
-        var command = new StartMediaImportCommand(_root, _folder, _manifestName, _manifest, plan.Fingerprint, _confirmed);
+        var command = new StartMediaImportCommand(_root, _folder, _manifestName, _manifest, plan.Fingerprint, _confirmed, _documentTypeId);
         await RunBusyAsync("Проверяю опись ещё раз и запускаю…", async () =>
         {
             var started = await Task.Run(() => Dispatcher.Send(command).AsTask());
@@ -536,6 +583,18 @@ else if (_setup is not null)
         using var stream = new DotNetStreamReference(new MemoryStream(file.Content));
         await JS.InvokeVoidAsync("downloadFileFromStream", file.FileName, stream);
     }
+
+    // Тип документов входит в итог проверки — после смены проверку нужно повторить.
+    private void OnDocumentTypeChanged(int? typeId)
+    {
+        _documentTypeId = typeId;
+        ResetCheck();
+    }
+
+    // Не нашёлся ни один файл описи — почти наверняка выбрана не та папка (пути описи — относительно неё).
+    private static bool NothingFound(MediaImportPlan plan) =>
+        plan.Items.Count == 0 && plan.Problems.Count > 0
+        && plan.Problems.All(p => p.Message.StartsWith(MediaImportPaths.NotFoundMessage, StringComparison.Ordinal));
 
     private void ResetCheck()
     {

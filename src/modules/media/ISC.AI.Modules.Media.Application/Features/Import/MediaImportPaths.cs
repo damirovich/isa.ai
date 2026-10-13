@@ -4,7 +4,8 @@ namespace ISC.AI.Modules.Media.Application.Features.Import;
 /// <param name="FullPath">Полный путь на диске сервера.</param>
 /// <param name="RelativePath">Путь относительно папки задания, разделитель «/».</param>
 /// <param name="Length">Размер, байт.</param>
-public sealed record MediaImportSourceFile(string FullPath, string RelativePath, long Length);
+/// <param name="LastWriteTimeUtc">Когда файл изменён — запасная дата документа без даты в описи (ADR-0042).</param>
+public sealed record MediaImportSourceFile(string FullPath, string RelativePath, long Length, DateTime LastWriteTimeUtc = default);
 
 /// <summary>
 /// Безопасное разрешение путей импорта архива (ADR-0041 п. 1): сервер читает файлы ТОЛЬКО внутри каталогов из
@@ -214,7 +215,7 @@ public sealed class MediaImportPaths
         }
 
         problem = null;
-        return new MediaImportSourceFile(info.FullName, normalized, info.Length);
+        return new MediaImportSourceFile(info.FullName, normalized, info.Length, info.LastWriteTimeUtc);
     }
 
     // Каждый каталог от base (не включая — его проверили раньше или он из настройки) до target включительно — не

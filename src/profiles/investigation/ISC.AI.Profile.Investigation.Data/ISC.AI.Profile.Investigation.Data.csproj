@@ -21,6 +21,7 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="EFCore.NamingConventions" />
+    <PackageReference Include="System.Data.OleDb" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
     <!-- Выгрузка сводок и справок в .docx (ТФ-ДДЛ-04, ADR-0031): OpenXml SDK, лицензия MIT. -->
     <PackageReference Include="DocumentFormat.OpenXml" />

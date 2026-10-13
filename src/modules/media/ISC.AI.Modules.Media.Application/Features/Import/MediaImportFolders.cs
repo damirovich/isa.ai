@@ -38,7 +38,7 @@ public static class MediaImportFolders
     }
 
     /// <summary>
-    /// Строки черновика описи: все файлы допустимых форматов под папкой, по пути. Реквизиты пустые; «дело» —
+    /// Строки черновика описи: все файлы допустимых форматов под папкой — носители и документы (ADR-0042), по пути. Реквизиты пустые; «дело» —
     /// имя папки первого уровня, если оператор так выбрал.
     /// </summary>
     /// <param name="folder">Папка архива (проверена <see cref="MediaImportPaths.ResolveFolder"/>).</param>
@@ -54,7 +54,7 @@ public static class MediaImportFolders
         foreach (var file in new DirectoryInfo(folder).EnumerateFiles("*", Options(recurse: true)))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (MediaFileRules.ContentTypeForFile(file.Name) is null)
+            if (MediaFileRules.ContentTypeForFile(file.Name) is null && ArchiveDocumentFormats.ContentTypeForFile(file.Name) is null)
             {
                 continue;
             }
@@ -88,8 +88,8 @@ public static class MediaImportReport
     /// <summary>Столбцы отчёта.</summary>
     public static IReadOnlyList<string> Columns { get; } =
     [
-        "строка описи", "файл", "дело", "состояние", "причина", "носитель", "sha256 до переноса", "sha256 после переноса",
-        "обработка", "размер, байт",
+        "строка описи", "файл", "дело", "состояние", "причина", "носитель", "документ", "sha256 до переноса",
+        "sha256 после переноса", "обработка", "размер, байт",
     ];
 
     /// <summary>Дата и время в местном поясе — как в описи: «дд.мм.гггг чч:мм:сс».</summary>
@@ -140,6 +140,7 @@ public static class MediaImportReport
                 StatusLabel(item.Status),
                 item.Reason,
                 item.AssetId?.ToString(CultureInfo.InvariantCulture),
+                item.DocumentId?.ToString(CultureInfo.InvariantCulture),
                 item.ExpectedSha256,
                 item.ContentSha256,
                 ProcessingLabel(item.Processing),

@@ -104,7 +104,7 @@ else if (_job is { } job)
             }
             <MudSimpleTable Dense="true" Hover="true" Class="mt-2">
                 <thead>
-                    <tr><th>Строка</th><th>Файл</th><th>Дело</th><th>Состояние</th><th>Носитель</th><th>Обработка</th></tr>
+                    <tr><th>Строка</th><th>Файл</th><th>Дело</th><th>Состояние</th><th>Носитель или документ</th><th>Обработка</th></tr>
                 </thead>
                 <tbody>
                     @foreach (var row in itemsPage.Rows)
@@ -126,7 +126,11 @@ else if (_job is { } job)
                             <td>
                                 @if (row.AssetId is { } assetId)
                                 {
-                                    <MudLink Href="@($"/media/assets/{assetId}")">№ @assetId</MudLink>
+                                    <MudLink Href="@($"/media/assets/{assetId}")">носитель № @assetId</MudLink>
+                                }
+                                else if (row.DocumentId is { } documentId)
+                                {
+                                    <MudLink Href="@($"/docflow/documents/{documentId}")">документ № @documentId</MudLink>
                                 }
                             </td>
                             <td>@row.Processing.Label()</td>

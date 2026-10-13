@@ -11,6 +11,9 @@
     <ProjectReference Include="..\..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
     <ProjectReference Include="..\ISC.AI.Profile.Investigation.Domain\ISC.AI.Profile.Investigation.Domain.csproj" />
     <ProjectReference Include="..\..\..\modules\media\ISC.AI.Modules.Media.Domain\ISC.AI.Modules.Media.Domain.csproj" />
+    <!-- Перенос баз Access (ADR-0043): фото объекта принимается в дело общим приёмом пакета (MediaIntake) и ставится
+         на обработку тем же путём, что загрузка (MediaProcessing) — направление профиль → модуль. -->
+    <ProjectReference Include="..\..\..\modules\media\ISC.AI.Modules.Media.Application\ISC.AI.Modules.Media.Application.csproj" />
     <!-- Документы дела (ТФ-ДЕЛ-02): порт документооборота (карточки по id) и его сценарии регистрации — направление профиль → модуль. -->
     <ProjectReference Include="..\..\..\modules\docflow\ISC.AI.Modules.DocFlow.Domain\ISC.AI.Modules.DocFlow.Domain.csproj" />
     <ProjectReference Include="..\..\..\modules\docflow\ISC.AI.Modules.DocFlow.Application\ISC.AI.Modules.DocFlow.Application.csproj" />

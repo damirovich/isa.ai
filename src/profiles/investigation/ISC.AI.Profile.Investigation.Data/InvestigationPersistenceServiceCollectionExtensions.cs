@@ -53,6 +53,11 @@ public static class InvestigationPersistenceServiceCollectionExtensions
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<ICaseReportStore, CaseReportStore>();
 
+        // Перенос баз Access (ADR-0043): чтение файла базы драйвером ACE только на чтение и учёт перенесённых
+        // записей для повтора без дублей.
+        services.AddSingleton<IAccessDatabaseReader, OleDbAccessDatabaseReader>();
+        services.AddScoped<IAccessImportRecordStore, AccessImportRecordStore>();
+
         // Документы дела (ТФ-ДЕЛ-02): привязки к документам документооборота по значению.
         services.AddScoped<ICaseDocumentStore, CaseDocumentStore>();
         services.AddSingleton<ICaseReportRenderer, Reports.CaseReportDocxRenderer>();

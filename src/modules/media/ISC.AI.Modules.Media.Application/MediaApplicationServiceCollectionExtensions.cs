@@ -51,6 +51,9 @@ public static class MediaApplicationServiceCollectionExtensions
         // проверка описи, исполнитель строк и подача в обработку — scoped; фоновая служба стартует после хоста.
         services.AddSingleton(MediaImportOptions.Read(configuration));
         services.TryAddSingleton(TimeProvider.System);
+
+        // Документы архива (ADR-0042) кладёт профиль со своим документооборотом; без него — явный отказ по строке.
+        services.TryAddScoped<IArchiveDocumentSink, Features.Import.UnsupportedArchiveDocumentSink>();
         services.AddScoped<Features.Import.MediaImportPlanner>();
         services.AddScoped<Features.Import.MediaImportRunner>();
         services.AddScoped<Features.Import.MediaImportFeeder>();

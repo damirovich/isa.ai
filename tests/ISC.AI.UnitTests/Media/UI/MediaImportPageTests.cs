@@ -85,6 +85,33 @@ public sealed class MediaImportPageTests : BunitContext, IAsyncLifetime
         cut.FindAll("button").Single(b => b.TextContent.Contains("Проверить")).HasAttribute("disabled").ShouldBeTrue("без описи проверять нечего");
     }
 
+    [Fact(DisplayName = "Проверка: ни один файл описи не найден — подсказка выбрать папку архива; в итоге видна папка проверки")]
+    public void Check_hints_wrong_folder_when_nothing_found()
+    {
+        var plan = CheckWith(
+            [],
+            [new MediaImportProblem(new ManifestRow(2, @"А-1-26\фото.jpg", "А-1/26"), MediaImportPaths.NotFoundMessage),
+             new MediaImportProblem(new ManifestRow(3, @"Х-99\фото.jpg", "Х-99/26"), MediaImportPaths.NotFoundMessage + "; дело № Х-99/26 не найдено среди доступных вам")]);
+
+        var cut = RenderCheckedPage(plan);
+
+        cut.Markup.ShouldContain(@"Папка архива: D:\Архив.");
+        cut.Markup.ShouldContain(@"Ни один файл описи не найден в папке «D:\Архив»");
+    }
+
+    [Fact(DisplayName = "Проверка: часть файлов найдена — подсказки о папке нет, ошибки по строкам как есть")]
+    public void Check_without_hint_when_some_files_found()
+    {
+        var item = new MediaImportItemDraft(2, "a.jpg", MediaImportFileKind.Image, "image/jpeg", 10, 5, "А-1/26", 1, 1,
+            DateTimeOffset.Now, false, null, null, null);
+        var plan = CheckWith([item], [new MediaImportProblem(new ManifestRow(3, "b.jpg", "А-1/26"), MediaImportPaths.NotFoundMessage)]);
+
+        var cut = RenderCheckedPage(plan);
+
+        cut.Markup.ShouldContain(MediaImportPaths.NotFoundMessage);
+        cut.Markup.ShouldNotContain("Ни один файл описи не найден");
+    }
+
     [Fact(DisplayName = "Страница задания: ход приёма и обработки, причина остановки; «Остановить» отправляет команду")]
     public void Job_page_shows_progress_and_stops()
     {
@@ -108,6 +135,29 @@ public sealed class MediaImportPageTests : BunitContext, IAsyncLifetime
 
         _mediator.Received(1).Send(Arg.Is<StopMediaImportCommand>(c => c.JobId == 5), Arg.Any<CancellationToken>());
         cut.Markup.ShouldContain("Задание остановлено.");
+    }
+
+    private static MediaImportPlan CheckWith(IReadOnlyList<MediaImportItemDraft> items, IReadOnlyList<MediaImportProblem> problems) =>
+        new(@"D:\Архив", "опись.csv", new string('B', 64), items, problems, [], 10, 0, 0, [], "UTF-8", "F");
+
+    private IRenderedComponent<MediaImport> RenderCheckedPage(MediaImportPlan plan)
+    {
+        Setup(ResponseDto<MediaImportSetup>.Ok(new MediaImportSetup([new MediaImportRoot(@"D:\Архив")], 1, 200L << 20, 16L << 30)));
+        _mediator.Send(Arg.Any<ListMediaImportFoldersQuery>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<ResponseDto<MediaImportFolderListing>>(ResponseDto<MediaImportFolderListing>.Ok(
+                new MediaImportFolderListing(@"D:\Архив", [], false))));
+        var manifest = new ManifestReadResult([], null, new string('B', 64), "UTF-8", ';', []);
+        _mediator.Send(Arg.Any<CheckMediaImportQuery>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<ResponseDto<MediaImportCheck>>(ResponseDto<MediaImportCheck>.Ok(new MediaImportCheck(manifest, plan))));
+
+        Render<MudPopoverProvider>();
+        var cut = Render<MediaImport>();
+        cut.FindComponent<Microsoft.AspNetCore.Components.Forms.InputFile>()
+            .UploadFiles(InputFileContent.CreateFromText("файл;дело", "опись.csv"));
+        cut.WaitForAssertion(() => cut.FindAll("button").Single(b => b.TextContent.Contains("Проверить")).HasAttribute("disabled").ShouldBeFalse());
+        cut.FindAll("button").Single(b => b.TextContent.Contains("Проверить")).Click();
+        cut.WaitForAssertion(() => cut.Markup.ShouldContain("3. Итог проверки"));
+        return cut;
     }
 
     private void Setup(ResponseDto<MediaImportSetup> response) =>

@@ -35,7 +35,7 @@ public sealed class MediaImportPlannerTests : IDisposable
         File.WriteAllBytes(Path.Combine(_folder, "дело 1", "a.jpg"), new byte[100]);
         File.WriteAllBytes(Path.Combine(_folder, "дело 1", "b.mp4"), new byte[300]);
         File.WriteAllBytes(Path.Combine(_folder, "дело 1", "c.mp3"), new byte[50]);
-        File.WriteAllBytes(Path.Combine(_folder, "дело 1", "notes.docx"), new byte[10]);
+        File.WriteAllBytes(Path.Combine(_folder, "дело 1", "notes.txt"), new byte[10]);
         File.WriteAllBytes(Path.Combine(_folder, "дело 1", "empty.jpg"), []);
 
         Targets(
@@ -62,7 +62,7 @@ public sealed class MediaImportPlannerTests : IDisposable
         photo.CaseId.ShouldBe(10);
         photo.Classification.ShouldBe((short)2);
         photo.DivisionId.ShouldBe(1);
-        photo.Kind.ShouldBe(MediaKind.Image);
+        photo.Kind.ShouldBe(MediaImportFileKind.Image);
         photo.ContentType.ShouldBe("image/jpeg");
         photo.ByteSize.ShouldBe(100);
         photo.CapturedAt.ShouldBe(new DateTimeOffset(2023, 5, 14, 13, 45, 0, TimeSpan.FromHours(6)));
@@ -71,7 +71,7 @@ public sealed class MediaImportPlannerTests : IDisposable
         photo.Place.ShouldBe("двор");
 
         plan.Items[1].Classification.ShouldBe((short)3, "гриф — дела ОТМ, а не что-то из описи");
-        plan.Items[2].Kind.ShouldBe(MediaKind.Audio);
+        plan.Items[2].Kind.ShouldBe(MediaImportFileKind.Audio);
 
         plan.Cases.Select(c => (c.Target.Case.Number, c.FileCount, c.Bytes)).ShouldBe([("1/2023", 1, 100L), ("ОТМ-5", 2, 350L)]);
         plan.Cases[1].Target.DepartmentLabel.ShouldBe("ОТМ — Оперативно-технические мероприятия");
@@ -95,7 +95,7 @@ public sealed class MediaImportPlannerTests : IDisposable
         var plan = await PlanAsync(
             "файл;дело;дата съёмки;sha256",
             "дело 1/нет.jpg;1/2023;;",
-            "дело 1/notes.docx;1/2023;;",
+            "дело 1/notes.txt;1/2023;;",
             "дело 1/empty.jpg;1/2023;;",
             "дело 1/a.jpg;999/1999;;",
             "дело 1/b.mp4;1/2023;когда-то;",
@@ -145,7 +145,7 @@ public sealed class MediaImportPlannerTests : IDisposable
         var plan = await PlanAsync(new MediaUploadOptions(250), "файл;дело", "дело 1/b.mp4;1/2023", "дело 1/a.jpg;1/2023");
 
         plan.Problems.ShouldHaveSingleItem().Row.RowNumber.ShouldBe(2);
-        plan.Items.ShouldHaveSingleItem().Kind.ShouldBe(MediaKind.Image);
+        plan.Items.ShouldHaveSingleItem().Kind.ShouldBe(MediaImportFileKind.Image);
     }
 
     [Fact(DisplayName = "Отпечаток: тот же итог — тот же отпечаток; другой гриф дела — другой (подтверждение устарело)")]

@@ -8,7 +8,8 @@ namespace ISC.AI.Profile.Investigation.Data;
 /// <summary>
 /// Обслуживание профиля «Следствие» при старте хоста: дозаполняет нормализованные ФИО и место жительства
 /// (ТО-мат-11) у фигурантов, заведённых до появления этих полей. Без этого пересечения (ТФ-ПЕР-07) молча не
-/// находили бы совпадений с прежними фигурантами, пока их карточку кто-нибудь не пересохранит.
+/// находили бы совпадений с прежними фигурантами, пока их карточку кто-нибудь не пересохранит. Заодно удаляет
+/// временные копии баз Access, пережившие аварийную остановку (ADR-0043, <see cref="OleDbAccessDatabaseReader.SweepStale"/>).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -31,6 +32,21 @@ public sealed partial class InvestigationStartupMaintenance(
     /// <inheritdoc />
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        // Копия базы Access — полный учёт отдела: после аварии она не должна дожидаться ручной уборки (ТБ-064).
+        // Живых переносов в процессе ещё нет — хост только стартует.
+        try
+        {
+            var removed = OleDbAccessDatabaseReader.SweepStale(OleDbAccessDatabaseReader.DefaultRoot);
+            if (removed > 0)
+            {
+                LogAccessCopiesRemoved(logger, removed, OleDbAccessDatabaseReader.DefaultRoot);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            LogAccessCopiesFailed(logger, exception, OleDbAccessDatabaseReader.DefaultRoot);
+        }
+
         try
         {
             var filled = await BackfillNormalizedAsync(contextFactory, cancellationToken);
@@ -99,4 +115,12 @@ public sealed partial class InvestigationStartupMaintenance(
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Обслуживание при старте: нормализованные реквизиты фигурантов не дозаполнены — старт не прерван, повтор при следующем старте.")]
     private static partial void LogBackfillFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Обслуживание при старте: удалены временные копии баз Access, оставшиеся после остановки: {Count} (каталог {Root}).")]
+    private static partial void LogAccessCopiesRemoved(ILogger logger, int count, string root);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Обслуживание при старте: временные копии баз Access не удалены — удалите вручную каталог {Root}.")]
+    private static partial void LogAccessCopiesFailed(ILogger logger, Exception exception, string root);
 }

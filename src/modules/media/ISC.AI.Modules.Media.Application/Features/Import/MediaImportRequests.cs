@@ -15,8 +15,10 @@ namespace ISC.AI.Modules.Media.Application.Features.Import;
 /// <param name="ProcessingSlots">Сколько носителей архива одновременно в общей очереди обработки.</param>
 /// <param name="MaxImageBytes">Предел фото, байт.</param>
 /// <param name="MaxStreamedBytes">Предел видео и аудио, байт.</param>
+/// <param name="DocumentTypes">Типы для документов архива (ADR-0042); пусто — документы этот экземпляр не принимает.</param>
 public sealed record MediaImportSetup(
-    IReadOnlyList<MediaImportRoot> Roots, int ProcessingSlots, long MaxImageBytes, long MaxStreamedBytes);
+    IReadOnlyList<MediaImportRoot> Roots, int ProcessingSlots, long MaxImageBytes, long MaxStreamedBytes,
+    IReadOnlyList<ArchiveDocumentType>? DocumentTypes = null);
 
 /// <summary>Вложенные папки выбранной папки архива (для выбора на экране).</summary>
 /// <param name="Folder">Полный путь выбранной папки.</param>
@@ -68,7 +70,9 @@ public static class MediaImportRules
 public sealed record GetMediaImportSetupQuery : IRequest<ResponseDto<MediaImportSetup>>
 {
     /// <inheritdoc cref="GetMediaImportSetupQuery" />
-    public sealed class Handler(IMediaAdministration administration, MediaImportOptions options, MediaUploadOptions uploadOptions)
+    public sealed class Handler(
+        IMediaAdministration administration, MediaImportOptions options, MediaUploadOptions uploadOptions,
+        IArchiveDocumentSink documents)
         : IRequestHandler<GetMediaImportSetupQuery, ResponseDto<MediaImportSetup>>
     {
         /// <inheritdoc />
@@ -79,8 +83,10 @@ public sealed record GetMediaImportSetupQuery : IRequest<ResponseDto<MediaImport
                 return ResponseDto<MediaImportSetup>.BadRequest(MediaImportRules.NoPermissionMessage);
             }
 
+            // null — документы этот экземпляр не принимает; пустой список — принимает, но типов «Хранение» не заведено.
+            var types = documents.IsSupported ? await documents.ListTypesAsync(cancellationToken) : null;
             return ResponseDto<MediaImportSetup>.Ok(new MediaImportSetup(
-                options.Roots, options.ProcessingSlots, MediaFileRules.MaxImageBytes, uploadOptions.MaxStreamedFileBytes));
+                options.Roots, options.ProcessingSlots, MediaFileRules.MaxImageBytes, uploadOptions.MaxStreamedFileBytes, types));
         }
     }
 }
@@ -177,7 +183,9 @@ public sealed record BuildMediaImportDraftQuery(string Root, string? Folder, boo
 /// <param name="Folder">Вложенная папка архива.</param>
 /// <param name="ManifestFileName">Имя файла описи.</param>
 /// <param name="ManifestContent">Содержимое описи.</param>
-public sealed record CheckMediaImportQuery(string Root, string? Folder, string ManifestFileName, byte[] ManifestContent)
+/// <param name="DocumentTypeId">Тип для документов, у которых в описи тип не указан (ADR-0042).</param>
+public sealed record CheckMediaImportQuery(
+    string Root, string? Folder, string ManifestFileName, byte[] ManifestContent, int? DocumentTypeId = null)
     : IRequest<ResponseDto<MediaImportCheck>>, IAuditableRequest
 {
     /// <summary>Сколько строк проверено — для полосы хода на экране (необязательно).</summary>
@@ -226,7 +234,8 @@ public sealed record CheckMediaImportQuery(string Root, string? Folder, string M
             }
 
             var plan = await planner.PlanAsync(
-                folder, query.ManifestFileName, manifest, access, time.LocalTimeZone, time.GetUtcNow(), query.Progress, cancellationToken);
+                folder, query.ManifestFileName, manifest, access, time.LocalTimeZone, time.GetUtcNow(), query.DocumentTypeId,
+                query.Progress, cancellationToken);
             return ResponseDto<MediaImportCheck>.Ok(new MediaImportCheck(manifest, plan));
         }
     }
@@ -242,8 +251,10 @@ public sealed record CheckMediaImportQuery(string Root, string? Folder, string M
 /// <param name="ManifestContent">Содержимое описи.</param>
 /// <param name="Fingerprint">Отпечаток итога проверки, который видел оператор.</param>
 /// <param name="Confirmed">Оператор подтвердил гриф и подразделение каждого дела (ТБ-024).</param>
+/// <param name="DocumentTypeId">Тип для документов, у которых в описи тип не указан (ADR-0042).</param>
 public sealed record StartMediaImportCommand(
-    string Root, string? Folder, string ManifestFileName, byte[] ManifestContent, string Fingerprint, bool Confirmed)
+    string Root, string? Folder, string ManifestFileName, byte[] ManifestContent, string Fingerprint, bool Confirmed,
+    int? DocumentTypeId = null)
     : IRequest<ResponseDto<int>>, IAuditableRequest
 {
     /// <inheritdoc />
@@ -302,7 +313,8 @@ public sealed record StartMediaImportCommand(
 
             // ТБ-024: задание создаётся только из того итога, который оператор видел и подтвердил.
             var plan = await planner.PlanAsync(
-                folder, command.ManifestFileName, manifest, access, time.LocalTimeZone, time.GetUtcNow(), null, cancellationToken);
+                folder, command.ManifestFileName, manifest, access, time.LocalTimeZone, time.GetUtcNow(), command.DocumentTypeId,
+                null, cancellationToken);
             if (!string.Equals(plan.Fingerprint, command.Fingerprint, StringComparison.Ordinal))
             {
                 return ResponseDto<int>.BadRequest(MediaImportRules.PlanChangedMessage);
@@ -324,7 +336,8 @@ public sealed record StartMediaImportCommand(
                     userId,
                     ObjectRef: "media:import:job=" + jobId.ToString(CultureInfo.InvariantCulture) + ":start",
                     PayloadSensitive: $"импорт архива запущен: папка «{folder}»; опись «{command.ManifestFileName}» "
-                        + $"sha256={plan.ManifestSha256}; строк к приёму {plan.Items.Count}, объём {MediaFileRules.DescribeSize(plan.TotalBytes)}; "
+                        + $"sha256={plan.ManifestSha256}; строк к приёму {plan.Items.Count} (из них документов {plan.DocumentCount}), "
+                        + $"объём {MediaFileRules.DescribeSize(plan.TotalBytes)}; "
                         + $"дел {plan.Cases.Count} (№ {string.Join(", ", plan.Cases.Select(c => c.Target.Case.Number))}); "
                         + $"строк с ошибками на проверке {plan.Problems.Count}; гриф и подразделение дел подтверждены оператором"),
                 cancellationToken);

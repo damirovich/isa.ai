@@ -10,9 +10,10 @@ namespace ISC.AI.Modules.Media.Application.Features.Import;
 
 /// <summary>Дело в итоге проверки: что оператор подтверждает пачкой (ТБ-024) и сколько в него ляжет.</summary>
 /// <param name="Target">Дело с подразделением и отделом.</param>
-/// <param name="FileCount">Сколько файлов описи ляжет в дело.</param>
+/// <param name="FileCount">Сколько файлов описи ляжет в дело (носители и документы).</param>
 /// <param name="Bytes">Их объём, байт.</param>
-public sealed record MediaImportCaseSummary(CaseImportTarget Target, int FileCount, long Bytes);
+/// <param name="DocumentCount">Из них документов (ADR-0042).</param>
+public sealed record MediaImportCaseSummary(CaseImportTarget Target, int FileCount, long Bytes, int DocumentCount = 0);
 
 /// <summary>Строка описи, которая не пройдёт импорт, и почему.</summary>
 /// <param name="Row">Строка описи как есть — для выгрузки в формате описи.</param>
@@ -35,6 +36,8 @@ public sealed record MediaImportProblem(ManifestRow Row, string Message);
 /// Отпечаток итога: при запуске проверка повторяется, и задание создаётся, только если итог тот же, что видел и
 /// подтвердил оператор (гриф и подразделение каждого дела, число строк).
 /// </param>
+/// <param name="DocumentCount">Документов к приёму (ADR-0042).</param>
+/// <param name="DocumentDateFromFileCount">Документов без даты в описи — дата будет датой изменения файла.</param>
 public sealed record MediaImportPlan(
     string FolderPath,
     string ManifestFileName,
@@ -47,7 +50,9 @@ public sealed record MediaImportPlan(
     int DateFromMetadataCount,
     IReadOnlyList<string> IgnoredColumns,
     string EncodingName,
-    string Fingerprint);
+    string Fingerprint,
+    int DocumentCount = 0,
+    int DocumentDateFromFileCount = 0);
 
 /// <summary>
 /// Проверка описи архива до запуска (ADR-0041 п. 3): разбирает строки, находит файлы под папкой архива
@@ -55,7 +60,13 @@ public sealed record MediaImportPlan(
 /// по делам. Ничего не записывает. Сигнатура содержимого и дата из метаданных проверяются при приёме файла: читать
 /// начало каждого файла архива на проверке — часы работы диска.
 /// </summary>
-public sealed class MediaImportPlanner(ICaseScope caseScope, MediaUploadOptions? uploadOptions = null)
+/// <remarks>
+/// Документы (ADR-0042) проверяются здесь же: тип — из описи по наименованию или общий для задания (только типы,
+/// которые принимает профиль, <see cref="IArchiveDocumentSink"/>), дата — из описи, иначе дата изменения файла,
+/// название — из описи, иначе имя файла.
+/// </remarks>
+public sealed class MediaImportPlanner(
+    ICaseScope caseScope, MediaUploadOptions? uploadOptions = null, IArchiveDocumentSink? documents = null)
 {
     /// <summary>Предел длины пути файла относительно папки архива.</summary>
     public const int MaxRelativePathLength = MediaImportLimits.RelativePathMaxLength;
@@ -67,6 +78,7 @@ public sealed class MediaImportPlanner(ICaseScope caseScope, MediaUploadOptions?
     /// <param name="access">Допуск оператора.</param>
     /// <param name="zone">Пояс для дат описи без смещения.</param>
     /// <param name="nowUtc">Текущее время (даты из будущего — ошибка).</param>
+    /// <param name="defaultDocumentTypeId">Тип для документов, у которых в описи тип не указан.</param>
     /// <param name="progress">Сколько строк проверено.</param>
     /// <param name="cancellationToken">Отмена.</param>
     public async Task<MediaImportPlan> PlanAsync(
@@ -76,6 +88,7 @@ public sealed class MediaImportPlanner(ICaseScope caseScope, MediaUploadOptions?
         AccessContext access,
         TimeZoneInfo zone,
         DateTimeOffset nowUtc,
+        int? defaultDocumentTypeId = null,
         IProgress<int>? progress = null,
         CancellationToken cancellationToken = default)
     {
@@ -104,12 +117,23 @@ public sealed class MediaImportPlanner(ICaseScope caseScope, MediaUploadOptions?
             .GroupBy(t => t.Case.Number.Trim(), StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
 
+        var sink = documents;
+        var documentTypes = sink is { IsSupported: true }
+            ? await sink.ListTypesAsync(cancellationToken)
+            : [];
+        var typesByName = documentTypes
+            .GroupBy(t => NormalizeName(t.Name), StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.Ordinal);
+        var defaultType = defaultDocumentTypeId is { } wantedType && documentTypes.Any(t => t.Id == wantedType) ? wantedType : (int?)null;
+
         var paths = new MediaImportPaths();
         var seen = new Dictionary<string, int>(MediaImportPaths.PathComparer);
         var items = new List<MediaImportItemDraft>();
         var problems = new List<MediaImportProblem>();
         var dateOnly = 0;
         var fromMetadata = 0;
+        var documentCount = 0;
+        var documentDateFromFile = 0;
 
         for (var index = 0; index < manifest.Rows.Count; index++)
         {
@@ -125,7 +149,7 @@ public sealed class MediaImportPlanner(ICaseScope caseScope, MediaUploadOptions?
             // --- файл ---
             MediaImportSourceFile? file = null;
             string? contentType = null;
-            MediaKind? kind = null;
+            MediaImportFileKind? kind = null;
             if (row.File is null)
             {
                 errors.Add("не указан файл");
@@ -150,18 +174,34 @@ public sealed class MediaImportPlanner(ICaseScope caseScope, MediaUploadOptions?
                 {
                     seen[file.RelativePath] = row.RowNumber;
                     contentType = MediaFileRules.ContentTypeForFile(file.RelativePath);
-                    kind = MediaFileRules.KindOf(contentType);
+                    kind = MediaFileRules.KindOf(contentType)?.ToImportKind();
+                    if (kind is null && ArchiveDocumentFormats.ContentTypeForFile(file.RelativePath) is { } documentType)
+                    {
+                        contentType = documentType;
+                        kind = MediaImportFileKind.Document;
+                    }
+
+                    var maxBytes = kind switch
+                    {
+                        null => 0,
+                        MediaImportFileKind.Document => MediaImportLimits.DocumentMaxBytes,
+                        _ => options.MaxBytesFor(kind.Value.ToMediaKind()!.Value),
+                    };
                     if (kind is null)
                     {
                         errors.Add("формат файла не поддерживается (" + Path.GetExtension(file.RelativePath) + ")");
+                    }
+                    else if (kind == MediaImportFileKind.Document && sink is not { IsSupported: true })
+                    {
+                        errors.Add(UnsupportedArchiveDocumentSink.NotSupportedMessage);
                     }
                     else if (file.Length == 0)
                     {
                         errors.Add("файл пуст");
                     }
-                    else if (file.Length > options.MaxBytesFor(kind.Value))
+                    else if (file.Length > maxBytes)
                     {
-                        errors.Add(MediaIntake.TooLargeMessage(options.MaxBytesFor(kind.Value)).TrimEnd('.').ToLowerInvariant());
+                        errors.Add(MediaIntake.TooLargeMessage(maxBytes).TrimEnd('.').ToLowerInvariant());
                     }
                 }
             }
@@ -198,9 +238,19 @@ public sealed class MediaImportPlanner(ICaseScope caseScope, MediaUploadOptions?
                 }
             }
 
-            if (row.Source is { Length: > UploadMediaValidator.MaxSourceLength })
+            var sourceLimit = kind == MediaImportFileKind.Document
+                ? MediaImportLimits.DocumentSourceMaxLength
+                : UploadMediaValidator.MaxSourceLength;
+            if (row.Source is { } sourceText && sourceText.Length > sourceLimit)
             {
-                errors.Add($"источник длиннее {UploadMediaValidator.MaxSourceLength} символов");
+                errors.Add($"источник длиннее {sourceLimit} символов");
+            }
+
+            // --- реквизиты документа (ADR-0042) ---
+            MediaImportDocumentDraft? document = null;
+            if (kind == MediaImportFileKind.Document && file is not null)
+            {
+                document = DocumentRequisites(row, file, capturedAt, zone, typesByName, defaultType, errors);
             }
 
             if (row.Place is { Length: > UploadMediaValidator.MaxPlaceLength })
@@ -214,14 +264,23 @@ public sealed class MediaImportPlanner(ICaseScope caseScope, MediaUploadOptions?
                 continue;
             }
 
-            if (capturedAt is not null && rowDateOnly)
+            if (kind == MediaImportFileKind.Document)
             {
-                dateOnly++;
+                documentCount++;
+                documentDateFromFile += document!.RegDateFromFile ? 1 : 0;
+                capturedAt = null; // у документа дата — реквизит документа, а не дата съёмки
             }
-
-            if (capturedAt is null && kind is MediaKind.Image or MediaKind.Video)
+            else
             {
-                fromMetadata++;
+                if (capturedAt is not null && rowDateOnly)
+                {
+                    dateOnly++;
+                }
+
+                if (capturedAt is null && kind is MediaImportFileKind.Image or MediaImportFileKind.Video)
+                {
+                    fromMetadata++;
+                }
             }
 
             items.Add(new MediaImportItemDraft(
@@ -238,7 +297,8 @@ public sealed class MediaImportPlanner(ICaseScope caseScope, MediaUploadOptions?
                 capturedAt is not null && rowDateOnly,
                 row.Source,
                 row.Place,
-                sha));
+                sha,
+                document));
         }
 
         progress?.Report(manifest.Rows.Count);
@@ -246,7 +306,8 @@ public sealed class MediaImportPlanner(ICaseScope caseScope, MediaUploadOptions?
         var targetById = targets.GroupBy(t => t.Case.CaseId).ToDictionary(g => g.Key, g => g.First());
         var cases = items
             .GroupBy(i => i.CaseId)
-            .Select(g => new MediaImportCaseSummary(targetById[g.Key], g.Count(), g.Sum(i => i.ByteSize)))
+            .Select(g => new MediaImportCaseSummary(
+                targetById[g.Key], g.Count(), g.Sum(i => i.ByteSize), g.Count(i => i.Kind == MediaImportFileKind.Document)))
             .OrderBy(c => c.Target.Case.Number, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
 
@@ -262,8 +323,88 @@ public sealed class MediaImportPlanner(ICaseScope caseScope, MediaUploadOptions?
             fromMetadata,
             manifest.IgnoredColumns,
             manifest.EncodingName,
-            Fingerprint(folder, manifest.Sha256, items, problems.Count));
+            Fingerprint(folder, manifest.Sha256, items, problems.Count),
+            documentCount,
+            documentDateFromFile);
     }
+
+    // Тип, номер, дата и название документа; ошибки — в общий список строки.
+    private static MediaImportDocumentDraft? DocumentRequisites(
+        ManifestRow row,
+        MediaImportSourceFile file,
+        DateTimeOffset? capturedAt,
+        TimeZoneInfo zone,
+        Dictionary<string, int> typesByName,
+        int? defaultType,
+        List<string> errors)
+    {
+        int? typeId = null;
+        if (row.DocumentType is { } typeName)
+        {
+            if (typesByName.TryGetValue(NormalizeName(typeName), out var found))
+            {
+                typeId = found;
+            }
+            else
+            {
+                errors.Add($"тип документа «{typeName}» не найден среди типов для архива (группа «Хранение»)");
+            }
+        }
+        else if (defaultType is { } fallback)
+        {
+            typeId = fallback;
+        }
+        else
+        {
+            errors.Add("укажите тип документа: столбцом «тип документа» в описи или общим для задания");
+        }
+
+        if (row.RegNumber is { Length: > MediaImportLimits.DocumentRegNumberMaxLength })
+        {
+            errors.Add($"рег. номер длиннее {MediaImportLimits.DocumentRegNumberMaxLength} символов");
+        }
+
+        if (row.Title is { Length: > MediaImportLimits.DocumentTitleMaxLength })
+        {
+            errors.Add($"название длиннее {MediaImportLimits.DocumentTitleMaxLength} символов");
+        }
+
+        DateOnly? regDate = null;
+        var fromFile = false;
+        if (row.DocumentDate is { } dateText)
+        {
+            if (ImportManifest.TryParseCapturedAt(dateText, zone, out var parsed, out _))
+            {
+                regDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(parsed, zone).DateTime);
+            }
+            else
+            {
+                errors.Add($"дата документа «{dateText}» не разобрана (пример: 14.05.2023)");
+            }
+        }
+        else if (capturedAt is { } captured)
+        {
+            regDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(captured, zone).DateTime);
+        }
+        else
+        {
+            regDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(
+                DateTime.SpecifyKind(file.LastWriteTimeUtc, DateTimeKind.Utc), zone));
+            fromFile = true;
+        }
+
+        if (typeId is null || regDate is null)
+        {
+            return null;
+        }
+
+        var title = string.IsNullOrWhiteSpace(row.Title) ? Path.GetFileNameWithoutExtension(file.RelativePath) : row.Title.Trim();
+        return new MediaImportDocumentDraft(typeId.Value, row.RegNumber?.Trim(), regDate.Value, title, fromFile);
+    }
+
+    // Наименование типа: без учёта регистра, лишних пробелов и «ё».
+    private static string NormalizeName(string name) =>
+        string.Join(' ', name.Trim().ToLowerInvariant().Replace('ё', 'е').Split(' ', StringSplitOptions.RemoveEmptyEntries));
 
     private static CaseImportTarget? ResolveCase(
         ManifestRow row, Dictionary<string, List<CaseImportTarget>> byNumber, List<string> errors)
@@ -315,7 +456,8 @@ public sealed class MediaImportPlanner(ICaseScope caseScope, MediaUploadOptions?
         var text = new StringBuilder()
             .Append(folder).Append('|').Append(manifestSha).Append('|')
             .Append(items.Count.ToString(CultureInfo.InvariantCulture)).Append('|')
-            .Append(problemCount.ToString(CultureInfo.InvariantCulture));
+            .Append(problemCount.ToString(CultureInfo.InvariantCulture)).Append('|')
+            .Append(items.Count(i => i.Document is not null).ToString(CultureInfo.InvariantCulture));
         foreach (var group in items.GroupBy(i => (i.CaseId, i.Classification, i.DivisionId)).OrderBy(g => g.Key.CaseId))
         {
             text.Append('|')

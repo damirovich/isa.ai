@@ -1,0 +1,588 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@page "/admin/access-import"
+@rendermode InteractiveServer
+@using System.Globalization
+@using ISC.AI.Abstractions.Security
+@using ISC.AI.Profile.Investigation.Application.Features.AccessImport
+@using ISC.AI.Profile.Investigation.Application.Features.Common
+@using ISC.AI.Profile.Investigation.Application.Features.Divisions
+@using ISC.AI.Profile.Investigation.Application.Features.Scope
+@using ISC.AI.Profile.Investigation.Domain.Enums
+@using ISC.AI.Profile.Investigation.Domain.Services
+@using Microsoft.AspNetCore.Components.Forms
+
+@* Перенос базы Access (ADR-0043). Шаги: файл базы (.accdb/.mdb — в хранилище с SHA-256) → сопоставление таблиц и
+   столбцов с полями системы (предложено по названиям, оператор поправляет) → подразделение, гриф и статус всех заданий
+   базы → проверка без записи (счёт, ошибки по записям, образец) → подтверждение грифа и подразделения (ТБ-024) →
+   перенос с ходом и отчётом. Права, допуск и отпечаток проверки сверяет сервер: экран лишь показывает отказ текстом. *@
+
+<PageHeader Title="Перенос из Access" Icon="@Icons.Material.Filled.DriveFolderUpload"
+            Subtitle="Задания, объекты, фото и связи из базы отдела — в дела «Задание по объекту» с анкетой, связями, автомобилями и адресами" />
+
+@if (_setupError is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_setupError</MudAlert>
+}
+else if (_setup is { Allowed: false })
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">@RoleGuard.Denied(InvestigationPermissions.CasesImport)</MudAlert>
+}
+else if (_setup is { UnavailableReason: { } unavailable })
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">@unavailable</MudAlert>
+}
+else if (_setup is not null)
+{
+    @* --- Шаг 1. Файл --- *@
+    <MudPaper Outlined="true" Class="pa-3">
+        <MudText Typo="Typo.h6">1. Файл базы</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            Загрузите копию базы Access (.accdb или .mdb). База только читается; файл сохраняется с контрольной суммой — как
+            подтверждение того, что и откуда перенесено. Базу с паролем откройте в Access и снимите пароль в копии.
+        </MudText>
+        <div class="d-flex gap-3 align-center flex-wrap mt-2">
+            <MudFileUpload T="IBrowserFile" FilesChanged="OnFileSelectedAsync" Accept=".accdb,.mdb" Disabled="_busy">
+                <CustomContent Context="upload">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="_busy"
+                               StartIcon="@Icons.Material.Filled.UploadFile"
+                               OnClick="@(() => upload.OpenFilePickerAsync())">Загрузить базу…</MudButton>
+                </CustomContent>
+            </MudFileUpload>
+            @if (_database is { } db)
+            {
+                <MudText Typo="Typo.body2">
+                    База: <b>@db.File.FileName</b> (@SizeLabel(db.File.Length)) · таблиц: @db.Tables.Count ·
+                    SHA-256 @db.File.Sha256[..16]…
+                </MudText>
+            }
+        </div>
+        @* Ход и ошибка загрузки — здесь, пока базы нет; дальше их показывает шаг, на котором идёт работа. *@
+        @if (_busy && _progressText is not null && _database is null)
+        {
+            <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mt-2" />
+            <MudText Typo="Typo.caption">@_progressText</MudText>
+        }
+        @if (_error is not null && _database is null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mt-2">@_error</MudAlert>
+        }
+    </MudPaper>
+
+    @if (_database is { } database)
+    {
+        @* --- Шаг 2. Сопоставление --- *@
+        <MudPaper Outlined="true" Class="pa-3 mt-3">
+            <MudText Typo="Typo.h6">2. Сопоставление полей</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                Система предложила соответствие по названиям столбцов — проверьте его. Пустое поле не переносится.
+                Связи привязываются к заданию по № задания (или по коду записи задания, если номера в связях нет).
+            </MudText>
+
+            <MudGrid Spacing="2" Class="mt-1">
+                <MudItem xs="12" md="6">
+                    <MudSelect T="string" Value="_tasksTable" ValueChanged="OnTasksTableChanged" Label="Таблица заданий *"
+                               Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy">
+                        @foreach (var table in database.Tables)
+                        {
+                            <MudSelectItem T="string" Value="@table.Name">@table.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                    @foreach (var field in AccessFields.TaskFields)
+                    {
+                        var current = field;
+                        <MudSelect T="string" Value="@_taskColumns.GetValueOrDefault(current)"
+                                   ValueChanged="@((string? v) => SetColumn(_taskColumns, current, v))"
+                                   Label="@current.Label()" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                                   Clearable="true" Placeholder="не переносится" Class="mt-2" Disabled="_busy">
+                            @foreach (var column in ColumnsOf(_tasksTable))
+                            {
+                                <MudSelectItem T="string" Value="@column.Name">@column.Name (@column.TypeName)</MudSelectItem>
+                            }
+                        </MudSelect>
+                    }
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudSelect T="string" Value="_linksTable" ValueChanged="OnLinksTableChanged" Label="Таблица связей"
+                               Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Placeholder="связи не переносятся"
+                               Disabled="_busy">
+                        @foreach (var table in database.Tables.Where(t => t.Name != _tasksTable))
+                        {
+                            <MudSelectItem T="string" Value="@table.Name">@table.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                    @if (_linksTable is not null)
+                    {
+                        @foreach (var field in AccessFields.LinkFields)
+                        {
+                            var current = field;
+                            <MudSelect T="string" Value="@_linkColumns.GetValueOrDefault(current)"
+                                       ValueChanged="@((string? v) => SetColumn(_linkColumns, current, v))"
+                                       Label="@current.Label()" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                                       Clearable="true" Placeholder="не переносится" Class="mt-2" Disabled="_busy">
+                                @foreach (var column in ColumnsOf(_linksTable))
+                                {
+                                    <MudSelectItem T="string" Value="@column.Name">@column.Name (@column.TypeName)</MudSelectItem>
+                                }
+                            </MudSelect>
+                        }
+                    }
+                </MudItem>
+            </MudGrid>
+        </MudPaper>
+
+        @* --- Шаг 3. Куда переносить --- *@
+        <MudPaper Outlined="true" Class="pa-3 mt-3">
+            <MudText Typo="Typo.h6">3. Куда переносить</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                В базе нет грифа, а подразделение — то, чей учёт переносится: выберите их для всех заданий базы. Задания станут
+                делами вида «Задание по объекту»; закрыть задание можно потом в его карточке.
+            </MudText>
+            <MudGrid Spacing="2" Class="mt-1">
+                <MudItem xs="12" sm="6" md="4">
+                    <MudSelect T="int?" Value="_divisionId" ValueChanged="@((int? v) => { _divisionId = v; ResetCheck(); })"
+                               Label="Подразделение *" Variant="Variant.Outlined" Margin="Margin.Dense"
+                               Placeholder="Из вашего допуска" HelperText="@DirectionHint" Disabled="_busy">
+                        @foreach (var division in _divisions)
+                        {
+                            <MudSelectItem T="int?" Value="@division.Id">@division.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6" md="4">
+                    @* Гриф БЕЗ умолчания и В ПРЕДЕЛАХ допуска (ТБ-024). *@
+                    <MudSelect T="short?" Value="_classification" ValueChanged="@((short? v) => { _classification = v; ResetCheck(); })"
+                               Label="Гриф *" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Выберите гриф" Disabled="_busy">
+                        @for (short level = 0; level <= _maxClassification; level++)
+                        {
+                            var value = level;
+                            <MudSelectItem T="short?" Value="@value">@ClassificationLevels.Label(value)</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6" md="4">
+                    <MudSelect T="CaseStatus" Value="_status" ValueChanged="@((CaseStatus v) => { _status = v; ResetCheck(); })"
+                               Label="Статус заданий" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy">
+                        <MudSelectItem T="CaseStatus" Value="CaseStatus.InProgress">@CaseStatus.InProgress.Label()</MudSelectItem>
+                        <MudSelectItem T="CaseStatus" Value="CaseStatus.Suspended">@CaseStatus.Suspended.Label()</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+            </MudGrid>
+            <MudCheckBox T="bool" Value="_createReferences" ValueChanged="@((bool v) => { _createReferences = v; ResetCheck(); })"
+                         Disabled="@(_busy || !_setup.CanCreateReferences)" Dense="true" Class="mt-2"
+                         Label="Завести недостающие записи справочников: инициаторов (ГУ) и типы связей" />
+            @if (!_setup.CanCreateReferences)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                    Заводить записи справочников может роль с правом «Подразделения и справочники». Без этого строки с
+                    неизвестным инициатором или типом связи не переносятся — заведите записи в «Справочниках» заранее.
+                </MudText>
+            }
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FactCheck" Class="mt-3"
+                       Disabled="@(_busy || !CanCheck)" OnClick="CheckAsync">Проверить</MudButton>
+            @if (_busy && _progressText is not null && _plan is null)
+            {
+                <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mt-2" />
+                <MudText Typo="Typo.caption">@_progressText</MudText>
+            }
+            @if (_error is not null && _plan is null)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mt-2">@_error</MudAlert>
+            }
+        </MudPaper>
+    }
+
+    @* --- Шаг 4. Итог проверки и перенос --- *@
+    @if (_plan is { } plan)
+    {
+        <MudPaper Outlined="true" Class="pa-3 mt-3">
+            <MudText Typo="Typo.h6">4. Итог проверки</MudText>
+            <MudText Typo="Typo.body1" Class="mt-1">
+                В базе <b>@plan.TaskCount</b> заданий и <b>@plan.LinkCount</b> связей. Будет перенесено заданий — <b>@plan.NewTaskCount</b>
+                (с фото — @plan.PhotoCount), связей — <b>@plan.NewLinkCount</b>.
+                @if (plan.AlreadyImportedTasks > 0)
+                {
+                    <span> Перенесены раньше — @plan.AlreadyImportedTasks (повтор их пропустит).</span>
+                }
+                С ошибками — <b>@plan.Problems.Count</b> записей: они не переносятся (или переносятся без фото).
+            </MudText>
+            @if (plan.InitiatorsToCreate.Count > 0 || plan.LinkTypesToCreate.Count > 0)
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-2">
+                    Будут заведены записи справочников.
+                    @if (plan.InitiatorsToCreate.Count > 0)
+                    {
+                        <div>Инициаторы (ГУ): @string.Join("; ", plan.InitiatorsToCreate)</div>
+                    }
+                    @if (plan.LinkTypesToCreate.Count > 0)
+                    {
+                        <div>Типы связей: @string.Join("; ", plan.LinkTypesToCreate)</div>
+                    }
+                </MudAlert>
+            }
+
+            @if (plan.Sample.Count > 0)
+            {
+                <MudText Typo="Typo.subtitle1" Class="mt-3">Первые задания — сверьте сопоставление</MudText>
+                <MudSimpleTable Dense="true" Class="mt-1">
+                    <thead><tr><th>Код</th><th>№ задания</th><th>Объект</th><th>Дата</th><th>Инициатор</th><th>Связей</th></tr></thead>
+                    <tbody>
+                        @foreach (var task in plan.Sample)
+                        {
+                            <tr>
+                                <td>@task.Key</td>
+                                <td>@task.CaseNumber</td>
+                                <td>@task.ObjectName</td>
+                                <td>@(task.Date?.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture) ?? "—")</td>
+                                <td>@(task.Initiator ?? AccessImporter.PlaceholderInitiator)</td>
+                                <td>@task.Links</td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            }
+
+            <AccessProblemTable Problems="plan.Problems" Title="Записи с ошибками" />
+
+            @if (plan.HasWork && _report is null)
+            {
+                <MudDivider Class="my-3" />
+                <MudCheckBox T="bool" @bind-Value="_confirmed" Disabled="_busy"
+                             Label="@ConfirmLabel(plan)" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow" Class="mt-2"
+                           Disabled="@(_busy || !_confirmed)" OnClick="RunAsync">Перенести</MudButton>
+            }
+            @if (_busy && _progressText is not null)
+            {
+                <MudProgressLinear Color="Color.Primary" Indeterminate="@(_done == 0)" Value="@ProgressPercent(plan)" Class="mt-2" />
+                <MudText Typo="Typo.caption">@_progressText</MudText>
+            }
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mt-2">@_error</MudAlert>
+            }
+        </MudPaper>
+    }
+
+    @* --- Итог переноса --- *@
+    @if (_report is { } report)
+    {
+        <MudPaper Outlined="true" Class="pa-3 mt-3">
+            <MudText Typo="Typo.h6">Итог переноса</MudText>
+            @if (report.Stopped)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mt-2">
+                    Перенос остановлен: @(report.Problems.FirstOrDefault()?.Message). Перенесённое сохранено; повтор той же базы
+                    продолжит с места остановки без дублей.
+                </MudAlert>
+            }
+            <MudText Typo="Typo.body1" Class="mt-1">
+                Заведено дел — <b>@report.CasesCreated</b>, объектов — <b>@report.ObjectsCreated</b>, связей — <b>@report.LinksCreated</b>;
+                фото в материалах — @report.PhotosAccepted, автомобилей — @report.VehiclesSaved, адресов посещения — @report.AddressesSaved,
+                записей справочников — @report.ReferencesCreated.
+                @if (report.AlreadyImported > 0)
+                {
+                    <span> Перенесены раньше и пропущены — @report.AlreadyImported.</span>
+                }
+            </MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary mt-1">
+                Фото объектов лежат в материалах дел; эталоном снимок делает сотрудник в карточке объекта.
+            </MudText>
+            <AccessProblemTable Problems="report.Problems" Title="Не перенесено или перенесено не полностью" />
+            <MudButton Variant="Variant.Text" Href="/cases" StartIcon="@Icons.Material.Filled.FolderOpen" Class="mt-2">К делам</MudButton>
+        </MudPaper>
+    }
+}
+
+@code {
+    private AccessImportSetup? _setup;
+    private string? _setupError;
+    private readonly List<DivisionNode> _divisions = [];
+    private IReadOnlyDictionary<int, CaseDirection> _directions = new Dictionary<int, CaseDirection>();
+    private short _maxClassification = -1;
+
+    private AccessDatabaseInfo? _database;
+    private string? _tasksTable;
+    private string? _linksTable;
+    private readonly Dictionary<AccessField, string> _taskColumns = [];
+    private readonly Dictionary<AccessField, string> _linkColumns = [];
+
+    private int? _divisionId;
+    private short? _classification;
+    private CaseStatus _status = CaseStatus.InProgress;
+    private bool _createReferences;
+
+    private AccessImportPlan? _plan;
+    private AccessImportReport? _report;
+    private bool _confirmed;
+
+    private bool _busy;
+    private int _done;
+    private string? _progressText;
+    private string? _error;
+
+    private bool CanCheck => _database is not null && _tasksTable is not null && _divisionId is not null && _classification is not null;
+
+    private string? DirectionHint => _divisionId is not { } id
+        ? null
+        : _directions.TryGetValue(id, out var direction)
+            ? $"Отдел: {direction.ShortLabel()} — {direction.Label()}"
+            : "Подразделение не отнесено ни к одному отделу";
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        if (!RendererInfo.IsInteractive)
+        {
+            return;
+        }
+
+        var setup = await Dispatcher.Send(new GetAccessImportSetupQuery());
+        if (!setup.Status || setup.Data is null)
+        {
+            _setupError = setup.StatusMessage;
+            return;
+        }
+
+        _setup = setup.Data;
+        if (!_setup.Allowed)
+        {
+            return;
+        }
+
+        // Подразделения и гриф — только в пределах допуска (ТБ-024); это удобство формы, сервер проверяет сам.
+        var scope = await Dispatcher.Send(new GetAccessScopeQuery());
+        if (scope is { Status: true, Data: { } s })
+        {
+            _maxClassification = s.MaxClassification;
+            _divisions.AddRange(s.OwnerDivisions.Where(d => d.IsActive));
+            _divisionId = _divisions.Count == 1 ? _divisions[0].Id : null;
+        }
+        else
+        {
+            _setupError = scope.StatusMessage;
+            return;
+        }
+
+        var divisions = await Dispatcher.Send(new ListDivisionsQuery());
+        if (divisions is { Status: true, Data: { } list })
+        {
+            _directions = DivisionDirections.Resolve(list);
+        }
+    }
+
+    private async Task OnFileSelectedAsync(IBrowserFile? file)
+    {
+        _database = null;
+        _report = null;
+        ResetCheck();
+        if (file is null)
+        {
+            return;
+        }
+
+        if (!AccessImportFiles.HasDatabaseExtension(file.Name))
+        {
+            _error = AccessImportFiles.WrongExtensionMessage;
+            return;
+        }
+
+        if (file.Size is <= 0 or > AccessImportFiles.MaxBytes)
+        {
+            _error = "Файл пуст или больше 2 ГБ — это не база Access.";
+            return;
+        }
+
+        await RunBusyAsync($"Загружаю и читаю базу «{file.Name}» ({SizeLabel(file.Size)})…", async () =>
+        {
+            try
+            {
+                await using var stream = file.OpenReadStream(file.Size);
+                var uploaded = await Dispatcher.Send(new UploadAccessDatabaseCommand(stream, file.Name, file.Size));
+                if (!uploaded.Status || uploaded.Data is null)
+                {
+                    _error = uploaded.StatusMessage;
+                    return;
+                }
+
+                _database = uploaded.Data;
+                ApplyMapping(uploaded.Data.Suggested);
+            }
+            catch (IOException exception)
+            {
+                // Обрыв передачи из браузера (закрыли вкладку, сеть) — загрузку можно повторить.
+                _error = "Файл не загружен: " + exception.Message;
+            }
+        });
+    }
+
+    private void ApplyMapping(AccessMapping mapping)
+    {
+        _tasksTable = mapping.TasksTable;
+        _linksTable = mapping.LinksTable;
+        _taskColumns.Clear();
+        _linkColumns.Clear();
+        foreach (var (field, column) in mapping.TaskColumns)
+        {
+            _taskColumns[field] = column;
+        }
+
+        foreach (var (field, column) in mapping.LinkColumns)
+        {
+            _linkColumns[field] = column;
+        }
+    }
+
+    private void OnTasksTableChanged(string? table)
+    {
+        _tasksTable = table;
+        _taskColumns.Clear();
+        if (TableOf(table) is { } selected)
+        {
+            foreach (var (field, column) in AccessAutoMapper.SuggestColumns(selected, AccessFields.TaskFields))
+            {
+                _taskColumns[field] = column;
+            }
+        }
+
+        if (_linksTable == table)
+        {
+            OnLinksTableChanged(null);
+        }
+
+        ResetCheck();
+    }
+
+    private void OnLinksTableChanged(string? table)
+    {
+        _linksTable = table;
+        _linkColumns.Clear();
+        if (TableOf(table) is { } selected)
+        {
+            foreach (var (field, column) in AccessAutoMapper.SuggestColumns(selected, AccessFields.LinkFields))
+            {
+                _linkColumns[field] = column;
+            }
+        }
+
+        ResetCheck();
+    }
+
+    private void SetColumn(Dictionary<AccessField, string> columns, AccessField field, string? column)
+    {
+        if (string.IsNullOrEmpty(column))
+        {
+            columns.Remove(field);
+        }
+        else
+        {
+            columns[field] = column;
+        }
+
+        ResetCheck();
+    }
+
+    private AccessTable? TableOf(string? name) => _database?.Tables.FirstOrDefault(t => t.Name == name);
+
+    private IReadOnlyList<AccessColumn> ColumnsOf(string? table) => TableOf(table)?.Columns ?? [];
+
+    private AccessMapping CurrentMapping() => new(
+        _tasksTable, new Dictionary<AccessField, string>(_taskColumns), _linksTable, new Dictionary<AccessField, string>(_linkColumns));
+
+    private AccessImportOptions? CurrentOptions() => _divisionId is { } division && _classification is { } classification
+        ? new AccessImportOptions(division, classification, _status, _createReferences)
+        : null;
+
+    private async Task CheckAsync()
+    {
+        if (_database is not { } database || CurrentOptions() is not { } options)
+        {
+            return;
+        }
+
+        ResetCheck();
+        _report = null;
+        var query = new CheckAccessImportQuery(database.File, CurrentMapping(), options);
+        await RunBusyAsync("Читаю базу и проверяю записи…", async () =>
+        {
+            var result = await Task.Run(() => Dispatcher.Send(query).AsTask());
+            if (!result.Status || result.Data is null)
+            {
+                _error = result.StatusMessage;
+                return;
+            }
+
+            _plan = result.Data;
+        });
+    }
+
+    private async Task RunAsync()
+    {
+        if (_database is not { } database || _plan is not { } plan || CurrentOptions() is not { } options)
+        {
+            return;
+        }
+
+        _done = 0;
+        var progress = new Progress<int>(count =>
+        {
+            _done = count;
+            _progressText = $"Обработано заданий: {count.ToString("N0", CultureInfo.GetCultureInfo("ru-RU"))} из {plan.TaskCount.ToString("N0", CultureInfo.GetCultureInfo("ru-RU"))}…";
+            _ = InvokeAsync(StateHasChanged);
+        });
+        var command = new RunAccessImportCommand(database.File, CurrentMapping(), options, plan.Fingerprint, _confirmed, progress);
+        await RunBusyAsync("Переношу…", async () =>
+        {
+            // Перенос тысяч заданий — вне потока отрисовки, чтобы ход был виден.
+            var result = await Task.Run(() => Dispatcher.Send(command).AsTask());
+            if (!result.Status || result.Data is null)
+            {
+                _error = result.StatusMessage;
+                return;
+            }
+
+            _report = result.Data;
+            _confirmed = false;
+        });
+    }
+
+    private async Task RunBusyAsync(string progressText, Func<Task> work)
+    {
+        _busy = true;
+        _error = null;
+        _progressText = progressText;
+        try
+        {
+            await work();
+        }
+        finally
+        {
+            _busy = false;
+            _progressText = null;
+        }
+    }
+
+    private void ResetCheck()
+    {
+        _plan = null;
+        _confirmed = false;
+        _error = null;
+    }
+
+    private string ConfirmLabel(AccessImportPlan plan)
+    {
+        var division = _divisions.FirstOrDefault(d => d.Id == _divisionId)?.Name ?? "—";
+        var grif = _classification is { } value ? ClassificationLabel(value) : "—";
+        return $"Все {plan.NewTaskCount} заданий получат гриф «{grif}» и подразделение «{division}» (ТБ-024) — подтверждаю.";
+    }
+
+    private static string ClassificationLabel(short value) => ClassificationLevels.Label(value);
+
+    private double ProgressPercent(AccessImportPlan plan) => plan.TaskCount == 0 ? 0 : 100.0 * _done / plan.TaskCount;
+
+    private static string SizeLabel(long bytes) => bytes switch
+    {
+        >= 1024 * 1024 => (bytes / (1024.0 * 1024.0)).ToString("0.#", CultureInfo.GetCultureInfo("ru-RU")) + " МБ",
+        >= 1024 => (bytes / 1024.0).ToString("0", CultureInfo.GetCultureInfo("ru-RU")) + " КБ",
+        _ => bytes.ToString(CultureInfo.InvariantCulture) + " байт",
+    };
+}

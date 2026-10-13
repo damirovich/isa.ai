@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.BackgroundTasks;
 using ISC.AI.Abstractions.Security;
@@ -91,7 +92,8 @@ public sealed class MediaImportRunner(
     IAuditWriter audit,
     MediaImportOptions importOptions,
     MediaUploadOptions uploadOptions,
-    TimeProvider time)
+    TimeProvider time,
+    IArchiveDocumentSink? documents = null)
 {
     /// <summary>Причина остановки: каталог исключён из настройки.</summary>
     public const string FolderNotAllowedReason =
@@ -227,6 +229,11 @@ public sealed class MediaImportRunner(
             return MediaImportItemOutcome.Reject(fileProblem ?? MediaImportPaths.NotFoundMessage);
         }
 
+        if (draft.Kind == MediaImportFileKind.Document)
+        {
+            return await AcceptDocumentAsync(context, work, caseItem, file, cancellationToken);
+        }
+
         FileStream content;
         try
         {
@@ -284,6 +291,82 @@ public sealed class MediaImportRunner(
             : new MediaImportItemOutcome(MediaImportItemStatus.Duplicate, null, receipt.AssetId, receipt.ContentHash, MediaImportProcessingState.None);
     }
 
+    // Документ архива (ADR-0042): файл целиком в память (до 100 МБ), сигнатура и контрольная сумма — как у носителей,
+    // повтор того же файла в то же дело — дубликат; регистрирует и привязывает к делу профиль (IArchiveDocumentSink).
+    private async Task<MediaImportItemOutcome> AcceptDocumentAsync(
+        MediaImportContext context, MediaImportWorkItem work, CaseScopeItem caseItem, MediaImportSourceFile file,
+        CancellationToken cancellationToken)
+    {
+        var draft = work.Draft;
+        if (documents is not { IsSupported: true } sink)
+        {
+            return MediaImportItemOutcome.Reject(UnsupportedArchiveDocumentSink.NotSupportedMessage);
+        }
+
+        if (draft.Document is not { } requisites)
+        {
+            return MediaImportItemOutcome.Reject("нет реквизитов документа — проверьте опись заново");
+        }
+
+        if (file.Length > MediaImportLimits.DocumentMaxBytes)
+        {
+            return MediaImportItemOutcome.Reject(MediaIntake.TooLargeMessage(MediaImportLimits.DocumentMaxBytes));
+        }
+
+        byte[] content;
+        try
+        {
+            content = await File.ReadAllBytesAsync(file.FullPath, cancellationToken);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return MediaImportItemOutcome.Reject("файл не прочитан: " + exception.Message);
+        }
+
+        if (!ArchiveDocumentFormats.MatchesSignature(draft.ContentType, content))
+        {
+            return MediaImportItemOutcome.Reject(ArchiveDocumentFormats.SignatureMismatchMessage);
+        }
+
+        var sha = Convert.ToHexString(SHA256.HashData(content));
+        if (draft.ExpectedSha256 is { Length: > 0 } expected && !string.Equals(expected, sha, StringComparison.OrdinalIgnoreCase))
+        {
+            return MediaImportItemOutcome.Reject(new MediaContentHashMismatchException(expected.ToUpperInvariant(), sha).Message);
+        }
+
+        // Тот же файл уже введён импортом в это дело — второй документ не заводится. Своя прерванная попытка (номер
+        // документа уже в строке) — не дубликат: её надо довести.
+        if (work.DocumentId is null && await imports.FindImportedDocumentAsync(draft.CaseId, sha, cancellationToken) is { } existing)
+        {
+            return new MediaImportItemOutcome(
+                MediaImportItemStatus.Duplicate, null, null, sha, MediaImportProcessingState.None, existing);
+        }
+
+        var notes = string.Create(
+            CultureInfo.InvariantCulture,
+            $"Импорт архива: задание {work.JobId}, строка описи {draft.RowNumber}, файл «{draft.RelativePath}».");
+        var result = await sink.ImportAsync(
+            new ArchiveDocumentRequest(
+                caseItem,
+                Path.GetFileName(file.RelativePath),
+                draft.ContentType,
+                content,
+                requisites.TypeId,
+                string.IsNullOrWhiteSpace(requisites.RegNumber) ? null : requisites.RegNumber,
+                requisites.RegDate,
+                requisites.Title,
+                draft.Source,
+                notes.Length > 2000 ? notes[..2000] : notes,
+                work.DocumentId),
+            context.Access,
+            documentId => imports.SetItemDocumentAsync(work.ItemId, documentId, cancellationToken),
+            cancellationToken);
+
+        return result.DocumentId is { } documentId
+            ? new MediaImportItemOutcome(MediaImportItemStatus.Accepted, null, null, sha, MediaImportProcessingState.Waiting, documentId)
+            : MediaImportItemOutcome.Reject(result.Error ?? "документ не зарегистрирован");
+    }
+
     private async Task StopBySystemAsync(MediaImportJobRun job, string reason, CancellationToken cancellationToken)
     {
         if (await imports.StopAsync(job.JobId, reason, cancellationToken))
@@ -315,7 +398,7 @@ public sealed class MediaImportRunner(
         };
         var objectRef = string.Create(
             CultureInfo.InvariantCulture,
-            $"media:import:job={work.JobId};row={draft.RowNumber};case={draft.CaseId};asset={outcome.AssetId?.ToString(CultureInfo.InvariantCulture) ?? "-"};result={result}");
+            $"media:import:job={work.JobId};row={draft.RowNumber};case={draft.CaseId};asset={outcome.AssetId?.ToString(CultureInfo.InvariantCulture) ?? "-"};doc={outcome.DocumentId?.ToString(CultureInfo.InvariantCulture) ?? "-"};result={result}");
 
         // Гриф записи — не ниже грифа дела и допуска субъекта (как у сквозного аудита): путь файла сам может быть
         // сведением ограниченного доступа.
@@ -343,7 +426,8 @@ public sealed class MediaImportFeeder(
     IMediaStore store,
     IBackgroundTaskQueue queue,
     IBackgroundTaskStore tasks,
-    MediaImportOptions options)
+    MediaImportOptions options,
+    IArchiveDocumentSink? documents = null)
 {
     /// <summary>Отмечает завершённую обработку и подаёт следующие носители на освободившиеся места.</summary>
     /// <returns>Сколько носителей подано.</returns>
@@ -372,14 +456,34 @@ public sealed class MediaImportFeeder(
         var next = await imports.ListWaitingProcessingAsync(free, cancellationToken);
         foreach (var item in next)
         {
-            // Расшифровка носителя архива стоит «в очереди» с приёма либо «ошибка, прервано перезапуском» — после
-            // аварии посреди обработки. Условный перевод вернёт её в «в очереди»; уже «в очереди» — оставит как есть.
-            if (item.Kind is MediaKind.Audio or MediaKind.Video)
+            // Документ (ADR-0042): индексация текста в корпус — задачей документооборота, через профиль.
+            if (item.DocumentId is { } documentId)
             {
-                await store.TryMarkTranscriptionPendingAsync(item.AssetId, cancellationToken);
+                if (documents is not { IsSupported: true } sink)
+                {
+                    await imports.MarkProcessingDoneAsync(item.ItemId, cancellationToken);
+                    continue;
+                }
+
+                var indexing = await sink.EnqueueIndexingAsync(documentId, cancellationToken);
+                await imports.MarkProcessingQueuedAsync(item.ItemId, indexing, null, cancellationToken);
+                continue;
             }
 
-            var started = await MediaProcessing.EnqueueAsync(queue, item.AssetId, item.Kind, cancellationToken);
+            if (item.AssetId is not { } assetId || item.AssetKind is not { } kind)
+            {
+                await imports.MarkProcessingDoneAsync(item.ItemId, cancellationToken);
+                continue;
+            }
+
+            // Расшифровка носителя архива стоит «в очереди» с приёма либо «ошибка, прервано перезапуском» — после
+            // аварии посреди обработки. Условный перевод вернёт её в «в очереди»; уже «в очереди» — оставит как есть.
+            if (kind is MediaKind.Audio or MediaKind.Video)
+            {
+                await store.TryMarkTranscriptionPendingAsync(assetId, cancellationToken);
+            }
+
+            var started = await MediaProcessing.EnqueueAsync(queue, assetId, kind, cancellationToken);
             await imports.MarkProcessingQueuedAsync(item.ItemId, started.IndexTaskId, started.TranscriptTaskId, cancellationToken);
         }
 

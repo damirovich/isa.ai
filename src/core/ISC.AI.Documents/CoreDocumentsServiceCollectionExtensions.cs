@@ -10,11 +10,14 @@ namespace ISC.AI.Documents;
 /// <summary>Регистрация движка документов ядра: извлечение текста из файлов (нейтрально к типу документа).</summary>
 public static class CoreDocumentsServiceCollectionExtensions
 {
-    /// <summary>Регистрирует извлекатели текста (.txt, .docx, .pdf, OCR сканов) и фасад <see cref="ITextExtractor"/>.</summary>
+    /// <summary>Регистрирует извлекатели текста (.txt, .docx, .doc, .pdf, OCR сканов) и фасад <see cref="ITextExtractor"/>.</summary>
     public static IServiceCollection AddCoreDocuments(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddSingleton<IFormatTextExtractor, PlainTextExtractor>();
         services.AddSingleton<IFormatTextExtractor, DocxTextExtractor>();
+
+        // Word 97–2003 (.doc) — своим чтением составного файла OLE и таблицы кусков, без сторонних библиотек (ADR-0042).
+        services.AddSingleton<IFormatTextExtractor, DocTextExtractor>();
 
         // OCR сканов (ПОДГ-02) регистрируется ВСЕГДА: сканы/изображения распознаются как OCR-формат, а при
         // ненастроенном OCR попытка даёт ЯВНУЮ ошибку «OCR не настроен» (а не «формат не поддерживается»).

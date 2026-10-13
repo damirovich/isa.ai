@@ -234,7 +234,7 @@ public sealed class MediaArchiveImportTests(MediaSnapshotFixture fixture) : ICla
         var imports = new MediaImportStore(fixture.Media, new AllowAllAccessPolicy());
 
         var jobId = await imports.CreateJobAsync(new MediaImportJobDraft(
-            @"D:\архив", "опись.csv", new string('c', 64), 77, [Item(2, "запись.mp3", 4, caseId: 1, classification: 0, division: 51, kind: MediaKind.Audio)]));
+            @"D:\архив", "опись.csv", new string('c', 64), 77, [Item(2, "запись.mp3", 4, caseId: 1, classification: 0, division: 51, kind: MediaImportFileKind.Audio)]));
         await imports.StartNextJobAsync();
         var work = (await imports.TakeNextItemAsync(jobId)).ShouldNotBeNull();
         var archived = await media.ReceiveAsync(
@@ -303,8 +303,8 @@ public sealed class MediaArchiveImportTests(MediaSnapshotFixture fixture) : ICla
     }
 
     private static MediaImportItemDraft Item(
-        int row, string path, long size, int caseId, short classification, int division, MediaKind kind = MediaKind.Image) =>
-        new(row, path, kind, kind == MediaKind.Audio ? "audio/mpeg" : "image/jpeg", size, caseId, "N-" + caseId, classification, division,
+        int row, string path, long size, int caseId, short classification, int division, MediaImportFileKind kind = MediaImportFileKind.Image) =>
+        new(row, path, kind, kind == MediaImportFileKind.Audio ? "audio/mpeg" : "image/jpeg", size, caseId, "N-" + caseId, classification, division,
             Captured, false, null, null, null);
 
     private sealed class RecordingQueue : IBackgroundTaskQueue
