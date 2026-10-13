@@ -256,7 +256,7 @@ public sealed class MediaImportRunnerTests : IDisposable
 
     private static MediaImportItemDraft Draft(
         int caseId = 10, short classification = 2, string? expectedSha = null, bool withDate = true) =>
-        new(2, "a.jpg", MediaKind.Image, "image/jpeg", Jpeg.Length, caseId, "1/2023", classification, 1,
+        new(2, "a.jpg", MediaImportFileKind.Image, "image/jpeg", Jpeg.Length, caseId, "1/2023", classification, 1,
             withDate ? Captured : null, false, "камера", "двор", expectedSha);
 }
 
@@ -272,7 +272,7 @@ public sealed class MediaImportFeederTests
     public async Task Busy_slot_blocks_feeding()
     {
         var running = Guid.NewGuid();
-        _imports.ListQueuedProcessingAsync(Arg.Any<CancellationToken>()).Returns([new MediaImportFeedItem(1, 10, MediaKind.Image, running, null)]);
+        _imports.ListQueuedProcessingAsync(Arg.Any<CancellationToken>()).Returns([new MediaImportFeedItem(1, 10, MediaKind.Image, null, running, null)]);
         _tasks.GetAsync(running, Arg.Any<CancellationToken>()).Returns(Info(running, BackgroundTaskStatus.Running));
 
         (await Feeder(slots: 1).FeedAsync()).ShouldBe(0);
@@ -285,9 +285,9 @@ public sealed class MediaImportFeederTests
     public async Task Finished_item_frees_slot_for_next()
     {
         var done = Guid.NewGuid();
-        _imports.ListQueuedProcessingAsync(Arg.Any<CancellationToken>()).Returns([new MediaImportFeedItem(1, 10, MediaKind.Image, done, null)]);
+        _imports.ListQueuedProcessingAsync(Arg.Any<CancellationToken>()).Returns([new MediaImportFeedItem(1, 10, MediaKind.Image, null, done, null)]);
         _tasks.GetAsync(done, Arg.Any<CancellationToken>()).Returns(Info(done, BackgroundTaskStatus.Completed));
-        _imports.ListWaitingProcessingAsync(1, Arg.Any<CancellationToken>()).Returns([new MediaImportFeedItem(2, 20, MediaKind.Video, null, null)]);
+        _imports.ListWaitingProcessingAsync(1, Arg.Any<CancellationToken>()).Returns([new MediaImportFeedItem(2, 20, MediaKind.Video, null, null, null)]);
 
         (await Feeder(slots: 1).FeedAsync()).ShouldBe(1);
 
@@ -303,8 +303,8 @@ public sealed class MediaImportFeederTests
         _imports.ListQueuedProcessingAsync(Arg.Any<CancellationToken>()).Returns([]);
         _imports.ListWaitingProcessingAsync(3, Arg.Any<CancellationToken>()).Returns(
         [
-            new MediaImportFeedItem(1, 10, MediaKind.Image, null, null),
-            new MediaImportFeedItem(2, 20, MediaKind.Audio, null, null),
+            new MediaImportFeedItem(1, 10, MediaKind.Image, null, null, null),
+            new MediaImportFeedItem(2, 20, MediaKind.Audio, null, null, null),
         ]);
 
         (await Feeder(slots: 3).FeedAsync()).ShouldBe(2);

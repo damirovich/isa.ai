@@ -102,6 +102,11 @@ public sealed class InvestigationProfile : IProfile
         new ModuleDescriptor("admin-references", "/admin/references", "Справочники",
             Icons.Material.Filled.MenuBook, typeof(References), ReadPolicy, GroupAdmin),
 
+        // Перенос баз Access отделов (ADR-0043): задания, объекты, фото и связи — в дела «Задание по объекту»;
+        // право «Перенос баз Access» (по умолчанию Администратор), допуск и гриф проверяет сервер.
+        new ModuleDescriptor("admin-access-import", "/admin/access-import", "Перенос из Access",
+            Icons.Material.Filled.DriveFolderUpload, typeof(AccessTransfer), ReadPolicy, GroupAdmin),
+
         // Запросы на правку архивных сводок и справок (ТФ-АДМ-06, ADR-0031): решает Администратор по метаданным.
         new ModuleDescriptor("admin-report-permits", "/admin/report-permits", "Запросы на правку сводок",
             Icons.Material.Filled.LockOpen, typeof(ReportPermits), ReadPolicy, GroupAdmin),

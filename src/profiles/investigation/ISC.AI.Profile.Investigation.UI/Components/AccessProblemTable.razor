@@ -1,0 +1,55 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@using System.Text
+@using ISC.AI.Profile.Investigation.Application.Features.AccessImport
+
+@* Записи базы Access с ошибками (ADR-0043 п. 7): первые строки на экране, все — файлом CSV для Excel. *@
+
+@if (Problems.Count > 0)
+{
+    <div class="d-flex align-center justify-space-between flex-wrap gap-2 mt-3">
+        <MudText Typo="Typo.subtitle1">@Title</MudText>
+        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Download"
+                   OnClick="DownloadAsync">Скачать списком (CSV)</MudButton>
+    </div>
+    <MudSimpleTable Dense="true" Class="mt-1">
+        <thead><tr><th>Таблица</th><th>Код записи</th><th>Что не так</th></tr></thead>
+        <tbody>
+            @foreach (var problem in Problems.Take(Shown))
+            {
+                <tr><td>@problem.Table</td><td>@problem.Key</td><td>@problem.Message</td></tr>
+            }
+        </tbody>
+    </MudSimpleTable>
+    @if (Problems.Count > Shown)
+    {
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">Показаны первые @Shown из @Problems.Count — все есть в скачанном файле.</MudText>
+    }
+}
+
+@code {
+    /// <summary>Сколько строк показывать на экране.</summary>
+    public const int Shown = 200;
+
+    /// <summary>Записи с ошибками.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<AccessImportProblem> Problems { get; set; } = [];
+
+    /// <summary>Заголовок блока.</summary>
+    [Parameter] public string Title { get; set; } = "Записи с ошибками";
+
+    private async Task DownloadAsync()
+    {
+        // CSV с «;» и BOM — так его без вопросов открывает русский Excel.
+        var text = new StringBuilder("таблица;код записи;что не так\r\n");
+        foreach (var problem in Problems)
+        {
+            text.Append(Escape(problem.Table)).Append(';').Append(Escape(problem.Key)).Append(';').Append(Escape(problem.Message)).Append("\r\n");
+        }
+
+        var bytes = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(text.ToString())).ToArray();
+        using var stream = new DotNetStreamReference(new MemoryStream(bytes));
+        await JS.InvokeVoidAsync("downloadFileFromStream", "перенос-access-ошибки.csv", stream);
+    }
+
+    private static string Escape(string value) =>
+        value.IndexOfAny([';', '"', '\r', '\n']) < 0 ? value : "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
+}

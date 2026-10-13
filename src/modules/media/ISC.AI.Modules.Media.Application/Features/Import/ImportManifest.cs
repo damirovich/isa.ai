@@ -13,6 +13,10 @@ namespace ISC.AI.Modules.Media.Application.Features.Import;
 /// <param name="Source">Источник.</param>
 /// <param name="Place">Место.</param>
 /// <param name="Sha256">Контрольная сумма SHA-256.</param>
+/// <param name="DocumentType">Тип документа по наименованию справочника (документы, ADR-0042).</param>
+/// <param name="RegNumber">Регистрационный номер документа.</param>
+/// <param name="DocumentDate">Дата документа.</param>
+/// <param name="Title">Название (краткое содержание) документа.</param>
 public sealed record ManifestRow(
     int RowNumber,
     string? File,
@@ -21,7 +25,11 @@ public sealed record ManifestRow(
     string? CapturedAt = null,
     string? Source = null,
     string? Place = null,
-    string? Sha256 = null);
+    string? Sha256 = null,
+    string? DocumentType = null,
+    string? RegNumber = null,
+    string? DocumentDate = null,
+    string? Title = null);
 
 /// <summary>Итог чтения описи.</summary>
 /// <param name="Rows">Непустые строки по порядку.</param>
@@ -51,8 +59,8 @@ public sealed record ManifestReadResult(
 /// </para>
 /// <para>
 /// Заголовок — без учёта регистра и буквы «ё»: обязательные столбцы «файл» и «дело»; необязательные «подразделение»
-/// (код), «дата съёмки», «источник», «место», «sha256». Лишние столбцы (например, «примечание») не мешают и
-/// перечисляются оператору.
+/// (код), «дата съёмки», «источник», «место», «sha256», для документов (ADR-0042) — «тип документа», «рег. номер»,
+/// «дата документа», «название». Лишние столбцы (например, «примечание») не мешают и перечисляются оператору.
 /// </para>
 /// </remarks>
 public static class ImportManifest
@@ -84,9 +92,24 @@ public static class ImportManifest
     /// <summary>Столбец контрольной суммы.</summary>
     public const string Sha256Column = "sha256";
 
+    /// <summary>Столбец типа документа (ADR-0042).</summary>
+    public const string DocumentTypeColumn = "тип документа";
+
+    /// <summary>Столбец регистрационного номера документа.</summary>
+    public const string RegNumberColumn = "рег. номер";
+
+    /// <summary>Столбец даты документа.</summary>
+    public const string DocumentDateColumn = "дата документа";
+
+    /// <summary>Столбец названия (краткого содержания) документа.</summary>
+    public const string TitleColumn = "название";
+
     /// <summary>Столбцы описи в порядке записи (черновик и выгрузка отказов).</summary>
     public static IReadOnlyList<string> Columns { get; } =
-        [FileColumn, CaseColumn, DivisionColumn, CapturedAtColumn, SourceColumn, PlaceColumn, Sha256Column];
+    [
+        FileColumn, CaseColumn, DivisionColumn, CapturedAtColumn, SourceColumn, PlaceColumn, Sha256Column,
+        DocumentTypeColumn, RegNumberColumn, DocumentDateColumn, TitleColumn,
+    ];
 
     private enum Field
     {
@@ -97,6 +120,10 @@ public static class ImportManifest
         Source,
         Place,
         Sha256,
+        DocumentType,
+        RegNumber,
+        DocumentDate,
+        Title,
     }
 
     private static readonly Dictionary<string, Field> Aliases = new(StringComparer.Ordinal)
@@ -131,6 +158,19 @@ public static class ImportManifest
         ["хеш"] = Field.Sha256,
         ["хэш"] = Field.Sha256,
         ["hash"] = Field.Sha256,
+        ["тип документа"] = Field.DocumentType,
+        ["тип"] = Field.DocumentType,
+        ["вид документа"] = Field.DocumentType,
+        ["рег. номер"] = Field.RegNumber,
+        ["рег номер"] = Field.RegNumber,
+        ["рег.номер"] = Field.RegNumber,
+        ["регистрационный номер"] = Field.RegNumber,
+        ["номер документа"] = Field.RegNumber,
+        ["дата документа"] = Field.DocumentDate,
+        ["дата регистрации"] = Field.DocumentDate,
+        ["название"] = Field.Title,
+        ["краткое содержание"] = Field.Title,
+        ["заголовок"] = Field.Title,
     };
 
     private static readonly string[] DateTimeFormats =
@@ -215,7 +255,11 @@ public static class ImportManifest
                 Value(record, map, Field.CapturedAt),
                 Value(record, map, Field.Source),
                 Value(record, map, Field.Place),
-                Value(record, map, Field.Sha256)));
+                Value(record, map, Field.Sha256),
+                Value(record, map, Field.DocumentType),
+                Value(record, map, Field.RegNumber),
+                Value(record, map, Field.DocumentDate),
+                Value(record, map, Field.Title)));
         }
 
         return new ManifestReadResult(rows, null, sha, encodingName, delimiter, ignored);
@@ -289,6 +333,7 @@ public static class ImportManifest
             await writer.WriteLineAsync(string.Join(';', new[]
             {
                 row.File, row.CaseNumber, row.DivisionCode, row.CapturedAt, row.Source, row.Place, row.Sha256,
+                row.DocumentType, row.RegNumber, row.DocumentDate, row.Title,
             }.Select(EscapeCsv)));
         }
 
@@ -313,7 +358,7 @@ public static class ImportManifest
     }
 
     private static string NormalizeHeader(string header) =>
-        string.Join(' ', header.Trim().TrimStart('﻿').ToLowerInvariant().Replace('ё', 'е')
+        string.Join(' ', header.Trim().TrimStart('\uFEFF').ToLowerInvariant().Replace('ё', 'е')
             .Split(' ', StringSplitOptions.RemoveEmptyEntries));
 
     private static string? Value(List<string> record, Dictionary<Field, int> map, Field field)

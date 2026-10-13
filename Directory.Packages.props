@@ -25,6 +25,9 @@
     <PackageVersion Include="Pgvector" Version="0.3.2" />
     <PackageVersion Include="Pgvector.EntityFrameworkCore" Version="0.3.0" />
     <PackageVersion Include="EFCore.NamingConventions" Version="10.0.1" />
+    <!-- Перенос баз Access (ADR-0043): чтение .accdb/.mdb драйвером ACE OLE DB. MIT (dotnet/runtime); сам драйвер
+         Microsoft Access Database Engine x64 — бесплатный, ставится на сервер отдельно, как ffmpeg. -->
+    <PackageVersion Include="System.Data.OleDb" Version="10.0.9" />
     <!-- Логи -->
     <PackageVersion Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageVersion Include="Serilog.Sinks.Console" Version="6.1.1" />

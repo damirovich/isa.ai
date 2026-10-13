@@ -32,6 +32,15 @@ public static class InvestigationApplicationServiceCollectionExtensions
             PositiveOr(configuration[CaseReportOptions.EditWindowKey], 48),
             PositiveOr(configuration[CaseReportOptions.PermitHoursKey], 24)));
 
+        // Документы архива при пакетном импорте (ADR-0042): в документооборот группы «Хранение» с привязкой к делу.
+        // Заменяет поставку пакета «Медиа» по умолчанию («документы не принимаются»): регистрация пакета — TryAdd.
+        services.AddScoped<ISC.AI.Modules.Media.Domain.Services.IArchiveDocumentSink, Features.CaseDocuments.ArchiveDocumentSink>();
+
+        // Перенос баз Access (ADR-0043): файл базы в хранилище со сверкой SHA-256 и сам перенос — теми же
+        // хранилищами, что ручной ввод (чтение базы драйвером ACE регистрирует слой данных).
+        services.AddScoped<Features.AccessImport.AccessImportFiles>();
+        services.AddScoped<Features.AccessImport.AccessImporter>();
+
         services.AddValidatorsFromAssembly(typeof(InvestigationApplicationServiceCollectionExtensions).Assembly);
         return services;
     }

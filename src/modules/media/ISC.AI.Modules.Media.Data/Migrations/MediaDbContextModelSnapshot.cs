@@ -494,6 +494,32 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("division_id");
 
+                    b.Property<int?>("DocumentId")
+                        .HasColumnType("integer")
+                        .HasColumnName("document_id");
+
+                    b.Property<DateOnly?>("DocumentRegDate")
+                        .HasColumnType("date")
+                        .HasColumnName("document_reg_date");
+
+                    b.Property<bool>("DocumentRegDateFromFile")
+                        .HasColumnType("boolean")
+                        .HasColumnName("document_reg_date_from_file");
+
+                    b.Property<string>("DocumentRegNumber")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("document_reg_number");
+
+                    b.Property<string>("DocumentTitle")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("document_title");
+
+                    b.Property<int?>("DocumentTypeId")
+                        .HasColumnType("integer")
+                        .HasColumnName("document_type_id");
+
                     b.Property<string>("ExpectedSha256")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)")
@@ -558,6 +584,10 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                     b.HasIndex("AssetId")
                         .HasDatabaseName("ix_import_item_asset_id")
                         .HasFilter("asset_id IS NOT NULL");
+
+                    b.HasIndex("CaseId", "ContentSha256")
+                        .HasDatabaseName("ix_import_item_case_id_content_sha256")
+                        .HasFilter("document_id IS NOT NULL");
 
                     b.HasIndex("Classification", "DivisionId")
                         .HasDatabaseName("ix_import_item_classification_division_id");

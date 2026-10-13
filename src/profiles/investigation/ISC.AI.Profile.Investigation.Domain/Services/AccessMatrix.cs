@@ -80,6 +80,9 @@ public static class InvestigationPermissions
     /// <summary>Уничтожение дела (ADR-0025).</summary>
     public const string CasesPurge = "cases.purge";
 
+    /// <summary>Перенос баз Access: задания, объекты и связи пачкой (ADR-0043).</summary>
+    public const string CasesImport = "cases.import";
+
     /// <summary>Загрузка материалов в дело.</summary>
     public const string MediaUpload = "media.upload";
 
@@ -144,6 +147,9 @@ public static class InvestigationPermissions
             Roles(InvestigationRole.Administrator),
             AdministratorOnlyReason: "Закреплено за Администратором (решение заказчика, ADR-0025): уничтожение необратимо, "
                 + "и следователь не должен иметь возможности уничтожить своё же дело."),
+        new(CasesImport, PermissionSection.Cases, "Перенос баз Access",
+            "Задания, объекты и связи из базы отдела пачкой: гриф и подразделение — выбор оператора, в пределах допуска",
+            Roles(InvestigationRole.Administrator)),
 
         new(MediaUpload, PermissionSection.Media, "Загрузка материалов",
             "Фото, видео и аудио в дело",
@@ -221,6 +227,7 @@ public static class InvestigationPermissions
         new("admin-audit", "Журнал аудита", [AdminAudit]),
         new("admin-divisions", "Подразделения", [AdminDirectories]),
         new("admin-references", "Справочники", [AdminDirectories]),
+        new("admin-access-import", "Перенос из Access", [CasesImport]),
         new("admin-report-permits", "Запросы на правку сводок", [ReportPermits]),
     ];
 

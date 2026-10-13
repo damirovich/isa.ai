@@ -26,8 +26,8 @@ public class MediaImportItem : BaseEntity, IClassified
     /// <summary>Путь файла относительно папки задания (разделитель «/»).</summary>
     public required string RelativePath { get; set; }
 
-    /// <summary>Вид носителя по расширению.</summary>
-    public MediaKind Kind { get; set; }
+    /// <summary>Вид файла по расширению: носитель или документ (ADR-0042).</summary>
+    public MediaImportFileKind Kind { get; set; }
 
     /// <summary>MIME-тип по расширению.</summary>
     public required string ContentType { get; set; }
@@ -80,7 +80,28 @@ public class MediaImportItem : BaseEntity, IClassified
     /// <summary>Подача носителя в обработку.</summary>
     public MediaImportProcessingState Processing { get; set; } = MediaImportProcessingState.None;
 
-    /// <summary>Фоновая задача индексации лиц, поданная заданием.</summary>
+    /// <summary>Тип документа документооборота (строки-документы, ADR-0042).</summary>
+    public int? DocumentTypeId { get; set; }
+
+    /// <summary>Регистрационный номер документа из описи.</summary>
+    public string? DocumentRegNumber { get; set; }
+
+    /// <summary>Дата документа.</summary>
+    public DateOnly? DocumentRegDate { get; set; }
+
+    /// <summary>Даты не было в описи — взята дата изменения файла.</summary>
+    public bool DocumentRegDateFromFile { get; set; }
+
+    /// <summary>Краткое содержание документа.</summary>
+    public string? DocumentTitle { get; set; }
+
+    /// <summary>
+    /// Документ документооборота, созданный строкой (ADR-0042) — слабая ссылка на схему документооборота (ТО-инф-06).
+    /// Пишется сразу после создания документа, до загрузки файла: прерванный приём продолжает этот документ.
+    /// </summary>
+    public int? DocumentId { get; set; }
+
+    /// <summary>Фоновая задача индексации лиц (носитель) или индексации текста (документ), поданная заданием.</summary>
     public Guid? IndexTaskId { get; set; }
 
     /// <summary>Фоновая задача расшифровки, поданная заданием.</summary>

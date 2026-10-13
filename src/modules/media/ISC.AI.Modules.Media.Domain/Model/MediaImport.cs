@@ -11,7 +11,60 @@ public static class MediaImportLimits
 
     /// <summary>Причина отказа строки или остановки задания.</summary>
     public const int ReasonMaxLength = 1000;
+
+    /// <summary>Регистрационный номер документа — как в документообороте.</summary>
+    public const int DocumentRegNumberMaxLength = 200;
+
+    /// <summary>Краткое содержание документа — как в документообороте.</summary>
+    public const int DocumentTitleMaxLength = 2000;
+
+    /// <summary>Источник документа — как в документообороте.</summary>
+    public const int DocumentSourceMaxLength = 500;
+
+    /// <summary>Предел размера документа архива — 100 МБ (сканы в PDF бывают большими).</summary>
+    public const long DocumentMaxBytes = 100L * 1024 * 1024;
 }
+
+/// <summary>
+/// Вид файла строки импорта (ADR-0041, ADR-0042): носитель (значения совпадают с <see cref="MediaKind"/>) или документ
+/// (сводка, справка, скан), который профиль заводит в документообороте.
+/// </summary>
+public enum MediaImportFileKind
+{
+    /// <summary>Фото.</summary>
+    Image = MediaKind.Image,
+
+    /// <summary>Видео.</summary>
+    Video = MediaKind.Video,
+
+    /// <summary>Аудио.</summary>
+    Audio = MediaKind.Audio,
+
+    /// <summary>Документ: <c>.docx</c>, <c>.doc</c>, <c>.pdf</c> (ADR-0042).</summary>
+    Document = 10,
+}
+
+/// <summary>Переходы между видом файла импорта и видом носителя.</summary>
+public static class MediaImportFileKinds
+{
+    /// <summary>Вид носителя для строки-носителя; <see langword="null"/> — документ.</summary>
+    public static MediaKind? ToMediaKind(this MediaImportFileKind kind) =>
+        kind == MediaImportFileKind.Document ? null : (MediaKind)kind;
+
+    /// <summary>Вид файла импорта для вида носителя.</summary>
+    public static MediaImportFileKind ToImportKind(this MediaKind kind) => (MediaImportFileKind)kind;
+}
+
+/// <summary>
+/// Реквизиты документа архива для регистрации в документообороте (ADR-0042): тип группы «Хранение», рег. номер,
+/// дата и краткое содержание.
+/// </summary>
+/// <param name="TypeId">Тип документа (группы «Хранение»).</param>
+/// <param name="RegNumber">Регистрационный номер из описи или <see langword="null"/>.</param>
+/// <param name="RegDate">Дата документа.</param>
+/// <param name="Title">Краткое содержание: «название» из описи или имя файла.</param>
+/// <param name="RegDateFromFile">Даты нет в описи — взята дата изменения файла.</param>
+public sealed record MediaImportDocumentDraft(int TypeId, string? RegNumber, DateOnly RegDate, string Title, bool RegDateFromFile);
 
 /// <summary>Состояние задания пакетного импорта архива (ADR-0041).</summary>
 public enum MediaImportJobStatus
@@ -76,7 +129,7 @@ public enum MediaImportProcessingState
 /// </summary>
 /// <param name="RowNumber">Номер строки описи (с заголовком — строка 1), для сообщений оператору.</param>
 /// <param name="RelativePath">Путь файла относительно папки задания, как в описи (разделитель приведён к «/»).</param>
-/// <param name="Kind">Вид носителя по расширению.</param>
+/// <param name="Kind">Вид файла по расширению: носитель или документ.</param>
 /// <param name="ContentType">MIME-тип по расширению (семейство затем сверяется по содержимому, ТС-010).</param>
 /// <param name="ByteSize">Размер файла на проверке, байт.</param>
 /// <param name="CaseId">Дело (непрозрачный идентификатор профиля).</param>
@@ -88,10 +141,11 @@ public enum MediaImportProcessingState
 /// <param name="Source">Источник (свободный текст).</param>
 /// <param name="Place">Место (на привязке к делу).</param>
 /// <param name="ExpectedSha256">Контрольная сумма из описи (hex, верхний регистр) или <see langword="null"/>.</param>
+/// <param name="Document">Реквизиты документа — только у строк-документов (ADR-0042).</param>
 public sealed record MediaImportItemDraft(
     int RowNumber,
     string RelativePath,
-    MediaKind Kind,
+    MediaImportFileKind Kind,
     string ContentType,
     long ByteSize,
     int CaseId,
@@ -102,7 +156,8 @@ public sealed record MediaImportItemDraft(
     bool CapturedDateOnly,
     string? Source,
     string? Place,
-    string? ExpectedSha256);
+    string? ExpectedSha256,
+    MediaImportDocumentDraft? Document = null);
 
 /// <summary>Новое задание импорта (ADR-0041).</summary>
 /// <param name="FolderPath">Полный путь папки, относительно которой заданы пути описи.</param>
@@ -176,6 +231,8 @@ public sealed record MediaImportJobSummary(
 /// <param name="CapturedAt">Дата съёмки из описи.</param>
 /// <param name="Source">Источник из описи.</param>
 /// <param name="Place">Место из описи.</param>
+/// <param name="DocumentId">Документ документооборота — у строк-документов (ADR-0042).</param>
+/// <param name="Kind">Вид файла.</param>
 public sealed record MediaImportItemView(
     int ItemId,
     int RowNumber,
@@ -191,7 +248,9 @@ public sealed record MediaImportItemView(
     MediaImportProcessingState Processing,
     DateTimeOffset? CapturedAt,
     string? Source,
-    string? Place);
+    string? Place,
+    int? DocumentId = null,
+    MediaImportFileKind Kind = MediaImportFileKind.Image);
 
 /// <summary>Страница строк задания (под решёткой допуска смотрящего, ТБ-020).</summary>
 /// <param name="Rows">Строки страницы.</param>
@@ -209,33 +268,40 @@ public sealed record MediaImportJobRun(int JobId, string FolderPath, int Operato
 /// <param name="ItemId">Строка задания.</param>
 /// <param name="JobId">Задание.</param>
 /// <param name="Draft">Реквизиты строки, как их записали при запуске.</param>
-public sealed record MediaImportWorkItem(int ItemId, int JobId, MediaImportItemDraft Draft);
+/// <param name="DocumentId">
+/// Документ, уже созданный прежней попыткой приёма этой строки (ADR-0042): повтор продолжает его, а не заводит второй.
+/// </param>
+public sealed record MediaImportWorkItem(int ItemId, int JobId, MediaImportItemDraft Draft, int? DocumentId = null);
 
 /// <summary>Итог приёма строки.</summary>
 /// <param name="Status">Принят, дубликат или отказ.</param>
 /// <param name="Reason">Причина отказа.</param>
 /// <param name="AssetId">Носитель.</param>
 /// <param name="ContentSha256">SHA-256, посчитанный при приёме.</param>
-/// <param name="Processing">Нужна ли подача носителя в обработку.</param>
+/// <param name="Processing">Нужна ли подача носителя (или документа) в обработку.</param>
+/// <param name="DocumentId">Документ документооборота — у строк-документов (ADR-0042).</param>
 public sealed record MediaImportItemOutcome(
     MediaImportItemStatus Status,
     string? Reason,
     int? AssetId,
     string? ContentSha256,
-    MediaImportProcessingState Processing)
+    MediaImportProcessingState Processing,
+    int? DocumentId = null)
 {
     /// <summary>Отказ с причиной.</summary>
     public static MediaImportItemOutcome Reject(string reason) =>
         new(MediaImportItemStatus.Rejected, reason, null, null, MediaImportProcessingState.None);
 }
 
-/// <summary>Носитель архива в подаче на обработку.</summary>
+/// <summary>Носитель или документ архива в подаче на обработку.</summary>
 /// <param name="ItemId">Строка задания.</param>
-/// <param name="AssetId">Носитель.</param>
-/// <param name="Kind">Вид носителя — какие конвейеры нужны.</param>
-/// <param name="IndexTaskId">Фоновая задача индексации лиц, если подана.</param>
+/// <param name="AssetId">Носитель (у строк-носителей).</param>
+/// <param name="AssetKind">Вид носителя — какие конвейеры нужны (у строк-носителей).</param>
+/// <param name="DocumentId">Документ (у строк-документов): подаётся индексация текста в корпус (ADR-0042).</param>
+/// <param name="IndexTaskId">Фоновая задача индексации лиц или индексации документа, если подана.</param>
 /// <param name="TranscriptTaskId">Фоновая задача расшифровки, если подана.</param>
-public sealed record MediaImportFeedItem(int ItemId, int AssetId, MediaKind Kind, Guid? IndexTaskId, Guid? TranscriptTaskId);
+public sealed record MediaImportFeedItem(
+    int ItemId, int? AssetId, MediaKind? AssetKind, int? DocumentId, Guid? IndexTaskId, Guid? TranscriptTaskId);
 
 /// <summary>Контрольная сумма файла не совпала с описью — файл в хранилище не записан (ADR-0041 п. 6).</summary>
 public sealed class MediaContentHashMismatchException : Exception

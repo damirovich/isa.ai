@@ -23,6 +23,62 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.AccessImportRecordEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CaseId")
+                        .HasColumnType("integer")
+                        .HasColumnName("case_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("FileSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("file_sha256");
+
+                    b.Property<int?>("PersonId")
+                        .HasColumnType("integer")
+                        .HasColumnName("person_id");
+
+                    b.Property<string>("SourceKey")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("source_key");
+
+                    b.Property<string>("SourceTable")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("source_table");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_access_import_record");
+
+                    b.HasIndex("CaseId")
+                        .HasDatabaseName("ix_access_import_record_case_id");
+
+                    b.HasIndex("FileSha256", "SourceTable", "SourceKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_access_import_record_file_sha256_source_table_source_key");
+
+                    b.ToTable("access_import_record", "investigation");
+                });
+
             modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.Appearance", b =>
                 {
                     b.Property<int>("Id")
@@ -1282,6 +1338,18 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                         .HasDatabaseName("ix_user_role_assignment_user_id");
 
                     b.ToTable("user_role_assignment", "investigation");
+                });
+
+            modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.AccessImportRecordEntity", b =>
+                {
+                    b.HasOne("ISC.AI.Profile.Investigation.Domain.Entities.CaseFile", "Case")
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_access_import_record_cases_case_id");
+
+                    b.Navigation("Case");
                 });
 
             modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.Appearance", b =>

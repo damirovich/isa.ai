@@ -53,6 +53,8 @@ public sealed class MediaImportItemConfiguration : IEntityTypeConfiguration<Medi
         builder.Property(i => i.ExpectedSha256).HasMaxLength(64);
         builder.Property(i => i.ContentSha256).HasMaxLength(64);
         builder.Property(i => i.Reason).HasMaxLength(ReasonMaxLength);
+        builder.Property(i => i.DocumentRegNumber).HasMaxLength(MediaImportLimits.DocumentRegNumberMaxLength);
+        builder.Property(i => i.DocumentTitle).HasMaxLength(MediaImportLimits.DocumentTitleMaxLength);
 
         // Режимные поля обязательны (ТБ-070): строка без грифа и подразделения дела в схему не попадает.
         builder.Property(i => i.Classification).IsRequired();
@@ -66,6 +68,9 @@ public sealed class MediaImportItemConfiguration : IEntityTypeConfiguration<Medi
         // задания по состоянию подачи — тот же индекс.
         builder.HasIndex(i => new { i.Processing, i.JobId, i.RowNumber });
         builder.HasIndex(i => i.AssetId).HasFilter("asset_id IS NOT NULL");
+
+        // Повтор документа (ADR-0042): тот же файл, уже введённый импортом в то же дело, — дубликат.
+        builder.HasIndex(i => new { i.CaseId, i.ContentSha256 }).HasFilter("document_id IS NOT NULL");
         builder.HasIndex(i => new { i.Classification, i.DivisionId });
 
         builder.HasOne(i => i.Job).WithMany(j => j.Items)

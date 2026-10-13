@@ -76,6 +76,9 @@ public class InvestigationDbContext(DbContextOptions<InvestigationDbContext> opt
     /// <summary>Справочники профиля: инициаторы, звания, должности, типы связей, категории (ТФ-АДМ-07).</summary>
     public DbSet<ReferenceItem> ReferenceItems { get; set; } = null!;
 
+    /// <summary>Перенесённые записи баз Access: повтор переноса без дублей (ADR-0043).</summary>
+    public DbSet<AccessImportRecordEntity> AccessImportRecords { get; set; } = null!;
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

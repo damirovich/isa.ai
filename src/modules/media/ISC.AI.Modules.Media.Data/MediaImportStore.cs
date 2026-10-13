@@ -27,7 +27,8 @@ public sealed class MediaImportStore(
     private const string CopyItemsCommand =
         "COPY media.import_item (job_id, row_number, relative_path, kind, content_type, byte_size, case_id, case_number, "
         + "classification, division_id, captured_at, captured_date_only, source, place, expected_sha256, status, processing, "
-        + "created_at) FROM STDIN (FORMAT BINARY)";
+        + "created_at, document_type_id, document_reg_number, document_reg_date, document_reg_date_from_file, document_title) "
+        + "FROM STDIN (FORMAT BINARY)";
 
     // Проекция строки для экрана и отчёта — одна на оба чтения.
     private static readonly System.Linq.Expressions.Expression<Func<MediaImportItem, MediaImportItemView>> ToView =
@@ -46,7 +47,9 @@ public sealed class MediaImportStore(
             i.Processing,
             i.CapturedAt,
             i.Source,
-            i.Place);
+            i.Place,
+            i.DocumentId,
+            i.Kind);
 
     /// <inheritdoc />
     public async Task<int> CreateJobAsync(MediaImportJobDraft draft, CancellationToken cancellationToken = default)
@@ -95,6 +98,11 @@ public sealed class MediaImportStore(
                 await writer.WriteAsync((int)MediaImportItemStatus.Pending, NpgsqlDbType.Integer, cancellationToken);
                 await writer.WriteAsync((int)MediaImportProcessingState.None, NpgsqlDbType.Integer, cancellationToken);
                 await writer.WriteAsync(now, NpgsqlDbType.TimestampTz, cancellationToken);
+                await WriteNullableAsync(writer, item.Document?.TypeId, NpgsqlDbType.Integer, cancellationToken);
+                await WriteNullableAsync(writer, item.Document?.RegNumber, NpgsqlDbType.Varchar, cancellationToken);
+                await WriteNullableAsync(writer, item.Document?.RegDate, NpgsqlDbType.Date, cancellationToken);
+                await writer.WriteAsync(item.Document?.RegDateFromFile ?? false, NpgsqlDbType.Boolean, cancellationToken);
+                await WriteNullableAsync(writer, item.Document?.Title, NpgsqlDbType.Varchar, cancellationToken);
             }
 
             await writer.CompleteAsync(cancellationToken);
@@ -306,7 +314,11 @@ public sealed class MediaImportStore(
             item.CapturedDateOnly,
             item.Source,
             item.Place,
-            item.ExpectedSha256));
+            item.ExpectedSha256,
+            item.DocumentTypeId is { } typeId && item.DocumentRegDate is { } regDate
+                ? new MediaImportDocumentDraft(typeId, item.DocumentRegNumber, regDate, item.DocumentTitle ?? string.Empty, item.DocumentRegDateFromFile)
+                : null),
+            item.DocumentId);
     }
 
     /// <inheritdoc />
@@ -342,6 +354,7 @@ public sealed class MediaImportStore(
                 .SetProperty(i => i.AssetId, outcome.AssetId)
                 .SetProperty(i => i.ContentSha256, outcome.ContentSha256)
                 .SetProperty(i => i.Processing, outcome.Processing)
+                .SetProperty(i => i.DocumentId, i => outcome.DocumentId ?? i.DocumentId)
                 .SetProperty(i => i.CompletedAt, now)
                 .SetProperty(i => i.UpdatedAt, now), cancellationToken);
 
@@ -391,6 +404,32 @@ public sealed class MediaImportStore(
     }
 
     /// <inheritdoc />
+    public async Task SetItemDocumentAsync(int itemId, int documentId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await db.ImportItems
+            .Where(i => i.Id == itemId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(i => i.DocumentId, documentId)
+                .SetProperty(i => i.UpdatedAt, DateTime.UtcNow), cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<int?> FindImportedDocumentAsync(int caseId, string contentSha256, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(contentSha256);
+
+        var sha = contentSha256.ToUpperInvariant();
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        return await db.ImportItems.AsNoTracking()
+            .Where(i => i.CaseId == caseId && i.ContentSha256 == sha && i.DocumentId != null
+                && (i.Status == MediaImportItemStatus.Accepted || i.Status == MediaImportItemStatus.Duplicate))
+            .OrderBy(i => i.Id)
+            .Select(i => i.DocumentId)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
     public async Task<bool> IsAssetFromItemAsync(int assetId, int itemId, CancellationToken cancellationToken = default)
     {
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -408,7 +447,7 @@ public sealed class MediaImportStore(
         // Носитель уничтожен (ТБ-075) до обработки — подавать нечего.
         await db.ImportItems
             .Where(i => (i.Processing == MediaImportProcessingState.Waiting || i.Processing == MediaImportProcessingState.Queued)
-                && i.AssetId == null)
+                && i.AssetId == null && i.DocumentId == null)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(i => i.Processing, MediaImportProcessingState.Done)
                 .SetProperty(i => i.UpdatedAt, now), cancellationToken);
@@ -483,14 +522,20 @@ public sealed class MediaImportStore(
                 .SetProperty(i => i.UpdatedAt, DateTime.UtcNow), cancellationToken);
     }
 
-    // Носитель берётся из хранилища, а не из строки: вид мог измениться после приёма (видео без видеопотока
-    // индексатор переводит в аудио, ADR-0026) — тогда нужна только расшифровка.
+    // Вид носителя берётся из хранилища, а не из строки: он мог измениться после приёма (видео без видеопотока
+    // индексатор переводит в аудио, ADR-0026) — тогда нужна только расшифровка. Документ подаётся индексацией текста.
     private static IQueryable<MediaImportFeedItem> FeedQuery(MediaDbContext db, MediaImportProcessingState state) =>
         db.ImportItems.AsNoTracking()
-            .Where(i => i.Processing == state && i.AssetId != null)
+            .Where(i => i.Processing == state && (i.AssetId != null || i.DocumentId != null))
             .OrderBy(i => i.JobId)
             .ThenBy(i => i.RowNumber)
-            .Select(i => new MediaImportFeedItem(i.Id, i.AssetId!.Value, i.Asset!.Kind, i.IndexTaskId, i.TranscriptTaskId));
+            .Select(i => new MediaImportFeedItem(
+                i.Id,
+                i.AssetId,
+                i.AssetId != null ? i.Asset!.Kind : null,
+                i.AssetId == null ? i.DocumentId : null,
+                i.IndexTaskId,
+                i.TranscriptTaskId));
 
     private static IQueryable<MediaImportItem> Filter(IQueryable<MediaImportItem> items, int jobId, MediaImportItemStatus? status)
     {

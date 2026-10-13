@@ -95,6 +95,18 @@ public interface IMediaImportStore
     Task<bool> TryCompleteJobAsync(int jobId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Запоминает документ, созданный строкой (ADR-0042), СРАЗУ после создания — до загрузки файла и привязки к делу:
+    /// если приём прервётся, повтор строки продолжит этот документ, а не заведёт второй.
+    /// </summary>
+    Task SetItemDocumentAsync(int itemId, int documentId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Документ, уже введённый импортом в это дело из файла с тем же SHA-256 (ADR-0042): повтор файла — дубликат,
+    /// а не второй документ. <see langword="null"/> — такого нет.
+    /// </summary>
+    Task<int?> FindImportedDocumentAsync(int caseId, string contentSha256, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Носитель создан этой же строкой задания (приём был прерван после записи носителя, но до записи итога строки):
     /// тогда «дубликат» при повторе — свой же носитель, и его обработку нужно подать.
     /// </summary>
