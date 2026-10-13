@@ -26,6 +26,10 @@ public sealed partial class MediaStore
     /// Статусы переводятся в «ошибка», а не ставятся в очередь заново: запись, на которой прежний процесс упал,
     /// уронила бы и новый, и так по кругу. «Ошибка» с причиной честна и снимается кнопкой повтора. Каждый
     /// конвейер — одним UPDATE по статусу: носителей в работе может быть сколько угодно, построчного обхода нет.
+    /// ИСКЛЮЧЕНИЕ — носители импорта архива, ещё не поданные в обработку (ADR-0041 п. 7): их расшифровка стоит
+    /// «в очереди», но в очередь в памяти они и не ставились — они ждут подачи заданием, которое переживает
+    /// перезапуск. Это не прерванная работа, а ожидание; «ошибка» на тысячах таких носителей была бы ложной. То же —
+    /// носитель строки, приём которой прервала авария: строка будет принята заново, и подачу сделает задание.
     /// </remarks>
     public async Task<InterruptedWorkRecovery> RecoverInterruptedAsync(CancellationToken cancellationToken = default)
     {
@@ -33,6 +37,8 @@ public sealed partial class MediaStore
 
         var transcriptions = await db.Assets
             .Where(a => a.TranscriptStatus == TranscriptStatus.Pending || a.TranscriptStatus == TranscriptStatus.Processing)
+            .Where(a => a.ImportItemId == null || !db.ImportItems.Any(i => i.Id == a.ImportItemId
+                && (i.Processing == MediaImportProcessingState.Waiting || i.Status == MediaImportItemStatus.InProgress)))
             .ExecuteUpdateAsync(s => s
                 .SetProperty(a => a.TranscriptStatus, TranscriptStatus.Failed)
                 .SetProperty(a => a.TranscriptError, InterruptedTranscriptionReason), cancellationToken);

@@ -1,0 +1,255 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Задание импорта архива (ADR-0041): ход приёма файлов и подачи в обработку, остановка и продолжение, строки с
+   отбором по состоянию, отчёт CSV (весь — для акта переноса; отказы — в формате описи для повторного импорта). Строки
+   — под решёткой допуска смотрящего (ТБ-020): вне допуска показывается только их число. Обновляется опросом, пока
+   задание идёт или носители ждут обработки. *@
+@page "/media/import/{JobId:int}"
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@using System.Globalization
+@using ISC.AI.Modules.Media.Application.Features.Assets
+@using ISC.AI.Modules.Media.Application.Features.Import
+@using ISC.AI.Modules.Media.Domain.Model
+
+<PageTitle>Задание импорта @JobId</PageTitle>
+
+<div class="d-flex align-center justify-space-between flex-wrap gap-2">
+    <div>
+        <MudText Typo="Typo.h5">Задание импорта № @JobId</MudText>
+        <MudLink Href="/media/import" Typo="Typo.body2">← Все задания</MudLink>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        @if (_job is { Status: MediaImportJobStatus.Running or MediaImportJobStatus.Queued })
+        {
+            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Pause"
+                       Disabled="_busy" OnClick="StopAsync">Остановить</MudButton>
+        }
+        @if (_job is { Status: MediaImportJobStatus.Stopped })
+        {
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow"
+                       Disabled="_busy" OnClick="ResumeAsync">Продолжить</MudButton>
+        }
+        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Download" Disabled="_busy"
+                   OnClick="@(() => ExportAsync(false))">Отчёт</MudButton>
+        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Download" Disabled="@(_busy || (_job?.Rejected ?? 0) == 0)"
+                   OnClick="@(() => ExportAsync(true))">Отказы как опись</MudButton>
+        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Disabled="_busy" OnClick="ReloadAsync">Обновить</MudButton>
+    </div>
+</div>
+
+@if (_message is not null)
+{
+    <MudAlert Severity="@(_messageIsError ? Severity.Error : Severity.Success)" Variant="Variant.Outlined" Dense="true" Class="mt-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _message = null)">@_message</MudAlert>
+}
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mt-3">@_error</MudAlert>
+}
+else if (_job is { } job)
+{
+    <MudPaper Outlined="true" Class="pa-3 mt-3">
+        <div class="d-flex align-center gap-2 flex-wrap">
+            <MudChip T="string" Color="@job.Status.ChipColor()">@job.Status.Label()</MudChip>
+            <MudText Typo="Typo.body2">
+                запущено @job.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture)
+                @if (job.FinishedAtUtc is { } finished)
+                {
+                    <span>· строки разобраны @finished.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture)</span>
+                }
+            </MudText>
+        </div>
+        @if (job.StopReason is { } reason)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-2">@reason</MudAlert>
+        }
+        <MudText Typo="Typo.body2" Class="mt-2">Папка: <b>@job.FolderPath</b></MudText>
+        <MudText Typo="Typo.body2">Опись: <b>@job.ManifestFileName</b> · SHA-256 @job.ManifestSha256</MudText>
+
+        <MudText Typo="Typo.subtitle1" Class="mt-3">Приём файлов: @job.Processed из @job.Total</MudText>
+        <MudProgressLinear Color="Color.Primary" Value="@MediaImportLabels.Percent(job.BytesDone, job.BytesTotal)" Class="mt-1" />
+        <MudText Typo="Typo.caption" Class="d-block">
+            @MediaFileRules.DescribeSize(job.BytesDone) из @MediaFileRules.DescribeSize(job.BytesTotal) ·
+            принято @job.Accepted · дубликатов @job.Duplicates · отказов @job.Rejected · ждут приёма @(job.Total - job.Processed)
+        </MudText>
+
+        <MudText Typo="Typo.subtitle1" Class="mt-3">
+            Обработка (поиск лиц, расшифровка): обработано @job.ProcessingDone, в обработке @job.ProcessingQueued, ждут очереди @job.ProcessingWaiting
+        </MudText>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+            Носители архива подаются в общую очередь понемногу, чтобы новые материалы следователей не ждали архив.
+            Обработка архива займёт дни или недели — страницу можно закрыть, задание идёт на сервере.
+        </MudText>
+    </MudPaper>
+
+    <MudPaper Outlined="true" Class="pa-3 mt-3">
+        <div class="d-flex align-end justify-space-between flex-wrap gap-2">
+            <MudText Typo="Typo.h6">Строки</MudText>
+            <MudSelect T="MediaImportItemStatus?" Value="_status" ValueChanged="OnStatusChangedAsync" Label="Состояние"
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Placeholder="Все" Style="width:200px;">
+                @foreach (var status in Enum.GetValues<MediaImportItemStatus>())
+                {
+                    <MudSelectItem T="MediaImportItemStatus?" Value="@status">@status.Label()</MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+        @if (_items is { } itemsPage)
+        {
+            @if (itemsPage.Hidden > 0)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
+                    Ещё @itemsPage.Hidden строк — в делах вне вашего допуска: они не показываются (ТБ-020).
+                </MudText>
+            }
+            <MudSimpleTable Dense="true" Hover="true" Class="mt-2">
+                <thead>
+                    <tr><th>Строка</th><th>Файл</th><th>Дело</th><th>Состояние</th><th>Носитель</th><th>Обработка</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in itemsPage.Rows)
+                    {
+                        <tr>
+                            <td>@row.RowNumber</td>
+                            <td>
+                                @row.RelativePath
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">@MediaFileRules.DescribeSize(row.ByteSize)</MudText>
+                            </td>
+                            <td>№ @row.CaseNumber</td>
+                            <td>
+                                <MudChip T="string" Size="Size.Small" Color="@row.Status.ChipColor()">@row.Status.Label()</MudChip>
+                                @if (row.Reason is { } why)
+                                {
+                                    <MudText Typo="Typo.caption" Class="d-block">@why</MudText>
+                                }
+                            </td>
+                            <td>
+                                @if (row.AssetId is { } assetId)
+                                {
+                                    <MudLink Href="@($"/media/assets/{assetId}")">№ @assetId</MudLink>
+                                }
+                            </td>
+                            <td>@row.Processing.Label()</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+            <div class="d-flex align-center gap-2 mt-2">
+                <MudButton Variant="Variant.Text" Size="Size.Small" Disabled="@(_skip == 0)" OnClick="@(() => PageAsync(-1))">Назад</MudButton>
+                <MudText Typo="Typo.caption">
+                    @(itemsPage.Total == 0 ? 0 : _skip + 1)–@(Math.Min(_skip + PageSize, itemsPage.Total)) из @itemsPage.Total
+                </MudText>
+                <MudButton Variant="Variant.Text" Size="Size.Small" Disabled="@(_skip + PageSize >= itemsPage.Total)" OnClick="@(() => PageAsync(1))">Дальше</MudButton>
+            </div>
+        }
+    </MudPaper>
+}
+
+@code {
+    private const int PageSize = 50;
+
+    private readonly ComponentPoller _poller = new(TimeSpan.FromSeconds(3));
+    private MediaImportJobSummary? _job;
+    private MediaImportItemPage? _items;
+    private MediaImportItemStatus? _status;
+    private int _skip;
+    private bool _busy;
+    private string? _error;
+    private string? _message;
+    private bool _messageIsError;
+
+    /// <summary>Задание.</summary>
+    [Parameter] public int JobId { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        if (!RendererInfo.IsInteractive)
+        {
+            return;
+        }
+
+        await ReloadAsync();
+        _poller.Start(() => InvokeAsync(async () =>
+        {
+            if (_job is { } job && (job.Status is MediaImportJobStatus.Running or MediaImportJobStatus.Queued
+                || job.ProcessingWaiting + job.ProcessingQueued > 0))
+            {
+                await ReloadAsync();
+                StateHasChanged();
+            }
+        }));
+    }
+
+    private async Task ReloadAsync()
+    {
+        var details = await Dispatcher.Send(new GetMediaImportJobQuery(JobId, _status, _skip, PageSize));
+        if (!details.Status || details.Data is null)
+        {
+            _error = details.StatusMessage;
+            return;
+        }
+
+        _error = null;
+        _job = details.Data.Job;
+        _items = details.Data.Items;
+    }
+
+    private async Task OnStatusChangedAsync(MediaImportItemStatus? status)
+    {
+        _status = status;
+        _skip = 0;
+        await ReloadAsync();
+    }
+
+    private async Task PageAsync(int direction)
+    {
+        _skip = Math.Max(0, _skip + direction * PageSize);
+        await ReloadAsync();
+    }
+
+    private Task StopAsync() => ActAsync(() => Dispatcher.Send(new StopMediaImportCommand(JobId)).AsTask());
+
+    private Task ResumeAsync() => ActAsync(() => Dispatcher.Send(new ResumeMediaImportCommand(JobId)).AsTask());
+
+    private async Task ActAsync(Func<Task<ISC.AI.Abstractions.Application.ResponseDto<bool>>> action)
+    {
+        _busy = true;
+        try
+        {
+            var result = await action();
+            _message = result.StatusMessage;
+            _messageIsError = !result.Status;
+            await ReloadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ExportAsync(bool rejectedAsManifest)
+    {
+        _busy = true;
+        try
+        {
+            var file = await Dispatcher.Send(new ExportMediaImportReportQuery(JobId, rejectedAsManifest));
+            if (!file.Status || file.Data is null)
+            {
+                _message = file.StatusMessage;
+                _messageIsError = true;
+                return;
+            }
+
+            using var stream = new DotNetStreamReference(new MemoryStream(file.Data.Content));
+            await JS.InvokeVoidAsync("downloadFileFromStream", file.Data.FileName, stream);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask DisposeAsync() => _poller.DisposeAsync();
+}

@@ -105,6 +105,13 @@ public class MediaAsset : AuditableEntity, IClassified
     public long? SourceTimestampMs { get; set; }
 
     /// <summary>
+    /// Строка задания импорта архива, которой принят носитель (ADR-0041): происхождение для цепочки хранения (ТБ-077).
+    /// Слабая ссылка без FK, как <see cref="SourceAssetId"/>: история импорта не связывает удаление носителя.
+    /// <see langword="null"/> — загружен вручную, снимок кадра или носитель до ADR-0041.
+    /// </summary>
+    public int? ImportItemId { get; set; }
+
+    /// <summary>
     /// Лента кадров видео (ADR-0038): имя картинки в хранилище (категория <c>media-filmstrips</c>, подкаталог =
     /// идентификатор). <see langword="null"/> — не видео либо проиндексировано до ленты (появится при «Переиндексировать»).
     /// </summary>

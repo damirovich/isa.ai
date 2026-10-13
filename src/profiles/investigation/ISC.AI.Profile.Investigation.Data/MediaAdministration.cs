@@ -51,6 +51,19 @@ public sealed class MediaAdministration(IUserRoleStore roles, ISubjectProvider s
     /// <inheritdoc />
     public Task<bool> CanPurgeAsync(CancellationToken cancellationToken = default) =>
         PermissionRule.CallerHasAsync(roles, subjectProvider, InvestigationPermissions.MediaPurge, cancellationToken);
+
+    /// <inheritdoc />
+    /// <remarks>Право матрицы «Импорт архива материалов» (ADR-0041), по умолчанию — Администратор.</remarks>
+    public Task<bool> CanImportArchiveAsync(CancellationToken cancellationToken = default) =>
+        PermissionRule.CallerHasAsync(roles, subjectProvider, InvestigationPermissions.MediaImport, cancellationToken);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// То же право, по роли пользователя, запустившего задание (ADR-0041): фоновое задание идёт без его сессии и
+    /// спрашивает перед каждым файлом — снятая роль или выключенная ячейка матрицы останавливают задание сразу.
+    /// </remarks>
+    public Task<bool> UserCanImportArchiveAsync(int userId, CancellationToken cancellationToken = default) =>
+        PermissionRule.UserHasAsync(roles, userId, InvestigationPermissions.MediaImport, cancellationToken);
 }
 
 /// <summary>

@@ -56,6 +56,46 @@ public static class MediaFileRules
         "audio/wav", "audio/x-wav", "audio/webm", "audio/flac", "audio/amr", "audio/3gpp",
     };
 
+    /// <summary>
+    /// MIME-тип по расширению файла — для импорта архива с диска (ADR-0041), где браузера, сообщающего тип, нет.
+    /// Только типы из allowlist: семейство файла затем всё равно сверяется с содержимым (ТС-010). <c>.webm</c> и
+    /// <c>.3gp</c> — видео: голосовую запись без картинки индексатор сам переведёт в аудио (ADR-0026), а как аудио
+    /// такой файл потерял бы поиск по лицу, если это всё-таки видео.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> ContentTypeByExtension { get; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [".jpg"] = "image/jpeg",
+            [".jpeg"] = "image/jpeg",
+            [".png"] = "image/png",
+            [".bmp"] = "image/bmp",
+            [".webp"] = "image/webp",
+            [".mp4"] = "video/mp4",
+            [".m4v"] = "video/mp4",
+            [".webm"] = "video/webm",
+            [".mkv"] = "video/x-matroska",
+            [".mov"] = "video/quicktime",
+            [".avi"] = "video/x-msvideo",
+            [".3gp"] = "video/3gpp",
+            [".3gpp"] = "video/3gpp",
+            [".mp3"] = "audio/mpeg",
+            [".m4a"] = "audio/mp4",
+            [".aac"] = "audio/aac",
+            [".ogg"] = "audio/ogg",
+            [".oga"] = "audio/ogg",
+            [".opus"] = "audio/ogg",
+            [".wav"] = "audio/wav",
+            [".flac"] = "audio/flac",
+            [".amr"] = "audio/amr",
+        };
+
+    /// <summary>MIME-тип по имени файла (<see cref="ContentTypeByExtension"/>) или <see langword="null"/>.</summary>
+    public static string? ContentTypeForFile(string? fileName)
+    {
+        var extension = Path.GetExtension(fileName ?? string.Empty);
+        return extension.Length > 0 && ContentTypeByExtension.TryGetValue(extension, out var type) ? type : null;
+    }
+
     /// <summary>Размер для сообщений человеку: «200 МБ», «16 ГБ», «1,5 ГБ».</summary>
     public static string DescribeSize(long bytes)
     {

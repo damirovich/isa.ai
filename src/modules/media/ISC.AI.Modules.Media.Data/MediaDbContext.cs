@@ -7,7 +7,7 @@ namespace ISC.AI.Modules.Media.Data;
 /// <summary>
 /// Контекст данных пакета «Медиа» (схема <c>media</c>, ДОК-13 §5.2): носители, кадры, лица, шаблоны,
 /// поисковые сессии с кандидат-листами и решениями верификации (ТО-инф-12, ТБ-073), фрагменты
-/// расшифровки речи (ADR-0026). Ведёт собственную историю миграций (<c>media.__ef_migrations_history</c>, ADR-0017, ТО-инф-08).
+/// расшифровки речи (ADR-0026), задания пакетного импорта архива (ADR-0041). Ведёт собственную историю миграций (<c>media.__ef_migrations_history</c>, ADR-0017, ТО-инф-08).
 /// </summary>
 /// <remarks>
 /// Наследует общий механизм таймстемпов у ядра (<see cref="AuditedDbContext"/>). Мягкого удаления в
@@ -48,6 +48,12 @@ public class MediaDbContext(DbContextOptions<MediaDbContext> options) : AuditedD
 
     /// <summary>Журнал сверок носителей с эталонами фигурантов (ТФ-ПЕР-09, ADR-0035).</summary>
     public DbSet<SuggestionRun> SuggestionRuns { get; set; } = null!;
+
+    /// <summary>Задания пакетного импорта архива (ADR-0041).</summary>
+    public DbSet<MediaImportJob> ImportJobs { get; set; } = null!;
+
+    /// <summary>Строки заданий импорта — файлы архива (ADR-0041).</summary>
+    public DbSet<MediaImportItem> ImportItems { get; set; } = null!;
 
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)

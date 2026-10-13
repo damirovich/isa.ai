@@ -6,6 +6,7 @@ using ISC.AI.Modules.Media.Application.Features.Transcription;
 using ISC.AI.Modules.Media.Domain.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ISC.AI.Modules.Media.Application;
 
@@ -45,6 +46,15 @@ public static class MediaApplicationServiceCollectionExtensions
         services.AddScoped<Features.Verification.IMaterialContextReader, Features.Verification.MaterialContextReader>();
         services.AddScoped<IMediaTranscriptionPipeline, MediaTranscriptionPipeline>();
         services.AddHostedService<MediaStartupMaintenance>();
+
+        // Пакетный импорт архива с описью (ADR-0041): разрешённые каталоги и порции обработки — из настройки;
+        // проверка описи, исполнитель строк и подача в обработку — scoped; фоновая служба стартует после хоста.
+        services.AddSingleton(MediaImportOptions.Read(configuration));
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<Features.Import.MediaImportPlanner>();
+        services.AddScoped<Features.Import.MediaImportRunner>();
+        services.AddScoped<Features.Import.MediaImportFeeder>();
+        services.AddHostedService<Features.Import.MediaImportWorker>();
         return services;
     }
 }

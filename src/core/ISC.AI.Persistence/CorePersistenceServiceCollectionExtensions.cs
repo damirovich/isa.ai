@@ -59,6 +59,10 @@ public static class CorePersistenceServiceCollectionExtensions
         // Per-op чтение допуска (Э3-08, ТБ-012/016): без кэша — отзыв действует немедленно.
         services.AddScoped<ClearanceAccessReader>();
 
+        // Тот же читатель — для фоновой работы, запущенной пользователем (пакетный импорт, ADR-0041): допуск
+        // по идентификатору, свежим чтением перед каждым действием.
+        services.AddScoped<Abstractions.Security.IUserAccessReader>(sp => sp.GetRequiredService<ClearanceAccessReader>());
+
         // Ведение допусков из интерфейса (ТБ-011/030): раньше гриф и подразделения правились только
         // SQL'ем по живой базе — мимо неизменяемого журнала.
         services.AddScoped<Abstractions.Security.IClearanceStore, ClearanceStore>();

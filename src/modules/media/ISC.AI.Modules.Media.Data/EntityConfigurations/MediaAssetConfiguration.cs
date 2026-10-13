@@ -47,5 +47,8 @@ public sealed class MediaAssetConfiguration : IEntityTypeConfiguration<MediaAsse
         // уничтожение видео не должно каскадом и без своей записи журнала снести снимок (ТБ-064/075). Индекс —
         // частичный: заполнен только у снимков, а нужен для «снимки этого видео» в карточке носителя.
         builder.HasIndex(a => a.SourceAssetId).HasFilter("source_asset_id IS NOT NULL");
+
+        // Происхождение из импорта архива (ADR-0041): восстановление при старте ищет носители строк импорта.
+        builder.HasIndex(a => a.ImportItemId).HasFilter("import_item_id IS NOT NULL");
     }
 }

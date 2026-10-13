@@ -13,8 +13,10 @@ namespace ISC.AI.Persistence.Security;
 /// кэшируется — отзыв допуска (мягкое удаление записи <c>clearance</c>) или деактивация пользователя
 /// действует для retrieval немедленно, даже при живой сессии. FAIL-CLOSED (ТБ-021): нет пользователя /
 /// пользователь неактивен / допуска нет — возвращается <c>null</c>, а не «пустой» доступ.
+/// Тот же читатель обслуживает и фоновую работу, запущенную пользователем (<see cref="IUserAccessReader"/>,
+/// ADR-0041): одно правило для сессии и для задания, чтобы они не разошлись.
 /// </remarks>
-public sealed class ClearanceAccessReader(IDbContextFactory<CoreDbContext> contextFactory)
+public sealed class ClearanceAccessReader(IDbContextFactory<CoreDbContext> contextFactory) : IUserAccessReader
 {
     /// <summary>
     /// Возвращает контекст доступа субъекта по локальному идентификатору пользователя либо <c>null</c>,
