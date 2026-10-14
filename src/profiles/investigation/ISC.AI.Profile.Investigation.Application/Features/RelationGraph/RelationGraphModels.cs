@@ -1,0 +1,113 @@
+using System.Collections.Generic;
+
+namespace ISC.AI.Profile.Investigation.Application.Features.RelationGraph;
+
+/// <summary>Вид узла графа связей (ADR-0045 п. 2).</summary>
+public enum RelationNodeKind
+{
+    /// <summary>Фигурант, доступный субъекту по полной решётке; раскрывается.</summary>
+    Person = 1,
+
+    /// <summary>Дело, доступное субъекту по полной решётке; раскрывается в своих фигурантов.</summary>
+    Case = 2,
+
+    /// <summary>
+    /// Чужое дело из пересечения (ТБ-084, ADR-0029 п. 4): только номер, вид, статус и ведущий; не раскрывается и на
+    /// карточку не ведёт.
+    /// </summary>
+    ForeignCase = 3,
+
+    /// <summary>Автотранспорт: один узел на нормализованный госномер (ТО-мат-11); лист.</summary>
+    Vehicle = 4,
+
+    /// <summary>Адрес: один узел на нормализованный адрес (ТО-мат-11); лист.</summary>
+    Address = 5,
+}
+
+/// <summary>Вид ребра графа связей.</summary>
+public enum RelationEdgeKind
+{
+    /// <summary>Фигурант — его дело (подпись — роль в деле).</summary>
+    CaseMember = 1,
+
+    /// <summary>Связь фигуранта из того же дела (ТФ-ПЕР-06): от связи к тому, чьей связью она является.</summary>
+    PersonLink = 2,
+
+    /// <summary>Реквизит фигуранта: автотранспорт или адрес (ТФ-ПЕР-06).</summary>
+    Requisite = 3,
+
+    /// <summary>Пересечение с другим делом (ТФ-ПЕР-07): от совпавшего реквизита (или фигуранта) к делу.</summary>
+    Intersection = 4,
+}
+
+/// <summary>Узел графа связей.</summary>
+/// <param name="Key">Ключ узла, уникальный в графе (вид + идентификатор или нормализованный реквизит).</param>
+/// <param name="Kind">Вид узла.</param>
+/// <param name="EntityId">Фигурант или дело — для ссылки на карточку и раскрытия; у реквизитов — <see langword="null"/>.</param>
+/// <param name="Title">Заголовок: ФИО, «Дело № …», госномер, адрес.</param>
+/// <param name="Subtitle">Вторая строка: роль и дело, вид и статус дела, марка и модель.</param>
+/// <param name="Level">Кольцо от центра графа (центр — 0).</param>
+/// <param name="ParentKey">Узел, при раскрытии которого этот узел появился впервые; у центра — <see langword="null"/>.</param>
+/// <param name="Expanded">Соседи узла показаны.</param>
+/// <param name="ResponsibleUserId">Ведущий дела — у узлов дела и чужого дела (ADR-0029 п. 4).</param>
+public sealed record RelationNode(
+    string Key,
+    RelationNodeKind Kind,
+    int? EntityId,
+    string Title,
+    string? Subtitle,
+    int Level,
+    string? ParentKey,
+    bool Expanded,
+    int? ResponsibleUserId = null)
+{
+    /// <summary>Узел можно раскрыть: фигурант и доступное дело; реквизиты и чужие дела — нет (ADR-0045 п. 3).</summary>
+    public bool Expandable => RelationNodeKeys.IsExpandable(Kind);
+}
+
+/// <summary>Ребро графа связей: ссылается на узлы по ключам.</summary>
+/// <param name="FromKey">Узел-начало.</param>
+/// <param name="ToKey">Узел-конец.</param>
+/// <param name="Kind">Вид ребра.</param>
+/// <param name="Label">Подпись: тип связи, вид адреса, «пересечение: …».</param>
+public sealed record RelationEdge(string FromKey, string ToKey, RelationEdgeKind Kind, string Label)
+{
+    /// <summary>Ключ ребра без учёта направления — встречная связь не задваивается (как в АСИО-10).</summary>
+    public string Key => string.CompareOrdinal(FromKey, ToKey) < 0
+        ? $"{FromKey}|{ToKey}|{Label}"
+        : $"{ToKey}|{FromKey}|{Label}";
+}
+
+/// <summary>Граф связей: узлы в порядке обхода вширь (центр первым) и рёбра.</summary>
+/// <param name="Nodes">Узлы.</param>
+/// <param name="Edges">Рёбра.</param>
+/// <param name="Truncated">Сработал предохранитель числа узлов: часть узлов осталась свёрнутой.</param>
+public sealed record RelationGraph(IReadOnlyList<RelationNode> Nodes, IReadOnlyList<RelationEdge> Edges, bool Truncated);
+
+/// <summary>Ключи узлов графа связей.</summary>
+public static class RelationNodeKeys
+{
+    /// <summary>Фигурант.</summary>
+    public static string Person(int personId) => $"person:{personId}";
+
+    /// <summary>Доступное дело.</summary>
+    public static string Case(int caseId) => $"case:{caseId}";
+
+    /// <summary>Чужое дело из пересечения.</summary>
+    public static string ForeignCase(int caseId) => $"foreign-case:{caseId}";
+
+    /// <summary>Автотранспорт по нормализованному госномеру.</summary>
+    public static string Vehicle(string plateNormalized) => $"vehicle:{plateNormalized}";
+
+    /// <summary>Автотранспорт без госномера — отдельный узел на строку.</summary>
+    public static string VehicleRow(int vehicleId) => $"vehicle-row:{vehicleId}";
+
+    /// <summary>Адрес по нормализованному значению.</summary>
+    public static string Address(string addressNormalized) => $"address:{addressNormalized}";
+
+    /// <summary>Адрес, у которого нормализованного значения нет, — отдельный узел на строку.</summary>
+    public static string AddressRow(int addressId) => $"address-row:{addressId}";
+
+    /// <summary>Узел раскрывается (фигурант и доступное дело).</summary>
+    public static bool IsExpandable(RelationNodeKind kind) => kind is RelationNodeKind.Person or RelationNodeKind.Case;
+}

@@ -1,0 +1,452 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@page "/persons/{PersonId:int}/graph"
+@page "/cases/{CaseId:int}/graph"
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@using System.Globalization
+@using Blazor.Diagrams
+@using Blazor.Diagrams.Components
+@using Point = Blazor.Diagrams.Core.Geometry.Point
+@using Blazor.Diagrams.Core.Models
+@using Blazor.Diagrams.Options
+@using ISC.AI.Abstractions.Security
+@using ISC.AI.Profile.Investigation.Application.Features.Directory
+@using ISC.AI.Profile.Investigation.Application.Features.RelationGraph
+@inject ISnackbar Snackbar
+
+@* Граф связей фигуранта или дела (ТФ-ПЕР-10, ADR-0045) — по образцу «Графа связей» АСИО-10. Граф строит сервер
+   одним запросом (обход вширь на выбранную глубину, до 300 узлов) — из тех же хранилищ и под той же решёткой, что
+   карточки: здесь не видно ничего, чего не видно на карточках (ТБ-020/021). Чужое дело — как в пересечениях
+   (ТБ-084): номер, вид, статус, ведущий; не раскрывается. Щелчок по узлу с «?» — тот же запрос с глубиной 1 от
+   узла (сервер заново проверяет доступ); по раскрытому — сворачивает ветку, показанную через него. Каждое построение
+   и раскрытие — запись в журнале (ТБ-030). Скрипт библиотеки диаграмм подключает модуль relationGraph.js — холст
+   рисуется только после его загрузки. *@
+
+<PageHeader Title="Граф связей" Subtitle="@_centerCaption" Icon="@Icons.Material.Filled.AccountTree">
+    <MudNumericField T="int" @bind-Value="_depth" Label="Глубина" Min="@GetRelationGraphQuery.MinDepth" Max="@GetRelationGraphQuery.MaxDepth"
+                     Variant="Variant.Outlined" Margin="Margin.Dense" Style="width:110px;" Disabled="@_loading" />
+    <MudTooltip Text="Перестроить граф с выбранной глубиной">
+        <MudIconButton Icon="@Icons.Material.Filled.Refresh" OnClick="BuildAsync" Disabled="@(_loading || !_libraryReady)"
+                       aria-label="Перестроить" />
+    </MudTooltip>
+    <MudButton Href="@BackHref" Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.ArrowBack">@BackLabel</MudButton>
+</PageHeader>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_error</MudAlert>
+}
+
+<div class="d-flex align-center gap-3 flex-wrap mb-2">
+    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+        Узлов: @_nodes.Count@(CollapsedCount > 0 ? $" · свёрнуто: {CollapsedCount}" : string.Empty)
+    </MudText>
+    @if (_truncated)
+    {
+        <MudText Typo="Typo.caption" Style="color:var(--mud-palette-warning);">
+            Граф урезан: больше @GetRelationGraphQuery.MaxNodes узлов не показывается — часть узлов осталась свёрнутой («?»).
+        </MudText>
+    }
+    <MudSpacer />
+    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+        Щелчок по узлу с «?» — показать его связи, по раскрытому — свернуть ветку. Узлы перетаскиваются, колесо мыши — масштаб.
+    </MudText>
+</div>
+
+<div class="rgraph-canvas-wrap">
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Style="position:absolute;top:0;left:0;right:0;z-index:2;" />
+    }
+    @if (_libraryReady)
+    {
+        <CascadingValue Value="_diagram">
+            <DiagramCanvas />
+        </CascadingValue>
+    }
+</div>
+
+@code {
+    /// <summary>Модуль страницы: подключает скрипт и стили библиотеки диаграмм (ADR-0045 п. 7).</summary>
+    public const string ModulePath = "./_content/ISC.AI.Profile.Investigation.UI/js/relationGraph.js";
+
+    // Цвет рёбер — значениями, а не переменными палитры: библиотека пишет цвет атрибутом SVG, а там var() не работает.
+    // Серый читается в обеих темах; пересечение выделено оранжевым.
+    private const string EdgeColor = "#9e9e9e";
+    private const string IntersectionColor = "#ef6c00";
+
+    /// <summary>Центр — фигурант (маршрут <c>/persons/{id}/graph</c>).</summary>
+    [Parameter] public int? PersonId { get; set; }
+
+    /// <summary>Центр — дело (маршрут <c>/cases/{id}/graph</c>).</summary>
+    [Parameter] public int? CaseId { get; set; }
+
+    private readonly BlazorDiagram _diagram = CreateDiagram();
+    private readonly Dictionary<string, RelationGraphNodeModel> _nodes = new(StringComparer.Ordinal);
+
+    // Рёбра: ключ → (ребро, концы) и узел → ключи его рёбер — чтобы убрать рёбра вместе с узлом.
+    private readonly Dictionary<string, (LinkModel Link, string A, string B)> _links = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, HashSet<string>> _nodeLinks = new(StringComparer.Ordinal);
+
+    // «Дерево показа»: какие узлы впервые появились при раскрытии узла — их и убирает сворачивание.
+    private readonly Dictionary<string, HashSet<string>> _children = new(StringComparer.Ordinal);
+
+    private readonly List<UserAccountRow> _accounts = [];
+    private IJSObjectReference? _module;
+    private bool _libraryReady;
+    private bool _loading;
+    private bool _truncated;
+    private string? _error;
+    private string? _centerCaption;
+    private string? _builtFor;
+    private int _depth = GetRelationGraphQuery.DefaultDepth;
+
+    private RelationNodeKind CenterKind => CaseId is not null ? RelationNodeKind.Case : RelationNodeKind.Person;
+    private int CenterId => CaseId ?? PersonId ?? 0;
+    private string CenterKey => string.Create(CultureInfo.InvariantCulture, $"{CenterKind}:{CenterId}");
+    private string BackHref => CaseId is { } caseId ? $"/cases/{caseId}" : $"/persons/{PersonId}";
+    private string BackLabel => CaseId is not null ? "К делу" : "К фигуранту";
+    private int CollapsedCount => _nodes.Values.Count(n => !n.IsCenter && n.Node.Expandable && !n.Expanded);
+
+    private static BlazorDiagram CreateDiagram()
+    {
+        var options = new BlazorDiagramOptions
+        {
+            AllowMultiSelection = false,
+            Zoom = { Enabled = true },
+            Links = { DefaultColor = EdgeColor }, // портов у узлов нет — рёбра только программные, пользователь их не рисует
+        };
+
+        // Клавиша Delete не убирает узлы и рёбра: граф — картинка сведений, а не редактор.
+        options.Constraints.ShouldDeleteNode = _ => ValueTask.FromResult(false);
+        options.Constraints.ShouldDeleteLink = _ => ValueTask.FromResult(false);
+
+        var diagram = new BlazorDiagram(options);
+        diagram.RegisterComponent<RelationGraphNodeModel, RelationGraphWidget>();
+
+        // Своя подпись ребра: у подписи библиотеки текст рвётся по словам и обрезается (ADR-0045 п. 5).
+        diagram.RegisterComponent<LinkLabelModel, RelationLinkLabelWidget>();
+        return diagram;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Только после подключения circuit'а (на предрендере OnAfterRender не вызывается): граф и журнал — один раз
+        // на открытие (ТБ-030), скрипт библиотеки — до первого рисования холста.
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", ModulePath);
+            await _module.InvokeVoidAsync("ensureLoaded");
+            _libraryReady = true;
+        }
+        catch (JSException ex)
+        {
+            _error = "Не удалось загрузить библиотеку графа: " + ex.Message;
+            StateHasChanged();
+            return;
+        }
+        catch (JSDisconnectedException)
+        {
+            return; // circuit уже закрыт
+        }
+
+        // Имена ведущих дел («ведёт …»); отказ справочника графу не мешает — останется номер сотрудника.
+        var accounts = await Dispatcher.Send(new ListUserDirectoryQuery());
+        if (accounts is { Status: true, Data: { } rows })
+        {
+            _accounts.AddRange(rows);
+        }
+
+        await BuildAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Переход между графами без ухода со страницы (другой фигурант или дело) — перестроить.
+        if (_libraryReady && _builtFor is not null && _builtFor != CenterKey)
+        {
+            await BuildAsync();
+        }
+    }
+
+    private async Task BuildAsync()
+    {
+        _loading = true;
+        _error = null;
+        _truncated = false;
+        Clear();
+        StateHasChanged();
+
+        var response = await Dispatcher.Send(new GetRelationGraphQuery(CenterKind, CenterId, _depth));
+        _builtFor = CenterKey;
+        _loading = false;
+        if (response is not { Status: true, Data: { } graph })
+        {
+            _error = response.StatusMessage;
+            _centerCaption = null;
+            StateHasChanged();
+            return;
+        }
+
+        var center = graph.Nodes[0];
+        _centerCaption = string.IsNullOrWhiteSpace(center.Subtitle) ? center.Title : $"{center.Title} · {center.Subtitle}";
+        AddNode(center, RelationGraphLayout.Center, isCenter: true);
+        Merge(graph, node => RelationGraphLayout.RingRadius(node.Level));
+        _truncated = graph.Truncated;
+        StateHasChanged();
+    }
+
+    // Добавить на холст узлы и рёбра ответа: узлы — веером вокруг узла, при раскрытии которого они появились
+    // (порядок ответа — обход вширь: родитель раньше детей); уже показанные узлы не дублируются.
+    private void Merge(RelationGraph graph, Func<RelationNode, double> radius)
+    {
+        var children = graph.Nodes
+            .Where(n => n.ParentKey is not null)
+            .GroupBy(n => n.ParentKey!, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
+
+        foreach (var node in graph.Nodes)
+        {
+            if (!_nodes.TryGetValue(node.Key, out var anchor))
+            {
+                continue;
+            }
+
+            if (node.Expanded)
+            {
+                anchor.Expanded = true;
+            }
+
+            if (!children.TryGetValue(node.Key, out var kids))
+            {
+                continue;
+            }
+
+            var fresh = kids.Where(k => !_nodes.ContainsKey(k.Key)).ToList();
+            var points = RelationGraphLayout.Place(anchor.Position, anchor.IsCenter, fresh.Count, radius(node));
+            for (var i = 0; i < fresh.Count; i++)
+            {
+                AddNode(fresh[i], points[i], isCenter: false);
+                if (!_children.TryGetValue(node.Key, out var set))
+                {
+                    set = new HashSet<string>(StringComparer.Ordinal);
+                    _children[node.Key] = set;
+                }
+
+                set.Add(fresh[i].Key);
+            }
+        }
+
+        foreach (var edge in graph.Edges)
+        {
+            AddLink(edge);
+        }
+    }
+
+    private void AddNode(RelationNode node, Point position, bool isCenter)
+    {
+        var model = new RelationGraphNodeModel(node, position)
+        {
+            IsCenter = isCenter,
+            Responsible = node.ResponsibleUserId is { } userId ? UserName(userId) : null,
+            OnToggleRequested = ToggleAsync,
+        };
+        _nodes[node.Key] = model;
+        _diagram.Nodes.Add(model);
+    }
+
+    private void AddLink(RelationEdge edge)
+    {
+        if (_links.ContainsKey(edge.Key)
+            || !_nodes.TryGetValue(edge.FromKey, out var from)
+            || !_nodes.TryGetValue(edge.ToKey, out var to))
+        {
+            return;
+        }
+
+        // Стрелка — где направление что-то значит: связь (кто чьей связью является) и пересечение (к делу).
+        var link = new LinkModel(from, to);
+        if (edge.Kind is RelationEdgeKind.PersonLink or RelationEdgeKind.Intersection)
+        {
+            link.TargetMarker = LinkMarker.Arrow;
+        }
+
+        if (edge.Kind == RelationEdgeKind.Intersection)
+        {
+            link.Color = IntersectionColor;
+        }
+
+        link.Labels.Add(new RelationLinkLabelModel(link, edge.Label, edge.Kind));
+        _diagram.Links.Add(link);
+        _links[edge.Key] = (link, edge.FromKey, edge.ToKey);
+        NodeLinks(edge.FromKey).Add(edge.Key);
+        NodeLinks(edge.ToKey).Add(edge.Key);
+    }
+
+    private HashSet<string> NodeLinks(string nodeKey)
+    {
+        if (!_nodeLinks.TryGetValue(nodeKey, out var set))
+        {
+            set = new HashSet<string>(StringComparer.Ordinal);
+            _nodeLinks[nodeKey] = set;
+        }
+
+        return set;
+    }
+
+    // Щелчок по узлу: свёрнутый — раскрыть, раскрытый — свернуть ветку (как в АСИО-10).
+    private async Task ToggleAsync(RelationGraphNodeModel node)
+    {
+        if (!node.Clickable || _loading)
+        {
+            return;
+        }
+
+        if (node.Expanded)
+        {
+            Collapse(node);
+        }
+        else
+        {
+            await ExpandAsync(node);
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ExpandAsync(RelationGraphNodeModel node)
+    {
+        if (node.Node.EntityId is not { } entityId)
+        {
+            return;
+        }
+
+        node.Loading = true;
+        node.Refresh();
+        await InvokeAsync(StateHasChanged);
+
+        // Сервер заново читает узел под решёткой (ADR-0045 п. 3): ключ узла с холста ничего не разрешает.
+        var response = await Dispatcher.Send(new GetRelationGraphQuery(node.Node.Kind, entityId, Depth: 1));
+        node.Loading = false;
+
+        if (response is { Status: true, Data: { } graph })
+        {
+            var fresh = graph.Nodes.Count(n => !_nodes.ContainsKey(n.Key));
+            if (_nodes.Count + fresh > GetRelationGraphQuery.MaxNodes)
+            {
+                Snackbar.Add($"На графе уже {_nodes.Count} узлов — предел {GetRelationGraphQuery.MaxNodes}. Сверните часть веток.", Severity.Warning);
+            }
+            else
+            {
+                Merge(graph, _ => RelationGraphLayout.ClickRadius);
+                node.Expanded = true;
+            }
+        }
+        else
+        {
+            Snackbar.Add(response.StatusMessage, Severity.Warning);
+        }
+
+        node.Refresh();
+    }
+
+    // Свернуть ветку: убрать узлы, впервые показанные через этот узел (и их ветки), с рёбрами; узел снова «?».
+    private void Collapse(RelationGraphNodeModel node)
+    {
+        var stack = new Stack<string>(_children.TryGetValue(node.Node.Key, out var kids) ? kids : []);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        while (stack.Count > 0)
+        {
+            var key = stack.Pop();
+            if (!seen.Add(key))
+            {
+                continue;
+            }
+
+            if (_children.TryGetValue(key, out var grandKids))
+            {
+                foreach (var grandKid in grandKids)
+                {
+                    stack.Push(grandKid);
+                }
+            }
+
+            RemoveNode(key);
+        }
+
+        _children.Remove(node.Node.Key);
+        node.Expanded = false;
+        node.Refresh();
+    }
+
+    private void RemoveNode(string key)
+    {
+        if (!_nodes.TryGetValue(key, out var model))
+        {
+            return;
+        }
+
+        if (_nodeLinks.TryGetValue(key, out var linkKeys))
+        {
+            foreach (var linkKey in linkKeys.ToList())
+            {
+                if (_links.Remove(linkKey, out var info))
+                {
+                    _diagram.Links.Remove(info.Link);
+                    var other = string.Equals(info.A, key, StringComparison.Ordinal) ? info.B : info.A;
+                    if (_nodeLinks.TryGetValue(other, out var otherLinks))
+                    {
+                        otherLinks.Remove(linkKey);
+                    }
+                }
+            }
+
+            _nodeLinks.Remove(key);
+        }
+
+        _diagram.Nodes.Remove(model);
+        _nodes.Remove(key);
+        _children.Remove(key);
+    }
+
+    private void Clear()
+    {
+        _diagram.Links.Clear();
+        _diagram.Nodes.Clear();
+        _nodes.Clear();
+        _links.Clear();
+        _nodeLinks.Clear();
+        _children.Clear();
+    }
+
+    private string UserName(int userId)
+    {
+        var account = _accounts.FirstOrDefault(a => a.UserId == userId);
+        if (account is null)
+        {
+            return string.Create(CultureInfo.InvariantCulture, $"сотрудник № {userId}");
+        }
+
+        return string.IsNullOrWhiteSpace(account.DisplayName) ? account.UserName : account.DisplayName;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit уже закрыт — освобождать на клиенте нечего.
+            }
+        }
+    }
+}

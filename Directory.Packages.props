@@ -69,6 +69,9 @@
     <PackageVersion Include="org.k2fsa.sherpa.onnx" Version="1.13.8" />
     <!-- UI: Blazor + MudBlazor -->
     <PackageVersion Include="MudBlazor" Version="9.5.0" />
+    <!-- Граф связей профиля «Следствие» (ADR-0045): Z.Blazor.Diagrams — MIT (зависимости Z.Blazor.Diagrams.Core — MIT,
+         SvgPathProperties — MIT); та же библиотека, что в АСИО-10. Скрипт и стили — static web assets пакета. -->
+    <PackageVersion Include="Z.Blazor.Diagrams" Version="3.0.4.1" />
     <PackageVersion Include="Microsoft.AspNetCore.Components.Web" Version="10.0.9" />
     <!-- Microsoft.Extensions.* — тонкие абстракции для контрактов, hosting и HttpClient -->
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.9" />
