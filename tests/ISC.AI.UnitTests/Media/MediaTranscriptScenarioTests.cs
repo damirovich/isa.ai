@@ -286,7 +286,7 @@ public sealed class MediaTranscriptScenarioTests
             kind == MediaKind.Image ? TranscriptStatus.NotApplicable : TranscriptStatus.Done);
 
     private ValueTask<ResponseDto<MediaTranscript>> GetAsync(GetTranscriptQuery query) =>
-        new GetTranscriptQuery.Handler(_accessProvider, _catalog, _caseScope).Handle(query, CancellationToken.None);
+        new GetTranscriptQuery.Handler(_accessProvider, _catalog, _caseScope, Substitute.For<ISearchSessionStore>()).Handle(query, CancellationToken.None);
 
     private ValueTask<ResponseDto<IReadOnlyList<TranscriptHit>>> SearchAsync(SearchTranscriptsQuery query) =>
         new SearchTranscriptsQuery.Handler(_accessProvider, _caseScope, _catalog).Handle(query, CancellationToken.None);

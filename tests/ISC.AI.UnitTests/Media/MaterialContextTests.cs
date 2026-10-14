@@ -35,7 +35,7 @@ public sealed class MaterialContextTests
             {
                 [30] = new(30, new DateTimeOffset(2022, 4, 18, 19, 3, 0, TimeSpan.FromHours(6)), Uploaded, "Материалы ОРМ"),
             });
-        _caseScope.ListAssetPlacesAsync(Arg.Any<IReadOnlyCollection<int>>(), Access, Arg.Any<CancellationToken>())
+        _caseScope.ListCandidatePlacesAsync(Arg.Any<IReadOnlyCollection<int>>(), Access, Arg.Any<CancellationToken>())
             .Returns(new Dictionary<int, string> { [30] = "г. Бишкек" });
 
         var materials = await new MaterialContextReader(_catalog, _caseScope).ReadAsync([30, 31, 30], Access);
@@ -43,7 +43,7 @@ public sealed class MaterialContextTests
         var material = materials.ShouldHaveSingleItem().Value;
         material.Source.ShouldBe("Материалы ОРМ");
         material.Place.ShouldBe("г. Бишкек");
-        await _caseScope.Received(1).ListAssetPlacesAsync(
+        await _caseScope.Received(1).ListCandidatePlacesAsync(
             Arg.Is<IReadOnlyCollection<int>>(ids => ids.SequenceEqual(VisibleOnly)), Access, Arg.Any<CancellationToken>());
 
         (await new MaterialContextReader(_catalog, _caseScope).ReadAsync([], Access)).ShouldBeEmpty();

@@ -120,6 +120,13 @@ public interface ICaseScope
     /// <summary>Дела, доступные субъекту (для выбора области поиска и загрузки).</summary>
     Task<IReadOnlyList<CaseScopeItem>> ListAccessibleCasesAsync(AccessContext access, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Дела В ПРЕДЕЛАХ ДОПУСКА субъекта — floor ядра и политика профиля БЕЗ сужения по роли и владению: область «все
+    /// доступные дела» поиска по лицу (взаимный поиск ОН+ОУ, ТБ-071, ТФ-ПЛ-05, ADR-0044). Дело выше допуска или чужого
+    /// подразделения сюда не попадает (ТБ-020/021); субъект без роли — пусто (default-deny, ТБ-012).
+    /// </summary>
+    Task<IReadOnlyList<CaseScopeItem>> ListCasesWithinClearanceAsync(AccessContext access, CancellationToken cancellationToken = default);
+
     /// <summary>Дело, если оно доступно субъекту; иначе <see langword="null"/>.</summary>
     Task<CaseScopeItem?> GetCaseAsync(int caseId, AccessContext access, CancellationToken cancellationToken = default);
 
@@ -154,11 +161,13 @@ public interface ICaseScope
     Task<bool> IsAssetAccessibleAsync(int assetId, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Место съёмки носителей (ТФ-ПЛ-02) — из привязки носителя к делу, только по делам, ДОСТУПНЫМ субъекту (роль и
-    /// floor ядра, ТБ-012/021/071). Носитель без места или без доступной привязки в ответ не попадает; при нескольких
-    /// привязках — место первой (по порядку привязки).
+    /// Место съёмки материалов КАНДИДАТОВ поиска (ТФ-ПЛ-02) — из привязки носителя к делу, по делам в пределах допуска
+    /// субъекта (floor ядра и политика профиля без сужения по роли, ADR-0044: кандидат взаимного поиска из чужого дела
+    /// открывается на просмотр вместе с местом). Субъект без роли — пусто (ТБ-012). Вызывающий передаёт только
+    /// носители кандидатов, видимых ему по floor. Носитель без места в ответ не попадает; при нескольких привязках —
+    /// место первой (по порядку привязки).
     /// </summary>
-    Task<IReadOnlyDictionary<int, string>> ListAssetPlacesAsync(
+    Task<IReadOnlyDictionary<int, string>> ListCandidatePlacesAsync(
         IReadOnlyCollection<int> assetIds, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>

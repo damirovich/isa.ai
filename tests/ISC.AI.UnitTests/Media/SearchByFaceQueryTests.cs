@@ -323,10 +323,10 @@ public sealed class SearchByFaceQueryTests
         await _embedder.Received(1).EmbedAsync(Arg.Any<byte[]>(), small, Arg.Any<CancellationToken>());
     }
 
-    [Fact(DisplayName = "Область «все доступные дела» (ТФ-ПЛ-05): CaseIds — все доступные, носители всех дел, в аудите «расширение… да»")]
+    [Fact(DisplayName = "Область «все дела в пределах допуска» (ТФ-ПЛ-05): CaseIds — все такие дела, носители всех дел, в аудите «расширение… да»")]
     public async Task All_accessible_scope_expands_case_ids_and_audits_expansion()
     {
-        _caseScope.ListAccessibleCasesAsync(Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
+        _caseScope.ListCasesWithinClearanceAsync(Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
             .Returns([new CaseScopeItem(3, "№ 1", "Дело", 2, 1), new CaseScopeItem(4, "№ 2", "Дело 2", 2, 1)]);
 
         var response = await HandleAsync(new SearchByFaceQuery(3, 9, SearchScopeKind.AllAccessibleCases, ProbeImage: Probe));
@@ -343,7 +343,7 @@ public sealed class SearchByFaceQueryTests
     public async Task Closed_cases_join_scope_only_when_operator_includes_them()
     {
         // Дело 3 — текущее (открытое), 4 — открытое, 5 — закрытое (оконченное много лет назад).
-        _caseScope.ListAccessibleCasesAsync(Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
+        _caseScope.ListCasesWithinClearanceAsync(Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
             .Returns([
                 new CaseScopeItem(3, "№ 1", "Дело", 2, 1),
                 new CaseScopeItem(4, "№ 2", "Дело 2", 2, 1),
@@ -371,7 +371,7 @@ public sealed class SearchByFaceQueryTests
     {
         _caseScope.GetCaseAsync(3, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
             .Returns(new CaseScopeItem(3, "№ 1", "Дело", 2, 1, IsClosed: true));
-        _caseScope.ListAccessibleCasesAsync(Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
+        _caseScope.ListCasesWithinClearanceAsync(Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
             .Returns([new CaseScopeItem(3, "№ 1", "Дело", 2, 1, IsClosed: true), new CaseScopeItem(4, "№ 2", "Дело 2", 2, 1)]);
 
         // Область «все доступные» без галочки: чужие закрытые дела отсеклись, своё текущее осталось.
@@ -379,6 +379,25 @@ public sealed class SearchByFaceQueryTests
 
         response.Status.ShouldBeTrue();
         response.Data!.CaseIds.ShouldBe([3, 4]);
+    }
+
+    [Fact(DisplayName = "ADR-0044: «все дела в пределах допуска» — дела без сужения по роли (взаимный поиск), а не только свои; «выбранные» — по-прежнему из своих")]
+    public async Task All_scope_uses_cases_within_clearance_not_own_cases()
+    {
+        // Свои дела следователя — только 3; в пределах допуска — ещё дела коллег 4 и 7.
+        _caseScope.ListAccessibleCasesAsync(Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
+            .Returns([new CaseScopeItem(3, "№ 1", "Дело", 2, 1)]);
+        _caseScope.ListCasesWithinClearanceAsync(Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
+            .Returns([new CaseScopeItem(3, "№ 1", "Дело", 2, 1), new CaseScopeItem(4, "ОУ-2", "Чужое", 2, 1), new CaseScopeItem(7, "ОН-5", "Чужое", 1, 1)]);
+
+        var all = await HandleAsync(new SearchByFaceQuery(3, 9, SearchScopeKind.AllAccessibleCases, ProbeImage: Probe));
+        all.Status.ShouldBeTrue();
+        all.Data!.CaseIds.ShouldBe([3, 4, 7]);
+
+        // Выбрать чужое дело поштучно нельзя: «выбранные» — из своих дел, чужие отсекаются.
+        var selected = await HandleAsync(new SearchByFaceQuery(3, 9, SearchScopeKind.SelectedCases, [3, 4], ProbeImage: Probe));
+        selected.Status.ShouldBeTrue();
+        selected.Data!.CaseIds.ShouldBe([3]);
     }
 
     private static FaceRow ProbeFace(bool acceptable, string? reason) =>

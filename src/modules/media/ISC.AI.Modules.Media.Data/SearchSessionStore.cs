@@ -127,6 +127,21 @@ public sealed class SearchSessionStore(
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<int>> ListCaseIdsWithCandidateAssetAsync(
+        int assetId, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+
+        // И сессия, и строка кандидата — под floor (VisibleCandidates): кандидат выше допуска основанием не служит.
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        return await VisibleCandidates(db, access)
+            .Where(c => c.AssetId == assetId)
+            .Select(c => c.Session!.CaseId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<SearchSessionRow>> ListByCaseAsync(int caseId, AccessContext access, CancellationToken cancellationToken = default)
     {
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);

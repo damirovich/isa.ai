@@ -43,16 +43,23 @@ public static class CaseAccessRule
     /// от несуществующего (ТБ-021).
     /// </summary>
     public static IQueryable<CaseFile> Apply(
-        IQueryable<CaseFile> cases, AccessContext access, IAccessPolicy policy, InvestigationRole? role)
+        IQueryable<CaseFile> cases, AccessContext access, IAccessPolicy policy, InvestigationRole? role) =>
+        Narrow(WithinClearance(cases, access, policy), role, access.NumericSubjectId);
+
+    /// <summary>
+    /// Дела В ПРЕДЕЛАХ ДОПУСКА: floor ядра и политика профиля БЕЗ сужения по роли и владению. Только для путей, где
+    /// это решено отдельно: взаимный поиск по лицу ОН+ОУ и материалы его кандидатов (ADR-0044). Floor не ослабляется:
+    /// дело выше допуска или чужого подразделения (в том числе ОТМ без допуска к нему, ТС-014) сюда не попадает.
+    /// Наличие роли проверяет вызывающий — без роли эти пути пусты (default-deny, ТБ-012).
+    /// </summary>
+    public static IQueryable<CaseFile> WithinClearance(IQueryable<CaseFile> cases, AccessContext access, IAccessPolicy policy)
     {
         ArgumentNullException.ThrowIfNull(cases);
         ArgumentNullException.ThrowIfNull(access);
         ArgumentNullException.ThrowIfNull(policy);
 
-        var narrowed = cases
+        return cases
             .Where(BaselineAccess.Filter<CaseFile>(access))
             .Where(policy.BuildFilter<CaseFile>(access));
-
-        return Narrow(narrowed, role, access.NumericSubjectId);
     }
 }

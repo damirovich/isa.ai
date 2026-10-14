@@ -80,6 +80,7 @@ public static class MediaFrameEndpoints
     /// <param name="t">Момент записи, мс, из строки запроса (<see cref="MediaFileRoutes.FrameTimeQuery"/>); разбирается строго.</param>
     /// <param name="fileAccess">Резолвер носителя-источника.</param>
     /// <param name="caseScope">Порт профиля: область дел субъекта (ТБ-071).</param>
+    /// <param name="sessions">Поисковые сессии: кадр кандидата взаимного поиска открывается на просмотр (ADR-0044).</param>
     /// <param name="storage">Файловое хранилище ядра — для временной копии, когда локального пути нет.</param>
     /// <param name="localFiles">Локальный путь к оригиналу (необязательный порт ядра, ADR-0028 п.4).</param>
     /// <param name="frames">Вырезка кадра внешним процессом ffmpeg.</param>
@@ -94,6 +95,7 @@ public static class MediaFrameEndpoints
         [FromQuery(Name = MediaFileRoutes.FrameTimeQuery)] string? t,
         [FromServices] IMediaFileAccess fileAccess,
         [FromServices] ICaseScope caseScope,
+        [FromServices] ISearchSessionStore sessions,
         [FromServices] IFileStorage storage,
         [FromServices] ILocalFileLocator? localFiles,
         [FromServices] IFrameExtractor frames,
@@ -146,9 +148,10 @@ public static class MediaFrameEndpoints
             return Results.NotFound();
         }
 
-        // ПОВЕРХ floor — область дел субъекта (ТБ-071): иначе следователь того же подразделения перебором id
-        // листал бы кадры чужих дел, а субъект без роли профиля — всё в допуске (default-deny, ТБ-012/021).
-        if (!await caseScope.IsAssetAccessibleAsync(assetId, access, cancellationToken))
+        // ПОВЕРХ floor — область дел субъекта (ТБ-071) либо кандидат его поиска (только просмотр, ADR-0044): иначе
+        // следователь того же подразделения перебором id листал бы кадры чужих дел, а субъект без роли профиля — всё
+        // в допуске (default-deny, ТБ-012/021).
+        if (!await AssetViewAccess.CanViewAsync(caseScope, sessions, assetId, access, cancellationToken))
         {
             MediaFrameEndpointsLog.RejectedOutsideCases(logger, access.SubjectId, assetId);
             return Results.NotFound();

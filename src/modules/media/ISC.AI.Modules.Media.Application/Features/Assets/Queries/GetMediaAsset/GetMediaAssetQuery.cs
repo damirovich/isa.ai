@@ -23,8 +23,17 @@ namespace ISC.AI.Modules.Media.Application.Features.Assets;
 /// Подтверждённые фигуранты на видео — отрезками треков их лиц (отметки на ленте, ADR-0038); у фото и аудио —
 /// пусто. Только фигуранты и появления, доступные субъекту (порт профиля <see cref="ICaseScope.ListAssetAppearancesAsync"/>).
 /// </param>
+/// <param name="ViewOnly">
+/// Носитель открыт как кандидат поиска из дела, которое субъект не ведёт (ADR-0044): только просмотр — действия
+/// (эталон, привязка, дата, снимок кадра, переиндексация, удаление, поиск по лицу) не показываются и сервером не
+/// принимаются.
+/// </param>
 public sealed record MediaAssetDetails(
-    MediaAssetRow Asset, IReadOnlyList<FaceRow> Faces, int? CaseId, IReadOnlyList<AssetPersonSpan>? PersonSpans = null);
+    MediaAssetRow Asset,
+    IReadOnlyList<FaceRow> Faces,
+    int? CaseId,
+    IReadOnlyList<AssetPersonSpan>? PersonSpans = null,
+    bool ViewOnly = false);
 
 /// <summary>
 /// Отрезок видео, на котором подтверждён фигурант (ADR-0038): трек лица из подтверждённого появления, а если трека нет
@@ -46,7 +55,8 @@ public sealed record GetMediaAssetQuery(int AssetId) : IRequest<ResponseDto<Medi
     public string? AuditSummary => $"media:asset:{AssetId}:view";
 
     /// <inheritdoc cref="GetMediaAssetQuery" />
-    public sealed class Handler(IAccessContextProvider accessProvider, IMediaCatalog catalog, ICaseScope caseScope)
+    public sealed class Handler(
+        IAccessContextProvider accessProvider, IMediaCatalog catalog, ICaseScope caseScope, ISearchSessionStore sessions)
         : IRequestHandler<GetMediaAssetQuery, ResponseDto<MediaAssetDetails>>
     {
         /// <inheritdoc />
@@ -65,8 +75,10 @@ public sealed record GetMediaAssetQuery(int AssetId) : IRequest<ResponseDto<Medi
 
             // Сужение по делам субъекта ПОВЕРХ решётки (ТБ-071, ТФ-ДЕЛ-03): следователь того же подразделения
             // и того же допуска перебором id не должен читать носители чужих дел, а субъект без роли — ничего.
-            // Отказ неотличим от «не найден» (ТБ-020/021).
-            if (!await caseScope.IsAssetAccessibleAsync(asset.Id, access, cancellationToken))
+            // Исключение — кандидат его поиска (взаимный поиск, ADR-0044): только просмотр. Отказ неотличим от
+            // «не найден» (ТБ-020/021).
+            var grant = await AssetViewAccess.ResolveAsync(caseScope, sessions, asset.Id, access, cancellationToken);
+            if (grant == AssetViewGrant.None)
             {
                 return ResponseDto<MediaAssetDetails>.NotFound("Носитель не найден или недоступен.");
             }
@@ -76,7 +88,8 @@ public sealed record GetMediaAssetQuery(int AssetId) : IRequest<ResponseDto<Medi
             var personSpans = asset.Kind == MediaKind.Video
                 ? await ReadPersonSpansAsync(asset.Id, access, cancellationToken)
                 : [];
-            return ResponseDto<MediaAssetDetails>.Ok(new MediaAssetDetails(asset, faces, caseId, personSpans));
+            return ResponseDto<MediaAssetDetails>.Ok(
+                new MediaAssetDetails(asset, faces, caseId, personSpans, ViewOnly: grant == AssetViewGrant.SearchCandidate));
         }
 
         /// <summary>

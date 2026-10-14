@@ -65,8 +65,17 @@
             <MudRadioGroup T="SearchScopeKind" @bind-Value="_scope">
                 <MudRadio T="SearchScopeKind" Value="SearchScopeKind.CurrentCase" Dense="true">текущее дело</MudRadio>
                 <MudRadio T="SearchScopeKind" Value="SearchScopeKind.SelectedCases" Dense="true">выбранные дела</MudRadio>
-                <MudRadio T="SearchScopeKind" Value="SearchScopeKind.AllAccessibleCases" Dense="true">все доступные дела</MudRadio>
+                <MudRadio T="SearchScopeKind" Value="SearchScopeKind.AllAccessibleCases" Dense="true">все дела в пределах допуска</MudRadio>
             </MudRadioGroup>
+            @if (_scope == SearchScopeKind.AllAccessibleCases)
+            {
+                @* Взаимный поиск (ТБ-071, ТФ-ПЛ-05, ADR-0044): дела и других сотрудников — в пределах грифа и подразделений
+                   допуска; дела ОТМ без допуска к ним сюда не попадают. *@
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                    Все дела в пределах вашего допуска, включая дела других сотрудников (взаимный поиск ОН и ОУ). Материал
+                    найденного кандидата из чужого дела можно открыть на просмотр; карточка того дела не открывается.
+                </MudText>
+            }
             @if (_scope == SearchScopeKind.SelectedCases)
             {
                 <MudSelect T="int" MultiSelection="true" @bind-SelectedValues="_selectedCaseIds" Label="Дела" Variant="Variant.Outlined"

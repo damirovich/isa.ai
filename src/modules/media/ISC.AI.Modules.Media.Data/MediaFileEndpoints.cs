@@ -62,6 +62,7 @@ public static class MediaFileEndpoints
         [FromRoute] string storedFileName,
         [FromServices] IMediaFileAccess fileAccess,
         [FromServices] ICaseScope caseScope,
+        [FromServices] ISearchSessionStore sessions,
         [FromServices] IFileStorage storage,
         [FromServices] IAccessContextProvider accessProvider,
         [FromServices] IAuditWriter auditWriter,
@@ -107,12 +108,12 @@ public static class MediaFileEndpoints
         }
 
         // ПОВЕРХ floor — область дел субъекта (ТБ-071, ТФ-ДЕЛ-03): носитель/вырезка — по привязке носителя к
-        // доступным делам, вырезка пробы — по делу сессии (CaseRef). Иначе следователь того же подразделения
-        // перебором id читал бы материалы чужих дел, а субъект без роли профиля — всё в допуске
-        // (default-deny, ТБ-012/021). Наружу — тот же единый 404.
+        // доступным делам либо как кандидат его поиска (только просмотр, ADR-0044, AssetViewAccess), вырезка пробы —
+        // по делу сессии (CaseRef). Иначе следователь того же подразделения перебором id читал бы материалы чужих
+        // дел, а субъект без роли профиля — всё в допуске (default-deny, ТБ-012/021). Наружу — тот же единый 404.
         var withinCases = category == MediaFileCategories.Probes
             ? file.CaseRef is { } caseRef && await caseScope.GetCaseAsync(caseRef, access, cancellationToken) is not null
-            : await caseScope.IsAssetAccessibleAsync(assetId, access, cancellationToken);
+            : await AssetViewAccess.CanViewAsync(caseScope, sessions, assetId, access, cancellationToken);
         if (!withinCases)
         {
             MediaFileEndpointsLog.RejectedOutsideCases(logger, access.SubjectId, category, assetId, storedFileName);

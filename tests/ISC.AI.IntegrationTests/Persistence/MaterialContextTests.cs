@@ -16,7 +16,8 @@ namespace ISC.AI.IntegrationTests.Persistence;
 
 /// <summary>
 /// Сведения о материале кандидата (ТФ-ПЛ-02) на настоящем Postgres: время съёмки, загрузки и источник — только у
-/// носителей в допуске; место — только из привязок к делам, доступным сотруднику, и только непустое.
+/// носителей в допуске; место — из привязок к делам в пределах допуска (и чужим — взаимный поиск, ADR-0044), только
+/// непустое; без роли — ничего.
 /// </summary>
 /// <remarks>Требуется Docker.</remarks>
 public sealed class MaterialContextTests : IAsyncLifetime
@@ -51,13 +52,13 @@ public sealed class MaterialContextTests : IAsyncLifetime
         (await catalog.ListMaterialInfoAsync([], new AccessContext("10", 1, [7]))).ShouldBeEmpty();
     }
 
-    [Fact(DisplayName = "Место: из привязки к доступному делу; дело выше допуска и пустое место не дают ничего")]
-    public async Task Places_come_from_accessible_cases_only()
+    [Fact(DisplayName = "Место: из привязки к делу в пределах допуска, в том числе чужому (ADR-0044); дело выше допуска, пустое место и субъект без роли не дают ничего")]
+    public async Task Places_come_from_cases_within_clearance_only()
     {
         var factory = new InvestigationContextFactory(_postgres.GetConnectionString());
         var core = new CoreContextFactory(_postgres.GetConnectionString());
         await InvestigationTestKit.MigrateAsync(factory);
-        await InvestigationTestKit.AssignRolesAsync(factory, (10, InvestigationRole.Investigator));
+        await InvestigationTestKit.AssignRolesAsync(factory, (10, InvestigationRole.Investigator), (11, InvestigationRole.Investigator));
 
         var cases = InvestigationTestKit.CreateCaseStore(factory, core);
         var scope = InvestigationTestKit.CreateCaseScope(factory, core);
@@ -69,12 +70,18 @@ public sealed class MaterialContextTests : IAsyncLifetime
         (await cases.LinkMediaAsync(secret, 101, "г. Ош", 10)).ShouldBe(CaseWriteResult.Ok);
         (await cases.LinkMediaAsync(open, 102, null, 10)).ShouldBe(CaseWriteResult.Ok);
 
-        // Допуск «Секретно» (2): дело с грифом 4 сотруднику не видно — его место не выдаётся.
-        var places = await scope.ListAssetPlacesAsync([100, 101, 102], InvestigationTestKit.Access(10, 2, 5));
+        // Дело коллеги (сотрудник 11) того же подразделения: материал кандидата взаимного поиска — с местом.
+        var colleague = InvestigationTestKit.Access(11, 4, 5);
+        var foreign = (await cases.CreateAsync(InvestigationTestKit.Draft("М-3", 5, 2, 11, 11), colleague)).CaseId;
+        (await cases.LinkMediaAsync(foreign, 103, "г. Ош, ул. Примерная, 7", 11)).ShouldBe(CaseWriteResult.Ok);
 
-        places.Keys.ToList().ShouldBe([100]);
+        // Допуск «Секретно» (2): дело с грифом 4 сотруднику не видно — его место не выдаётся.
+        var places = await scope.ListCandidatePlacesAsync([100, 101, 102, 103], InvestigationTestKit.Access(10, 2, 5));
+
+        places.Keys.Order().ToList().ShouldBe([100, 103]);
         places[100].ShouldBe("г. Бишкек");
-        (await scope.ListAssetPlacesAsync([100], InvestigationTestKit.Access(99, 4, 5))).ShouldBeEmpty(); // без роли
+        places[103].ShouldBe("г. Ош, ул. Примерная, 7");
+        (await scope.ListCandidatePlacesAsync([100], InvestigationTestKit.Access(99, 4, 5))).ShouldBeEmpty(); // без роли
     }
 
     private static async Task<int> SeedAssetAsync(MediaDbContext db, short classification, DateTimeOffset? captured, string source)

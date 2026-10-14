@@ -11,13 +11,14 @@ namespace ISC.AI.Modules.Media.Application.Features.Verification;
 
 /// <summary>
 /// Сведения о материале кандидатов (ТФ-ПЛ-02): время съёмки, загрузки и источник — из каталога пакета, место — из
-/// привязки к делу (порт профиля). Двумя запросами на страницу, а не на каждого кандидата.
+/// привязки к делу (порт профиля). Двумя запросами на страницу, а не на каждого кандидата. Кандидат взаимного поиска из
+/// чужого дела в пределах допуска открывается на просмотр вместе с местом и датой (ADR-0044).
 /// </summary>
 public interface IMaterialContextReader
 {
     /// <summary>
-    /// Сведения о носителях <paramref name="assetIds"/> под контекстом <paramref name="access"/>: носитель выше допуска
-    /// в ответ не попадает (ТБ-020/021), место — только по делам субъекта (ТБ-071).
+    /// Сведения о носителях кандидатов <paramref name="assetIds"/> под контекстом <paramref name="access"/>: носитель выше
+    /// допуска в ответ не попадает (ТБ-020/021), место — по делам в пределах допуска (ADR-0044).
     /// </summary>
     Task<IReadOnlyDictionary<int, MaterialContext>> ReadAsync(
         IReadOnlyCollection<int> assetIds, AccessContext access, CancellationToken cancellationToken = default);
@@ -43,7 +44,7 @@ public sealed class MaterialContextReader(IMediaCatalog catalog, ICaseScope case
             return new Dictionary<int, MaterialContext>();
         }
 
-        var places = await caseScope.ListAssetPlacesAsync(infos.Keys.ToArray(), access, cancellationToken);
+        var places = await caseScope.ListCandidatePlacesAsync(infos.Keys.ToArray(), access, cancellationToken);
         return infos.ToDictionary(
             kv => kv.Key,
             kv => new MaterialContext(

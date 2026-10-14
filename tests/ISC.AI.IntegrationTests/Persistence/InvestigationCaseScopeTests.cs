@@ -240,4 +240,41 @@ public sealed class InvestigationCaseScopeTests : IAsyncLifetime
         (await scope.GetCaseAsync(closed.CaseId, owner)).ShouldNotBeNull().IsClosed.ShouldBeTrue();
         (await scope.GetCaseAsync(open.CaseId, owner)).ShouldNotBeNull().IsClosed.ShouldBeFalse();
     }
+    [Fact(DisplayName = "ADR-0044: дела в пределах допуска — следователю и чужие дела в его подразделениях; не выше грифа, не другого подразделения (ОТМ); без роли — пусто")]
+    public async Task Cases_within_clearance_ignore_role_but_keep_floor()
+    {
+        var factory = new InvestigationContextFactory(_postgres.GetConnectionString());
+        var core = new CoreContextFactory(_postgres.GetConnectionString());
+        await InvestigationTestKit.MigrateAsync(factory);
+        await InvestigationTestKit.AssignRolesAsync(factory,
+            (10, InvestigationRole.Investigator),
+            (11, InvestigationRole.Investigator),
+            (20, InvestigationRole.Head));
+
+        var cases = InvestigationTestKit.CreateCaseStore(factory, core);
+        var scope = InvestigationTestKit.CreateCaseScope(factory, core);
+        var head = InvestigationTestKit.Access(20, 9, 5, 6);
+
+        // Подразделение 5 — ОН/ОУ, 6 — ОТМ. Своё дело следователя A, дело коллеги, дело выше его допуска, дело ОТМ.
+        var own = (await cases.CreateAsync(InvestigationTestKit.Draft("ОН-1", 5, 2, 10), head)).CaseId;
+        var foreign = (await cases.CreateAsync(InvestigationTestKit.Draft("ОУ-1", 5, 2, 11), head)).CaseId;
+        var secret = (await cases.CreateAsync(InvestigationTestKit.Draft("ОУ-С", 5, 4, 11), head)).CaseId;
+        var otm = (await cases.CreateAsync(InvestigationTestKit.Draft("ОТМ-1", 6, 1, 11), head)).CaseId;
+
+        var investigatorA = InvestigationTestKit.Access(10, 3, 5);
+
+        // Обычная область «по роли» не изменилась: следователь видит только своё.
+        (await scope.ListAccessibleCasesAsync(investigatorA)).Select(c => c.CaseId).ShouldBe([own]);
+
+        // Взаимный поиск: и дело коллеги; дело выше грифа и дело ОТМ (нет допуска к подразделению) — нет.
+        (await scope.ListCasesWithinClearanceAsync(investigatorA)).Select(c => c.CaseId).Order().ShouldBe([own, foreign]);
+
+        // Допуск к ОТМ выдан — дело ОТМ входит тем же правилом, отдельного обхода нет.
+        (await scope.ListCasesWithinClearanceAsync(InvestigationTestKit.Access(10, 3, 5, 6))).Select(c => c.CaseId).Order()
+            .ShouldBe(new[] { own, foreign, otm }.Order());
+
+        // Без роли — пусто даже при полном допуске (ТБ-012).
+        (await scope.ListCasesWithinClearanceAsync(InvestigationTestKit.Access(50, 9, 5, 6))).ShouldBeEmpty();
+        (await scope.ListCasesWithinClearanceAsync(head)).Select(c => c.CaseId).Order().ShouldBe(new[] { own, foreign, secret, otm }.Order());
+    }
 }

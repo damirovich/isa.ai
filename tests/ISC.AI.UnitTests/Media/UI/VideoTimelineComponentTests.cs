@@ -163,7 +163,8 @@ public sealed class VideoTimelineComponentTests : BunitContext, IAsyncLifetime
 
     private bool _popoverRendered;
 
-    private IRenderedComponent<AssetCard> RenderCard(MediaAssetRow asset, IReadOnlyList<FaceRow> faces, IReadOnlyList<AssetPersonSpan> persons)
+    private IRenderedComponent<AssetCard> RenderCard(
+        MediaAssetRow asset, IReadOnlyList<FaceRow> faces, IReadOnlyList<AssetPersonSpan> persons, bool viewOnly = false)
     {
         // Поставщик всплывающих окон MudBlazor — один на тест (второй экземпляр конфликтует с первым).
         if (!_popoverRendered)
@@ -174,8 +175,36 @@ public sealed class VideoTimelineComponentTests : BunitContext, IAsyncLifetime
 
         _mediator.Send(Arg.Any<GetMediaAssetQuery>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ResponseDto<MediaAssetDetails>>(ResponseDto<MediaAssetDetails>.Ok(
-                new MediaAssetDetails(asset, faces, 3, persons))));
+                new MediaAssetDetails(asset, faces, viewOnly ? null : 3, persons, viewOnly))));
         return Render<AssetCard>(p => p.Add(x => x.Id, 5));
+    }
+
+    [Fact(DisplayName = "ADR-0044: носитель-кандидат из чужого дела — пометка «только просмотр», без действий и без ссылки на дело")]
+    public void View_only_asset_card_hides_actions()
+    {
+        var cut = RenderCard(Video(capturedAt: null, recordedAt: null), [TrackFace(11, 1_000, 1)], [], viewOnly: true);
+
+        cut.Markup.ShouldContain("Материал из дела, которое вы не ведёте");
+        cut.Markup.ShouldContain("дело, которое вы не ведёте (просмотр по результату поиска)");
+        var buttons = cut.FindAll("button").Select(b => b.TextContent).ToList();
+        foreach (var action in new[] { "Переиндексировать", "Удалить", "Найти в других материалах", "Привязать к фигуранту" })
+        {
+            buttons.ShouldNotContain(b => b.Contains(action, StringComparison.Ordinal), action);
+        }
+
+        cut.FindAll("a").Select(a => a.GetAttribute("href") ?? string.Empty).ShouldNotContain(h => h.StartsWith("/media/cases/", StringComparison.Ordinal));
+        cut.Markup.ShouldNotContain(">указать<");
+        cut.Markup.ShouldNotContain("Скачать оригинал"); // скачать — уже выдача, а не просмотр (ADR-0044)
+    }
+
+    [Fact(DisplayName = "ADR-0044: свой носитель — без пометки «только просмотр», действия на месте")]
+    public void Own_asset_card_keeps_actions()
+    {
+        var cut = RenderCard(Video(capturedAt: null, recordedAt: null), [TrackFace(11, 1_000, 1)], []);
+
+        cut.Markup.ShouldNotContain("Материал из дела, которое вы не ведёте");
+        cut.FindAll("button").ShouldContain(b => b.TextContent.Contains("Привязать к фигуранту", StringComparison.Ordinal));
+        cut.Markup.ShouldContain("Скачать оригинал");
     }
 
     private static FaceRow TrackFace(int id, long timestampMs, int track) =>
