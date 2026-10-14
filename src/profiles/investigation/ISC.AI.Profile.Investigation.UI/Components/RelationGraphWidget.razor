@@ -1,0 +1,142 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@using System.Collections.Generic
+@using Microsoft.AspNetCore.Components.Web
+@using MudBlazor
+@using ISC.AI.Profile.Investigation.Application.Features.RelationGraph
+
+@* Карточка узла графа связей (ADR-0045 п. 5) — по образцу АСИО-10. Щелчок по фигуранту или делу раскрывает его
+   связи («?» — узел свёрнут) или сворачивает ветку; сдвиг указателя больше 5 px между нажатием и отпусканием —
+   перетаскивание узла, а не щелчок. «Открыть» — карточка фигуранта или дела в новой вкладке (граф остаётся).
+   Чужое дело (ТБ-084) не раскрывается и ссылки не имеет. Длинные строки в карточке обрезаются — при наведении мыши
+   подсказка показывает весь текст узла и что делает щелчок. *@
+
+<div class="@CssClass" title="@Tooltip" @onpointerdown="OnPointerDown" @onclick="OnClickAsync">
+    <div class="rgraph-node__head">
+        <MudIcon Icon="@KindIcon" Size="Size.Small" Style="@($"color:{KindColor};flex:0 0 auto;")" />
+        <div class="rgraph-node__title">@Node.Node.Title</div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Node.Node.Subtitle))
+    {
+        <div class="rgraph-node__sub">@Node.Node.Subtitle</div>
+    }
+    @if (Node.Responsible is { } responsible)
+    {
+        <div class="rgraph-node__sub">ведёт @responsible</div>
+    }
+    @if (Node.Node.Kind == RelationNodeKind.ForeignCase)
+    {
+        <div class="rgraph-node__sub rgraph-node__sub--foreign">чужое дело</div>
+    }
+    @if (Node.Href is { } href)
+    {
+        <a class="rgraph-node__open" href="@href" target="_blank" rel="noopener"
+           @onclick:stopPropagation="true" @onpointerdown:stopPropagation="true">открыть</a>
+    }
+
+    @if (Node.Loading)
+    {
+        <div class="rgraph-node__badge rgraph-node__badge--load">
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+        </div>
+    }
+    else if (CanExpand)
+    {
+        <span class="rgraph-node__badge rgraph-node__badge--q">?</span>
+    }
+</div>
+
+@code {
+    /// <summary>Узел холста (передаёт библиотека диаграмм).</summary>
+    [Parameter] public RelationGraphNodeModel Node { get; set; } = null!;
+
+    private double _downX;
+    private double _downY;
+
+    private bool CanExpand => Node.Node.Expandable && !Node.IsCenter && !Node.Expanded && !Node.Loading;
+
+    private string CssClass =>
+        $"rgraph-node rgraph-node--{KindClass}"
+        + (Node.IsCenter ? " rgraph-node--center" : string.Empty)
+        + (Node.Clickable ? " rgraph-node--clickable" : string.Empty)
+        + (Node.Selected ? " rgraph-node--selected" : string.Empty);
+
+    private string KindClass => Node.Node.Kind switch
+    {
+        RelationNodeKind.Person => "person",
+        RelationNodeKind.Case => "case",
+        RelationNodeKind.ForeignCase => "foreign",
+        RelationNodeKind.Vehicle => "vehicle",
+        _ => "address",
+    };
+
+    private string KindIcon => Node.Node.Kind switch
+    {
+        RelationNodeKind.Person => Icons.Material.Filled.Person,
+        RelationNodeKind.Case => Icons.Material.Filled.FolderOpen,
+        RelationNodeKind.ForeignCase => Icons.Material.Filled.FolderShared,
+        RelationNodeKind.Vehicle => Icons.Material.Filled.DirectionsCar,
+        _ => Icons.Material.Filled.Place,
+    };
+
+    // Цвет значка — переменными палитры MudBlazor (светлая и тёмная тема).
+    private string KindColor => Node.Node.Kind switch
+    {
+        RelationNodeKind.Person => "var(--mud-palette-primary)",
+        RelationNodeKind.Case => "var(--mud-palette-info)",
+        RelationNodeKind.ForeignCase => "var(--mud-palette-warning)",
+        RelationNodeKind.Vehicle => "var(--mud-palette-secondary)",
+        _ => "var(--mud-palette-success)",
+    };
+
+    // Подсказка при наведении — весь текст узла построчно (в карточке он обрезается), затем что делает щелчок.
+    private string Tooltip
+    {
+        get
+        {
+            var lines = new List<string> { Node.Node.Title };
+            if (!string.IsNullOrWhiteSpace(Node.Node.Subtitle))
+            {
+                lines.Add(Node.Node.Subtitle);
+            }
+
+            if (Node.Responsible is { } responsible)
+            {
+                lines.Add($"ведёт {responsible}");
+            }
+
+            if (Node.Node.Kind == RelationNodeKind.ForeignCase)
+            {
+                lines.Add("Чужое дело: показано как в пересечениях — номер, вид, статус и ведущий; фигуранты и материалы не раскрываются.");
+            }
+            else if (Node.Clickable)
+            {
+                lines.Add(Node.Expanded ? "Щелчок — свернуть ветку" : "Щелчок — показать связи");
+            }
+
+            return string.Join('\n', lines);
+        }
+    }
+
+    private void OnPointerDown(PointerEventArgs e)
+    {
+        // Точка нажатия — чтобы отличить щелчок от перетаскивания узла.
+        _downX = e.ClientX;
+        _downY = e.ClientY;
+    }
+
+    private async Task OnClickAsync(MouseEventArgs e)
+    {
+        var dx = e.ClientX - _downX;
+        var dy = e.ClientY - _downY;
+        if ((dx * dx) + (dy * dy) > 25)
+        {
+            return; // перетаскивание, не щелчок
+        }
+
+        if (Node.Clickable)
+        {
+            await Node.RequestToggleAsync();
+        }
+    }
+}

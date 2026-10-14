@@ -1,14 +1,19 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
+using ISC.AI.Abstractions.Application;
+using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.Media.Data;
 using ISC.AI.Modules.Media.Data.Entities;
 using ISC.AI.Modules.Media.Domain.Model;
+using ISC.AI.Profile.Investigation.Application.Features.RelationGraph;
 using ISC.AI.Profile.Investigation.Data;
 using ISC.AI.Profile.Investigation.Domain.Entities;
 using ISC.AI.Profile.Investigation.Domain.Enums;
 using ISC.AI.Profile.Investigation.Domain.Services;
 using Microsoft.EntityFrameworkCore;
+using NSubstitute;
 using Shouldly;
 using Testcontainers.PostgreSql;
 
@@ -70,6 +75,48 @@ public sealed class InvestigationIntersectionsTests : IAsyncLifetime
 
         // Фигурант недоступен по роли (чужой следователь без дела) — «не найден», а не пустой список.
         (await kit.Intersections.FindForPersonAsync(scene.Target, InvestigationTestKit.Access(Colleague, 3, 5))).ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Граф связей (ADR-0045): дело коллеги — узлом «чужое дело» без его фигурантов; центром — «не найден»; руководителю — обычное дело")]
+    public async Task Relation_graph_shows_colleague_case_only_as_intersection()
+    {
+        var kit = await ArrangeAsync();
+        var scene = await SeedAsync(kit);
+
+        // Следователь, глубина 3: объект → своё дело → его фигуранты → их реквизиты и пересечения.
+        var investigator = RelationGraph(kit, InvestigationTestKit.Access(Owner, 3, 5));
+        var graph = (await investigator.Handle(
+            new GetRelationGraphQuery(RelationNodeKind.Person, scene.Target, Depth: 3), CancellationToken.None)).Data.ShouldNotBeNull();
+
+        var foreign = graph.Nodes.Where(n => n.Kind == RelationNodeKind.ForeignCase).ShouldHaveSingleItem();
+        foreign.Key.ShouldBe(RelationNodeKeys.ForeignCase(scene.ColleagueCase));
+        foreign.Title.ShouldBe("Дело № Б-19/26");
+        foreign.EntityId.ShouldBeNull();
+        foreign.ResponsibleUserId.ShouldBe(Colleague);
+
+        // Фигуранты — только своего дела; дела коллеги узлом дела нет, скрытых дел (выше допуска, чужое
+        // подразделение) — ни в каком виде (ТБ-084).
+        graph.Nodes.Where(n => n.Kind == RelationNodeKind.Person)
+            .ShouldAllBe(n => n.Subtitle!.EndsWith("дело № А-1/26", StringComparison.Ordinal));
+        graph.Nodes.ShouldNotContain(n => n.Key == RelationNodeKeys.Case(scene.ColleagueCase));
+        var hidden = new[] { scene.SecretCase, scene.OtherDivisionCase }
+            .SelectMany(id => new[] { RelationNodeKeys.Case(id), RelationNodeKeys.ForeignCase(id) })
+            .ToHashSet(StringComparer.Ordinal);
+        graph.Nodes.ShouldNotContain(n => hidden.Contains(n.Key));
+
+        // Один узел автомобиля: номер объекта и связи своего дела нормализуются в один ключ (ТО-мат-11).
+        graph.Nodes.Where(n => n.Kind == RelationNodeKind.Vehicle).ShouldHaveSingleItem().Key
+            .ShouldBe(RelationNodeKeys.Vehicle("01KG123ABC"));
+
+        // Дело коллеги центром графа следователю недоступно — как и его карточка.
+        (await investigator.Handle(new GetRelationGraphQuery(RelationNodeKind.Case, scene.ColleagueCase), CancellationToken.None))
+            .StatusCode.ShouldBe(ResponseStatusCode.NotFound);
+
+        // Руководитель подразделения видит дело коллеги и по роли — обычный узел дела, раскрывается (ТФ-ДЕЛ-03).
+        var head = (await RelationGraph(kit, InvestigationTestKit.Access(Head, 3, 5)).Handle(
+            new GetRelationGraphQuery(RelationNodeKind.Person, scene.Target, Depth: 1), CancellationToken.None)).Data.ShouldNotBeNull();
+        head.Nodes.Where(n => n.Key == RelationNodeKeys.Case(scene.ColleagueCase)).ShouldHaveSingleItem().Expandable.ShouldBeTrue();
+        head.Nodes.ShouldNotContain(n => n.Kind == RelationNodeKind.ForeignCase);
     }
 
     [Fact(DisplayName = "Решение по пересечению: пишется строкой своего дела и перезаписывается; по невидимому пересечению — NotFound")]
@@ -385,6 +432,15 @@ public sealed class InvestigationIntersectionsTests : IAsyncLifetime
         }
 
         return new Scene(ownCase, colleagueCase, secretCase, otherDivisionCase, target);
+    }
+
+    // Граф связей настоящими хранилищами под решёткой; допуск субъекта — через подменённого провайдера.
+    private static GetRelationGraphQuery.Handler RelationGraph(Kit kit, AccessContext access)
+    {
+        var provider = Substitute.For<IAccessContextProvider>();
+        provider.GetCurrentAsync(Arg.Any<CancellationToken>()).Returns(access);
+        return new GetRelationGraphQuery.Handler(
+            kit.Persons, kit.Requisites, kit.Cases, kit.Intersections, new ReferenceStore(kit.Factory), provider);
     }
 
     private static async Task<int> CreatePersonAsync(Kit kit, ISC.AI.Abstractions.Security.AccessContext access, int caseId, string name, PersonQuestionnaire? questionnaire)

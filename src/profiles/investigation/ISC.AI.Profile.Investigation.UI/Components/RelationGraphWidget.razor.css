@@ -1,0 +1,105 @@
+/* Карточка узла графа связей (ADR-0045) — по образцу АСИО-10; цвета — переменными палитры MudBlazor (обе темы). */
+.rgraph-node {
+    position: relative;
+    width: 190px;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--mud-palette-surface);
+    border: 1px solid var(--mud-palette-lines-default);
+    border-left-width: 4px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .12);
+    cursor: grab;
+    user-select: none;
+}
+
+.rgraph-node--person { border-left-color: var(--mud-palette-primary); }
+.rgraph-node--case { border-left-color: var(--mud-palette-info); }
+.rgraph-node--vehicle { border-left-color: var(--mud-palette-secondary); }
+.rgraph-node--address { border-left-color: var(--mud-palette-success); }
+
+/* Чужое дело — пунктир: видно только как в пересечениях (ТБ-084), не раскрывается. */
+.rgraph-node--foreign {
+    border-style: dashed;
+    border-left-style: solid;
+    border-left-color: var(--mud-palette-warning);
+}
+
+.rgraph-node--center {
+    border: 2px solid var(--mud-palette-error);
+    border-left-width: 4px;
+    box-shadow: 0 0 0 4px rgba(var(--mud-palette-error-rgb), .15), 0 2px 6px rgba(0, 0, 0, .18);
+}
+
+.rgraph-node--clickable { cursor: pointer; }
+
+.rgraph-node--clickable:hover {
+    border-color: var(--mud-palette-info);
+    box-shadow: 0 0 0 3px rgba(var(--mud-palette-info-rgb), .18), 0 1px 3px rgba(0, 0, 0, .12);
+}
+
+.rgraph-node--selected {
+    outline: 2px solid var(--mud-palette-primary);
+    outline-offset: 1px;
+}
+
+.rgraph-node__head {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+}
+
+.rgraph-node__title {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--mud-palette-text-primary);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    word-break: break-word;
+}
+
+.rgraph-node__sub {
+    margin-top: 3px;
+    font-size: 11px;
+    color: var(--mud-palette-text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.rgraph-node__sub--foreign { color: var(--mud-palette-warning); }
+
+.rgraph-node__open {
+    display: inline-block;
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--mud-palette-primary);
+    cursor: pointer;
+}
+
+.rgraph-node__badge {
+    position: absolute;
+    top: -10px;
+    right: -10px;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    font-weight: 700;
+    font-size: 14px;
+}
+
+.rgraph-node__badge--q {
+    background: var(--mud-palette-info);
+    color: var(--mud-palette-info-text);
+    line-height: 1;
+}
+
+.rgraph-node__badge--load {
+    background: var(--mud-palette-surface);
+}

@@ -1,0 +1,28 @@
+/* Холст графа связей (ADR-0045): фон в точку, как в АСИО-10; высота — окно минус шапка страницы. */
+.rgraph-canvas-wrap {
+    position: relative;
+    height: calc(100vh - 230px);
+    min-height: 480px;
+    overflow: hidden;
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: 8px;
+    background-color: var(--mud-palette-background-gray);
+    background-image: radial-gradient(var(--mud-palette-lines-default) 1px, transparent 1px);
+    background-size: 22px 22px;
+}
+
+/* Рамка подписи ребра: у библиотеки она 1×1 px, и подпись сжимается до ширины слова. Здесь — полоса 200×24 px
+   с центром в точке подписи (RelationLinkLabelWidget: одна строка, длинная — с многоточием и подсказкой). Сама
+   полоса щелчки не ловит — только подпись. */
+.rgraph-canvas-wrap ::deep .diagram-link foreignObject.diagram-link-label {
+    width: 200px;
+    height: 24px;
+    transform: translate(-100px, -12px);
+    overflow: visible;
+    pointer-events: none;
+}
+
+/* Холст библиотеки прозрачный — виден фон в точку. */
+.rgraph-canvas-wrap ::deep .diagram-canvas {
+    background-color: transparent !important;
+}

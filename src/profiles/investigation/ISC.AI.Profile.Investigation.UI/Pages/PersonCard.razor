@@ -62,6 +62,9 @@ else
                 </MudText>
             }
         </div>
+        @* Граф связей (ТФ-ПЕР-10, ADR-0045): фигурант в центре — дело, связи, транспорт, адреса, пересечения. *@
+        <MudButton Href="@($"/persons/{Id}/graph")" Variant="Variant.Outlined" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.AccountTree">Граф связей</MudButton>
         <MudButton Href="@($"/cases/{_person.CaseId}")" Variant="Variant.Text" Size="Size.Small"
                    StartIcon="@Icons.Material.Filled.ArrowBack">К делу</MudButton>
     </PageHeader>

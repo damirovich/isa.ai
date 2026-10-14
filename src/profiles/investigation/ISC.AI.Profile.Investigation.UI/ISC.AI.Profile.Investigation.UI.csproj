@@ -31,6 +31,9 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
     <PackageReference Include="MudBlazor" />
+    <!-- Граф связей (ADR-0045): только этот проект; хост библиотеку не знает — скрипт и стили грузит модуль
+         страницы wwwroot/js/relationGraph.js. -->
+    <PackageReference Include="Z.Blazor.Diagrams" />
   </ItemGroup>
 
 </Project>
