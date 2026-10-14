@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Threading.Tasks;
 using Blazor.Diagrams.Core.Geometry;
@@ -18,16 +19,19 @@ public sealed class RelationGraphNodeModel : NodeModel
 
     /// <summary>Узел холста для узла графа.</summary>
     /// <param name="node">Узел ответа сервера.</param>
-    /// <param name="position">Положение на холсте.</param>
-    public RelationGraphNodeModel(RelationNode node, Point position)
+    /// <param name="position">Положение на холсте (левый верхний угол).</param>
+    /// <param name="responsible">Подпись ведущего дела («ведёт …») — у узлов дела и чужого дела.</param>
+    public RelationGraphNodeModel(RelationNode node, Point position, string? responsible = null)
         : base(position)
     {
         ArgumentNullException.ThrowIfNull(node);
         Node = node;
         Expanded = node.Expanded;
+        Responsible = responsible;
 
-        // Стартовый размер — чтобы рёбра сразу упирались в границу карточки (библиотека пере-измерит после рендера).
-        Size = new Size(Width, 60);
+        // Стартовый размер — по числу строк карточки, чтобы раскладка сразу оставила место, а рёбра упирались в
+        // границу (библиотека пере-измерит размер после рендера).
+        Size = new Size(Width, EstimateHeight());
     }
 
     /// <summary>Узел ответа сервера.</summary>
@@ -43,7 +47,7 @@ public sealed class RelationGraphNodeModel : NodeModel
     public bool Loading { get; set; }
 
     /// <summary>Подпись ведущего дела («ведёт …») — у узлов дела и чужого дела.</summary>
-    public string? Responsible { get; set; }
+    public string? Responsible { get; }
 
     /// <summary>Карточка фигуранта или дела; у реквизитов и чужого дела ссылки нет (ADR-0045 п. 3).</summary>
     public string? Href => Node.EntityId is not { } id
@@ -61,6 +65,44 @@ public sealed class RelationGraphNodeModel : NodeModel
     /// <summary>Узел можно раскрыть или свернуть щелчком.</summary>
     public bool Clickable => !IsCenter && !Loading && Node.Expandable;
 
+    /// <summary>Строки карточки под заголовком — те же, что на холсте и на выгружаемой картинке.</summary>
+    public IReadOnlyList<string> Lines
+    {
+        get
+        {
+            var lines = new List<string>();
+            if (!string.IsNullOrWhiteSpace(Node.Subtitle))
+            {
+                lines.Add(Node.Subtitle);
+            }
+
+            if (Responsible is { } responsible)
+            {
+                lines.Add($"ведёт {responsible}");
+            }
+
+            if (Node.Kind == RelationNodeKind.ForeignCase)
+            {
+                lines.Add("чужое дело");
+            }
+
+            return lines;
+        }
+    }
+
     /// <summary>Передать щелчок странице.</summary>
     public Task RequestToggleAsync() => OnToggleRequested?.Invoke(this) ?? Task.CompletedTask;
+
+    // Высота: поля и заголовок (до двух строк), строки под ним, ссылка «открыть».
+    private double EstimateHeight()
+    {
+        var height = 18 + 16 + (Node.Title.Length > 24 ? 16 : 0);
+        height += Lines.Count * 15;
+        if (Href is not null)
+        {
+            height += 18;
+        }
+
+        return height;
+    }
 }

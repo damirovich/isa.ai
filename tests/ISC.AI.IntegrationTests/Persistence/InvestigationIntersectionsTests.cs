@@ -119,6 +119,110 @@ public sealed class InvestigationIntersectionsTests : IAsyncLifetime
         head.Nodes.ShouldNotContain(n => n.Kind == RelationNodeKind.ForeignCase);
     }
 
+    [Fact(DisplayName = "Граф связей v0.2 (ADR-0045 п. 10, 12): по госномеру, адресу и ФИО — только доступные фигуранты; «ё/е», регистр и знаки LIKE не мешают")]
+    public async Task Relation_selections_respect_full_lattice()
+    {
+        var kit = await ArrangeAsync();
+        var scene = await SeedAsync(kit);
+        var investigator = InvestigationTestKit.Access(Owner, 3, 5);
+        var head = InvestigationTestKit.Access(Head, 3, 5);
+
+        // Госномер: следователю — только своё дело; руководителю — и дело коллеги; выше допуска и чужое подразделение — никому.
+        (await kit.Persons.ListByPlateAsync("01KG123ABC", investigator)).Select(p => p.DisplayName)
+            .ShouldBe(["Семенов Петр", "Связь"], ignoreOrder: true);
+        (await kit.Persons.ListByPlateAsync("01KG123ABC", head)).Select(p => p.DisplayName)
+            .ShouldBe(["Семенов Петр", "Связь", "Шторм", "Второй"], ignoreOrder: true);
+
+        // Адрес: строкой адресов (вид — из строки) и местом жительства из анкеты (вид не задан).
+        var residents = await kit.Persons.ListByAddressAsync("бишкек ул токтогула 1", head);
+        residents.Single(r => r.Person.Id == scene.Target).Kind.ShouldBe(AddressKind.Residence);
+        residents.Single(r => r.Person.DisplayName == "Шторм").Kind.ShouldBeNull();
+        (await kit.Persons.ListByAddressAsync("бишкек ул токтогула 1", investigator)).ShouldHaveSingleItem().Person.Id.ShouldBe(scene.Target);
+
+        // ФИО: регистр и «ё/е» не мешают; чужие дела — только в пределах роли и допуска.
+        (await kit.Persons.SearchAsync("СЕМЁН", 20, investigator)).ShouldHaveSingleItem().Id.ShouldBe(scene.Target);
+        (await kit.Persons.SearchAsync("семен", 20, head)).Select(p => p.DisplayName)
+            .ShouldBe(["Семенов Петр", "Семенов Петр", "Семёнов Пётр"], ignoreOrder: true);
+        (await kit.Persons.SearchAsync("семен", 1, head)).Count.ShouldBe(1);
+
+        // «_» и «%» в запросе — буквальные: неэкранированный «_в» нашёл бы «Семенов».
+        (await kit.Persons.SearchAsync("_в", 20, head)).ShouldBeEmpty();
+        (await kit.Persons.SearchAsync("%", 20, head)).ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Граф связей v0.2 (ADR-0045 п. 11): «вместе на материалах» — только действующие появления доступных фигурантов")]
+    public async Task Co_appearances_respect_lattice_and_revocation()
+    {
+        var kit = await ArrangeAsync();
+        var owner = InvestigationTestKit.Access(Owner, 9, 5);
+        var colleague = InvestigationTestKit.Access(Colleague, 9, 5, 6);
+
+        var ownCase = (await kit.Cases.CreateAsync(InvestigationTestKit.Draft("А-1/26", 5, 2, Owner), owner)).CaseId;
+        var colleagueCase = (await kit.Cases.CreateAsync(InvestigationTestKit.Draft("Б-19/26", 5, 2, Colleague), colleague)).CaseId;
+        var secretCase = (await kit.Cases.CreateAsync(InvestigationTestKit.Draft("С-7/26", 5, 4, Colleague), colleague)).CaseId;
+
+        var target = await CreatePersonAsync(kit, owner, ownCase, "Объект", null);
+        var partner = await CreatePersonAsync(kit, owner, ownCase, "Напарник", null);
+        var revoked = await CreatePersonAsync(kit, owner, ownCase, "Отозванный", null);
+        var colleaguePerson = await CreatePersonAsync(kit, colleague, colleagueCase, "Шторм", null);
+        var secretPerson = await CreatePersonAsync(kit, colleague, secretCase, "Скрытый", null);
+
+        const int FirstAsset = 600, SecondAsset = 601;
+        await using (var db = kit.Factory.CreateDbContext())
+        {
+            var candidate = 1;
+            var at = new DateTime(2026, 10, 1, 10, 0, 0, DateTimeKind.Utc);
+            var revokedAppearance = Appearance(revoked, ownCase, FirstAsset, 700, candidate++, 2, 5, at);
+            revokedAppearance.Status = AppearanceStatus.Revoked;
+            db.Appearances.AddRange(
+                Appearance(target, ownCase, FirstAsset, 701, candidate++, 2, 5, at),
+                Appearance(target, ownCase, SecondAsset, 702, candidate++, 2, 5, at),
+                Appearance(partner, ownCase, FirstAsset, 703, candidate++, 2, 5, at),
+                Appearance(partner, ownCase, SecondAsset, 704, candidate++, 2, 5, at),
+                revokedAppearance,
+                Appearance(colleaguePerson, colleagueCase, FirstAsset, 705, candidate++, 2, 5, at),
+                Appearance(secretPerson, secretCase, FirstAsset, 706, candidate++, 4, 5, at));
+            await db.SaveChangesAsync();
+        }
+
+        // Следователь: напарник на двух материалах; отозванное появление совместности не даёт; дело коллеги — не по роли,
+        // секретное — не по допуску.
+        var mine = await kit.Persons.ListCoAppearancesAsync(target, InvestigationTestKit.Access(Owner, 3, 5));
+        mine.ShouldHaveSingleItem().Person.Id.ShouldBe(partner);
+        mine[0].MaterialCount.ShouldBe(2);
+
+        // Руководитель видит и фигуранта коллеги; секретный — по-прежнему нет.
+        var headView = await kit.Persons.ListCoAppearancesAsync(target, InvestigationTestKit.Access(Head, 3, 5));
+        headView.Select(r => r.Person.Id).ShouldBe([partner, colleaguePerson], ignoreOrder: true);
+
+        // Недоступный исходный фигурант — пусто, а не чужие имена.
+        (await kit.Persons.ListCoAppearancesAsync(secretPerson, InvestigationTestKit.Access(Head, 3, 5))).ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Цепочка «как связаны» (ADR-0045 п. 12): руководителю — через общий номер или адрес за 2 шага; следователю цель недоступна — «не найден»")]
+    public async Task Relation_path_follows_lattice()
+    {
+        var kit = await ArrangeAsync();
+        var scene = await SeedAsync(kit);
+        int shtorm;
+        await using (var db = kit.Factory.CreateDbContext())
+        {
+            shtorm = await db.Persons.Where(p => p.DisplayName == "Шторм").Select(p => p.Id).SingleAsync();
+        }
+
+        var path = (await RelationPath(kit, InvestigationTestKit.Access(Head, 3, 5))
+            .Handle(new FindRelationPathQuery(RelationNodeKind.Person, scene.Target, shtorm), CancellationToken.None)).Data.ShouldNotBeNull();
+        path.Nodes[0].Key.ShouldBe(RelationNodeKeys.Person(scene.Target));
+        path.Nodes[^1].Key.ShouldBe(RelationNodeKeys.Person(shtorm));
+        path.Edges.Count.ShouldBe(2);
+        path.Nodes[1].Kind.ShouldBeOneOf(RelationNodeKind.Vehicle, RelationNodeKind.Address);
+
+        var denied = await RelationPath(kit, InvestigationTestKit.Access(Owner, 3, 5))
+            .Handle(new FindRelationPathQuery(RelationNodeKind.Person, scene.Target, shtorm), CancellationToken.None);
+        denied.StatusCode.ShouldBe(ResponseStatusCode.NotFound);
+        denied.StatusMessage.ShouldBe(GetRelationGraphQuery.NotFound);
+    }
+
     [Fact(DisplayName = "Решение по пересечению: пишется строкой своего дела и перезаписывается; по невидимому пересечению — NotFound")]
     public async Task Review_is_written_only_for_visible_intersection()
     {
@@ -440,6 +544,15 @@ public sealed class InvestigationIntersectionsTests : IAsyncLifetime
         var provider = Substitute.For<IAccessContextProvider>();
         provider.GetCurrentAsync(Arg.Any<CancellationToken>()).Returns(access);
         return new GetRelationGraphQuery.Handler(
+            kit.Persons, kit.Requisites, kit.Cases, kit.Intersections, new ReferenceStore(kit.Factory), provider);
+    }
+
+    // Цепочка «как связаны» настоящими хранилищами под решёткой.
+    private static FindRelationPathQuery.Handler RelationPath(Kit kit, AccessContext access)
+    {
+        var provider = Substitute.For<IAccessContextProvider>();
+        provider.GetCurrentAsync(Arg.Any<CancellationToken>()).Returns(access);
+        return new FindRelationPathQuery.Handler(
             kit.Persons, kit.Requisites, kit.Cases, kit.Intersections, new ReferenceStore(kit.Factory), provider);
     }
 

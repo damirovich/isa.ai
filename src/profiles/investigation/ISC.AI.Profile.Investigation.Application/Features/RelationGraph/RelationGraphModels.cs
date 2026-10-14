@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace ISC.AI.Profile.Investigation.Application.Features.RelationGraph;
@@ -17,10 +18,16 @@ public enum RelationNodeKind
     /// </summary>
     ForeignCase = 3,
 
-    /// <summary>Автотранспорт: один узел на нормализованный госномер (ТО-мат-11); лист.</summary>
+    /// <summary>
+    /// Автотранспорт: один узел на нормализованный госномер (ТО-мат-11); раскрывается в доступных фигурантов с этим
+    /// номером (ADR-0045 п. 10). Без госномера — узел на строку, не раскрывается.
+    /// </summary>
     Vehicle = 4,
 
-    /// <summary>Адрес: один узел на нормализованный адрес (ТО-мат-11); лист.</summary>
+    /// <summary>
+    /// Адрес: один узел на нормализованный адрес (ТО-мат-11); раскрывается в доступных фигурантов с этим адресом
+    /// (ADR-0045 п. 10). Без нормализованного значения — узел на строку, не раскрывается.
+    /// </summary>
     Address = 5,
 }
 
@@ -38,18 +45,31 @@ public enum RelationEdgeKind
 
     /// <summary>Пересечение с другим делом (ТФ-ПЕР-07): от совпавшего реквизита (или фигуранта) к делу.</summary>
     Intersection = 4,
+
+    /// <summary>
+    /// Совместное появление (ADR-0045 п. 11): у обоих фигурантов есть действующие появления на одних и тех же
+    /// носителях. Следственная версия, а не утверждение системы (ТФ-ВЕР-03).
+    /// </summary>
+    CoAppearance = 5,
 }
 
 /// <summary>Узел графа связей.</summary>
 /// <param name="Key">Ключ узла, уникальный в графе (вид + идентификатор или нормализованный реквизит).</param>
 /// <param name="Kind">Вид узла.</param>
-/// <param name="EntityId">Фигурант или дело — для ссылки на карточку и раскрытия; у реквизитов — <see langword="null"/>.</param>
+/// <param name="EntityId">
+/// Для раскрытия и ссылки: фигурант или дело; у автотранспорта и адреса — фигурант, у которого этот реквизит
+/// (через него сервер проверяет раскрытие, ADR-0045 п. 10); у чужого дела — <see langword="null"/>.
+/// </param>
 /// <param name="Title">Заголовок: ФИО, «Дело № …», госномер, адрес.</param>
 /// <param name="Subtitle">Вторая строка: роль и дело, вид и статус дела, марка и модель.</param>
 /// <param name="Level">Кольцо от центра графа (центр — 0).</param>
 /// <param name="ParentKey">Узел, при раскрытии которого этот узел появился впервые; у центра — <see langword="null"/>.</param>
 /// <param name="Expanded">Соседи узла показаны.</param>
 /// <param name="ResponsibleUserId">Ведущий дела — у узлов дела и чужого дела (ADR-0029 п. 4).</param>
+/// <param name="Classification">
+/// Гриф сведений узла (ADR-0030): фигуранта, дела; у реквизита — его фигуранта. У чужого дела — <see langword="null"/>:
+/// гриф чужого дела не раскрывается (ТБ-084). По нему размечается выгрузка картинки (ADR-0045 п. 14).
+/// </param>
 public sealed record RelationNode(
     string Key,
     RelationNodeKind Kind,
@@ -59,17 +79,21 @@ public sealed record RelationNode(
     int Level,
     string? ParentKey,
     bool Expanded,
-    int? ResponsibleUserId = null)
+    int? ResponsibleUserId = null,
+    short? Classification = null)
 {
-    /// <summary>Узел можно раскрыть: фигурант и доступное дело; реквизиты и чужие дела — нет (ADR-0045 п. 3).</summary>
-    public bool Expandable => RelationNodeKeys.IsExpandable(Kind);
+    /// <summary>
+    /// Узел можно раскрыть: фигурант, доступное дело, автотранспорт и адрес с нормализованным ключом; чужие дела —
+    /// никогда (ADR-0045 п. 3).
+    /// </summary>
+    public bool Expandable { get; init; } = RelationNodeKeys.IsExpandable(Kind);
 }
 
 /// <summary>Ребро графа связей: ссылается на узлы по ключам.</summary>
 /// <param name="FromKey">Узел-начало.</param>
 /// <param name="ToKey">Узел-конец.</param>
 /// <param name="Kind">Вид ребра.</param>
-/// <param name="Label">Подпись: тип связи, вид адреса, «пересечение: …».</param>
+/// <param name="Label">Подпись: тип связи, вид адреса, «пересечение: …», «вместе на материалах: N».</param>
 public sealed record RelationEdge(string FromKey, string ToKey, RelationEdgeKind Kind, string Label)
 {
     /// <summary>Ключ ребра без учёта направления — встречная связь не задваивается (как в АСИО-10).</summary>
@@ -87,6 +111,9 @@ public sealed record RelationGraph(IReadOnlyList<RelationNode> Nodes, IReadOnlyL
 /// <summary>Ключи узлов графа связей.</summary>
 public static class RelationNodeKeys
 {
+    private const string VehiclePrefix = "vehicle:";
+    private const string AddressPrefix = "address:";
+
     /// <summary>Фигурант.</summary>
     public static string Person(int personId) => $"person:{personId}";
 
@@ -97,17 +124,46 @@ public static class RelationNodeKeys
     public static string ForeignCase(int caseId) => $"foreign-case:{caseId}";
 
     /// <summary>Автотранспорт по нормализованному госномеру.</summary>
-    public static string Vehicle(string plateNormalized) => $"vehicle:{plateNormalized}";
+    public static string Vehicle(string plateNormalized) => VehiclePrefix + plateNormalized;
 
     /// <summary>Автотранспорт без госномера — отдельный узел на строку.</summary>
     public static string VehicleRow(int vehicleId) => $"vehicle-row:{vehicleId}";
 
     /// <summary>Адрес по нормализованному значению.</summary>
-    public static string Address(string addressNormalized) => $"address:{addressNormalized}";
+    public static string Address(string addressNormalized) => AddressPrefix + addressNormalized;
 
     /// <summary>Адрес, у которого нормализованного значения нет, — отдельный узел на строку.</summary>
     public static string AddressRow(int addressId) => $"address-row:{addressId}";
 
-    /// <summary>Узел раскрывается (фигурант и доступное дело).</summary>
-    public static bool IsExpandable(RelationNodeKind kind) => kind is RelationNodeKind.Person or RelationNodeKind.Case;
+    /// <summary>Вид узла раскрывается (фигурант, доступное дело, автотранспорт, адрес).</summary>
+    public static bool IsExpandable(RelationNodeKind kind) =>
+        kind is RelationNodeKind.Person or RelationNodeKind.Case or RelationNodeKind.Vehicle or RelationNodeKind.Address;
+
+    /// <summary>
+    /// Нормализованное значение из ключа узла автотранспорта или адреса; ключ другого вида (в том числе узла на
+    /// строку) — <see langword="null"/>.
+    /// </summary>
+    public static string? ValueOf(RelationNodeKind kind, string? key)
+    {
+        var prefix = kind switch
+        {
+            RelationNodeKind.Vehicle => VehiclePrefix,
+            RelationNodeKind.Address => AddressPrefix,
+            _ => null,
+        };
+        return prefix is not null && key is { Length: > 0 } && key.StartsWith(prefix, StringComparison.Ordinal) && key.Length > prefix.Length
+            ? key[prefix.Length..]
+            : null;
+    }
+
+    /// <summary>Вид узла для сводки журнала (ТБ-032: без значений).</summary>
+    public static string AuditName(RelationNodeKind kind) => kind switch
+    {
+        RelationNodeKind.Person => "person",
+        RelationNodeKind.Case => "case",
+        RelationNodeKind.Vehicle => "vehicle",
+        RelationNodeKind.Address => "address",
+        RelationNodeKind.ForeignCase => "foreign-case",
+        _ => "other",
+    };
 }

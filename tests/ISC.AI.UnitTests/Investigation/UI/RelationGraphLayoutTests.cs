@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Blazor.Diagrams.Core.Geometry;
 using ISC.AI.Profile.Investigation.UI;
@@ -58,6 +59,69 @@ public sealed class RelationGraphLayoutTests
         RelationGraphLayout.RingRadius(8).ShouldBe(150);
         RelationGraphLayout.Place(Center, anchorIsCenter: false, count: 0, radius: 200).ShouldBeEmpty();
     }
+
+    [Fact(DisplayName = "ADR-0045 п. 9: силовая раскладка — карточки не перекрываются, центр закреплён, раскладка повторяется один в один")]
+    public void Arrange_removes_overlaps_and_is_deterministic()
+    {
+        // Звезда из 12 узлов, все начально в одной точке (худший случай), плюс цепочка из двух.
+        var boxes = Enumerable.Range(0, 12).Select(i => new LayoutBox($"n{i}", 100, 100, 190, 70))
+            .Prepend(new LayoutBox("c", Center.X, Center.Y, 190, 70))
+            .Append(new LayoutBox("a", 0, 0, 190, 70))
+            .Append(new LayoutBox("b", 0, 0, 190, 70))
+            .ToList();
+        var edges = Enumerable.Range(0, 12).Select(i => ("c", $"n{i}")).Append(("n0", "a")).Append(("a", "b")).ToList();
+        var pinned = new HashSet<string>(StringComparer.Ordinal) { "c" };
+
+        var first = RelationGraphLayout.Arrange(boxes, edges, pinned);
+        var second = RelationGraphLayout.Arrange(boxes, edges, pinned);
+
+        first["c"].X.ShouldBe(Center.X);
+        first["c"].Y.ShouldBe(Center.Y);
+        first.Keys.ShouldAllBe(key => first[key].X == second[key].X && first[key].Y == second[key].Y);
+
+        var placed = boxes.Select(b => b with { X = first[b.Key].X, Y = first[b.Key].Y }).ToList();
+        for (var i = 0; i < placed.Count; i++)
+        {
+            for (var j = i + 1; j < placed.Count; j++)
+            {
+                Overlaps(placed[i], placed[j]).ShouldBeFalse($"{placed[i].Key} и {placed[j].Key} перекрываются");
+            }
+        }
+    }
+
+    [Fact(DisplayName = "ADR-0045 п. 9: после раскрытия щелчком двигаются только новые узлы — закреплённые остаются на месте")]
+    public void Arrange_keeps_fixed_boxes()
+    {
+        var boxes = new List<LayoutBox>
+        {
+            new("old1", 0, 0, 190, 70), new("old2", 400, 0, 190, 70), new("new1", 0, 0, 190, 70), new("new2", 0, 0, 190, 70),
+        };
+        var fixedKeys = new HashSet<string>(StringComparer.Ordinal) { "old1", "old2" };
+
+        var result = RelationGraphLayout.Arrange(boxes, [("old1", "new1"), ("old1", "new2")], fixedKeys, iterations: 150);
+
+        result["old1"].X.ShouldBe(0);
+        result["old2"].X.ShouldBe(400);
+        Overlaps(boxes[0] with { X = result["old1"].X, Y = result["old1"].Y }, boxes[2] with { X = result["new1"].X, Y = result["new1"].Y })
+            .ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "ADR-0045 п. 9: «Вписать» — граф в окне с полями, крупнее 1:1 не увеличивает")]
+    public void Fit_scales_down_but_not_up()
+    {
+        var wide = new List<LayoutBox> { new("a", 0, 0, 190, 70), new("b", 2810, 1430, 190, 70) }; // 3000 × 1500
+        var (zoom, panX, panY) = RelationGraphLayout.Fit(wide, 1240, 840, margin: 20);
+        zoom.ShouldBe(0.4, 0.0001);
+        panX.ShouldBe(20, 0.0001);
+        panY.ShouldBe(20 + ((800 - 600) / 2.0), 0.0001);
+
+        var small = new List<LayoutBox> { new("a", 100, 100, 190, 70) };
+        RelationGraphLayout.Fit(small, 1240, 840).Zoom.ShouldBe(1);
+        RelationGraphLayout.Fit([], 1240, 840).ShouldBe((1, 0, 0));
+    }
+
+    private static bool Overlaps(LayoutBox a, LayoutBox b) =>
+        a.X < b.X + b.Width && b.X < a.X + a.Width && a.Y < b.Y + b.Height && b.Y < a.Y + a.Height;
 
     private static double Distance(Point a, Point b) => Math.Sqrt(((a.X - b.X) * (a.X - b.X)) + ((a.Y - b.Y) * (a.Y - b.Y)));
 }

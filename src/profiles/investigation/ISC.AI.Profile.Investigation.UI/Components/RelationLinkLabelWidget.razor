@@ -5,7 +5,8 @@
 @* Подпись ребра графа связей (ADR-0045 п. 5) вместо подписи библиотеки по умолчанию: та у Z.Blazor.Diagrams лежит в
    рамке шириной 1 px, поэтому сжимается до ширины слова — текст рвётся по словам и обрезается. Здесь подпись — в одну
    строку по центру полосы (размер полосы задаёт стиль страницы графа), длинная — с многоточием, полный текст — во
-   всплывающей подсказке при наведении мыши. Пересечение выделено тем же цветом, что и его ребро. *@
+   всплывающей подсказке при наведении мыши. Пересечение и «вместе на материалах» выделены тем же цветом, что и
+   их рёбра. *@
 
 <div class="rgraph-edge-label-box">
     <span class="@CssClass" title="@Label.Content">@Label.Content</span>
@@ -15,7 +16,10 @@
     /// <summary>Подпись ребра (передаёт библиотека диаграмм).</summary>
     [Parameter] public LinkLabelModel Label { get; set; } = null!;
 
-    private string CssClass => Label is RelationLinkLabelModel { Kind: RelationEdgeKind.Intersection }
-        ? "rgraph-edge-label rgraph-edge-label--intersection"
-        : "rgraph-edge-label";
+    private string CssClass => (Label as RelationLinkLabelModel)?.Kind switch
+    {
+        RelationEdgeKind.Intersection => "rgraph-edge-label rgraph-edge-label--intersection",
+        RelationEdgeKind.CoAppearance => "rgraph-edge-label rgraph-edge-label--together",
+        _ => "rgraph-edge-label",
+    };
 }
