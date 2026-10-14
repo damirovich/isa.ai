@@ -26,3 +26,14 @@
 .rgraph-canvas-wrap ::deep .diagram-canvas {
     background-color: transparent !important;
 }
+
+/* Легенда линий под чипами фильтра (ADR-0045 п. 13). */
+.rgraph-legend {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-left: 8px;
+    font-size: 12px;
+    color: var(--mud-palette-text-secondary);
+}

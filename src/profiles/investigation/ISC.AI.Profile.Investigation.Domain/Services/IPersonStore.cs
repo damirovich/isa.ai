@@ -146,6 +146,16 @@ public sealed record ReferencePhotoDraft(
     int PersonId, int MediaAssetId, int? MediaFaceId, float? QualityScore, string? Source,
     string? LegalBasis, DateOnly? ReviewDueAt, int? AddedByUserId);
 
+/// <summary>Фигурант с найденным адресом — раскрытие адреса в графе связей (ADR-0045 п. 10).</summary>
+/// <param name="Person">Фигурант, доступный субъекту.</param>
+/// <param name="Kind">Вид адреса из строки адресов; <see langword="null"/> — место жительства из анкеты.</param>
+public sealed record PersonAddressMatch(PersonRow Person, AddressKind? Kind);
+
+/// <summary>Фигурант, с которым есть совместные появления на материалах (ADR-0045 п. 11).</summary>
+/// <param name="Person">Другой фигурант, доступный субъекту.</param>
+/// <param name="MaterialCount">Число носителей, на которых у обоих есть действующие появления.</param>
+public sealed record CoAppearanceRow(PersonRow Person, int MaterialCount);
+
 /// <summary>Исход записи фигуранта.</summary>
 public enum PersonWriteResult
 {
@@ -210,6 +220,37 @@ public interface IPersonStore
     /// </summary>
     Task<IReadOnlyList<AssetAppearanceRow>> ListAppearancesOnAssetAsync(
         int assetId, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Доступные субъекту фигуранты, у которых есть автотранспорт с этим нормализованным госномером (ТО-мат-11) —
+    /// раскрытие узла автомобиля в графе связей (ADR-0045 п. 10). Фигурант — по полной решётке и роли, строка
+    /// автотранспорта — под floor'ом строки; совпадения в недоступных делах не раскрываются ничем (ТБ-020/021).
+    /// </summary>
+    Task<IReadOnlyList<PersonRow>> ListByPlateAsync(
+        string plateNormalized, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Доступные субъекту фигуранты с этим нормализованным адресом — в строке адресов (под floor'ом строки) или
+    /// местом жительства в анкете (ADR-0045 п. 10). Правило видимости — как у <see cref="ListByPlateAsync"/>.
+    /// </summary>
+    Task<IReadOnlyList<PersonAddressMatch>> ListByAddressAsync(
+        string addressNormalized, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Фигуранты, у которых есть действующие (не отозванные) появления на тех же носителях, что и у этого
+    /// фигуранта (ADR-0045 п. 11). Оба фигуранта — по полной решётке и роли, появления — под floor'ом строки (как
+    /// <see cref="ListAppearancesOnAssetAsync"/>); недоступный исходный фигурант — пустой список.
+    /// </summary>
+    Task<IReadOnlyList<CoAppearanceRow>> ListCoAppearancesAsync(
+        int personId, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Поиск доступных субъекту фигурантов по ФИО или псевдониму — подстрока без учёта регистра и «ё/е»
+    /// (ТО-мат-11), по имени, не больше <paramref name="limit"/> строк; короче двух знаков — пусто
+    /// (выбор фигуранта для цепочки «как связаны», ADR-0045 п. 12).
+    /// </summary>
+    Task<IReadOnlyList<PersonRow>> SearchAsync(
+        string text, int limit, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>Эталоны фигуранта.</summary>
     Task<IReadOnlyList<ReferencePhotoRow>> ListReferencePhotosAsync(int personId, AccessContext access, CancellationToken cancellationToken = default);

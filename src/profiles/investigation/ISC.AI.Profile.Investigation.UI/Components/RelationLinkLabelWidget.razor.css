@@ -27,8 +27,14 @@
     user-select: none;
 }
 
-/* Пересечение — тот же оранжевый, что у его ребра (RelationGraphPage.IntersectionColor). */
+/* Пересечение и «вместе на материалах» — те же цвета, что у их рёбер (RelationGraphSvg.IntersectionColor,
+   RelationGraphSvg.CoAppearanceColor). */
 .rgraph-edge-label--intersection {
     background: #ef6c00;
+    color: #fff;
+}
+
+.rgraph-edge-label--together {
+    background: #2e7d32;
     color: #fff;
 }

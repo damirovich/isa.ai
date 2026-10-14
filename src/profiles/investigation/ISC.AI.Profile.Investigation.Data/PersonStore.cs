@@ -387,6 +387,170 @@ public sealed class PersonStore(
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ИНВАРИАНТ (ТБ-020/021, ADR-0045 п. 10): фигурант — по ПОЛНОЙ решётке и роли (<see cref="PersonAccess"/>),
+    /// строка автотранспорта — под floor'ом строки. Совпадение номера в деле, которое субъект не видит, не
+    /// раскрывается ни строкой, ни счётчиком: для чужих дел есть только пересечение (ADR-0029).
+    /// </remarks>
+    public async Task<IReadOnlyList<PersonRow>> ListByPlateAsync(
+        string plateNormalized, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        if (string.IsNullOrWhiteSpace(plateNormalized))
+        {
+            return [];
+        }
+
+        var role = await ResolveRoleAsync(access, cancellationToken);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Подзапрос по строкам — без AsNoTracking: режим отслеживания задаётся только на корне (см. PersonAccess).
+        var vehicles = db.PersonVehicles
+            .Where(BaselineAccess.Filter<PersonVehicle>(access))
+            .Where(policy.BuildFilter<PersonVehicle>(access))
+            .Where(v => v.PlateNormalized == plateNormalized);
+
+        return await ProjectRows(AccessiblePersons(db, access, role).Where(p => vehicles.Any(v => v.PersonId == p.Id)), db)
+            .ToListAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>Правило видимости — как у <see cref="ListByPlateAsync"/>; место жительства — поле самого фигуранта.</remarks>
+    public async Task<IReadOnlyList<PersonAddressMatch>> ListByAddressAsync(
+        string addressNormalized, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        if (string.IsNullOrWhiteSpace(addressNormalized))
+        {
+            return [];
+        }
+
+        var role = await ResolveRoleAsync(access, cancellationToken);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var addresses = db.PersonAddresses
+            .Where(BaselineAccess.Filter<PersonAddress>(access))
+            .Where(policy.BuildFilter<PersonAddress>(access))
+            .Where(a => a.TextNormalized == addressNormalized);
+
+        var persons = await ProjectRows(
+                AccessiblePersons(db, access, role)
+                    .Where(p => p.ResidenceNormalized == addressNormalized || addresses.Any(a => a.PersonId == p.Id)),
+                db)
+            .ToListAsync(cancellationToken);
+        if (persons.Count == 0)
+        {
+            return [];
+        }
+
+        // Вид адреса — первой строки фигуранта с этим ключом; нет строки — значит, совпало место жительства из анкеты.
+        var ids = persons.Select(p => p.Id).ToList();
+        var kinds = (await addresses
+                .Where(a => ids.Contains(a.PersonId))
+                .OrderBy(a => a.Id)
+                .Select(a => new { a.PersonId, a.Kind })
+                .ToListAsync(cancellationToken))
+            .GroupBy(a => a.PersonId)
+            .ToDictionary(g => g.Key, g => g.First().Kind);
+
+        return persons
+            .Select(p => new PersonAddressMatch(p, kinds.TryGetValue(p.Id, out var kind) ? kind : null))
+            .ToList();
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ИНВАРИАНТ (ТБ-020/021, ADR-0045 п. 11): оба фигуранта — по полной решётке и роли, появления — под floor'ом
+    /// строки и только действующие: отозванное появление (ADR-0034) совместности не даёт. Носители не
+    /// раскрываются — только их число.
+    /// </remarks>
+    public async Task<IReadOnlyList<CoAppearanceRow>> ListCoAppearancesAsync(
+        int personId, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+
+        var role = await ResolveRoleAsync(access, cancellationToken);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var visible = AccessiblePersons(db, access, role);
+        if (!await visible.AnyAsync(p => p.Id == personId, cancellationToken))
+        {
+            return [];
+        }
+
+        var appearances = db.Appearances
+            .Where(BaselineAccess.Filter<Appearance>(access))
+            .Where(policy.BuildFilter<Appearance>(access))
+            .Where(a => a.Status != AppearanceStatus.Revoked);
+        var ownAssets = appearances.Where(a => a.PersonId == personId).Select(a => a.MediaAssetId);
+
+        var pairs = await appearances
+            .Where(a => a.PersonId != personId && ownAssets.Contains(a.MediaAssetId) && visible.Any(p => p.Id == a.PersonId))
+            .Select(a => new { a.PersonId, a.MediaAssetId })
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        if (pairs.Count == 0)
+        {
+            return [];
+        }
+
+        var counts = pairs.GroupBy(p => p.PersonId).ToDictionary(g => g.Key, g => g.Count());
+        var ids = counts.Keys.ToList();
+        var persons = await ProjectRows(visible.Where(p => ids.Contains(p.Id)), db).ToListAsync(cancellationToken);
+
+        return persons
+            .Select(p => new CoAppearanceRow(p, counts[p.Id]))
+            .OrderByDescending(r => r.MaterialCount)
+            .ThenBy(r => r.Person.Id)
+            .ToList();
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Только доступные фигуранты (полная решётка и роль): поиск не открывает ни имён, ни самого факта существования
+    /// фигурантов недоступных дел (ТБ-020/021). Значения запроса в журнал не идут (ТБ-032) — сводку пишет сценарий.
+    /// </remarks>
+    public async Task<IReadOnlyList<PersonRow>> SearchAsync(
+        string text, int limit, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+
+        var needle = RequisiteNormalizer.SearchText(text);
+        if (needle.Length < 2 || limit <= 0)
+        {
+            return [];
+        }
+
+        var role = await ResolveRoleAsync(access, cancellationToken);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // «ё» в имени приводится к «е» так же, как в запросе (RequisiteNormalizer.SearchText); регистр снимает ILIKE.
+        var pattern = "%" + EscapeLike(needle) + "%";
+        var found = await AccessiblePersons(db, access, role)
+            .Where(p => EF.Functions.ILike(p.DisplayName.Replace("ё", "е").Replace("Ё", "Е"), pattern, "\\")
+                || (p.Alias != null && EF.Functions.ILike(p.Alias.Replace("ё", "е").Replace("Ё", "Е"), pattern, "\\")))
+            .OrderBy(p => p.DisplayName)
+            .ThenBy(p => p.Id)
+            .Select(p => p.Id)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+        if (found.Count == 0)
+        {
+            return [];
+        }
+
+        var rows = await ProjectRows(AccessiblePersons(db, access, role).Where(p => found.Contains(p.Id)), db)
+            .ToListAsync(cancellationToken);
+        return rows.OrderBy(r => found.IndexOf(r.Id)).ToList();
+    }
+
+    // Экранирование подстановочных знаков LIKE: «%», «_» и сам экранирующий «\» в запросе — буквальные.
+    private static string EscapeLike(string text) =>
+        text.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<ReferencePhotoRow>> ListReferencePhotosAsync(int personId, AccessContext access, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(access);

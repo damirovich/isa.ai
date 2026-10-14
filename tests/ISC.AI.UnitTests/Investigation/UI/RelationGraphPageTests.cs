@@ -29,12 +29,15 @@ namespace ISC.AI.UnitTests.Investigation.UI;
 /// <summary>
 /// Страница графа связей (ТФ-ПЕР-10, ADR-0045): граф строится одним запросом с центром из маршрута; чужое дело — без
 /// ссылки «открыть»; щелчок по свёрнутому узлу («?») — тот же запрос с глубиной 1 от узла, повторный щелчок
-/// сворачивает ветку. Запросы Mediator подменены, JS — в свободном режиме bUnit.
+/// сворачивает ветку; чипы видов узлов скрывают узлы с их рёбрами, центр — никогда; выгрузка — сначала запись в журнал
+/// с грифом картинки, затем файл. Запросы Mediator подменены, JS — в свободном режиме bUnit.
 /// </summary>
 public sealed class RelationGraphPageTests : BunitContext, IAsyncLifetime
 {
     private const int PersonId = 10;
     private readonly IMediator _mediator = Substitute.For<IMediator>();
+    private readonly BunitJSModuleInterop _module;
+    private IRenderedComponent<MudPopoverProvider>? _popover;
 
     public RelationGraphPageTests()
     {
@@ -42,6 +45,8 @@ public sealed class RelationGraphPageTests : BunitContext, IAsyncLifetime
 
         // Холст библиотеки диаграмм спрашивает у браузера свои размеры; в bUnit браузера нет — отвечаем сами.
         JSInterop.Setup<Rectangle>("ZBlazorDiagrams.getBoundingClientRect", _ => true).SetResult(new Rectangle(0, 0, 1200, 800));
+        _module = JSInterop.SetupModule(RelationGraphPage.ModulePath);
+        _module.Mode = JSRuntimeMode.Loose;
         Services.AddMudServices();
         Services.AddSingleton(_mediator);
         var profile = Substitute.For<IProfile>();
@@ -57,6 +62,7 @@ public sealed class RelationGraphPageTests : BunitContext, IAsyncLifetime
         var brother = Node(RelationNodeKeys.Person(11), RelationNodeKind.Person, 11, "Иванов Пётр", 1, center.Key) with
         {
             Subtitle = "Связь · дело № 12-2026",
+            Classification = 2,
         };
         var foreign = Node(RelationNodeKeys.ForeignCase(20), RelationNodeKind.ForeignCase, null, "Дело № 20/26", 1, center.Key) with
         {
@@ -143,11 +149,92 @@ public sealed class RelationGraphPageTests : BunitContext, IAsyncLifetime
         NodeCard(cut, "Иванов Пётр").QuerySelector(".rgraph-node__badge--q").ShouldNotBeNull();
     }
 
+    [Fact(DisplayName = "ADR-0045 п. 13: чип вида узла скрывает узлы этого вида вместе с рёбрами; центр не скрывается никогда")]
+    public void Kind_chips_filter_nodes_but_not_center()
+    {
+        var cut = RenderPage();
+        cut.WaitForAssertion(() => cut.FindAll(".rgraph-node").Count.ShouldBe(3));
+
+        Chip(cut, "Чужие дела").Click();
+        cut.WaitForAssertion(() => cut.FindAll(".rgraph-node").Count.ShouldBe(2));
+        cut.FindAll(".rgraph-edge-label").Select(e => e.TextContent.Trim()).ShouldBe(["брат"]);
+        cut.Markup.ShouldContain("скрыто фильтром: 1");
+
+        Chip(cut, "Фигуранты").Click();
+        cut.WaitForAssertion(() => cut.FindAll(".rgraph-node").Count.ShouldBe(1));
+        NodeCard(cut, "Иванов Иван").ShouldNotBeNull(); // центр
+
+        Chip(cut, "Чужие дела").Click();
+        Chip(cut, "Фигуранты").Click();
+        cut.WaitForAssertion(() => cut.FindAll(".rgraph-node").Count.ShouldBe(3));
+    }
+
+    [Fact(DisplayName = "ADR-0045 п. 9: раскладка одна — переключателя «Веером» нет; «Расставить заново» и «Вписать» узлы не теряют")]
+    public void Single_layout_with_relayout_and_fit()
+    {
+        var cut = RenderPage();
+        cut.WaitForAssertion(() => cut.FindAll(".rgraph-node").Count.ShouldBe(3));
+
+        cut.Markup.ShouldNotContain("Веером");
+        cut.FindAll(".mud-toggle-item").ShouldBeEmpty();
+
+        cut.Find("button[aria-label='Расставить заново']").Click();
+        cut.Find("button[aria-label='Вписать в окно']").Click();
+        cut.FindAll(".rgraph-node").Count.ShouldBe(3);
+    }
+
+    [Fact(DisplayName = "ADR-0045 п. 14: выгрузка — запись Export с грифом картинки, затем файл с грифом и подписью «кто сформировал»")]
+    public void Export_audits_then_downloads_marked_picture()
+    {
+        _mediator.Send(Arg.Any<ExportRelationGraphCommand>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<ResponseDto<string>>(ResponseDto<string>.Ok("Петров П.П.")));
+        var cut = RenderPage();
+        cut.WaitForAssertion(() => cut.FindAll(".rgraph-node").Count.ShouldBe(3));
+
+        ExportAs(cut, "Картинка SVG");
+
+        cut.WaitForAssertion(() => _module.Invocations.Count(i => i.Identifier == "downloadSvg").ShouldBe(1));
+        _mediator.Received(1).Send(
+            Arg.Is<ExportRelationGraphCommand>(c => c.Format == RelationGraphExportFormat.Svg && c.NodeCount == 3
+                && c.Classification == 2 && c.CenterKind == RelationNodeKind.Person && c.CenterId == PersonId),
+            Arg.Any<CancellationToken>());
+        var svg = _module.Invocations.Single(i => i.Identifier == "downloadSvg").Arguments[1].ShouldBeOfType<string>();
+        svg.ShouldContain(ClassificationLevels.Marking(2));
+        svg.ShouldContain("Сформировал: Петров П.П.");
+        svg.ShouldContain("Иванов Пётр");
+    }
+
+    [Fact(DisplayName = "ADR-0045 п. 14: журнал отказал — файла нет")]
+    public void Export_without_audit_downloads_nothing()
+    {
+        _mediator.Send(Arg.Any<ExportRelationGraphCommand>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<ResponseDto<string>>(ResponseDto<string>.BadRequest(ExportRelationGraphCommand.NoSubject)));
+        var cut = RenderPage();
+        cut.WaitForAssertion(() => cut.FindAll(".rgraph-node").Count.ShouldBe(3));
+
+        ExportAs(cut, "Картинка PNG");
+
+        cut.WaitForAssertion(() => _mediator.Received(1).Send(Arg.Any<ExportRelationGraphCommand>(), Arg.Any<CancellationToken>()));
+        _module.Invocations.ShouldNotContain(i => i.Identifier == "downloadPng" || i.Identifier == "downloadSvg");
+    }
+
     private IRenderedComponent<RelationGraphPage> RenderPage()
     {
-        Render<MudPopoverProvider>();
+        _popover = Render<MudPopoverProvider>();
         return Render<RelationGraphPage>(p => p.Add(x => x.PersonId, PersonId));
     }
+
+    // «Скачать» → пункт меню: меню открывается во всплывающем слое MudPopoverProvider.
+    private void ExportAs(IRenderedComponent<RelationGraphPage> cut, string item)
+    {
+        cut.FindAll("button").Single(b => b.TextContent.Contains("Скачать", StringComparison.Ordinal)).Click();
+        var popover = _popover.ShouldNotBeNull();
+        popover.WaitForAssertion(() => popover.FindAll(".mud-menu-item").ShouldNotBeEmpty());
+        popover.FindAll(".mud-menu-item").Single(e => e.TextContent.Contains(item, StringComparison.Ordinal)).Click();
+    }
+
+    private static AngleSharp.Dom.IElement Chip(IRenderedComponent<RelationGraphPage> cut, string text) =>
+        cut.FindAll(".mud-chip").Single(e => e.TextContent.Trim() == text);
 
     private static AngleSharp.Dom.IElement NodeCard(IRenderedComponent<RelationGraphPage> cut, string title) =>
         cut.FindAll(".rgraph-node").Single(e => e.QuerySelector(".rgraph-node__title")!.TextContent.Trim() == title);

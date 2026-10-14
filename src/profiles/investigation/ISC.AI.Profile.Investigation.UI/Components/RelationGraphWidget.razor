@@ -111,7 +111,12 @@
             }
             else if (Node.Clickable)
             {
-                lines.Add(Node.Expanded ? "Щелчок — свернуть ветку" : "Щелчок — показать связи");
+                lines.Add(Node.Expanded ? "Щелчок — свернуть ветку" : Node.Node.Kind switch
+                {
+                    RelationNodeKind.Vehicle => "Щелчок — у кого ещё этот госномер (в доступных вам делах)",
+                    RelationNodeKind.Address => "Щелчок — кто ещё по этому адресу (в доступных вам делах)",
+                    _ => "Щелчок — показать связи",
+                });
             }
 
             return string.Join('\n', lines);
