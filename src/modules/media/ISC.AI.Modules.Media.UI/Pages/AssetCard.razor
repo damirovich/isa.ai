@@ -74,15 +74,18 @@ else
                 <MudChip T="string" Variant="Variant.Text" Color="@asset.IndexStatus.ChipColor()">@asset.IndexStatus.Label()</MudChip>
             }
             <ClassificationChip Classification="@asset.Classification" />
-            @if (FacesApplicable(asset))
+            @if (FacesApplicable(asset) && !_details.ViewOnly)
             {
                 @* Переиндексация = повторный поиск лиц; к аудио неприменима (сервер тоже откажет). *@
                 <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" Disabled="_busy" OnClick="ReindexAsync">Переиндексировать</MudButton>
             }
-            <MudTooltip Text="Гарантированное удаление — роли Администратор/Руководитель">
-                <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteForever" Disabled="_busy"
-                           OnClick="@(() => _purgeOpen = true)">Удалить</MudButton>
-            </MudTooltip>
+            @if (!_details.ViewOnly)
+            {
+                <MudTooltip Text="Гарантированное удаление — роли Администратор/Руководитель">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteForever" Disabled="_busy"
+                               OnClick="@(() => _purgeOpen = true)">Удалить</MudButton>
+                </MudTooltip>
+            }
             @if (_details.CaseId is { } caseId)
             {
                 <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" Href="@($"/media/cases/{caseId}")">К медиатеке дела</MudButton>
@@ -90,6 +93,15 @@ else
         </div>
     </div>
 
+    @if (_details.ViewOnly)
+    {
+        @* Взаимный поиск ОН+ОУ (ADR-0044): материал чужого дела открыт как кандидат поиска — только просмотр. *@
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="my-3">
+            Материал из дела, которое вы не ведёте: он открыт как кандидат вашего поиска по лицу (взаимный поиск ОН и ОУ).
+            Только просмотр — изменить, привязать или искать по нему нельзя, карточка того дела не открывается.
+            Совпадение подтверждают эксперт по лицам и верификатор.
+        </MudAlert>
+    }
     @if (_error is not null)
     {
         <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3"
@@ -133,6 +145,10 @@ else
                 {
                     <MudLink Href="@($"/media/cases/{linkedCase}")" Typo="Typo.caption">№ @linkedCase</MudLink>
                 }
+                else if (_details.ViewOnly)
+                {
+                    <span>дело, которое вы не ведёте (просмотр по результату поиска)</span>
+                }
                 else
                 {
                     <span>не привязан</span>
@@ -142,7 +158,10 @@ else
             @* ТФ-МЕД-17: дату съёмки оператор подтверждает или исправляет; у фото и видео без неё — предупреждение. *@
             <MudText Typo="Typo.caption" Class="@(asset.CapturedAt is null && asset.Kind != MediaKind.Audio ? "mud-error-text" : "mud-text-secondary")">
                 Съёмка: @(asset.CapturedAt is { } captured ? captured.ToLocalTime().ToString("dd.MM.yyyy HH:mm") : "не указана")
-                <MudLink Typo="Typo.caption" Class="ml-1" OnClick="OpenCapturedAt" Disabled="_busy">@(asset.CapturedAt is null ? "указать" : "изменить")</MudLink>
+                @if (!_details.ViewOnly)
+                {
+                    <MudLink Typo="Typo.caption" Class="ml-1" OnClick="OpenCapturedAt" Disabled="_busy">@(asset.CapturedAt is null ? "указать" : "изменить")</MudLink>
+                }
             </MudText>
             @if (asset.Kind == MediaKind.Video && asset.RecordedAt is { } recorded)
             {
@@ -152,7 +171,7 @@ else
                     <span title="Время начала записи из метаданных файла — как его записала камера. Часы камеры могли быть сбиты, метаданные — изменены: это сведения из файла, не доказательство.">
                         В файле: @recorded.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture)
                     </span>
-                    @if (asset.CapturedAt is null)
+                    @if (asset.CapturedAt is null && !_details.ViewOnly)
                     {
                         <MudLink Typo="Typo.caption" Class="ml-1" OnClick="@(() => ApplyRecordedAtAsync(recorded))" Disabled="_busy">применить как дату съёмки</MudLink>
                     }
@@ -191,6 +210,7 @@ else
                 @* Тот же эндпоинт раздачи, что у видео: допуск и сужение по делам — на каждый запрос, Range для
                    перемотки, одна выдача субъекту — одна запись аудита (MediaViewAuditThrottle, ТБ-030). *@
                 <audio id="@AudioElementId" controls preload="metadata" src="@MediaFileUrl.Originals(asset.Id, asset.StoredFileName)"
+                       controlslist="@(_details.ViewOnly ? "nodownload" : null)"
                        style="width:100%;max-width:720px;display:block;margin:0 auto;"></audio>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
                     Запись воспроизводится без обработки (ТЭ-007); переход к месту записи — щелчком по фрагменту расшифровки ниже.
@@ -202,8 +222,11 @@ else
                 @* AMR/3GPP браузер не воспроизводит (эндпоинт отдаёт их вложением): честная ссылка вместо мёртвого плеера. *@
                 <div class="d-flex flex-column align-center gap-2 py-4">
                     <MudIcon Icon="@Icons.Material.Filled.AudioFile" Size="Size.Large" Class="mud-text-secondary" />
-                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download"
-                               Href="@MediaFileUrl.Originals(asset.Id, asset.StoredFileName)" download="@asset.OriginalFileName">Скачать оригинал</MudButton>
+                    @if (!_details.ViewOnly)
+                    {
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download"
+                                   Href="@MediaFileUrl.Originals(asset.Id, asset.StoredFileName)" download="@asset.OriginalFileName">Скачать оригинал</MudButton>
+                    }
                 </div>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
                     Браузер не воспроизводит формат @MediaLabels.FormatName(asset.ContentType) — откройте файл в проигрывателе; переход к месту
@@ -219,7 +242,7 @@ else
             <VideoFrameViewer @key="asset.Id" @ref="_viewer" AssetId="@asset.Id" StoredFileName="@asset.StoredFileName" OriginalFileName="@asset.OriginalFileName"
                               ContentType="@asset.ContentType" Playable="@IsBrowserPlayable(asset.ContentType)"
                               FrameRate="@asset.FrameRate" DurationMs="@asset.DurationMs" StartMs="@(StartAtMs ?? 0)"
-                              CanSnapshot="@(_details.CaseId is not null)" OnSnapshotRequested="SnapshotAsync"
+                              CanSnapshot="@(_details.CaseId is not null)" AllowDownload="@(!_details.ViewOnly)" OnSnapshotRequested="SnapshotAsync"
                               FilmstripUrl="@(asset.FilmstripStoredFileName is { } strip ? MediaFileUrl.Filmstrip(asset.Id, strip) : null)"
                               FilmstripTileCount="@(asset.FilmstripTileCount ?? 0)" FilmstripStepMs="@(asset.FilmstripStepMs ?? 0)"
                               TileAspect="@TileAspect(asset)" FilmstripHint="@FilmstripHint(asset)"
@@ -258,13 +281,13 @@ else
         @if (asset.Kind == MediaKind.Video && !IsBrowserPlayable(asset.ContentType))
         {
             @* Видео кадрами с сервера: проигрывателя нет, щелчок по фрагменту показывает кадр (ADR-0028, п. 10). *@
-            <TranscriptPanel AssetId="@asset.Id" StartAtMs="@StartAtMs" OnSeekRequested="ShowFrameAsync" />
+            <TranscriptPanel AssetId="@asset.Id" StartAtMs="@StartAtMs" OnSeekRequested="ShowFrameAsync" ReadOnly="@_details.ViewOnly" />
         }
         else
         {
             @* У видео перемотку по ?t= делает просмотрщик (владелец <video>); у аудио проигрывателем владеет панель. *@
             <TranscriptPanel AssetId="@asset.Id" PlayerElementId="@PlayableElementId(asset)" StartAtMs="@StartAtMs"
-                             SeekToStart="@(asset.Kind != MediaKind.Video)" />
+                             SeekToStart="@(asset.Kind != MediaKind.Video)" ReadOnly="@_details.ViewOnly" />
         }
     }
 
@@ -327,10 +350,13 @@ else
                                 </div>
                             </div>
                             <div class="d-flex gap-1 flex-wrap">
-                                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonSearch"
-                                           Disabled="@(!best.QualityAcceptable)" OnClick="@(() => SearchFace(best.Id))">Найти в других материалах</MudButton>
-                                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonAdd"
-                                           Disabled="@(_busy || _details.CaseId is null)" OnClick="@(() => OpenLinkAsync(best))">Привязать к фигуранту</MudButton>
+                                @if (!_details.ViewOnly)
+                                {
+                                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonSearch"
+                                               Disabled="@(!best.QualityAcceptable)" OnClick="@(() => SearchFace(best.Id))">Найти в других материалах</MudButton>
+                                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonAdd"
+                                               Disabled="@(_busy || _details.CaseId is null)" OnClick="@(() => OpenLinkAsync(best))">Привязать к фигуранту</MudButton>
+                                }
                             </div>
                             @if (current.Faces.Count > 1)
                             {
@@ -376,10 +402,13 @@ else
                                 <MudText Typo="Typo.caption" Class="mud-text-secondary">
                                     детектор @current.DetectionScore.ToString("0.00", CultureInfo.CurrentCulture) · качество @current.QualityScore.ToString("0.00", CultureInfo.CurrentCulture)
                                 </MudText>
-                                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonSearch" Class="mt-2"
-                                           Disabled="@(!current.QualityAcceptable)" OnClick="@(() => SearchFace(current.Id))">Найти в других материалах</MudButton>
-                                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonAdd"
-                                           Disabled="@(_busy || _details.CaseId is null)" OnClick="@(() => OpenLinkAsync(current))">Привязать к фигуранту</MudButton>
+                                @if (!_details.ViewOnly)
+                                {
+                                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonSearch" Class="mt-2"
+                                               Disabled="@(!current.QualityAcceptable)" OnClick="@(() => SearchFace(current.Id))">Найти в других материалах</MudButton>
+                                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonAdd"
+                                               Disabled="@(_busy || _details.CaseId is null)" OnClick="@(() => OpenLinkAsync(current))">Привязать к фигуранту</MudButton>
+                                }
                             </div>
                         </MudPaper>
                     }
@@ -388,7 +417,10 @@ else
         </MudPaper>
 
         @* ================= Сверка с фигурантами дела (ТФ-ПЕР-09, ADR-0035) ================= *@
-        <PersonSuggestionPanel AssetId="@asset.Id" IndexStatus="@asset.IndexStatus" FaceCount="@_details.Faces.Count" />
+        @if (!_details.ViewOnly)
+        {
+            <PersonSuggestionPanel AssetId="@asset.Id" IndexStatus="@asset.IndexStatus" FaceCount="@_details.Faces.Count" />
+        }
     }
     </div>
     </div>

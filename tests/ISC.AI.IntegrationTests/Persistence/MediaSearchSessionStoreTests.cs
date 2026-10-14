@@ -366,6 +366,30 @@ public sealed class MediaSearchSessionStoreTests : IAsyncLifetime
         (await store.HasSuggestionAsync(100, 9, 43, assetId)).ShouldBeFalse();
     }
 
+    [Fact(DisplayName = "ADR-0044: дела сессий, где носитель — кандидат, читаются под floor сессии и строки кандидата")]
+    public async Task Case_ids_with_candidate_asset_respect_floor()
+    {
+        var factory = new MediaContextFactory(_postgres.GetConnectionString());
+        int openFace, secretFace;
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+            openFace = await SeedFaceAsync(db, classification: 1, divisionId: 7, crop: null);
+            secretFace = await SeedFaceAsync(db, classification: 2, divisionId: 7, crop: null);
+        }
+
+        var store = new SearchSessionStore(factory, new AllowAllAccessPolicy());
+        await store.CreateAsync(Draft(caseId: 100, caseIds: [100, 101]), [Candidate(openFace, 0.10), Candidate(secretFace, 0.20, classification: 2)]);
+        await store.CreateAsync(Draft(caseId: 102, caseIds: [102]), [Candidate(openFace, 0.15)]);
+
+        (await store.ListCaseIdsWithCandidateAssetAsync(openFace, Insider)).Order().ShouldBe([100, 102]);
+
+        // Кандидат выше допуска основанием не служит; чужое подразделение и несуществующий носитель — пусто.
+        (await store.ListCaseIdsWithCandidateAssetAsync(secretFace, Insider)).ShouldBeEmpty();
+        (await store.ListCaseIdsWithCandidateAssetAsync(openFace, Outsider)).ShouldBeEmpty();
+        (await store.ListCaseIdsWithCandidateAssetAsync(999_999, Insider)).ShouldBeEmpty();
+    }
+
     private static SearchSessionDraft Draft(int caseId, int[] caseIds) => new(
         CaseId: caseId,
         AuthorizationRef: "поручение № 7",

@@ -35,6 +35,7 @@ public sealed class MediaFrameEndpointTests
 
     private readonly IMediaFileAccess _fileAccess = Substitute.For<IMediaFileAccess>();
     private readonly ICaseScope _caseScope = Substitute.For<ICaseScope>();
+    private readonly ISearchSessionStore _sessions = Substitute.For<ISearchSessionStore>();
     private readonly IFileStorage _storage = Substitute.For<IFileStorage>();
     private readonly ILocalFileLocator _localFiles = Substitute.For<ILocalFileLocator>();
     private readonly IFrameExtractor _frames = Substitute.For<IFrameExtractor>();
@@ -332,7 +333,7 @@ public sealed class MediaFrameEndpointTests
 
     private Task<IResult> ServeAsync(string? t, ILocalFileLocator? localFiles) =>
         MediaFrameEndpoints.ServeFrameAsync(
-            _http, AssetId, t, _fileAccess, _caseScope, _storage, localFiles, _frames, _accessProvider, _audit, _throttle,
+            _http, AssetId, t, _fileAccess, _caseScope, _sessions, _storage, localFiles, _frames, _accessProvider, _audit, _throttle,
             NullLogger<MediaFrameEndpointsCategory>.Instance, CancellationToken.None);
 
     private async Task AssertNoExtractionAsync()

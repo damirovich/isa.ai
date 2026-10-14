@@ -33,7 +33,8 @@ public sealed record GetTranscriptQuery(int AssetId) : IRequest<ResponseDto<Medi
     public const string NotFoundMessage = "Носитель не найден или недоступен.";
 
     /// <inheritdoc cref="GetTranscriptQuery" />
-    public sealed class Handler(IAccessContextProvider accessProvider, IMediaCatalog catalog, ICaseScope caseScope)
+    public sealed class Handler(
+        IAccessContextProvider accessProvider, IMediaCatalog catalog, ICaseScope caseScope, ISearchSessionStore sessions)
         : IRequestHandler<GetTranscriptQuery, ResponseDto<MediaTranscript>>
     {
         /// <inheritdoc />
@@ -45,8 +46,8 @@ public sealed record GetTranscriptQuery(int AssetId) : IRequest<ResponseDto<Medi
             var access = await accessProvider.GetCurrentAsync(cancellationToken);
 
             // Сужение по делам субъекта (ТБ-071, ТФ-ДЕЛ-03) — ДО чтения фрагментов: чужой носитель не читается
-            // вовсе. Отказ неотличим от «не найден» (ТБ-020/021).
-            if (!await caseScope.IsAssetAccessibleAsync(query.AssetId, access, cancellationToken))
+            // вовсе, кроме кандидата его поиска (только просмотр, ADR-0044). Отказ неотличим от «не найден» (ТБ-020/021).
+            if (!await AssetViewAccess.CanViewAsync(caseScope, sessions, query.AssetId, access, cancellationToken))
             {
                 return ResponseDto<MediaTranscript>.NotFound(NotFoundMessage);
             }

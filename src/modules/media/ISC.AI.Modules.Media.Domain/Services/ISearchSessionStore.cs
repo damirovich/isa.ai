@@ -17,6 +17,13 @@ public interface ISearchSessionStore
     /// <summary>Создать сессию с кандидат-листом (в порядке ранга); возвращает идентификатор сессии.</summary>
     Task<int> CreateAsync(SearchSessionDraft draft, IReadOnlyList<FaceCandidate> candidates, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Дела, в которых проводились поисковые сессии с носителем <paramref name="assetId"/> среди кандидатов: и сессия, и
+    /// строка кандидата — под floor (ТБ-020/021). Основа правила просмотра материала кандидата (ADR-0044,
+    /// <see cref="AssetViewAccess"/>); доступность самих дел по роли проверяет вызывающий через порт профиля.
+    /// </summary>
+    Task<IReadOnlyList<int>> ListCaseIdsWithCandidateAssetAsync(int assetId, AccessContext access, CancellationToken cancellationToken = default);
+
     /// <summary>Сессия, если доступна субъекту.</summary>
     Task<SearchSessionRow?> GetAsync(int sessionId, AccessContext access, CancellationToken cancellationToken = default);
 

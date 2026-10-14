@@ -124,7 +124,7 @@ public static class MediaLabels
     {
         SearchScopeKind.CurrentCase => "текущее дело",
         SearchScopeKind.SelectedCases => "выбранные дела",
-        SearchScopeKind.AllAccessibleCases => "все доступные дела",
+        SearchScopeKind.AllAccessibleCases => "все дела в пределах допуска",
         _ => scope.ToString(),
     };
 

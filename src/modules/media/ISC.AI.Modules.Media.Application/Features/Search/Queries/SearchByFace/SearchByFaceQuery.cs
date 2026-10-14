@@ -252,7 +252,9 @@ public sealed record SearchByFaceQuery(
                 }
 
                 case SearchScopeKind.AllAccessibleCases:
-                    return (await caseScope.ListAccessibleCasesAsync(access, cancellationToken))
+                    // Взаимный поиск ОН+ОУ (ТБ-071, ТФ-ПЛ-05, ADR-0044): все дела в пределах допуска — floor ядра без
+                    // сужения по роли. Дела ОТМ отсекает допуск по подразделениям (ТС-014), закрытые — Included.
+                    return (await caseScope.ListCasesWithinClearanceAsync(access, cancellationToken))
                         .Where(c => Included(c, query, caseItem))
                         .Select(c => c.CaseId)
                         .Distinct()

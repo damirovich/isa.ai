@@ -43,7 +43,7 @@ public sealed class VideoTimelineScenarioTests
 
     private async Task<MediaAssetDetails> Handle()
     {
-        var handler = new GetMediaAssetQuery.Handler(_accessProvider, _catalog, _caseScope);
+        var handler = new GetMediaAssetQuery.Handler(_accessProvider, _catalog, _caseScope, Substitute.For<ISearchSessionStore>());
         var response = await handler.Handle(new GetMediaAssetQuery(5), CancellationToken.None);
         response.Status.ShouldBeTrue();
         return response.Data.ShouldNotBeNull();

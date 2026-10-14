@@ -45,6 +45,32 @@ public sealed class CaseScope(
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Взаимный поиск ОН+ОУ (ADR-0044): тем же правилом, что пересечения (ADR-0029 п. 1) — floor ядра и политика
+    /// профиля без сужения по роли. Без роли — пусто: отсутствие роли по-прежнему закрывает всё (ТБ-012).
+    /// </remarks>
+    public async Task<IReadOnlyList<CaseScopeItem>> ListCasesWithinClearanceAsync(
+        AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+
+        if (await ResolveRoleAsync(access, cancellationToken) is null)
+        {
+            return [];
+        }
+
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var rows = await CaseAccessRule.WithinClearance(db.Cases, access, policy)
+            .AsNoTracking()
+            .OrderBy(c => c.Id)
+            .Select(c => new { c.Id, c.Number, c.Title, c.Classification, c.DivisionId, c.Status })
+            .ToListAsync(cancellationToken);
+        return rows
+            .Select(c => new CaseScopeItem(c.Id, c.Number, c.Title, c.Classification, c.DivisionId, c.Status == CaseStatus.Closed))
+            .ToList();
+    }
+
+    /// <inheritdoc />
     public async Task<CaseScopeItem?> GetCaseAsync(int caseId, AccessContext access, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(access);
@@ -165,7 +191,7 @@ public sealed class CaseScope(
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyDictionary<int, string>> ListAssetPlacesAsync(
+    public async Task<IReadOnlyDictionary<int, string>> ListCandidatePlacesAsync(
         IReadOnlyCollection<int> assetIds, AccessContext access, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(assetIds);
@@ -176,11 +202,16 @@ public sealed class CaseScope(
         }
 
         var ids = assetIds.Distinct().ToArray();
-        var role = await ResolveRoleAsync(access, cancellationToken);
+        if (await ResolveRoleAsync(access, cancellationToken) is null)
+        {
+            return new Dictionary<int, string>();
+        }
+
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
 
-        // Место — только из привязок к делам субъекта (та же область, что у всех чтений по носителю, ТБ-071).
-        var accessible = CaseAccessRule.Apply(db.Cases, access, policy, role);
+        // Место материала кандидата — из привязок к делам в пределах допуска (ADR-0044): кандидат взаимного поиска из
+        // чужого дела ОН/ОУ открывается на просмотр вместе с местом. Floor ядра не ослабляется (ТБ-020/021).
+        var accessible = CaseAccessRule.WithinClearance(db.Cases, access, policy);
         var links = await db.CaseMediaLinks.AsNoTracking()
             .Where(l => ids.Contains(l.MediaAssetId) && l.Place != null && l.Place != ""
                 && accessible.Any(c => c.Id == l.CaseId))

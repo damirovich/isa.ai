@@ -24,7 +24,8 @@ public sealed record GetFaceQuery(int FaceId) : IRequest<ResponseDto<FaceRow>>, 
     public string? AuditSummary => $"media:face:{FaceId}:view";
 
     /// <inheritdoc cref="GetFaceQuery" />
-    public sealed class Handler(IAccessContextProvider accessProvider, IMediaCatalog catalog, ICaseScope caseScope)
+    public sealed class Handler(
+        IAccessContextProvider accessProvider, IMediaCatalog catalog, ICaseScope caseScope, ISearchSessionStore sessions)
         : IRequestHandler<GetFaceQuery, ResponseDto<FaceRow>>
     {
         /// <inheritdoc />
@@ -40,9 +41,10 @@ public sealed record GetFaceQuery(int FaceId) : IRequest<ResponseDto<FaceRow>>, 
                 return ResponseDto<FaceRow>.NotFound("Лицо не найдено или недоступно.");
             }
 
-            // Сужение по делам субъекта поверх решётки (ТБ-071, ТФ-ДЕЛ-03): лицо — биометрия носителя,
-            // читается только если носитель входит в дела субъекта; отказ неотличим от «не найдено».
-            if (!await caseScope.IsAssetAccessibleAsync(face.AssetId, access, cancellationToken))
+            // Сужение по делам субъекта поверх решётки (ТБ-071, ТФ-ДЕЛ-03): лицо — биометрия носителя, читается
+            // только если носитель входит в дела субъекта либо найден его поиском (ADR-0044); отказ неотличим от
+            // «не найдено».
+            if (!await AssetViewAccess.CanViewAsync(caseScope, sessions, face.AssetId, access, cancellationToken))
             {
                 return ResponseDto<FaceRow>.NotFound("Лицо не найдено или недоступно.");
             }

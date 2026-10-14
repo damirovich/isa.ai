@@ -37,7 +37,9 @@
 {
     @* Перемотка работает благодаря Range на эндпоинте. Одна выдача файла субъекту — одна запись аудита
        (MediaViewAuditThrottle, ТБ-030): продолжения Range-запросов при воспроизведении/шаге журнал не множат. *@
+    @* Без скачивания (материал кандидата из чужого дела, ADR-0044) — и пункт «Скачать» встроенного проигрывателя убран. *@
     <video id="@VideoElementId" controls preload="metadata" src="@MediaFileUrl.Originals(AssetId, StoredFileName)"
+           controlslist="@(AllowDownload ? null : "nodownload")"
            style="max-width:100%;max-height:70vh;display:block;margin:0 auto;"></video>
 }
 else
@@ -79,7 +81,7 @@ else
         <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PhotoCamera"
                    Disabled="_snapshotBusy" OnClick="SnapshotAsync">@(_snapshotBusy ? "Сохраняю кадр…" : "Снимок кадра")</MudButton>
     }
-    @if (!Playable)
+    @if (!Playable && AllowDownload)
     {
         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download"
                    Href="@MediaFileUrl.Originals(AssetId, StoredFileName)" download="@OriginalFileName">Скачать оригинал</MudButton>
@@ -159,6 +161,12 @@ else
 
     /// <summary>Показывать «Снимок кадра» (носитель привязан к делу — снимок сохраняется в него).</summary>
     [Parameter] public bool CanSnapshot { get; set; }
+
+    /// <summary>
+    /// Разрешено скачивать оригинал. <see langword="false"/> — материал кандидата из чужого дела (ADR-0044): только
+    /// просмотр, кнопки «Скачать оригинал» и пункта скачивания проигрывателя нет.
+    /// </summary>
+    [Parameter] public bool AllowDownload { get; set; } = true;
 
     /// <summary>«Снимок кадра»: номинальный момент кадра, мс. Сам снимок (команда, сообщение) делает страница.</summary>
     [Parameter] public EventCallback<long> OnSnapshotRequested { get; set; }

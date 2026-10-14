@@ -32,7 +32,7 @@
                 <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@(_busy || _loading)"
                            OnClick="RefreshAsync">Обновить</MudButton>
             }
-            @if (_transcript is { } shown)
+            @if (_transcript is { } shown && !ReadOnly)
             {
                 @* Пока расшифровка в очереди или идёт, повторный запуск неактивен: иначе нажатие вместо «Обновить»
                    ставило бы ещё один полный прогон в общую очередь (сервер такой запуск тоже отклоняет). *@
@@ -176,6 +176,12 @@
     /// перемотки из разных компонентов — гонка прокрутки (последняя утащила бы страницу от фрагмента к видео).
     /// </summary>
     [Parameter] public bool SeekToStart { get; set; } = true;
+
+    /// <summary>
+    /// Только чтение: носитель открыт как кандидат взаимного поиска из чужого дела (ADR-0044) — запустить расшифровку
+    /// заново нельзя (сервер такой запуск тоже отклонит).
+    /// </summary>
+    [Parameter] public bool ReadOnly { get; set; }
 
     private MediaTranscript? _transcript;
     private int? _loadedAssetId;
