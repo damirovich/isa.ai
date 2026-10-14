@@ -23,7 +23,10 @@ namespace ISC.AI.Modules.Media.Application.Features.Verification;
 /// по идентификатору сессии). Для пробы-лица носителя — <see langword="null"/>: вырезка берётся по <paramref name="ProbeFaceId"/>.
 /// </param>
 /// <param name="ProbeSha256">SHA-256 пробы (ТБ-077: идентичность пробы без хранения вектора).</param>
-/// <param name="ProbeFaceId">Лицо-проба, если проба — лицо носителя (тогда вырезка — в категории вырезок его носителя).</param>
+/// <param name="ProbeFaceId">
+/// Лицо-проба, если проба — лицо носителя (тогда вырезка — в категории вырезок его носителя); у поиска по эталонам
+/// фигуранта — эталон, по которому совпадение с этим кандидатом лучшее (ADR-0046).
+/// </param>
 /// <param name="Classification">Гриф (показывается обязательно, ТБ-073).</param>
 /// <param name="DivisionId">Подразделение.</param>
 /// <param name="Status">Статус кандидата.</param>
@@ -37,6 +40,8 @@ namespace ISC.AI.Modules.Media.Application.Features.Verification;
 /// Когда, откуда и где снят материал (ТФ-ПЛ-02) — сведения о материале, а не о решениях, видны всем стадиям; заполняет
 /// обработчик (<see cref="IMaterialContextReader"/>), <see langword="null"/> — носитель вне допуска.
 /// </param>
+/// <param name="ProbeMatchCount">Поиск по эталонам (ADR-0046): сколько эталонов нашли кандидата — как и балл, вывод поиска, а не решение.</param>
+/// <param name="ProbeTotal">Поиск по эталонам: сколько всего эталонов было в поиске.</param>
 public sealed record VerificationQueueItem(
     int CandidateId,
     int SessionId,
@@ -57,7 +62,9 @@ public sealed record VerificationQueueItem(
     VerificationDecision? OwnDecision,
     SessionOrigin Origin = SessionOrigin.Operator,
     int? SuggestedPersonRef = null,
-    MaterialContext? Material = null)
+    MaterialContext? Material = null,
+    int? ProbeMatchCount = null,
+    int? ProbeTotal = null)
 {
     /// <summary>
     /// Слепая проекция полной строки кандидата: из решений остаётся только решение <paramref name="userId"/>,
@@ -85,12 +92,15 @@ public sealed record VerificationQueueItem(
             candidate.CropStoredFileName,
             session.ProbeCropStoredFileName,
             session.ProbeSha256,
-            session.ProbeFaceId,
+            // Поиск по эталонам (ADR-0046): пара показывает эталон лучшего совпадения, а не первый эталон сессии.
+            candidate.ProbeFaceId ?? session.ProbeFaceId,
             candidate.Classification,
             candidate.DivisionId,
             candidate.Status,
             candidate.Decisions.LastOrDefault(d => d.SubjectId == userId),
             session.Origin,
-            stage is VerificationStage.Expert or VerificationStage.Supervisor ? session.SuggestedPersonRef : null);
+            stage is VerificationStage.Expert or VerificationStage.Supervisor ? session.SuggestedPersonRef : null,
+            ProbeMatchCount: candidate.ProbeMatchCount,
+            ProbeTotal: session.ProbeFaceIds?.Count);
     }
 }

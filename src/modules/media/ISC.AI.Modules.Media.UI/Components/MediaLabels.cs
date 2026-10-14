@@ -251,4 +251,22 @@ public static class MediaLabels
         >= 1024 => $"{bytes / 1024.0:0.#} КБ",
         _ => $"{bytes} Б",
     };
+
+    // --- Порог поиска по лицу (ТФ-ПЛ-06): оператор видит и задаёт СХОЖЕСТЬ в процентах, система хранит и применяет
+    // косинусное РАССТОЯНИЕ (1 − схожесть) — так считает индекс лиц (ADR-0019). Перевод — только здесь, в одну сторону
+    // и обратно, чтобы поле, выдача и страница сессии говорили одно и то же.
+
+    /// <summary>Порог расстояния по схожести «не ниже, %»; пусто — без порога.</summary>
+    public static double? MaxCosineDistance(int? minSimilarityPercent) =>
+        minSimilarityPercent is { } percent ? Math.Clamp(100 - percent, 0, 100) / 100.0 : null;
+
+    /// <summary>Схожесть «не ниже, %» по порогу расстояния (округлённо); пусто — без порога.</summary>
+    public static int? MinSimilarityPercent(double? maxCosineDistance) =>
+        maxCosineDistance is { } distance ? (int)Math.Round((1 - distance) * 100, MidpointRounding.AwayFromZero) : null;
+
+    /// <summary>Подпись порога для выдачи и сессии: «схожесть от 50 %» либо «без порога».</summary>
+    public static string SimilarityThreshold(double? maxCosineDistance) =>
+        MinSimilarityPercent(maxCosineDistance) is { } percent
+            ? string.Create(CultureInfo.InvariantCulture, $"схожесть от {percent} %")
+            : "без порога";
 }

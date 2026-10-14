@@ -21,6 +21,8 @@ namespace ISC.AI.Modules.Media.Application.Features.Search;
 /// <param name="TopK">Действующая ширина кандидат-листа (после зажатия в границы ТН-008).</param>
 /// <param name="MaxCosineDistance">Действующий порог расстояния (после предела ТФ-ПЛ-06); <see langword="null"/> — без порога.</param>
 /// <param name="CaseIds">Дела, по носителям которых искали (область, ТФ-ПЛ-05).</param>
+/// <param name="ProbeFaceIds">Поиск по эталонам фигуранта (ADR-0046): эталоны, по которым искали; иначе — <see langword="null"/>.</param>
+/// <param name="SkippedProbes">Эталоны, пропущенные с причиной (нет шаблона) — показываются оператору.</param>
 public sealed record FaceSearchResult(
     int SessionId,
     string ProbeSha256,
@@ -31,4 +33,6 @@ public sealed record FaceSearchResult(
     string EmbedderVersion,
     int TopK,
     double? MaxCosineDistance,
-    IReadOnlyList<int> CaseIds);
+    IReadOnlyList<int> CaseIds,
+    IReadOnlyList<int>? ProbeFaceIds = null,
+    IReadOnlyList<string>? SkippedProbes = null);

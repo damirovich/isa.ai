@@ -18,12 +18,16 @@ public sealed class SearchByFaceValidator : AbstractValidator<SearchByFaceQuery>
         RuleFor(q => q.TopK).InclusiveBetween(1, 500).When(q => q.TopK is not null);
         RuleFor(q => q.MaxCosineDistance).InclusiveBetween(0.0, 2.0).When(q => q.MaxCosineDistance is not null);
 
-        // Ровно одна проба: изображение ЛИБО лицо уже проиндексированного носителя (ТФ-ПЛ-03).
+        // Ровно одна проба: изображение, лицо уже проиндексированного носителя (ТФ-ПЛ-03) ЛИБО эталоны фигуранта (ADR-0046).
         RuleFor(q => q)
-            .Must(q => (q.ProbeImage is not null) != (q.ProbeFaceId is not null))
-            .WithMessage("Укажите либо пробное изображение, либо лицо носителя — ровно одно.")
+            .Must(q => (q.ProbeImage is not null ? 1 : 0) + (q.ProbeFaceId is not null ? 1 : 0) + (q.ProbeFaceIds is not null ? 1 : 0) == 1)
+            .WithMessage("Укажите ровно одну пробу: пробное изображение, лицо носителя или эталоны фигуранта.")
             .WithName("Probe");
         RuleFor(q => q.ProbeFaceId).GreaterThan(0).When(q => q.ProbeFaceId is not null);
+        RuleFor(q => q.ProbeFaceIds)
+            .Must(ids => ids!.Count is >= 2 and <= SearchByFaceQuery.MaxProbeFaces && ids.All(id => id > 0) && ids.Distinct().Count() == ids.Count)
+            .When(q => q.ProbeFaceIds is not null)
+            .WithMessage($"Эталонов в одном поиске — от 2 до {SearchByFaceQuery.MaxProbeFaces}, без повторов.");
         RuleFor(q => q.ProbeImage)
             .Must(image => image is { LongLength: > 0 and <= MaxProbeBytes })
             .When(q => q.ProbeImage is not null)
@@ -33,7 +37,7 @@ public sealed class SearchByFaceValidator : AbstractValidator<SearchByFaceQuery>
             .WithMessage("Номер лица на пробе не может быть отрицательным.");
         RuleFor(q => q.ProbeFaceIndex)
             .Null()
-            .When(q => q.ProbeFaceId is not null)
+            .When(q => q.ProbeFaceId is not null || q.ProbeFaceIds is not null)
             .WithMessage("Номер лица на пробе задаётся только вместе с пробным изображением.");
 
         RuleFor(q => q.SelectedCaseIds)

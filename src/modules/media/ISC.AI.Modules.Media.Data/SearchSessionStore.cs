@@ -54,6 +54,16 @@ public sealed class SearchSessionStore(
                 nameof(draft));
         }
 
+        // Поиск по нескольким эталонам (ADR-0046): не меньше двух лиц, первое — ProbeFaceId (его показывают прежние
+        // экраны и индекс предложений), вырезки пробы-изображения нет.
+        if (draft.ProbeFaceIds is { } probeFaceIds
+            && (probeFaceIds.Count < 2 || probeFaceIds[0] != draft.ProbeFaceId || draft.ProbeCropStoredFileName is not null))
+        {
+            throw new ArgumentException(
+                "Поиск по нескольким эталонам: не меньше двух лиц, первое — ProbeFaceId, без вырезки пробы (ADR-0046).",
+                nameof(draft));
+        }
+
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
 
         // Имя вырезки лица берётся у лица базы на момент поиска: потом носитель могут удалить, а история
@@ -88,6 +98,7 @@ public sealed class SearchSessionStore(
             RequestedByUserId = draft.RequestedByUserId,
             Origin = draft.Origin,
             SuggestedPersonRef = draft.SuggestedPersonRef,
+            ProbeFaceIds = draft.ProbeFaceIds?.ToArray(),
         };
         db.SearchSessions.Add(session);
 
@@ -109,6 +120,8 @@ public sealed class SearchSessionStore(
                 Classification = candidate.Classification,
                 DivisionId = candidate.DivisionId,
                 Status = CandidateStatus.Candidate,
+                ProbeFaceId = candidate.ProbeFaceId,
+                ProbeMatchCount = candidate.ProbeMatchCount is { } matches ? (short)matches : null,
             });
         }
 
@@ -389,23 +402,25 @@ public sealed class SearchSessionStore(
         int Id, int CaseId, string AuthorizationRef, SearchScopeKind Scope, int[] CaseIds, string ProbeSha256,
         int? ProbeFaceId, string? ProbeCropStoredFileName, int TopK, double? MaxCosineDistance, string DetectorVersion,
         string EmbedderVersion, short Classification, int DivisionId, int? RequestedByUserId, DateTime CreatedAt, int CandidateCount,
-        SessionOrigin Origin, int? SuggestedPersonRef);
+        SessionOrigin Origin, int? SuggestedPersonRef, int[]? ProbeFaceIds);
 
     private static IQueryable<SessionProjection> ProjectSessions(MediaDbContext db, IQueryable<SearchSession> sessions) =>
         sessions.Select(s => new SessionProjection(
             s.Id, s.CaseId, s.AuthorizationRef, s.Scope, s.CaseIds, s.ProbeSha256, s.ProbeFaceId, s.ProbeCropStoredFileName,
             s.TopK, s.MaxCosineDistance, s.DetectorVersion, s.EmbedderVersion, s.Classification, s.DivisionId,
-            s.RequestedByUserId, s.CreatedAt, db.SearchCandidates.Count(c => c.SessionId == s.Id), s.Origin, s.SuggestedPersonRef));
+            s.RequestedByUserId, s.CreatedAt, db.SearchCandidates.Count(c => c.SessionId == s.Id), s.Origin, s.SuggestedPersonRef,
+            s.ProbeFaceIds));
 
     private static SearchSessionRow ToRow(SessionProjection s) => new(
         s.Id, s.CaseId, s.AuthorizationRef, s.Scope, s.CaseIds, s.ProbeSha256, s.ProbeFaceId, s.ProbeCropStoredFileName,
         s.TopK, s.MaxCosineDistance, s.DetectorVersion, s.EmbedderVersion, s.Classification, s.DivisionId,
-        s.RequestedByUserId, s.CreatedAt, s.CandidateCount, s.Origin, s.SuggestedPersonRef);
+        s.RequestedByUserId, s.CreatedAt, s.CandidateCount, s.Origin, s.SuggestedPersonRef, s.ProbeFaceIds);
 
     private sealed record CandidateProjection(
         int Id, int SessionId, int CaseId, int Rank, int FaceId, int AssetId, int? FrameIndex, long? FrameTimestampMs,
         double CosineDistance, string? CropStoredFileName, string ModelVersion, short Classification, int DivisionId,
-        CandidateStatus Status, int? PersonRef, float? QualityScore, SessionOrigin Origin, int? SuggestedPersonRef);
+        CandidateStatus Status, int? PersonRef, float? QualityScore, SessionOrigin Origin, int? SuggestedPersonRef,
+        int? ProbeFaceId, short? ProbeMatchCount);
 
     private static async Task<List<SearchCandidateRow>> MaterializeAsync(
         MediaDbContext db, IQueryable<SearchCandidate> candidates, CancellationToken cancellationToken)
@@ -416,7 +431,7 @@ public sealed class SearchSessionStore(
                 c.Id, c.SessionId, c.Session!.CaseId, c.Rank, c.FaceId, c.AssetId, c.FrameIndex, c.FrameTimestampMs,
                 c.CosineDistance, c.CropStoredFileName, c.ModelVersion, c.Classification, c.DivisionId, c.Status, c.PersonRef,
                 db.Faces.Where(f => f.Id == c.FaceId).Select(f => (float?)f.QualityScore).FirstOrDefault(),
-                c.Session.Origin, c.Session.SuggestedPersonRef))
+                c.Session.Origin, c.Session.SuggestedPersonRef, c.ProbeFaceId, c.ProbeMatchCount))
             .ToListAsync(cancellationToken);
         if (rows.Count == 0)
         {
@@ -438,7 +453,9 @@ public sealed class SearchSessionStore(
                 .ToList(),
             r.QualityScore,
             r.Origin,
-            r.SuggestedPersonRef))
+            r.SuggestedPersonRef,
+            r.ProbeFaceId,
+            r.ProbeMatchCount))
             .ToList();
     }
 

@@ -24,6 +24,9 @@ public sealed class SearchSessionConfiguration : IEntityTypeConfiguration<Search
         // дела — значения из схемы профиля, FK через границу схем нет (ТО-инф-08).
         builder.Property(s => s.CaseIds).HasColumnType("integer[]").IsRequired();
 
+        // Эталоны поиска по нескольким эталонам (ADR-0046) — лица этой же схемы; у одиночного поиска колонка пуста.
+        builder.Property(s => s.ProbeFaceIds).HasColumnType("integer[]");
+
         // Режимные поля обязательны (ТБ-070/024): сессия без грифа дела в схему не попадает.
         builder.Property(s => s.Classification).IsRequired();
         builder.Property(s => s.DivisionId).IsRequired();

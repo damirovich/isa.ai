@@ -59,4 +59,13 @@ public class SearchCandidate : BaseEntity, IClassified
 
     /// <summary>Фигурант, к которому привязан кандидат (значение из схемы профиля, ТФ-ВЕР-03); <see langword="null"/> — не привязан.</summary>
     public int? PersonRef { get; set; }
+
+    /// <summary>
+    /// Поиск по нескольким эталонам (ADR-0046): эталон, по которому совпадение лучшее, — его показывает пара «проба ↔
+    /// кандидат» (ТФ-ВЕР-01); у одиночного поиска — <see langword="null"/>.
+    /// </summary>
+    public int? ProbeFaceId { get; set; }
+
+    /// <summary>Поиск по нескольким эталонам: сколько эталонов нашли этого кандидата в пределах порога.</summary>
+    public short? ProbeMatchCount { get; set; }
 }

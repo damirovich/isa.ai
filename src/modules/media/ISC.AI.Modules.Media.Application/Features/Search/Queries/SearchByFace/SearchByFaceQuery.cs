@@ -20,9 +20,11 @@ using Microsoft.Extensions.Logging;
 namespace ISC.AI.Modules.Media.Application.Features.Search;
 
 /// <summary>
-/// Поиск по лицу в контексте дела и основания (ТФ-ПЛ-01..06, ТБ-071): проба — изображение либо лицо уже
-/// проиндексированного носителя (ТФ-ПЛ-03); область — текущее дело, выбранные или все доступные дела
-/// (ТФ-ПЛ-05); выдача — кандидат-лист, записанный поисковой сессией (ТО-инф-12).
+/// Поиск по лицу в контексте дела и основания (ТФ-ПЛ-01..06, ТБ-071): проба — изображение, лицо уже
+/// проиндексированного носителя (ТФ-ПЛ-03) либо несколько лиц-эталонов фигуранта (ТФ-ПЕР-03, ADR-0046); область —
+/// текущее дело, выбранные или все доступные дела (ТФ-ПЛ-05); выдача — кандидат-лист, записанный поисковой сессией
+/// (ТО-инф-12). По нескольким эталонам кандидаты сводятся по лицу: лучшее совпадение, эталон и число совпавших
+/// эталонов; сами эталоны в кандидаты не попадают.
 /// </summary>
 /// <remarks>
 /// НЕ <see cref="IAuditableRequest"/>: состав записи ТБ-072 (субъект, дело, основание, хеш и копия пробы,
@@ -41,9 +43,13 @@ public sealed record SearchByFaceQuery(
     int? ProbeFaceIndex = null,
     int? TopK = null,
     double? MaxCosineDistance = null,
-    bool IncludeClosedCases = false)
+    bool IncludeClosedCases = false,
+    IReadOnlyList<int>? ProbeFaceIds = null)
     : IRequest<ResponseDto<FaceSearchResult>>
 {
+    /// <summary>Наибольшее число эталонов в одном поиске (ADR-0046): N запросов к индексу лиц в пределах ТН-006.</summary>
+    public const int MaxProbeFaces = 10;
+
     /// <inheritdoc cref="SearchByFaceQuery" />
     public sealed class Handler(
         IMediaAdministration administration,
@@ -126,13 +132,17 @@ public sealed record SearchByFaceQuery(
 
             var assetIds = await caseScope.GetAssetIdsAsync(caseIds, cancellationToken);
 
-            // (д) Проба: шаблон уже проиндексированного лица либо новое изображение (тот же конвейер, что при индексации).
-            var (probe, failure) = await ResolveProbeAsync(query, access, caseItem.CaseId, cancellationToken);
-            if (probe is null)
+            // (д) Проба: шаблон уже проиндексированного лица, новое изображение (тот же конвейер, что при индексации)
+            // либо несколько лиц-эталонов (ADR-0046) — эталоны без шаблона пропускаются с причиной.
+            var (probes, skipped, failure) = await ResolveProbesAsync(query, access, caseItem.CaseId, cancellationToken);
+            if (probes is null)
             {
                 await AuditDeniedAsync(query, access, caseItem, failure!.StatusMessage, cancellationToken);
                 return failure;
             }
+
+            var probe = probes[0];
+            var multiProbe = probes.Count > 1;
 
             try
             {
@@ -140,10 +150,22 @@ public sealed record SearchByFaceQuery(
                 var topK = options.ClampTopK(query.TopK);
                 var maxDistance = options.EffectiveMaxCosineDistance(query.MaxCosineDistance);
 
-                // (ж) Поиск: решётка — на стороне БД (ТБ-020/021), область — поверх неё, не вместо.
-                var candidates = await faceSearch.SearchAsync(
-                    new FaceSearchQuery(probe.Template, topK, maxDistance, IncludeStale: false, assetIds),
-                    access, cancellationToken);
+                // ADR-0046 п. 2: у поиска по эталонам порог обязателен — по нему считается согласие эталонов. Без
+                // порога оператора и конфигурации — рабочий порог системы (тот же, что у предложений, ADR-0035, до
+                // калибровки ТО-мат-08); он записывается в сессию и виден оператору.
+                if (query.ProbeFaceIds is not null)
+                {
+                    maxDistance ??= options.EffectiveAutoSuggestMaxCosineDistance;
+                }
+
+                // (ж) Поиск: решётка — на стороне БД (ТБ-020/021), область — поверх неё, не вместо. По эталонам — по
+                // каждому, со сводкой кандидатов по лицу (ADR-0046).
+                var candidates = query.ProbeFaceIds is { } referenceFaceIds
+                    ? await SearchByReferencesAsync(probes, referenceFaceIds, topK, maxDistance!.Value, assetIds, access, cancellationToken)
+                    : await faceSearch.SearchAsync(
+                        new FaceSearchQuery(probe.Template, topK, maxDistance, IncludeStale: false, assetIds),
+                        access, cancellationToken);
+                var probeSha = multiProbe ? CombinedSha(probes) : probe.Sha256;
 
                 // (з) Сессия (ТО-инф-12): хеш пробы, параметры, версии моделей, кандидат-лист. Вектор — нет (ТБ-074).
                 var draft = new SearchSessionDraft(
@@ -151,8 +173,8 @@ public sealed record SearchByFaceQuery(
                     authorization.Reference,
                     query.Scope,
                     caseIds,
-                    probe.Sha256,
-                    query.ProbeFaceId,
+                    probeSha,
+                    query.ProbeFaceIds is null ? query.ProbeFaceId : probe.FaceId,
                     probe.CropStoredFileName,
                     topK,
                     maxDistance,
@@ -161,7 +183,8 @@ public sealed record SearchByFaceQuery(
                     options.HnswEfSearch,
                     caseItem.Classification,
                     caseItem.DivisionId,
-                    access.NumericSubjectId);
+                    access.NumericSubjectId,
+                    ProbeFaceIds: multiProbe ? probes.Select(p => p.FaceId!.Value).ToList() : null);
                 var sessionId = await sessionStore.CreateAsync(draft, candidates, cancellationToken);
 
                 // (и) АУДИТ ТБ-072 — полный состав; сбой записи пробрасывается (fail-closed: нет записи — нет выдачи).
@@ -172,14 +195,14 @@ public sealed record SearchByFaceQuery(
                         access.NumericSubjectId,
                         ObjectRef: $"media:search:{sessionId};case:{caseItem.CaseId};auth:{authorization.AuthorizationId}",
                         DivisionId: caseItem.DivisionId,
-                        PayloadSensitive: BuildAuditPayload(query, authorization, caseIds, probe, topK, maxDistance, candidates)),
+                        PayloadSensitive: BuildAuditPayload(query, authorization, caseIds, probes, skipped, topK, maxDistance, candidates)),
                     cancellationToken);
 
                 // (к) Кандидаты — как записаны (с идентификаторами для верификации).
                 var rows = await sessionStore.ListCandidatesAsync(sessionId, access, cancellationToken);
                 return ResponseDto<FaceSearchResult>.Ok(new FaceSearchResult(
                     sessionId,
-                    probe.Sha256,
+                    probeSha,
                     probe.CropStoredFileName,
                     probe.DetectedFaces,
                     rows,
@@ -187,7 +210,9 @@ public sealed record SearchByFaceQuery(
                     embedder.ModelVersion,
                     topK,
                     maxDistance,
-                    caseIds));
+                    caseIds,
+                    multiProbe ? probes.Select(p => p.FaceId!.Value).ToList() : null,
+                    skipped));
             }
             catch (Exception)
             {
@@ -282,39 +307,193 @@ public sealed record SearchByFaceQuery(
         {
             if (query.ProbeFaceId is { } probeFaceId)
             {
-                // Fail-closed (ТБ-020/021): лицо под решёткой; затем — сужение по делам субъекта (ТБ-071, ДОК-13 §248
-                // «сотрудник, ищущий вне своего дела»): биометрия носителя чужого дела пробой быть не может.
-                // Оба отказа наружу неразличимы («не найдено или недоступно»).
-                var face = await catalog.GetFaceAsync(probeFaceId, access, cancellationToken);
-                if (face is null || !await caseScope.IsAssetAccessibleAsync(face.AssetId, access, cancellationToken))
-                {
-                    return (null, ResponseDto<FaceSearchResult>.NotFound("Лицо-проба не найдено или недоступно."));
-                }
-
-                // ТО-мат-07: лицо есть, но шаблон не строился (непригодно) — это НЕ отказ по допуску, а отказ по качеству.
-                var template = face.QualityAcceptable ? await catalog.GetTemplateAsync(probeFaceId, access, cancellationToken) : null;
-                if (template is null)
-                {
-                    // «Шаблона нет» — внешне один признак, а причин две: лицо непригодно по качеству (шаблон
-                    // не строился, ТО-мат-07) ЛИБО шаблон был и удалён регламентом по закрытию дела (ТБ-074,
-                    // ADR-0024). Различаем по делу носителя, а не по догадке: объяснять регламент «плохим
-                    // качеством» значит отправить оператора искать дефект распознавания там, где сработало
-                    // правило хранения.
-                    var closedByRegulation = face.QualityAcceptable
-                        && !await caseScope.IsBiometricIndexingAllowedAsync(face.AssetId, cancellationToken);
-
-                    return (null, ResponseDto<FaceSearchResult>.BadRequest(
-                        closedByRegulation
-                            ? "Поиск по этому лицу невозможен: дело закрыто, шаблон удалён регламентом (ТБ-074)."
-                            : $"Лицо-проба непригодно для сравнения: {face.QualityReason ?? "шаблон не построен"} (ТО-мат-07)."));
-                }
-
-                var sha = Convert.ToHexStringLower(SHA256.HashData(MemoryMarshal.AsBytes<float>(template)));
-                return (new ProbeResolution(
-                    template, sha, CropStoredFileName: null, DetectedFaces: 0,
-                    $"лицо {probeFaceId.ToString(CultureInfo.InvariantCulture)} носителя {face.AssetId.ToString(CultureInfo.InvariantCulture)}"), null);
+                return await ResolveFaceProbeAsync(probeFaceId, access, cancellationToken);
             }
 
+            return await ResolveImageProbeAsync(query, caseId, cancellationToken);
+        }
+
+        /// <summary>
+        /// Пробы поиска: одна (изображение или лицо носителя) либо эталоны фигуранта (ADR-0046). Эталон без шаблона —
+        /// непригоден по качеству или шаблон удалён регламентом — пропускается с причиной; недоступное лицо — отказ
+        /// всего поиска (ТБ-020/021: среди эталонов не может быть чужой биометрии); пригодных нет — отказ с причинами.
+        /// </summary>
+        private async Task<(IReadOnlyList<ProbeResolution>? Probes, IReadOnlyList<string> Skipped, ResponseDto<FaceSearchResult>? Failure)> ResolveProbesAsync(
+            SearchByFaceQuery query, AccessContext access, int caseId, CancellationToken cancellationToken)
+        {
+            if (query.ProbeFaceIds is not { } faceIds)
+            {
+                var (single, failure) = await ResolveProbeAsync(query, access, caseId, cancellationToken);
+                return single is null ? (null, [], failure) : ([single], [], null);
+            }
+
+            var probes = new List<ProbeResolution>(faceIds.Count);
+            var skipped = new List<string>();
+            foreach (var faceId in faceIds)
+            {
+                var (probe, failure) = await ResolveFaceProbeAsync(faceId, access, cancellationToken);
+                if (probe is not null)
+                {
+                    probes.Add(probe);
+                    continue;
+                }
+
+                if (failure!.StatusCode == ResponseStatusCode.NotFound)
+                {
+                    return (null, [], failure);
+                }
+
+                skipped.Add($"эталон — лицо № {faceId.ToString(CultureInfo.InvariantCulture)}: {failure.StatusMessage}");
+            }
+
+            return probes.Count == 0
+                ? (null, skipped, ResponseDto<FaceSearchResult>.BadRequest("Ни один эталон не пригоден для поиска: " + string.Join("; ", skipped)))
+                : (probes, skipped, null);
+        }
+
+        /// <summary>
+        /// Поиск по эталонам фигуранта (ADR-0046 п. 2): по каждой пробе — ближайшие соседи в той же области, с тем же
+        /// порогом и шириной; сами эталоны (<paramref name="referenceFaceIds"/>) в кандидаты не попадают — ширина
+        /// каждого запроса увеличена на их число. Выдачи объединяются, отбираются лучшие по известному расстоянию, и
+        /// для отобранных расстояние до КАЖДОГО эталона пересчитывается по шаблону кандидата: эталон мог не выдать
+        /// кандидата не потому, что тот далёк, а потому, что выдачу заняли другие лица (в видео — десятки кадров
+        /// одного человека). Итог по кандидату: наименьшее расстояние, эталон, по которому оно получено (при равенстве
+        /// — первый по порядку), и число эталонов в пределах порога <paramref name="maxDistance"/>.
+        /// </summary>
+        /// <remarks>Шаблоны кандидатов читаются под тем же допуском и только в память — в выдачу и в базу не идут (ТБ-074).</remarks>
+        private async Task<IReadOnlyList<FaceCandidate>> SearchByReferencesAsync(
+            IReadOnlyList<ProbeResolution> probes,
+            IReadOnlyList<int> referenceFaceIds,
+            int topK,
+            double maxDistance,
+            IReadOnlyCollection<int> assetIds,
+            AccessContext access,
+            CancellationToken cancellationToken)
+        {
+            var references = referenceFaceIds.ToHashSet();
+            var found = new Dictionary<int, FaceCandidate>();
+            var distances = new Dictionary<int, Dictionary<int, double>>();
+            foreach (var probe in probes)
+            {
+                var results = await faceSearch.SearchAsync(
+                    new FaceSearchQuery(probe.Template, topK + references.Count, maxDistance, IncludeStale: false, assetIds),
+                    access, cancellationToken);
+                foreach (var candidate in results.Where(c => !references.Contains(c.FaceId)))
+                {
+                    found.TryAdd(candidate.FaceId, candidate);
+                    if (!distances.TryGetValue(candidate.FaceId, out var byProbe))
+                    {
+                        byProbe = [];
+                        distances[candidate.FaceId] = byProbe;
+                    }
+
+                    byProbe[probe.FaceId!.Value] = candidate.CosineDistance;
+                }
+            }
+
+            var selected = found.Keys
+                .OrderBy(faceId => distances[faceId].Values.Min())
+                .ThenBy(faceId => faceId)
+                .Take(topK)
+                .ToList();
+
+            // Один пригодный эталон — обычная выдача без сводных полей (сводить не с чем).
+            if (probes.Count == 1)
+            {
+                return selected.Select(faceId => found[faceId] with { ProbeFaceId = null, ProbeMatchCount = null }).ToList();
+            }
+
+            foreach (var faceId in selected)
+            {
+                var template = await catalog.GetTemplateAsync(faceId, access, cancellationToken);
+                foreach (var probe in probes)
+                {
+                    if (template is { Length: > 0 } && template.Length == probe.Template.Length)
+                    {
+                        distances[faceId][probe.FaceId!.Value] = CosineDistance(probe.Template, template);
+                    }
+                }
+            }
+
+            var order = probes.Select(p => p.FaceId!.Value).ToList();
+            return selected
+                .Select(faceId =>
+                {
+                    var byProbe = distances[faceId];
+                    var bestProbe = order.Where(byProbe.ContainsKey).MinBy(id => byProbe[id]);
+                    return found[faceId] with
+                    {
+                        CosineDistance = byProbe[bestProbe],
+                        ProbeFaceId = bestProbe,
+                        ProbeMatchCount = byProbe.Values.Count(distance => distance <= maxDistance),
+                    };
+                })
+                .OrderBy(c => c.CosineDistance)
+                .ThenByDescending(c => c.ProbeMatchCount ?? 0)
+                .ThenBy(c => c.FaceId)
+                .ToList();
+        }
+
+        // Косинусное расстояние (1 − cos) — та же метрика, что у индекса лиц (ADR-0019); нулевой вектор — «далеко».
+        private static double CosineDistance(float[] a, float[] b)
+        {
+            double dot = 0, normA = 0, normB = 0;
+            for (var i = 0; i < a.Length; i++)
+            {
+                dot += (double)a[i] * b[i];
+                normA += (double)a[i] * a[i];
+                normB += (double)b[i] * b[i];
+            }
+
+            return normA == 0 || normB == 0 ? 1 : 1 - (dot / (Math.Sqrt(normA) * Math.Sqrt(normB)));
+        }
+
+        // Хеш пробы поиска по эталонам: SHA-256 от перечня хешей шаблонов через «;» в порядке поиска (ADR-0046 п. 3).
+        private static string CombinedSha(IReadOnlyList<ProbeResolution> probes) =>
+            Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join(";", probes.Select(p => p.Sha256)))));
+
+        /// <summary>Проба — лицо уже проиндексированного носителя (ТФ-ПЛ-03) или эталон фигуранта (ADR-0046).</summary>
+        private async Task<(ProbeResolution? Probe, ResponseDto<FaceSearchResult>? Failure)> ResolveFaceProbeAsync(
+            int probeFaceId, AccessContext access, CancellationToken cancellationToken)
+        {
+            // Fail-closed (ТБ-020/021): лицо под решёткой; затем — сужение по делам субъекта (ТБ-071, ДОК-13 §248
+            // «сотрудник, ищущий вне своего дела»): биометрия носителя чужого дела пробой быть не может.
+            // Оба отказа наружу неразличимы («не найдено или недоступно»).
+            var face = await catalog.GetFaceAsync(probeFaceId, access, cancellationToken);
+            if (face is null || !await caseScope.IsAssetAccessibleAsync(face.AssetId, access, cancellationToken))
+            {
+                return (null, ResponseDto<FaceSearchResult>.NotFound("Лицо-проба не найдено или недоступно."));
+            }
+
+            // ТО-мат-07: лицо есть, но шаблон не строился (непригодно) — это НЕ отказ по допуску, а отказ по качеству.
+            var template = face.QualityAcceptable ? await catalog.GetTemplateAsync(probeFaceId, access, cancellationToken) : null;
+            if (template is null)
+            {
+                // «Шаблона нет» — внешне один признак, а причин две: лицо непригодно по качеству (шаблон
+                // не строился, ТО-мат-07) ЛИБО шаблон был и удалён регламентом по закрытию дела (ТБ-074,
+                // ADR-0024). Различаем по делу носителя, а не по догадке: объяснять регламент «плохим
+                // качеством» значит отправить оператора искать дефект распознавания там, где сработало
+                // правило хранения.
+                var closedByRegulation = face.QualityAcceptable
+                    && !await caseScope.IsBiometricIndexingAllowedAsync(face.AssetId, cancellationToken);
+
+                return (null, ResponseDto<FaceSearchResult>.BadRequest(
+                    closedByRegulation
+                        ? "Поиск по этому лицу невозможен: дело закрыто, шаблон удалён регламентом (ТБ-074)."
+                        : $"Лицо-проба непригодно для сравнения: {face.QualityReason ?? "шаблон не построен"} (ТО-мат-07)."));
+            }
+
+            var sha = Convert.ToHexStringLower(SHA256.HashData(MemoryMarshal.AsBytes<float>(template)));
+            return (new ProbeResolution(
+                template, sha, CropStoredFileName: null, DetectedFaces: 0,
+                $"лицо {probeFaceId.ToString(CultureInfo.InvariantCulture)} носителя {face.AssetId.ToString(CultureInfo.InvariantCulture)}",
+                probeFaceId), null);
+        }
+
+        /// <summary>Проба — изображение: детекция, выбор лица, качество (ТО-мат-07), шаблон, вырезка пробы.</summary>
+        private async Task<(ProbeResolution? Probe, ResponseDto<FaceSearchResult>? Failure)> ResolveImageProbeAsync(
+            SearchByFaceQuery query, int caseId, CancellationToken cancellationToken)
+        {
             var image = query.ProbeImage
                 ?? throw new InvalidOperationException("Проба не задана: ожидалось изображение либо лицо носителя.");
 
@@ -380,7 +559,8 @@ public sealed record SearchByFaceQuery(
             SearchByFaceQuery query,
             CaseAuthorizationItem authorization,
             IReadOnlyList<int> caseIds,
-            ProbeResolution probe,
+            IReadOnlyList<ProbeResolution> probes,
+            IReadOnlyList<string> skipped,
             int topK,
             double? maxDistance,
             IReadOnlyList<FaceCandidate> candidates)
@@ -396,7 +576,20 @@ public sealed record SearchByFaceQuery(
               // ТБ-072: включение ЗАКРЫТЫХ дел — расширение области, и оно должно быть видно в журнале
               // отдельно: по закрытым делам ищут по иному поводу, чем по своей текущей работе.
               .Append("; закрытые дела: ").AppendLine(query.IncludeClosedCases ? "включены оператором" : "не включены");
-            sb.Append("проба: sha256=").Append(probe.Sha256).Append("; ").AppendLine(probe.Description);
+            if (query.ProbeFaceIds is null)
+            {
+                sb.Append("проба: sha256=").Append(probes[0].Sha256).Append("; ").AppendLine(probes[0].Description);
+            }
+            else
+            {
+                // ADR-0046: все эталоны поиска с хешами шаблонов и пропущенные — с причиной.
+                sb.Append("проба: эталоны фигуранта (").Append(probes.Count.ToString(inv)).Append("): ")
+                  .AppendJoin("; ", probes.Select(p => $"{p.Description} sha256={p.Sha256}")).AppendLine();
+                if (skipped.Count > 0)
+                {
+                    sb.Append("пропущены: ").AppendJoin("; ", skipped).AppendLine();
+                }
+            }
 
             if (query.ProbeImage is { } image)
             {
@@ -421,7 +614,8 @@ public sealed record SearchByFaceQuery(
 
             sb.Append("кандидаты (").Append(candidates.Count.ToString(inv)).Append("): ");
             sb.AppendJoin("; ", candidates.Select((c, i) =>
-                $"{(i + 1).ToString(inv)}:{c.FaceId.ToString(inv)}:{c.AssetId.ToString(inv)}:{c.FrameIndex?.ToString(inv) ?? "-"}:{c.Similarity.ToString("F4", inv)}"));
+                $"{(i + 1).ToString(inv)}:{c.FaceId.ToString(inv)}:{c.AssetId.ToString(inv)}:{c.FrameIndex?.ToString(inv) ?? "-"}:{c.Similarity.ToString("F4", inv)}"
+                + (c.ProbeFaceId is { } best ? $":эталон {best.ToString(inv)}, совпало {(c.ProbeMatchCount ?? 1).ToString(inv)}" : string.Empty)));
 
             return sb.ToString();
         }
@@ -457,6 +651,6 @@ public sealed record SearchByFaceQuery(
 
         /// <summary>Разрешённая проба: вектор (только в памяти, ТБ-074), хеш, вырезка, число лиц, описание для аудита.</summary>
         private sealed record ProbeResolution(
-            float[] Template, string Sha256, string? CropStoredFileName, int DetectedFaces, string Description);
+            float[] Template, string Sha256, string? CropStoredFileName, int DetectedFaces, string Description, int? FaceId = null);
     }
 }

@@ -7,6 +7,7 @@
 @page "/media/search"
 @rendermode InteractiveServer
 @inject NavigationManager Navigation
+@inject ISC.AI.Modules.Media.Application.MediaSearchOptions SearchOptions
 @using Microsoft.AspNetCore.Components.Forms
 @using ISC.AI.Modules.Media.Application.Features.Scope
 @using ISC.AI.Modules.Media.Application.Features.Search
@@ -106,9 +107,11 @@
             <div class="d-flex gap-3 flex-wrap">
                 <MudNumericField T="int" @bind-Value="_topK" Label="Кандидатов (5..50)" Variant="Variant.Outlined" Min="5" Max="50"
                                  Margin="Margin.Dense" Style="max-width:180px;" Disabled="_busy" />
-                <MudNumericField T="double?" @bind-Value="_threshold" Label="Порог расстояния" Variant="Variant.Outlined" Min="0" Max="1" Step="0.05"
-                                 Margin="Margin.Dense" Style="max-width:200px;" Disabled="_busy" Clearable="true"
-                                 HelperText="необязательно; ослабить сверх предела эксплуатанта нельзя" />
+                @* Порог — схожестью в процентах (ТФ-ПЛ-06): так его понимает оператор; в расстояние переводит MediaLabels. *@
+                <MudNumericField T="int?" @bind-Value="_minSimilarity" Label="Схожесть не ниже, %" Variant="Variant.Outlined"
+                                 Min="@MinAllowedSimilarity" Max="100" Step="5"
+                                 Margin="Margin.Dense" Style="max-width:220px;" Disabled="_busy" Clearable="true"
+                                 HelperText="@SimilarityHelp" />
             </div>
         </MudItem>
     </MudGrid>
@@ -116,7 +119,33 @@
     <MudDivider Class="my-3" />
     <MudText Typo="Typo.subtitle2" Class="mb-2">Проба</MudText>
     <div class="d-flex align-center gap-4 flex-wrap">
-        @if (_probeFace is { } probeFace)
+        @if (_references.Count > 0 || _referencesMissing > 0)
+        {
+            @* Пробы — эталоны фигуранта (ТФ-ПЕР-03, ADR-0046): поиск по всем сразу, кандидаты сводятся по лицу. Непригодный
+               эталон (ТО-мат-07) показан, но в поиск не идёт; эталон вне допуска — только счётчиком (ТБ-020/021). *@
+            @foreach (var reference in _references)
+            {
+                var face = reference;
+                <FaceCropTile Url="@(face.CropStoredFileName is { } crop ? MediaFileUrl.FaceCrop(face.AssetId, crop) : null)"
+                              Size="96" Caption="@($"эталон — лицо № {face.Id} · качество {face.QualityScore:0.00}")"
+                              Unusable="@(!face.QualityAcceptable)" UnusableReason="@face.QualityReason">
+                    <MudLink Href="@($"/media/assets/{face.AssetId}?face={face.Id}")" Typo="Typo.caption">открыть носитель</MudLink>
+                </FaceCropTile>
+            }
+            <div>
+                <MudText Typo="Typo.body2">Поиск по всем эталонам фигуранта: @UsableReferences.Count из @(_references.Count + _referencesMissing)</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                    Кандидаты сводятся по лицу: лучшее совпадение, эталон, по которому оно найдено, и у скольких эталонов схожесть
+                    в пределах порога (не задан порог — рабочий порог системы). Сами эталоны в кандидаты не попадают.
+                </MudText>
+                @if (_referencesMissing > 0)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block">Недоступно эталонов: @_referencesMissing (нет либо вне вашего допуска).</MudText>
+                }
+                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="ClearProbe" Disabled="_busy">Сбросить пробу</MudButton>
+            </div>
+        }
+        else if (_probeFace is { } probeFace)
         {
             @* Проба — лицо уже проиндексированного носителя (ТФ-ПЛ-03): вектор берётся из базы, изображение не грузится. *@
             <FaceCropTile Url="@(probeFace.CropStoredFileName is { } crop ? MediaFileUrl.FaceCrop(probeFace.AssetId, crop) : null)"
@@ -214,7 +243,7 @@
                 сессия <MudLink Href="@($"/media/sessions/{result.SessionId}")" Typo="Typo.caption">№ @result.SessionId</MudLink>
                 · область: @_scope.Label() (@result.CaseIds.Count дел@(_includeClosedCases && _scope != SearchScopeKind.CurrentCase ? ", включая закрытые" : string.Empty))
                 · детектор @result.DetectorVersion · векторизатор @result.EmbedderVersion
-                · до @result.TopK кандидатов@(result.MaxCosineDistance is { } threshold ? $" · порог {threshold:0.00}" : string.Empty)
+                · до @result.TopK кандидатов · @MediaLabels.SimilarityThreshold(result.MaxCosineDistance)
             </MudText>
         </div>
         @if (result.DetectedFaces > 1)
@@ -227,8 +256,17 @@
         }
         @* ПО ЧЕМУ искали — рядом с выдачей (ТЭ-005): проба-изображение показывается миниатюрой, которую
            сделал браузер, проба-лицо носителя — своей вырезкой; хеш пробы даёт сверку с журналом (ТБ-072). *@
-        <MudPaper Outlined="true" Class="pa-2 mb-3 d-flex align-center gap-3">
-            @if (_probeFace is { } probeFace)
+        <MudPaper Outlined="true" Class="pa-2 mb-3 d-flex align-center gap-3 flex-wrap">
+            @if (result.ProbeFaceIds is { Count: > 1 } searchedReferences)
+            {
+                @foreach (var referenceId in searchedReferences)
+                {
+                    var face = _references.FirstOrDefault(f => f.Id == referenceId);
+                    <FaceCropTile Url="@(face?.CropStoredFileName is { } referenceCrop ? MediaFileUrl.FaceCrop(face.AssetId, referenceCrop) : null)"
+                                  Size="72" Caption="@($"эталон — лицо № {referenceId}")" />
+                }
+            }
+            else if (_probeFace is { } probeFace)
             {
                 <FaceCropTile Url="@(probeFace.CropStoredFileName is { } probeCrop ? MediaFileUrl.FaceCrop(probeFace.AssetId, probeCrop) : null)"
                               Size="96" Caption="@($"проба — лицо № {probeFace.Id}")" />
@@ -239,9 +277,11 @@
                      style="width:96px;height:96px;object-fit:contain;background:#0b1220;" />
             }
             <div>
-                <MudText Typo="Typo.body2">Искали по этой пробе</MudText>
+                <MudText Typo="Typo.body2">
+                    @(result.ProbeFaceIds is { Count: > 1 } references ? $"Искали по {references.Count} эталонам фигуранта" : "Искали по этой пробе")
+                </MudText>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
-                    @(_probeFileName ?? (_probeFace is { } row ? $"лицо № {row.Id} из носителя № {row.AssetId}" : "проба"))
+                    @(result.ProbeFaceIds is { Count: > 1 } ? "кандидаты сведены по лицу" : _probeFileName ?? (_probeFace is { } row ? $"лицо № {row.Id} из носителя № {row.AssetId}" : "проба"))
                     · отпечаток @result.ProbeSha256[..12].ToLowerInvariant()… (по нему проба сверяется с записью в журнале, ТБ-072)
                 </MudText>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
@@ -249,6 +289,13 @@
                 </MudText>
             </div>
         </MudPaper>
+        @if (result.SkippedProbes is { Count: > 0 } skipped)
+        {
+            @* Эталон без шаблона (качество ТО-мат-07 или регламент закрытого дела ТБ-074) — пропущен, причина видна. *@
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                Пропущены эталоны: @string.Join("; ", skipped)
+            </MudAlert>
+        }
         @if (result.Candidates.Count == 0)
         {
             <MudText Typo="Typo.body2" Class="mud-text-secondary">
@@ -266,6 +313,13 @@
                                       Size="128" Caption="@(current.QualityScore is { } quality ? $"кандидат № {current.Rank} · качество лица {quality:0.00}" : $"кандидат № {current.Rank}")" />
                         <div class="d-flex flex-column align-center gap-1 mt-1">
                             <SimilarityChip Similarity="@current.Similarity" />
+                            @if (current.ProbeFaceId is { } bestReference && result.ProbeFaceIds is { Count: > 1 } allReferences)
+                            {
+                                @* Согласие эталонов — подсказка оператору, а не вывод системы (ТЭ-005/006). *@
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary" Align="Align.Center">
+                                    эталон № @bestReference · совпало эталонов: @(current.ProbeMatchCount ?? 1) из @allReferences.Count
+                                </MudText>
+                            }
                             <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@current.Status.ChipColor()">@current.Status.Label()</MudChip>
                             <ClassificationChip Classification="@current.Classification" />
                             <MudLink Href="@($"/media/assets/{current.AssetId}?face={current.FaceId}")" Typo="Typo.caption">
@@ -292,6 +346,12 @@
     [SupplyParameterFromQuery(Name = "faceId")] public string? FaceIdQuery { get; set; }
 
     /// <summary>
+    /// Параметр <c>?faceIds=1,2,3</c> — эталоны фигуранта (поиск по всем эталонам, ТФ-ПЕР-03, ADR-0046; переход из
+    /// карточки фигуранта). Неразобранные значения отбрасываются, не больше <see cref="SearchByFaceQuery.MaxProbeFaces"/>.
+    /// </summary>
+    [SupplyParameterFromQuery(Name = "faceIds")] public string? FaceIdsQuery { get; set; }
+
+    /// <summary>
     /// Параметр <c>?authId=</c> — основание поиска (переход «Искать по материалам» из карточки фигуранта). Принимается,
     /// только если это основание выбранного дела (ТБ-071); иначе выбор остаётся за оператором.
     /// </summary>
@@ -313,6 +373,15 @@
     /// <summary>Лицо носителя как проба (ТФ-ПЛ-03) из адресной строки; неразобранное — пробы нет.</summary>
     private int? QueryFaceId => MediaQueryValues.ParseInt(FaceIdQuery);
 
+    /// <summary>Эталоны фигуранта из адресной строки (ADR-0046): разобранные, без повторов, не больше предела.</summary>
+    private List<int> QueryFaceIds => (FaceIdsQuery ?? string.Empty)
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Select(MediaQueryValues.ParseInt)
+        .OfType<int>()
+        .Distinct()
+        .Take(SearchByFaceQuery.MaxProbeFaces)
+        .ToList();
+
     private IReadOnlyList<CaseScopeItem> _cases = [];
     private IReadOnlyList<CaseAuthorizationItem> _authorizations = [];
     private bool _authorizationsLoaded;
@@ -331,12 +400,24 @@
 
     private FaceRow? _probeFace;
     private int? _probeFaceId;
+
+    // Эталоны фигуранта (ADR-0046): загруженные лица и сколько не загрузилось (нет либо вне допуска — не различаем).
+    private readonly List<FaceRow> _references = [];
+    private int _referencesMissing;
     private byte[]? _probeBytes;
     private string? _probeFileName;
     private string? _probePreview;
     private int? _probeFaceIndex;
     private int _topK = 20;
-    private double? _threshold;
+    // Порог схожести «не ниже, %»; пусто — без порога (у поиска по эталонам — рабочий порог системы, ADR-0046).
+    private int? _minSimilarity;
+
+    // Ниже предела эксплуатанта схожесть не опускается (порог расстояния не дальше MaxAllowedCosineDistance).
+    private int MinAllowedSimilarity => MediaLabels.MinSimilarityPercent(SearchOptions.MaxAllowedCosineDistance) ?? 0;
+
+    private string SimilarityHelp =>
+        $"необязательно; не ниже {MinAllowedSimilarity} % — предел эксплуатанта; пусто — без порога "
+        + $"(поиск по всем эталонам — от {MediaLabels.MinSimilarityPercent(SearchOptions.EffectiveAutoSuggestMaxCosineDistance)} %)";
     private FaceSearchResult? _result;
     private bool _busy;
     private string? _error;
@@ -351,7 +432,12 @@
         : _scope == SearchScopeKind.SelectedCases && _selectedCaseIds.Count == 0 ? "Отметьте хотя бы одно дело в области поиска."
         : string.Empty;
 
-    private bool HasProbe => _probeFace is { QualityAcceptable: true } || _probeBytes is not null;
+    private bool HasProbe => _references.Count > 0 || _referencesMissing > 0
+        ? UsableReferences.Count > 0
+        : _probeFace is { QualityAcceptable: true } || _probeBytes is not null;
+
+    // Эталоны, которые идут в поиск: непригодные по качеству (ТО-мат-07) не отправляются — шаблона у них нет.
+    private List<FaceRow> UsableReferences => _references.Where(f => f.QualityAcceptable).ToList();
 
     private bool CanSearch => !_busy && _caseId is not null && _authorizationId is not null && HasProbe
         && (_scope != SearchScopeKind.SelectedCases || _selectedCaseIds.Count > 0);
@@ -385,11 +471,29 @@
             await OnCaseChangedAsync(queryCase);
         }
 
-        if (QueryFaceId is { } faceId)
+        // Один эталон в списке — обычная проба-лицо; несколько — поиск по всем эталонам (ADR-0046).
+        var referenceIds = QueryFaceIds;
+        var singleFaceId = QueryFaceId ?? (referenceIds.Count == 1 ? referenceIds[0] : null);
+        if (singleFaceId is { } faceId)
         {
             _probeFaceId = faceId;
             var face = await Dispatcher.Send(new GetFaceQuery(faceId));
             _probeFace = face is { Status: true, Data: { } row } ? row : null;
+        }
+        else if (referenceIds.Count > 1)
+        {
+            foreach (var referenceId in referenceIds)
+            {
+                var face = await Dispatcher.Send(new GetFaceQuery(referenceId));
+                if (face is { Status: true, Data: { } row })
+                {
+                    _references.Add(row);
+                }
+                else
+                {
+                    _referencesMissing++;
+                }
+            }
         }
 
         // Основание из адреса — только из перечня оснований выбранного дела (ТБ-071).
@@ -458,6 +562,8 @@
             _probePreview = await BuildPreviewAsync(file);
             _probeFace = null;
             _probeFaceId = null;
+            _references.Clear();
+            _referencesMissing = 0;
             _probeFaceIndex = null;
             _result = null;
         }
@@ -500,6 +606,8 @@
         _probePreview = null;
         _probeFace = null;
         _probeFaceId = null;
+        _references.Clear();
+        _referencesMissing = 0;
         _probeFaceIndex = null;
         _result = null;
     }
@@ -515,17 +623,23 @@
         _error = null;
         try
         {
+            // Эталоны фигуранта (ADR-0046): два и больше пригодных — поиск по всем; один — обычная проба-лицо.
+            var references = _references.Count > 0 ? UsableReferences.Select(f => f.Id).ToList() : [];
+            var byReferences = references.Count >= 2;
+            var probeFaceId = _references.Count > 0 ? (references.Count == 1 ? references[0] : (int?)null) : _probeFace?.Id;
+            var byImage = _references.Count == 0 && _probeFace is null;
             var response = await Dispatcher.Send(new SearchByFaceQuery(
                 caseId,
                 authorizationId,
                 _scope,
                 _scope == SearchScopeKind.SelectedCases ? _selectedCaseIds.Distinct().ToList() : null,
-                _probeFace is null ? _probeBytes : null,
-                _probeFace?.Id,
-                _probeFace is null ? _probeFaceIndex : null,
+                byImage ? _probeBytes : null,
+                probeFaceId,
+                byImage ? _probeFaceIndex : null,
                 _topK,
-                _threshold,
-                _includeClosedCases));
+                MediaLabels.MaxCosineDistance(_minSimilarity),
+                _includeClosedCases,
+                byReferences ? references : null));
 
             if (response is { Status: true, Data: { } result })
             {

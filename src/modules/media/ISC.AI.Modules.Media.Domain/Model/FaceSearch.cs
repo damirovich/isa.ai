@@ -35,6 +35,11 @@ public sealed record FaceSearchQuery(
 /// <param name="Classification">Гриф носителя (денормализован на шаблон, ТБ-020).</param>
 /// <param name="DivisionId">Подразделение-владелец.</param>
 /// <param name="ModelVersion">Версия модели, породившей шаблон (ТО-прог-11).</param>
+/// <param name="ProbeFaceId">
+/// Поиск по нескольким эталонам (ADR-0046): эталон, по которому совпадение лучшее; у одиночного поиска —
+/// <see langword="null"/>.
+/// </param>
+/// <param name="ProbeMatchCount">Поиск по нескольким эталонам: сколько эталонов нашли этого кандидата в пределах порога.</param>
 public sealed record FaceCandidate(
     int FaceId,
     int AssetId,
@@ -43,7 +48,9 @@ public sealed record FaceCandidate(
     double CosineDistance,
     short Classification,
     int DivisionId,
-    string ModelVersion)
+    string ModelVersion,
+    int? ProbeFaceId = null,
+    int? ProbeMatchCount = null)
 {
     /// <summary>Косинусная схожесть (cos = 1 − расстояние) — для отображения и порогов ТО-мат-05.</summary>
     public double Similarity => 1 - CosineDistance;

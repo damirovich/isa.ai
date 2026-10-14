@@ -67,4 +67,10 @@ public class SearchSession : BaseEntity, IClassified
     /// подсказка эксперту, а не привязка — привязку ставит эксперт (ТФ-ВЕР-03).
     /// </summary>
     public int? SuggestedPersonRef { get; set; }
+
+    /// <summary>
+    /// Поиск по нескольким эталонам (ADR-0046): все пригодные лица-эталоны, первое — <see cref="ProbeFaceId"/>;
+    /// у одиночного поиска — <see langword="null"/>.
+    /// </summary>
+    public int[]? ProbeFaceIds { get; set; }
 }
