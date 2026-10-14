@@ -746,6 +746,14 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("person_ref");
 
+                    b.Property<int?>("ProbeFaceId")
+                        .HasColumnType("integer")
+                        .HasColumnName("probe_face_id");
+
+                    b.Property<short?>("ProbeMatchCount")
+                        .HasColumnType("smallint")
+                        .HasColumnName("probe_match_count");
+
                     b.Property<int>("Rank")
                         .HasColumnType("integer")
                         .HasColumnName("rank");
@@ -848,6 +856,10 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                     b.Property<int?>("ProbeFaceId")
                         .HasColumnType("integer")
                         .HasColumnName("probe_face_id");
+
+                    b.PrimitiveCollection<int[]>("ProbeFaceIds")
+                        .HasColumnType("integer[]")
+                        .HasColumnName("probe_face_ids");
 
                     b.Property<string>("ProbeSha256")
                         .IsRequired()

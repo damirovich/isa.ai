@@ -9,6 +9,8 @@ namespace ISC.AI.Modules.Media.Domain.Model;
 /// <c>Origin</c> — кто запустил: сотрудник или система (ТФ-ПЕР-09). <c>SuggestedPersonRef</c> — фигурант дела, чей
 /// эталон был пробой автоматического предложения (непрозрачный идентификатор профиля); это подсказка эксперту,
 /// а не решение: привязку к фигуранту (<c>PersonRef</c> кандидата) по-прежнему ставит эксперт (ТФ-ВЕР-03).
+/// <c>ProbeFaceIds</c> — поиск по нескольким эталонам (ADR-0046): все пригодные лица-эталоны, первое совпадает с
+/// <c>ProbeFaceId</c>; у одиночного поиска — <see langword="null"/>.
 /// </remarks>
 public sealed record SearchSessionDraft(
     int CaseId,
@@ -27,9 +29,13 @@ public sealed record SearchSessionDraft(
     int DivisionId,
     int? RequestedByUserId,
     SessionOrigin Origin = SessionOrigin.Operator,
-    int? SuggestedPersonRef = null);
+    int? SuggestedPersonRef = null,
+    IReadOnlyList<int>? ProbeFaceIds = null);
 
-/// <summary>Поисковая сессия, как она хранится (ТО-инф-12, ТФ-ПЛ-07).</summary>
+/// <summary>
+/// Поисковая сессия, как она хранится (ТО-инф-12, ТФ-ПЛ-07). <c>ProbeFaceIds</c> — эталоны поиска по нескольким
+/// эталонам (ADR-0046); у одиночного поиска — <see langword="null"/>.
+/// </summary>
 public sealed record SearchSessionRow(
     int Id,
     int CaseId,
@@ -49,11 +55,18 @@ public sealed record SearchSessionRow(
     DateTime CreatedAt,
     int CandidateCount,
     SessionOrigin Origin = SessionOrigin.Operator,
-    int? SuggestedPersonRef = null);
+    int? SuggestedPersonRef = null,
+    IReadOnlyList<int>? ProbeFaceIds = null)
+{
+    /// <summary>Поиск по нескольким эталонам (ADR-0046).</summary>
+    public bool IsMultiProbe => ProbeFaceIds is { Count: > 1 };
+}
 
 /// <summary>
 /// Кандидат поисковой сессии с решениями верификации (ТФ-ПЛ-02, ТФ-ВЕР-01/02). Полная строка — для
 /// хранилища и руководителя; очередь верификатора получает ПРОЕКЦИЮ без чужих решений (слепота, ТФ-ВЕР-02).
+/// <c>ProbeFaceId</c> и <c>ProbeMatchCount</c> — поиск по нескольким эталонам (ADR-0046): эталон лучшего совпадения
+/// (он и показывается в паре «проба ↔ кандидат», ТФ-ВЕР-01) и число совпавших эталонов; у одиночного поиска — пусто.
 /// </summary>
 public sealed record SearchCandidateRow(
     int Id,
@@ -74,7 +87,9 @@ public sealed record SearchCandidateRow(
     IReadOnlyList<VerificationDecision> Decisions,
     float? QualityScore = null,
     SessionOrigin Origin = SessionOrigin.Operator,
-    int? SuggestedPersonRef = null)
+    int? SuggestedPersonRef = null,
+    int? ProbeFaceId = null,
+    int? ProbeMatchCount = null)
 {
     /// <summary>Косинусная схожесть (1 − расстояние) — показывается ТОЛЬКО с предупреждением о вероятностной природе (ТЭ-006).</summary>
     public double Similarity => 1 - CosineDistance;

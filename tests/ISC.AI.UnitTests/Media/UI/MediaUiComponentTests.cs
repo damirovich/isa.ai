@@ -40,6 +40,8 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
         Services.AddMudServices();
         Services.AddSingleton(_mediator);
         Services.AddSingleton(ISC.AI.Modules.Media.Application.MediaUploadOptions.Default);
+        // Страница поиска по лицу показывает предел порога схожести из настроек поиска (ТФ-ПЛ-06).
+        Services.AddSingleton(new ISC.AI.Modules.Media.Application.MediaSearchOptions());
         SetRendererInfo(new RendererInfo("Server", true));
 
         // Блок «Сверка с фигурантами дела» (ТФ-ПЕР-09) есть на каждой карточке с лицами: по умолчанию — пустое состояние.

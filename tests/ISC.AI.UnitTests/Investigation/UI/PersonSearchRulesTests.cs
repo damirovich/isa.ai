@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ISC.AI.Abstractions.Security;
@@ -6,6 +7,7 @@ using ISC.AI.Modules.Media.Domain.Services;
 using ISC.AI.Profile.Investigation.Application.Features.Persons;
 using ISC.AI.Profile.Investigation.Domain.Enums;
 using ISC.AI.Profile.Investigation.Domain.Services;
+using ISC.AI.Modules.Media.Application.Features.Search;
 using ISC.AI.Profile.Investigation.UI;
 using NSubstitute;
 using Shouldly;
@@ -57,6 +59,28 @@ public sealed class PersonSearchRulesTests
 
         PersonSearchRules.Plan(7, [Photo(4, face: 400, quality: 0.8f)], [], context).Url
             .ShouldBe("/media/search?caseId=7&faceId=400&scope=all");
+    }
+
+    [Fact(DisplayName = "ADR-0046: несколько эталонов — поиск по всем: лица по качеству, без повторов и заменённых, не больше 10")]
+    public void Several_references_search_by_all()
+    {
+        var plan = PersonSearchRules.Plan(7,
+            [
+                Photo(1, face: 400, quality: 0.8f),
+                Photo(2, face: 401, quality: 0.9f),
+                Photo(3, face: 402, quality: 0.5f),
+                Photo(4, face: 401, quality: 0.7f),                    // то же лицо — повтор
+                Photo(5, face: 403, quality: 0.95f, supersededBy: 1),  // заменён
+                Photo(6, face: null, quality: 0.99f),                  // без лица
+            ],
+            [], Ready);
+
+        plan.Url.ShouldBe("/media/search?caseId=7&faceIds=401,400,402&scope=all&authId=5&auto=1");
+        plan.ProbeCount.ShouldBe(3);
+        plan.Probe.ShouldNotBeNull().MediaFaceId.ShouldBe(401);
+
+        var many = Enumerable.Range(1, 12).Select(i => Photo(i, face: 500 + i, quality: i / 100f)).ToList();
+        PersonSearchRules.Plan(7, many, [], Ready).ProbeCount.ShouldBe(SearchByFaceQuery.MaxProbeFaces);
     }
 
     [Fact(DisplayName = "Нет права, основания или эталона — кнопка неактивна, причина названа")]

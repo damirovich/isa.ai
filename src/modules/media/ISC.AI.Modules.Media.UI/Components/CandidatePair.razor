@@ -3,7 +3,8 @@
    без «улучшений» (ТЭ-007); оригиналы — по ссылке «открыть носитель». Проба ветвится по ProbeFaceId:
    лицо носителя → вырезка в категории вырезок ЕГО носителя (носитель узнаём запросом GetFaceQuery,
    в очереди его идентификатора нет); изображение-проба → вырезка пробы под идентификатором сессии.
-   Никаких слов «совпадение»/«это он» — только «кандидат» (ТЭ-005). *@
+   Поиск по эталонам фигуранта (ADR-0046): проба — эталон, по которому совпадение лучшее, подпись — «совпало
+   эталонов: k из N». Никаких слов «совпадение»/«это он» — только «кандидат» (ТЭ-005). *@
 @using ISC.AI.Modules.Media.Application.Features.Scope
 @using ISC.AI.Modules.Media.Application.Features.Verification
 @using ISC.AI.Modules.Media.Domain.Services
@@ -53,8 +54,13 @@
     private string? CandidateUrl => Item.CropStoredFileName is { } crop ? MediaFileUrl.FaceCrop(Item.AssetId, crop) : null;
 
     private string ProbeCaption => Item.ProbeFaceId is { } faceId
-        ? (_probeUnavailable ? $"проба: лицо № {faceId} (недоступно)" : $"проба: лицо № {faceId}")
+        ? (_probeUnavailable ? $"проба: лицо № {faceId} (недоступно)" : $"проба: лицо № {faceId}") + ReferencesNote
         : "проба: изображение";
+
+    // Поиск по эталонам: какой это эталон и сколько эталонов нашли кандидата (согласие — подсказка, не вывод).
+    private string ReferencesNote => Item.ProbeTotal is { } total && Item.ProbeMatchCount is { } matches
+        ? $" · эталон, совпало эталонов: {matches} из {total}"
+        : string.Empty;
 
     private string CandidateCaption => Item.FrameTimestampMs is { } ms
         ? $"кандидат № {Item.Rank} · кадр {MediaLabels.Timecode(ms)}"

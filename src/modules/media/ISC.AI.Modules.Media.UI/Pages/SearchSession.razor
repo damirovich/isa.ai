@@ -46,10 +46,29 @@ else
     <MudPaper Outlined="true" Class="pa-4 my-4">
         <MudText Typo="Typo.subtitle1" Class="mb-2">Параметры поиска</MudText>
         <div class="d-flex gap-4 flex-wrap align-start">
-            <FaceCropTile Url="@ProbeUrl(session)" Size="128" Caption="@ProbeCaption(session)" />
+            @if (session.ProbeFaceIds is { Count: > 1 } references)
+            {
+                @* Поиск по эталонам фигуранта (ADR-0046): все эталоны; у кандидата — эталон лучшего совпадения. *@
+                @foreach (var referenceId in references)
+                {
+                    var face = _referenceFaces.GetValueOrDefault(referenceId);
+                    <FaceCropTile Url="@(face?.CropStoredFileName is { } crop ? MediaFileUrl.FaceCrop(face.AssetId, crop) : null)" Size="96"
+                                  Caption="@(face is null ? $"эталон — лицо № {referenceId} (недоступно)" : $"эталон — лицо № {referenceId}")" />
+                }
+            }
+            else
+            {
+                <FaceCropTile Url="@ProbeUrl(session)" Size="128" Caption="@ProbeCaption(session)" />
+            }
             <div class="d-flex flex-column gap-1">
+                @if (session.ProbeFaceIds is { Count: > 1 } searched)
+                {
+                    <MudText Typo="Typo.caption">
+                        Поиск по @searched.Count эталонам фигуранта: кандидаты сведены по лицу — лучшее совпадение, эталон и число совпавших эталонов.
+                    </MudText>
+                }
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">Область: @session.Scope.Label() (@session.CaseIds.Count дел: @string.Join(", ", session.CaseIds))</MudText>
-                <MudText Typo="Typo.caption" Class="mud-text-secondary">Кандидатов запрошено: @session.TopK · выдано: @session.CandidateCount@(session.MaxCosineDistance is { } t ? $" · порог расстояния {t:0.00}" : " · без порога")</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Кандидатов запрошено: @session.TopK · выдано: @session.CandidateCount · @MediaLabels.SimilarityThreshold(session.MaxCosineDistance)</MudText>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">Детектор @session.DetectorVersion · векторизатор @session.EmbedderVersion</MudText>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">SHA-256 пробы: <code>@session.ProbeSha256</code></MudText>
                 @if (session.RequestedByUserId is { } user)
@@ -102,7 +121,15 @@ else
                 <FaceCropTile Url="@(context.CropStoredFileName is { } crop ? MediaFileUrl.FaceCrop(context.AssetId, crop) : null)" Size="64"
                               Caption="@(context.QualityScore is { } quality ? $"качество лица {quality:0.00}" : null)" />
             </MudTd>
-            <MudTd DataLabel="Схожесть"><SimilarityChip Similarity="@context.Similarity" /></MudTd>
+            <MudTd DataLabel="Схожесть">
+                <SimilarityChip Similarity="@context.Similarity" />
+                @if (context.ProbeFaceId is { } bestReference && session.ProbeFaceIds is { Count: > 1 } allReferences)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                        эталон № @bestReference · совпало эталонов: @(context.ProbeMatchCount ?? 1) из @allReferences.Count
+                    </MudText>
+                }
+            </MudTd>
             <MudTd DataLabel="Статус">
                 <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@context.Status.ChipColor()">@context.Status.Label()</MudChip>
                 @if (context.Status == CandidateStatus.Confirmed)
@@ -173,6 +200,7 @@ else
         ? []
         : [.. _details.Candidates.Where(c => (_minSimilarity is not { } min || c.Similarity >= min) && (_status is not { } st || c.Status == st))];
     private FaceRow? _probeFace;
+    private readonly Dictionary<int, FaceRow?> _referenceFaces = [];
     private string? _error;
 
     protected override async Task OnInitializedAsync()
@@ -189,7 +217,16 @@ else
         }
 
         _details = details;
-        if (details.Session.ProbeFaceId is { } probeFaceId)
+        if (details.Session.ProbeFaceIds is { Count: > 1 } references)
+        {
+            // Поиск по эталонам (ADR-0046): вырезки эталонов — под их носителями; недоступный эталон — без вырезки.
+            foreach (var referenceId in references)
+            {
+                var face = await Dispatcher.Send(new GetFaceQuery(referenceId));
+                _referenceFaces[referenceId] = face is { Status: true, Data: { } row } ? row : null;
+            }
+        }
+        else if (details.Session.ProbeFaceId is { } probeFaceId)
         {
             // Проба — лицо носителя: вырезка лежит под ЕГО носителем, узнаём его отдельным запросом (аудит View).
             var face = await Dispatcher.Send(new GetFaceQuery(probeFaceId));

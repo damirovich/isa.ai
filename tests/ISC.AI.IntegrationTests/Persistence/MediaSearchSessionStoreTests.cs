@@ -390,6 +390,42 @@ public sealed class MediaSearchSessionStoreTests : IAsyncLifetime
         (await store.ListCaseIdsWithCandidateAssetAsync(999_999, Insider)).ShouldBeEmpty();
     }
 
+    [Fact(DisplayName = "ADR-0046: поиск по эталонам — эталоны сессии и у кандидата лучший эталон с числом совпавших сохраняются; противоречивый черновик отклоняется")]
+    public async Task Multi_probe_session_round_trips()
+    {
+        var factory = new MediaContextFactory(_postgres.GetConnectionString());
+        int first, second, candidateFace;
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.MigrateAsync();
+            first = await SeedFaceAsync(db, classification: 1, divisionId: 7, crop: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.jpg");
+            second = await SeedFaceAsync(db, classification: 1, divisionId: 7, crop: null);
+            candidateFace = await SeedFaceAsync(db, classification: 1, divisionId: 7, crop: null);
+        }
+
+        var store = new SearchSessionStore(factory, new AllowAllAccessPolicy());
+        var draft = Draft(caseId: 100, caseIds: [100]) with { ProbeFaceId = first, ProbeFaceIds = [first, second] };
+
+        var sessionId = await store.CreateAsync(draft, [Candidate(candidateFace, 0.2) with { ProbeFaceId = second, ProbeMatchCount = 2 }]);
+
+        var session = (await store.GetAsync(sessionId, Insider)).ShouldNotBeNull();
+        session.ProbeFaceIds.ShouldBe([first, second]);
+        session.IsMultiProbe.ShouldBeTrue();
+        var candidate = (await store.ListCandidatesAsync(sessionId, Insider)).ShouldHaveSingleItem();
+        candidate.ProbeFaceId.ShouldBe(second);
+        candidate.ProbeMatchCount.ShouldBe(2);
+
+        // Одиночный поиск — поля пусты, как у прежних сессий.
+        var plainId = await store.CreateAsync(Draft(caseId: 100, caseIds: [100]) with { ProbeFaceId = first }, [Candidate(candidateFace, 0.2)]);
+        (await store.GetAsync(plainId, Insider)).ShouldNotBeNull().ProbeFaceIds.ShouldBeNull();
+        (await store.ListCandidatesAsync(plainId, Insider)).ShouldHaveSingleItem().ProbeFaceId.ShouldBeNull();
+
+        // Меньше двух эталонов или первый не совпадает с ProbeFaceId — противоречие, сессия не создаётся.
+        await Should.ThrowAsync<ArgumentException>(() => store.CreateAsync(draft with { ProbeFaceIds = [first] }, []));
+        await Should.ThrowAsync<ArgumentException>(() => store.CreateAsync(draft with { ProbeFaceIds = [second, first] }, []));
+        (await store.ListByCaseAsync(100, Insider)).Count.ShouldBe(2);
+    }
+
     private static SearchSessionDraft Draft(int caseId, int[] caseIds) => new(
         CaseId: caseId,
         AuthorizationRef: "поручение № 7",
