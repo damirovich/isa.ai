@@ -215,6 +215,7 @@ public static class InvestigationPermissions
     [
         new("dashboard", "Дашборд", [CasesView]),
         new("cases", "Дела", [CasesView]),
+        new("search", "Поиск", [CasesView]),
         new("media-search", "Поиск по лицу", [MediaSearch]),
         new("media-verification", "Верификация", [VerificationExpert, VerificationVerifier, VerificationResolve]),
         new("media-import", "Импорт архива", [MediaImport]),

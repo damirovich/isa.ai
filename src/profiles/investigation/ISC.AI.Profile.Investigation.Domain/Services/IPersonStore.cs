@@ -252,6 +252,16 @@ public interface IPersonStore
     Task<IReadOnlyList<PersonRow>> SearchAsync(
         string text, int limit, AccessContext access, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Единый поиск (ТФ-ПСК-01, ADR-0048): фигуранты по ФИО или псевдониму (подстрока <see cref="SearchTerms.Text"/>
+    /// без учёта регистра и «ё/е»), по дате рождения (<see cref="SearchTerms.Date"/>) или году рождения
+    /// (<see cref="SearchTerms.Year"/>). ОБЛАСТЬ — дела <paramref name="caseIds"/>, уже отобранные вызывающим по решётке (ТБ-071); хранилище повторно
+    /// применяет свою решётку на стороне БД (фигурант — по полной решётке и роли).
+    /// Не больше <paramref name="limit"/> строк, по имени.
+    /// </summary>
+    Task<IReadOnlyList<PersonRow>> SearchInCasesAsync(
+        SearchTerms terms, IReadOnlyCollection<int> caseIds, int limit, AccessContext access, CancellationToken cancellationToken = default);
+
     /// <summary>Эталоны фигуранта.</summary>
     Task<IReadOnlyList<ReferencePhotoRow>> ListReferencePhotosAsync(int personId, AccessContext access, CancellationToken cancellationToken = default);
 

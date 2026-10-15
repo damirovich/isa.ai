@@ -94,6 +94,28 @@ public sealed class CaseDocumentStore(
         return removed > 0 ? CaseDocumentWriteResult.Ok : CaseDocumentWriteResult.NotLinked;
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<CaseDocumentRef>> ListLinksAsync(
+        IReadOnlyCollection<int> caseIds, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(caseIds);
+        ArgumentNullException.ThrowIfNull(access);
+        if (caseIds.Count == 0)
+        {
+            return [];
+        }
+
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var role = await PermissionRule.ResolveCaseViewerAsync(roles, access.NumericSubjectId, cancellationToken);
+        var ids = caseIds.ToArray();
+        var visible = CaseAccessRule.Apply(db.Cases.AsNoTracking(), access, policy, role).Where(c => ids.Contains(c.Id)).Select(c => c.Id);
+        return await db.CaseDocumentLinks.AsNoTracking()
+            .Where(l => visible.Contains(l.CaseId))
+            .OrderByDescending(l => l.CreatedAt).ThenByDescending(l => l.Id)
+            .Select(l => new CaseDocumentRef(l.CaseId, l.DocFlowDocumentId))
+            .ToListAsync(cancellationToken);
+    }
+
     private async Task<bool> CaseVisibleAsync(InvestigationDbContext db, int caseId, AccessContext access, CancellationToken cancellationToken)
     {
         // Без права «Дашборд и реестр дел» (матрица доступа, ADR-0032) роль не видит дел — и их документов.

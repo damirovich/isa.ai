@@ -64,4 +64,23 @@ public interface IPersonRequisiteStore
 
     /// <summary>Удалить автотранспорт (ошибку ввода); запись об удалении — в журнале аудита.</summary>
     Task<PersonWriteResult> DeleteVehicleAsync(int vehicleId, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Единый поиск (ТФ-ПСК-01, ADR-0048): автотранспорт по госномеру (подстрока нормализованного номера
+    /// <see cref="SearchTerms.Plate"/>: «123ABC» находит «01 KG 123 ABC») или по марке и модели (подстрока текста).
+    /// ОБЛАСТЬ — дела <paramref name="caseIds"/>, уже отобранные вызывающим по решётке (ТБ-071); хранилище повторно
+    /// применяет свою решётку на стороне БД (строка транспорта — под своим floor'ом, фигурант — по полной решётке и роли).
+    /// Не больше <paramref name="limit"/> строк.
+    /// </summary>
+    Task<IReadOnlyList<VehicleSearchRow>> SearchVehiclesAsync(
+        SearchTerms terms, IReadOnlyCollection<int> caseIds, int limit, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Единый поиск (ТФ-ПСК-01, ADR-0048): адреса фигурантов и место жительства из анкеты — подстрока нормализованного
+    /// адреса <see cref="SearchTerms.Address"/> («улица» = «ул.»). ОБЛАСТЬ — дела <paramref name="caseIds"/>, уже отобранные вызывающим по решётке (ТБ-071); хранилище повторно
+    /// применяет свою решётку на стороне БД (строка адреса — под
+    /// своим floor'ом, фигурант — по полной решётке и роли). Не больше <paramref name="limit"/> строк.
+    /// </summary>
+    Task<IReadOnlyList<AddressSearchRow>> SearchAddressesAsync(
+        SearchTerms terms, IReadOnlyCollection<int> caseIds, int limit, AccessContext access, CancellationToken cancellationToken = default);
 }

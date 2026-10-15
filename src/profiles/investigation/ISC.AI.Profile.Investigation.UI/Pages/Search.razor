@@ -1,0 +1,364 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@page "/search"
+@rendermode InteractiveServer
+@using System.Globalization
+@using ISC.AI.Modules.Media.Domain.Model
+@using ISC.AI.Profile.Investigation.Application.Features.Search
+@using ISC.AI.Profile.Investigation.Domain.Enums
+@using ISC.AI.Profile.Investigation.Domain.Services
+@inject NavigationManager Navigation
+
+@* Единый поиск (ТФ-ПСК-01, ADR-0048): одна строка — дела, фигуранты, госномера, адреса, сводки и справки, расшифровки
+   и документы дел, в пределах дел субъекта (область и решётку применяет сервер — UnifiedSearchQuery и хранилища).
+   Поиск запускается кнопкой «Найти» или Enter, а не на каждую букву: каждый поиск — запись журнала с искомым текстом
+   (ТБ-030/032). Запрос, виды и отдел — в адресе (SearchPageState): «Назад» из карточки повторяет ту же выдачу.
+   Каждая строка ведёт на место (ТФ-ПСК-02): дело, фигурант, сводка, документ — в карточку; фрагмент расшифровки — в
+   карточку носителя на этом месте записи (?t=). Совпадение выделяется разбиением строки (SearchHighlight), без
+   вставки разметки: текст строк — данные дел. *@
+
+<PageHeader Title="Поиск" Subtitle="Дела, фигуранты, госномера, адреса, сводки, расшифровки и документы — в пределах ваших дел"
+            Icon="@Icons.Material.Filled.ManageSearch" />
+
+<MudPaper Outlined="true" Class="pa-3 my-4">
+    <div class="d-flex gap-3 align-center flex-wrap">
+        <MudTextField T="string" @bind-Value="_input" Label="Что ищем" Variant="Variant.Outlined" Immediate="true"
+                      Placeholder="ФИО, псевдоним, госномер, адрес, № дела или задания, дата рождения, слово из сводки или записи"
+                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Clearable="true"
+                      OnKeyDown="OnKeyDownAsync" Class="flex-grow-1" Style="min-width:300px;" />
+        <MudSelect T="CaseDirection?" @bind-Value="_direction" Label="Отдел" Variant="Variant.Outlined" Clearable="true" Dense="true"
+                   Placeholder="Все отделы" Style="min-width:170px;">
+            @foreach (var direction in Enum.GetValues<CaseDirection>())
+            {
+                <MudSelectItem T="CaseDirection?" Value="@direction">@direction.ShortLabel() — @direction.Label()</MudSelectItem>
+            }
+        </MudSelect>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Search"
+                   Disabled="_busy" OnClick="SearchAsync">Найти</MudButton>
+    </div>
+    <div class="d-flex gap-1 align-center flex-wrap mt-2">
+        <MudText Typo="Typo.caption" Class="mud-text-secondary mr-2">Искать в:</MudText>
+        @foreach (var kind in SearchPageState.AllKinds)
+        {
+            var current = kind;
+            <MudCheckBox T="bool" Value="@((_kinds & current) != 0)" ValueChanged="@(on => ToggleKind(current, on))"
+                         Label="@SearchPageState.Label(current)" Color="Color.Primary" Size="Size.Small" Dense="true" />
+        }
+    </div>
+</MudPaper>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="my-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@if (_busy)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-2" />
+}
+else if (_result is { } result)
+{
+    var query = result.Text;
+    <MudText Typo="Typo.body2" Class="mb-3" Style="font-weight:500;">
+        @(result.TotalCount == 0
+            ? $"По запросу «{query}» ничего не найдено — в пределах ваших дел и допуска."
+            : $"Найдено по запросу «{query}»: {result.TotalCount}")
+    </MudText>
+
+    @if (Searched(SearchKinds.Cases) && result.Cases.Count > 0)
+    {
+        <SearchSection Title="Дела" Count="result.Cases.Count" Truncated="@result.Truncated.HasFlag(SearchKinds.Cases)">
+            <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
+                <thead><tr><th>Номер</th><th>Название</th><th>Вид</th><th>Статус</th><th>Отдел</th><th>Открыто</th></tr></thead>
+                <tbody>
+                    @foreach (var row in result.Cases)
+                    {
+                        <tr>
+                            <td>
+                                <a href="@($"/cases/{row.Id}")">@Highlight(row.Number, query)</a>
+                                @if (row.TaskNumber is { } task && !string.Equals(task, row.Number, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    <span class="d-block mud-text-secondary" style="font-size:0.75rem;">задание № @Highlight(task, query)</span>
+                                }
+                            </td>
+                            <td>@Highlight(row.Title, query)</td>
+                            <td>@row.Kind.Label()</td>
+                            <td>@row.Status.Label()</td>
+                            <td>@(row.Direction?.ShortLabel() ?? "—")</td>
+                            <td>@row.OpenedAt.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </SearchSection>
+    }
+
+    @if (Searched(SearchKinds.Persons) && result.Persons.Count > 0)
+    {
+        <SearchSection Title="Фигуранты" Count="result.Persons.Count" Truncated="@result.Truncated.HasFlag(SearchKinds.Persons)">
+            <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
+                <thead><tr><th>ФИО</th><th>Псевдоним</th><th>Роль</th><th>Рождение</th><th>Дело</th></tr></thead>
+                <tbody>
+                    @foreach (var row in result.Persons)
+                    {
+                        <tr>
+                            <td><a href="@($"/persons/{row.Id}")">@Highlight(row.DisplayName, query)</a></td>
+                            <td>@Highlight(row.Questionnaire?.Alias, query)</td>
+                            <td>@row.Role.Label()</td>
+                            <td>@BirthLabel(row.Questionnaire)</td>
+                            <td>@CaseLink(row.CaseId, result)</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </SearchSection>
+    }
+
+    @if (Searched(SearchKinds.Vehicles) && result.Vehicles.Count > 0)
+    {
+        <SearchSection Title="Автотранспорт" Count="result.Vehicles.Count" Truncated="@result.Truncated.HasFlag(SearchKinds.Vehicles)">
+            <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
+                <thead><tr><th>Госномер</th><th>Марка, модель, цвет</th><th>Фигурант</th><th>Дело</th></tr></thead>
+                <tbody>
+                    @foreach (var row in result.Vehicles)
+                    {
+                        <tr>
+                            <td style="font-family:monospace;">@(row.Vehicle.PlateNumber ?? "номер неизвестен")</td>
+                            <td>@Highlight(VehicleLabel(row.Vehicle), query)</td>
+                            <td><a href="@($"/persons/{row.PersonId}")">@row.PersonName</a></td>
+                            <td>@CaseLink(row.CaseId, result)</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </SearchSection>
+    }
+
+    @if (Searched(SearchKinds.Addresses) && result.Addresses.Count > 0)
+    {
+        <SearchSection Title="Адреса" Count="result.Addresses.Count" Truncated="@result.Truncated.HasFlag(SearchKinds.Addresses)">
+            <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
+                <thead><tr><th>Адрес</th><th>Вид</th><th>Фигурант</th><th>Дело</th></tr></thead>
+                <tbody>
+                    @foreach (var row in result.Addresses)
+                    {
+                        <tr>
+                            <td>@Highlight(row.Text, query)</td>
+                            <td>@(row.Kind?.Label() ?? "место жительства (анкета)")</td>
+                            <td><a href="@($"/persons/{row.PersonId}")">@row.PersonName</a></td>
+                            <td>@CaseLink(row.CaseId, result)</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </SearchSection>
+    }
+
+    @if (Searched(SearchKinds.Reports) && result.Reports.Count > 0)
+    {
+        <SearchSection Title="Сводки и справки" Count="result.Reports.Count" Truncated="@result.Truncated.HasFlag(SearchKinds.Reports)">
+            <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
+                <thead><tr><th>Документ</th><th>Дата</th><th>Объект</th><th>Дело</th></tr></thead>
+                <tbody>
+                    @foreach (var row in result.Reports)
+                    {
+                        <tr>
+                            <td><a href="@($"/reports/{row.Id}")">@row.Kind.Label()</a></td>
+                            <td>@row.ReportDate.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)</td>
+                            <td>@(row.PersonName ?? "—")</td>
+                            <td>@CaseLink(row.CaseId, result)</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </SearchSection>
+    }
+
+    @if (Searched(SearchKinds.Transcripts) && result.Transcripts.Count > 0)
+    {
+        <SearchSection Title="Расшифровки" Count="result.Transcripts.Count" Truncated="@result.Truncated.HasFlag(SearchKinds.Transcripts)">
+            <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
+                <thead><tr><th>Место записи</th><th>Фрагмент</th><th>Носитель</th><th>Дело</th></tr></thead>
+                <tbody>
+                    @foreach (var row in result.Transcripts)
+                    {
+                        <tr>
+                            <td style="font-family:monospace;white-space:nowrap;">
+                                <a href="@($"/media/assets/{row.AssetId}?t={row.StartMs.ToString(CultureInfo.InvariantCulture)}")"
+                                   title="Открыть запись на этом месте">[@Clock(row.StartMs)]</a>
+                            </td>
+                            <td>@Highlight(row.Text, query)</td>
+                            <td>@(row.Kind == MediaKind.Video ? "видео" : "аудио") · @row.AssetFileName</td>
+                            <td>@CaseLink(row.CaseId, result)</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </SearchSection>
+    }
+
+    @if (Searched(SearchKinds.Documents) && result.Documents.Count > 0)
+    {
+        <SearchSection Title="Документы дел" Count="result.Documents.Count" Truncated="@result.Truncated.HasFlag(SearchKinds.Documents)">
+            <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
+                <thead><tr><th>Рег. номер</th><th>Дата</th><th>Вид</th><th>Краткое содержание</th><th>Дело</th></tr></thead>
+                <tbody>
+                    @foreach (var row in result.Documents)
+                    {
+                        <tr>
+                            <td><a href="@($"/docflow/documents/{row.DocumentId}")">@Highlight(row.RegNumber ?? "без номера", query)</a></td>
+                            <td>@row.RegDate.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)</td>
+                            <td>@Highlight(row.TypeName, query)</td>
+                            <td>@Highlight(row.ShortContent, query)</td>
+                            <td>@CaseLink(row.CaseId, result)</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </SearchSection>
+    }
+}
+else if (!_busy)
+{
+    <MudText Typo="Typo.body2" Class="mud-text-secondary">
+        Госномер ищется при любом написании («01 KG 123 ABC», «01kg123abc»), адрес — с «ул.» и без, ФИО и псевдоним — с «ё» и «е»;
+        дата рождения — в виде «дд.мм.гггг» или годом. Каждый поиск записывается в журнал.
+    </MudText>
+}
+
+@code {
+    /// <summary>Запрос (<c>?q=</c>).</summary>
+    [SupplyParameterFromQuery(Name = "q")] public string? TextParameter { get; set; }
+
+    /// <summary>Виды выдачи (<c>?kinds=Persons,Cases</c>).</summary>
+    [SupplyParameterFromQuery(Name = "kinds")] public string? KindsParameter { get; set; }
+
+    /// <summary>Отдел (<c>?direction=on|ou|otm</c>).</summary>
+    [SupplyParameterFromQuery(Name = DirectionQuery.Name)] public string? DirectionParameter { get; set; }
+
+    private string? _input;
+    private SearchKinds _kinds = SearchKinds.All;
+    private CaseDirection? _direction;
+    private SearchPageState? _loaded;
+    private UnifiedSearchResult? _result;
+    private SearchKinds _searchedKinds = SearchKinds.All;
+    private bool _busy;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var state = SearchPageState.Parse(new Dictionary<string, string?>
+        {
+            ["q"] = TextParameter,
+            ["kinds"] = KindsParameter,
+            [DirectionQuery.Name] = DirectionParameter,
+        });
+        _input = state.Text;
+        _kinds = state.Kinds;
+        _direction = state.Direction;
+
+        // ТБ-030: на предрендере не ищем — иначе одно открытие давало бы две записи журнала. Тот же адрес повторно не ищется.
+        if (RendererInfo.IsInteractive && state.Text is not null && state != _loaded)
+        {
+            await RunAsync(state);
+        }
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            await SearchAsync();
+        }
+    }
+
+    // «Найти»: состояние — в адрес (поиск выполнит OnParametersSetAsync); тот же адрес — искать заново прямо здесь.
+    private async Task SearchAsync()
+    {
+        _error = null;
+        var state = new SearchPageState(string.IsNullOrWhiteSpace(_input) ? null : _input.Trim(), _kinds, _direction);
+        if (state.Text is null || !SearchTerms.Parse(state.Text).IsSearchable)
+        {
+            _error = UnifiedSearchQuery.TooShortMessage;
+            return;
+        }
+
+        if ((_kinds & SearchKinds.All) == SearchKinds.None)
+        {
+            _error = UnifiedSearchQuery.NoKindsMessage;
+            return;
+        }
+
+        var uri = state.ToUri();
+        if (state == _loaded || Navigation.ToBaseRelativePath(Navigation.Uri) == uri.TrimStart('/'))
+        {
+            await RunAsync(state);
+            return;
+        }
+
+        Navigation.NavigateTo(uri);
+    }
+
+    private async Task RunAsync(SearchPageState state)
+    {
+        _busy = true;
+        _error = null;
+        _loaded = state;
+        try
+        {
+            var response = await Dispatcher.Send(new UnifiedSearchQuery(state.Text!, state.Kinds, state.Direction));
+            if (response is { Status: true, Data: { } data })
+            {
+                _result = data;
+                _searchedKinds = state.Kinds;
+            }
+            else
+            {
+                _result = null;
+                _error = response?.StatusMessage ?? "Поиск не выполнен.";
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void ToggleKind(SearchKinds kind, bool on) => _kinds = on ? _kinds | kind : _kinds & ~kind;
+
+    private bool Searched(SearchKinds kind) => (_searchedKinds & kind) != 0;
+
+    private static string Clock(long milliseconds)
+    {
+        var span = TimeSpan.FromMilliseconds(Math.Max(0, milliseconds));
+        return span.TotalHours >= 1
+            ? ((int)span.TotalHours).ToString(CultureInfo.InvariantCulture) + ":" + span.ToString(@"mm\:ss", CultureInfo.InvariantCulture)
+            : span.ToString(@"mm\:ss", CultureInfo.InvariantCulture);
+    }
+
+    private static string BirthLabel(PersonQuestionnaire? questionnaire) => questionnaire switch
+    {
+        { BirthDate: { } date } => date.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture),
+        { BirthYear: { } year } => year.ToString(CultureInfo.InvariantCulture) + " г.",
+        _ => "—",
+    };
+
+    private static string VehicleLabel(PersonVehicleRow vehicle) =>
+        string.Join(", ", new[] { vehicle.Make, vehicle.Model, vehicle.Color }.Where(v => !string.IsNullOrWhiteSpace(v)));
+
+    // Выделение совпадения: куски Razor выводит как текст (экранирует).
+    private static RenderFragment Highlight(string? text, string query) => @<span>@foreach (var part in SearchHighlight.Split(text, query))
+    {
+        if (part.IsMatch)
+        {
+            <mark style="padding:0;">@part.Text</mark>
+        }
+        else
+        {
+            @part.Text
+        }
+    }</span>;
+
+    private static RenderFragment CaseLink(int caseId, UnifiedSearchResult result) =>
+        @<a href="@($"/cases/{caseId}")">№ @(result.CaseNumbers.TryGetValue(caseId, out var number) ? number : caseId.ToString(CultureInfo.InvariantCulture))</a>;
+}

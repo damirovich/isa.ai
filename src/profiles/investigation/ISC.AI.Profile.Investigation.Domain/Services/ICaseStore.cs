@@ -205,6 +205,14 @@ public interface ICaseStore
     /// <summary>Носители дел (для области поиска), без решётки — вызывающий уже проверил доступ к делам.</summary>
     Task<IReadOnlyCollection<int>> ListMediaAssetIdsAsync(IReadOnlyCollection<int> caseIds, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Дело каждого носителя среди дел <paramref name="caseIds"/> (единый поиск, ADR-0048: фрагмент расшифровки —
+    /// с номером дела): первая привязка по порядку. Без решётки — вызывающий уже проверил доступ к делам; носитель
+    /// без привязки к этим делам в словаре отсутствует.
+    /// </summary>
+    Task<IReadOnlyDictionary<int, int>> MapMediaAssetsAsync(
+        IReadOnlyCollection<int> assetIds, IReadOnlyCollection<int> caseIds, CancellationToken cancellationToken = default);
+
     /// <summary>Дело носителя; <see langword="null"/> — не привязан.</summary>
     Task<int?> FindCaseByMediaAsync(int mediaAssetId, CancellationToken cancellationToken = default);
 

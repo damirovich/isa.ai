@@ -40,4 +40,12 @@ public interface ICaseDocumentStore
 
     /// <summary>Открепить документ от дела (сам документ не удаляется).</summary>
     Task<CaseDocumentWriteResult> DetachAsync(int caseId, int documentId, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Привязки документов к делам <paramref name="caseIds"/> — для поиска по документам дел (ТФ-ПСК-01, ADR-0048).
+    /// Дела, недоступные субъекту по полной решётке, отбрасываются (повторная проверка на стороне БД); видимость
+    /// самих документов проверяет вызывающий через порт документооборота.
+    /// </summary>
+    Task<IReadOnlyList<CaseDocumentRef>> ListLinksAsync(
+        IReadOnlyCollection<int> caseIds, AccessContext access, CancellationToken cancellationToken = default);
 }

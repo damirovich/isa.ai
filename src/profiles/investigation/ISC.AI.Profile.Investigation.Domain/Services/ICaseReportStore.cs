@@ -133,6 +133,14 @@ public interface ICaseReportStore
     /// <summary>Документы дела (новые даты первыми); <paramref name="text"/> — подстрока по полям. <see langword="null"/> — дело недоступно.</summary>
     Task<IReadOnlyList<CaseReportRow>?> ListByCaseAsync(int caseId, string? text, AccessContext access, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Единый поиск (ТФ-ПСК-01, ADR-0048): сводки и справки по тексту полей бланка (подстрока <see cref="SearchTerms.Text"/>,
+    /// как поиск внутри дела). ОБЛАСТЬ — дела <paramref name="caseIds"/>, уже отобранные вызывающим по решётке (ТБ-071); хранилище повторно
+    /// применяет свою решётку на стороне БД. Новые даты первыми, не больше <paramref name="limit"/> строк.
+    /// </summary>
+    Task<IReadOnlyList<CaseReportRow>> SearchAsync(
+        SearchTerms terms, IReadOnlyCollection<int> caseIds, int limit, AccessContext access, CancellationToken cancellationToken = default);
+
     /// <summary>Карточка документа; <see langword="null"/> — недоступен.</summary>
     Task<CaseReportDetails?> GetAsync(int reportId, AccessContext access, CancellationToken cancellationToken = default);
 
