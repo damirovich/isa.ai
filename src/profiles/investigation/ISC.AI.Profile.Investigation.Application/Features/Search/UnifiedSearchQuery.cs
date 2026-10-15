@@ -17,38 +17,6 @@ using Mediator;
 
 namespace ISC.AI.Profile.Investigation.Application.Features.Search;
 
-/// <summary>Виды выдачи единого поиска (ADR-0048); можно сочетать.</summary>
-[Flags]
-public enum SearchKinds
-{
-    /// <summary>Ничего.</summary>
-    None = 0,
-
-    /// <summary>Дела: номер, № задания, название.</summary>
-    Cases = 1,
-
-    /// <summary>Фигуранты: ФИО, псевдоним, дата или год рождения.</summary>
-    Persons = 2,
-
-    /// <summary>Автотранспорт: госномер, марка, модель.</summary>
-    Vehicles = 4,
-
-    /// <summary>Адреса фигурантов и место жительства из анкеты.</summary>
-    Addresses = 8,
-
-    /// <summary>Сводки и справки: текст полей бланка.</summary>
-    Reports = 16,
-
-    /// <summary>Расшифровки речи носителей дел.</summary>
-    Transcripts = 32,
-
-    /// <summary>Документы дел: регистрационный номер, вид, краткое содержание.</summary>
-    Documents = 64,
-
-    /// <summary>Все виды.</summary>
-    All = Cases | Persons | Vehicles | Addresses | Reports | Transcripts | Documents,
-}
-
 /// <summary>Найденный фрагмент расшифровки — с делом носителя (для перехода к месту записи, ТФ-ПСК-02).</summary>
 /// <param name="AssetId">Носитель.</param>
 /// <param name="CaseId">Дело носителя (первая привязка среди дел области поиска).</param>
@@ -109,6 +77,8 @@ public sealed record UnifiedSearchResult(
 /// <para>АУДИТ (ТБ-030/032): одна запись <see cref="AuditAction.Search"/> на поиск; искомый текст — в чувствительной
 /// части записи (он сам раскрывает, что искали), гриф записи — не ниже допуска субъекта. Поиски пакетов (по
 /// расшифровкам одного дела) не вызываются — их порты используются напрямую, без второй записи.</para>
+/// <para>ИСТОРИЯ (ADR-0049): выполненный поиск записывается в историю вошедшего сотрудника — с грифом его текущего
+/// допуска; без определённого сотрудника история не пишется.</para>
 /// </remarks>
 /// <param name="Text">Запрос: 2–200 знаков.</param>
 /// <param name="Kinds">Какие виды искать; по умолчанию — все.</param>
@@ -151,7 +121,9 @@ public sealed record UnifiedSearchQuery(string Text, SearchKinds Kinds = SearchK
         ICaseDocumentStore caseDocuments,
         IDocumentLookup documents,
         IMediaCatalog media,
-        IAccessContextProvider accessProvider) : IRequestHandler<UnifiedSearchQuery, ResponseDto<UnifiedSearchResult>>
+        IAccessContextProvider accessProvider,
+        ISubjectProvider subjectProvider,
+        ISearchHistoryStore history) : IRequestHandler<UnifiedSearchQuery, ResponseDto<UnifiedSearchResult>>
     {
         /// <inheritdoc />
         public async ValueTask<ResponseDto<UnifiedSearchResult>> Handle(UnifiedSearchQuery query, CancellationToken cancellationToken)
@@ -218,6 +190,15 @@ public sealed record UnifiedSearchQuery(string Text, SearchKinds Kinds = SearchK
             var result = new UnifiedSearchResult(
                 terms.Raw, foundCases, foundPersons, foundVehicles, foundAddresses, foundReports, foundTranscripts, foundDocuments,
                 numbers, truncated);
+
+            // История — сотрудника, который искал; гриф строки — его текущий допуск (ADR-0049).
+            if (await subjectProvider.GetCurrentUserIdAsync(cancellationToken) is { } userId)
+            {
+                await history.RecordAsync(
+                    userId, new SearchHistoryDraft(terms, kinds, query.Direction, result.TotalCount, access.MaxClassification),
+                    cancellationToken);
+            }
+
             return ResponseDto<UnifiedSearchResult>.Ok(result, result.TotalCount);
         }
 

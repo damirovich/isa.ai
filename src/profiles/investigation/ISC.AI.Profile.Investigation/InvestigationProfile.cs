@@ -125,6 +125,8 @@ public sealed class InvestigationProfile : IProfile
     /// </remarks>
     public IReadOnlyList<IShellWidget> ShellWidgets { get; } =
     [
+        // Быстрый поиск по делам (ADR-0049) — левее колокольчика: Enter открывает страницу «Поиск».
+        new ShellWidgetDescriptor("investigation-quick-search", ShellWidgetSlot.AppBarRight, Order: 5, typeof(QuickSearch)),
         .. DocFlowModule.ShellWidgets,
         .. MediaModule.ShellWidgets,
         .. AdminModule.ShellWidgets,

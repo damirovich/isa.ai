@@ -79,6 +79,9 @@ public class InvestigationDbContext(DbContextOptions<InvestigationDbContext> opt
     /// <summary>Перенесённые записи баз Access: повтор переноса без дублей (ADR-0043).</summary>
     public DbSet<AccessImportRecordEntity> AccessImportRecords { get; set; } = null!;
 
+    /// <summary>История единого поиска сотрудников (ADR-0049).</summary>
+    public DbSet<SearchHistoryEntry> SearchHistory { get; set; } = null!;
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

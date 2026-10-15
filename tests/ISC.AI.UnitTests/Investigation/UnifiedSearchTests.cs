@@ -37,11 +37,14 @@ public sealed class UnifiedSearchTests
     private readonly IDocumentLookup _documents = Substitute.For<IDocumentLookup>();
     private readonly IMediaCatalog _media = Substitute.For<IMediaCatalog>();
     private readonly IAccessContextProvider _accessProvider = Substitute.For<IAccessContextProvider>();
+    private readonly ISubjectProvider _subject = Substitute.For<ISubjectProvider>();
+    private readonly ISearchHistoryStore _history = Substitute.For<ISearchHistoryStore>();
     private CaseFilter? _scopeFilter;
 
     public UnifiedSearchTests()
     {
         _accessProvider.GetCurrentAsync(Arg.Any<CancellationToken>()).Returns(Access);
+        _subject.GetCurrentUserIdAsync(Arg.Any<CancellationToken>()).Returns(10);
         _cases.ListAsync(Arg.Do<CaseFilter>(f => _scopeFilter = f), Access, Arg.Any<CancellationToken>())
             .Returns(new CasePage([Case(1, "14/24", "Задание № 14/24 — Учебный Марат"), Case(2, "УД-5", "Кража", task: "3/24")], 2));
         _persons.SearchInCasesAsync(Arg.Any<SearchTerms>(), Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<int>(), Access, Arg.Any<CancellationToken>())
@@ -199,6 +202,64 @@ public sealed class UnifiedSearchTests
         validator.Validate(new UnifiedSearchQuery("01KG")).IsValid.ShouldBeTrue();
     }
 
+    [Fact(DisplayName = "ADR-0049: выполненный поиск записывается в историю вошедшего — запрос, виды, отдел, число найденного и гриф = его допуск; без сотрудника — нет")]
+    public async Task Search_is_recorded_to_history_of_subject()
+    {
+        _persons.SearchInCasesAsync(Arg.Any<SearchTerms>(), Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<int>(), Access, Arg.Any<CancellationToken>())
+            .Returns([Person(1), Person(2)]);
+
+        await HandleAsync(new UnifiedSearchQuery("  Иванов ", SearchKinds.Persons, CaseDirection.Establishment));
+
+        await _history.Received(1).RecordAsync(
+            10,
+            Arg.Is<SearchHistoryDraft>(d => d.Terms.Raw == "Иванов" && d.Kinds == SearchKinds.Persons
+                && d.Direction == CaseDirection.Establishment && d.ResultCount == 2 && d.Classification == Access.MaxClassification),
+            Arg.Any<CancellationToken>());
+
+        _history.ClearReceivedCalls();
+        _subject.GetCurrentUserIdAsync(Arg.Any<CancellationToken>()).Returns((int?)null);
+        await HandleAsync(new UnifiedSearchQuery("Иванов"));
+        await _history.DidNotReceiveWithAnyArgs().RecordAsync(default, default!, default);
+
+        // Отказ по длине — не поиск: в историю не попадает.
+        await HandleAsync(new UnifiedSearchQuery("и"));
+        await _history.DidNotReceiveWithAnyArgs().RecordAsync(default, default!, default);
+    }
+
+    [Fact(DisplayName = "ADR-0049: история — своя и в пределах текущего допуска; закрепление сверх предела — отказ; чужая запись — «не найдено»; журнал — без текста")]
+    public async Task History_requests_are_own_and_audited_without_text()
+    {
+        var rows = new List<SearchHistoryRow> { new(5, "Иванов", SearchKinds.All, null, 3, true, DateTime.UtcNow) };
+        _history.ListAsync(10, Access.MaxClassification, Arg.Any<CancellationToken>()).Returns(rows);
+        (await new ListSearchHistoryQuery.Handler(_history, _subject, _accessProvider).Handle(new ListSearchHistoryQuery(), CancellationToken.None))
+            .Data.ShouldBe(rows);
+
+        _history.SetPinnedAsync(10, 5, true, Arg.Any<CancellationToken>()).Returns(SearchHistoryWriteResult.PinLimit);
+        _history.SetPinnedAsync(10, 6, true, Arg.Any<CancellationToken>()).Returns(SearchHistoryWriteResult.NotFound);
+        var pin = new PinSearchHistoryCommand.Handler(_history, _subject);
+        (await pin.Handle(new PinSearchHistoryCommand(5, true), CancellationToken.None)).StatusMessage.ShouldBe(PinSearchHistoryCommand.PinLimitMessage);
+        (await pin.Handle(new PinSearchHistoryCommand(6, true), CancellationToken.None)).StatusMessage.ShouldBe(SearchHistoryMessages.NotFound);
+
+        _history.DeleteAsync(10, 7, Arg.Any<CancellationToken>()).Returns(SearchHistoryWriteResult.Ok);
+        (await new DeleteSearchHistoryCommand.Handler(_history, _subject).Handle(new DeleteSearchHistoryCommand(7), CancellationToken.None))
+            .Data.ShouldBeTrue();
+        _history.ClearAsync(10, Arg.Any<CancellationToken>()).Returns(4);
+        (await new ClearSearchHistoryCommand.Handler(_history, _subject).Handle(new ClearSearchHistoryCommand(), CancellationToken.None))
+            .Data.ShouldBe(4);
+
+        new PinSearchHistoryCommand(5, true).AuditSummary.ShouldBe("investigation:search-history:5:pin");
+        new PinSearchHistoryCommand(5, false).AuditSummary.ShouldBe("investigation:search-history:5:unpin");
+        new DeleteSearchHistoryCommand(7).AuditSummary.ShouldBe("investigation:search-history:7:delete");
+        new ClearSearchHistoryCommand().AuditSummary.ShouldBe("investigation:search-history:clear");
+        new DeleteSearchHistoryCommand(7).AuditAction.ShouldBe(AuditAction.Modify);
+
+        // Без определённого сотрудника — пустая история и ни одного изменения.
+        _subject.GetCurrentUserIdAsync(Arg.Any<CancellationToken>()).Returns((int?)null);
+        (await new ListSearchHistoryQuery.Handler(_history, _subject, _accessProvider).Handle(new ListSearchHistoryQuery(), CancellationToken.None))
+            .Data.ShouldBeEmpty();
+        (await pin.Handle(new PinSearchHistoryCommand(5, true), CancellationToken.None)).StatusMessage.ShouldBe(SearchHistoryMessages.NotFound);
+    }
+
     // ---------------- страница ----------------
 
     [Fact(DisplayName = "Состояние страницы в адресе: умолчания не пишутся; виды и отдел читаются обратно; мусор — умолчание")]
@@ -229,7 +290,8 @@ public sealed class UnifiedSearchTests
     }
 
     private async Task<ISC.AI.Abstractions.Application.ResponseDto<UnifiedSearchResult>> HandleAsync(UnifiedSearchQuery query) =>
-        await new UnifiedSearchQuery.Handler(_cases, _persons, _requisites, _reports, _caseDocuments, _documents, _media, _accessProvider)
+        await new UnifiedSearchQuery.Handler(
+                _cases, _persons, _requisites, _reports, _caseDocuments, _documents, _media, _accessProvider, _subject, _history)
             .Handle(query, CancellationToken.None);
 
     private static CaseRow Case(int id, string number, string title, string? task = null) =>
