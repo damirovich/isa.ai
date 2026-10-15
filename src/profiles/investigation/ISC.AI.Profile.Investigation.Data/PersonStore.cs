@@ -544,8 +544,54 @@ public sealed class PersonStore(
         return rows.OrderBy(r => found.IndexOf(r.Id)).ToList();
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Совпадение по имени и псевдониму — как у <see cref="SearchAsync"/> (ILIKE по тексту с «ё» → «е»); дата
+    /// рождения — точная, год — по году рождения анкеты либо году полной даты. Область — пересечение решётки
+    /// фигуранта (<see cref="PersonAccess"/>) и дел области поиска: фигурант дела вне области не выдаётся, даже если
+    /// доступен.
+    /// </remarks>
+    public async Task<IReadOnlyList<PersonRow>> SearchInCasesAsync(
+        SearchTerms terms, IReadOnlyCollection<int> caseIds, int limit, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(terms);
+        ArgumentNullException.ThrowIfNull(caseIds);
+        ArgumentNullException.ThrowIfNull(access);
+        if (!terms.IsSearchable || caseIds.Count == 0 || limit <= 0)
+        {
+            return [];
+        }
+
+        var role = await ResolveRoleAsync(access, cancellationToken);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var ids = caseIds.ToArray();
+        var pattern = "%" + EscapeLike(terms.Text) + "%";
+        var date = terms.Date;
+        var year = terms.Year;
+        var found = await AccessiblePersons(db, access, role)
+            .Where(p => ids.Contains(p.CaseId))
+            .Where(p => EF.Functions.ILike(p.DisplayName.Replace("ё", "е").Replace("Ё", "Е"), pattern, "\\")
+                || (p.Alias != null && EF.Functions.ILike(p.Alias.Replace("ё", "е").Replace("Ё", "Е"), pattern, "\\"))
+                || (date != null && p.BirthDate == date)
+                || (year != null && (p.BirthYear == year || (p.BirthDate != null && p.BirthDate.Value.Year == year))))
+            .OrderBy(p => p.DisplayName)
+            .ThenBy(p => p.Id)
+            .Select(p => p.Id)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+        if (found.Count == 0)
+        {
+            return [];
+        }
+
+        var rows = await ProjectRows(AccessiblePersons(db, access, role).Where(p => found.Contains(p.Id)), db)
+            .ToListAsync(cancellationToken);
+        return rows.OrderBy(r => found.IndexOf(r.Id)).ToList();
+    }
+
     // Экранирование подстановочных знаков LIKE: «%», «_» и сам экранирующий «\» в запросе — буквальные.
-    private static string EscapeLike(string text) =>
+    internal static string EscapeLike(string text) =>
         text.Replace("\\", "\\\\", StringComparison.Ordinal)
             .Replace("%", "\\%", StringComparison.Ordinal)
             .Replace("_", "\\_", StringComparison.Ordinal);

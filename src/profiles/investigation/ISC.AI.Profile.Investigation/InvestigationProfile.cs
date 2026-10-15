@@ -77,6 +77,11 @@ public sealed class InvestigationProfile : IProfile
         new ModuleDescriptor("cases", "/cases", "Дела", Icons.Material.Filled.FolderOpen,
             typeof(Cases), ReadPolicy, GroupCases),
 
+        // Единый поиск (ТФ-ПСК-01, ADR-0048): одна строка — дела, фигуранты, госномера, адреса, сводки, расшифровки
+        // и документы дел, в пределах дел субъекта.
+        new ModuleDescriptor("search", "/search", "Поиск", Icons.Material.Filled.ManageSearch,
+            typeof(Search), ReadPolicy, GroupCases),
+
         // --- Секция «Медиа»: страницы объявляет САМ пакет (носители, «Поиск по лицу», «Верификация»);
         // профиль лишь включает их в реестр (ADR-0017/0022).
         .. MediaModule.Modules,

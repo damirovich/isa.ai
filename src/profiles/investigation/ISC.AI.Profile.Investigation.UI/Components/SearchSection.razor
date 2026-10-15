@@ -1,0 +1,30 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@* Раздел выдачи единого поиска (ADR-0048): заголовок со счётчиком и пометка, когда показаны не все найденные. *@
+
+<MudPaper Outlined="true" Class="pa-3 mb-4">
+    <div class="d-flex align-center gap-2 mb-2">
+        <MudText Typo="Typo.subtitle1">@Title</MudText>
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@Count</MudChip>
+        @if (Truncated)
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                показаны первые @Count — уточните запрос или выберите отдел
+            </MudText>
+        }
+    </div>
+    @ChildContent
+</MudPaper>
+
+@code {
+    /// <summary>Название раздела.</summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+
+    /// <summary>Сколько строк в разделе.</summary>
+    [Parameter] public int Count { get; set; }
+
+    /// <summary>Найдено больше предела — показаны первые.</summary>
+    [Parameter] public bool Truncated { get; set; }
+
+    /// <summary>Таблица раздела.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

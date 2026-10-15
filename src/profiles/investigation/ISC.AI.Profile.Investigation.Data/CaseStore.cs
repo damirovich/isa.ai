@@ -336,6 +336,36 @@ public sealed class CaseStore(
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, int>> MapMediaAssetsAsync(
+        IReadOnlyCollection<int> assetIds, IReadOnlyCollection<int> caseIds, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(assetIds);
+        ArgumentNullException.ThrowIfNull(caseIds);
+        if (assetIds.Count == 0 || caseIds.Count == 0)
+        {
+            return new Dictionary<int, int>();
+        }
+
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var assets = assetIds.ToArray();
+        var cases = caseIds.ToArray();
+        var links = await db.CaseMediaLinks.AsNoTracking()
+            .Where(l => assets.Contains(l.MediaAssetId) && cases.Contains(l.CaseId))
+            .OrderBy(l => l.Id)
+            .Select(l => new { l.MediaAssetId, l.CaseId })
+            .ToListAsync(cancellationToken);
+
+        // Носитель после дедупликации по хешу бывает привязан к нескольким делам — берётся первая привязка.
+        var map = new Dictionary<int, int>();
+        foreach (var link in links)
+        {
+            map.TryAdd(link.MediaAssetId, link.CaseId);
+        }
+
+        return map;
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyCollection<int>> ListMediaAssetIdsAsync(IReadOnlyCollection<int> caseIds, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(caseIds);

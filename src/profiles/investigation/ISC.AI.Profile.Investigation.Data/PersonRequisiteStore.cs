@@ -209,6 +209,95 @@ public sealed class PersonRequisiteStore(
 
     // Роль для правила видимости дел: без права «Дашборд и реестр дел» (матрица доступа, ADR-0032) — null, и
     // CaseAccessRule вернёт пусто (ТБ-012/021).
+    /// <inheritdoc />
+    /// <remarks>
+    /// Госномер сравнивается по НОРМАЛИЗОВАННОМУ значению (ТО-мат-11) подстрокой — регистр, пробелы, дефисы и
+    /// кириллические омоглифы на совпадение не влияют; марка и модель — подстрокой без учёта регистра. Строка
+    /// транспорта — под своим floor'ом и политикой, фигурант — по общему правилу <see cref="PersonAccess"/> и в делах
+    /// области поиска.
+    /// </remarks>
+    public async Task<IReadOnlyList<VehicleSearchRow>> SearchVehiclesAsync(
+        SearchTerms terms, IReadOnlyCollection<int> caseIds, int limit, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(terms);
+        ArgumentNullException.ThrowIfNull(caseIds);
+        ArgumentNullException.ThrowIfNull(access);
+        if (!terms.IsSearchable || caseIds.Count == 0 || limit <= 0)
+        {
+            return [];
+        }
+
+        var role = await ResolveRoleAsync(access, cancellationToken);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var ids = caseIds.ToArray();
+        var persons = PersonAccess.Accessible(db, access, policy, role).Where(p => ids.Contains(p.CaseId));
+        var textPattern = "%" + PersonStore.EscapeLike(terms.Text) + "%";
+        var platePattern = terms.Plate is { } plate ? "%" + PersonStore.EscapeLike(plate) + "%" : null;
+        var rows = await db.PersonVehicles.AsNoTracking()
+            .Where(BaselineAccess.Filter<PersonVehicle>(access))
+            .Where(policy.BuildFilter<PersonVehicle>(access))
+            .Where(v => (platePattern != null && v.PlateNormalized != null && EF.Functions.Like(v.PlateNormalized, platePattern, "\\"))
+                || (v.Make != null && EF.Functions.ILike(v.Make, textPattern, "\\"))
+                || (v.Model != null && EF.Functions.ILike(v.Model, textPattern, "\\")))
+            .Join(persons, v => v.PersonId, p => p.Id, (v, p) => new { Vehicle = v, p.CaseId, p.DisplayName })
+            .OrderBy(x => x.Vehicle.PlateNormalized)
+            .ThenBy(x => x.Vehicle.Id)
+            .Take(limit)
+            .Select(x => new VehicleSearchRow(
+                x.Vehicle.PersonId, x.CaseId, x.DisplayName,
+                new PersonVehicleRow(x.Vehicle.Id, x.Vehicle.PersonId, x.Vehicle.PlateNumber, x.Vehicle.Make, x.Vehicle.Model,
+                    x.Vehicle.Color, x.Vehicle.Notes)))
+            .ToListAsync(cancellationToken);
+        return rows;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Адрес сравнивается по НОРМАЛИЗОВАННОМУ значению (ТО-мат-11, «улица» = «ул.»): строки адресов фигурантов
+    /// (под своим floor'ом и политикой) и место жительства из анкеты (поле самого фигуранта). Сначала адреса, затем
+    /// анкеты; всего не больше <paramref name="limit"/>.
+    /// </remarks>
+    public async Task<IReadOnlyList<AddressSearchRow>> SearchAddressesAsync(
+        SearchTerms terms, IReadOnlyCollection<int> caseIds, int limit, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(terms);
+        ArgumentNullException.ThrowIfNull(caseIds);
+        ArgumentNullException.ThrowIfNull(access);
+        if (terms.Address is not { } address || caseIds.Count == 0 || limit <= 0)
+        {
+            return [];
+        }
+
+        var role = await ResolveRoleAsync(access, cancellationToken);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var ids = caseIds.ToArray();
+        var persons = PersonAccess.Accessible(db, access, policy, role).Where(p => ids.Contains(p.CaseId));
+        var pattern = "%" + PersonStore.EscapeLike(address) + "%";
+
+        var fromAddresses = await db.PersonAddresses.AsNoTracking()
+            .Where(BaselineAccess.Filter<PersonAddress>(access))
+            .Where(policy.BuildFilter<PersonAddress>(access))
+            .Where(a => EF.Functions.Like(a.TextNormalized, pattern, "\\"))
+            .Join(persons, a => a.PersonId, p => p.Id, (a, p) => new { Address = a, p.CaseId, p.DisplayName })
+            .OrderBy(x => x.Address.TextNormalized)
+            .ThenBy(x => x.Address.Id)
+            .Take(limit)
+            .Select(x => new AddressSearchRow(x.Address.PersonId, x.CaseId, x.DisplayName, (AddressKind?)x.Address.Kind, x.Address.Text))
+            .ToListAsync(cancellationToken);
+
+        var fromQuestionnaires = await persons
+            .Where(p => p.Residence != null && p.ResidenceNormalized != null && EF.Functions.Like(p.ResidenceNormalized, pattern, "\\"))
+            .OrderBy(p => p.ResidenceNormalized)
+            .ThenBy(p => p.Id)
+            .Take(limit)
+            .Select(p => new AddressSearchRow(p.Id, p.CaseId, p.DisplayName, null, p.Residence!))
+            .ToListAsync(cancellationToken);
+
+        return fromAddresses.Concat(fromQuestionnaires).Take(limit).ToList();
+    }
+
     private Task<InvestigationRole?> ResolveRoleAsync(AccessContext access, CancellationToken cancellationToken) =>
         PermissionRule.ResolveCaseViewerAsync(roles, access.NumericSubjectId, cancellationToken);
 }

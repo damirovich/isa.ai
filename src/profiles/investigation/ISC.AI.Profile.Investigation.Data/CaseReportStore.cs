@@ -72,6 +72,44 @@ public sealed class CaseReportStore(
     }
 
     /// <inheritdoc />
+    /// <remarks>Совпадение — как у <see cref="ListByCaseAsync"/>: подстрока по нормализованному тексту полей бланка.</remarks>
+    public async Task<IReadOnlyList<CaseReportRow>> SearchAsync(
+        SearchTerms terms, IReadOnlyCollection<int> caseIds, int limit, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(terms);
+        ArgumentNullException.ThrowIfNull(caseIds);
+        ArgumentNullException.ThrowIfNull(access);
+        if (!terms.IsSearchable || caseIds.Count == 0 || limit <= 0)
+        {
+            return [];
+        }
+
+        var role = await ResolveRoleAsync(access, cancellationToken);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var ids = caseIds.ToArray();
+        var needle = terms.Text;
+        var rows = await Visible(db, access, role, tracking: false)
+            .Where(r => ids.Contains(r.CaseId) && r.SearchText.Contains(needle))
+            .OrderByDescending(r => r.ReportDate).ThenByDescending(r => r.CreatedAt).ThenByDescending(r => r.Id)
+            .Take(limit)
+            .Select(r => new
+            {
+                r.Id, r.CaseId, r.Kind, r.ReportDate, r.PersonId,
+                PersonName = db.Persons.Where(p => p.Id == r.PersonId).Select(p => p.DisplayName).FirstOrDefault(),
+                r.IsActive, r.CreatedAt, r.CreatedByUserId, r.CurrentRevision,
+            })
+            .ToListAsync(cancellationToken);
+
+        var now = Now();
+        return rows
+            .Select(r => new CaseReportRow(
+                r.Id, r.CaseId, r.Kind, r.ReportDate, r.PersonId, r.PersonName,
+                options.StateAt(AsUtc(r.CreatedAt), r.IsActive, now), AsUtc(r.CreatedAt), r.CreatedByUserId, r.CurrentRevision))
+            .ToList();
+    }
+
+    /// <inheritdoc />
     public async Task<CaseReportDetails?> GetAsync(int reportId, AccessContext access, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(access);

@@ -24,11 +24,12 @@ public sealed class InvestigationModuleVisibilityTests
         InvestigationModuleVisibility.Rules.Keys.Where(id => !AllIds.Contains(id)).ShouldBeEmpty();
     }
 
-    [Fact(DisplayName = "Верификатор: дашборд, дела, верификация, документы и отчёты — без поиска по лицу и администрирования")]
+    [Fact(DisplayName = "Верификатор: дашборд, дела, единый поиск, верификация, документы и отчёты — без поиска по лицу и администрирования")]
     public void Verifier_sees_only_own_sections()
     {
+        // «Поиск» (ADR-0048) открыт тому, кому открыт реестр дел: ищет только в его делах.
         Visible(InvestigationRole.Verifier).Order()
-            .ShouldBe(new[] { "cases", "dashboard", "docflow-documents", "docflow-reports", "media-verification" }.Order());
+            .ShouldBe(new[] { "cases", "dashboard", "docflow-documents", "docflow-reports", "media-verification", "search" }.Order());
     }
 
     [Fact(DisplayName = "Администратор видит всё")]
