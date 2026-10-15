@@ -83,6 +83,9 @@ public static class InvestigationPermissions
     /// <summary>Перенос баз Access: задания, объекты и связи пачкой (ADR-0043).</summary>
     public const string CasesImport = "cases.import";
 
+    /// <summary>Чат и поиск по смыслу по материалам дел — локальная модель (ADR-0051).</summary>
+    public const string CasesChat = "cases.chat";
+
     /// <summary>Загрузка материалов в дело.</summary>
     public const string MediaUpload = "media.upload";
 
@@ -150,6 +153,9 @@ public static class InvestigationPermissions
         new(CasesImport, PermissionSection.Cases, "Перенос баз Access",
             "Задания, объекты и связи из базы отдела пачкой: гриф и подразделение — выбор оператора, в пределах допуска",
             Roles(InvestigationRole.Administrator)),
+        new(CasesChat, PermissionSection.Cases, "Чат по материалам дел",
+            "Вопросы к документам, расшифровкам, сводкам и сведениям доступных дел и поиск по смыслу: локальная модель отвечает только по найденным фрагментам, со ссылками",
+            Roles(InvestigationRole.Investigator, InvestigationRole.Head, InvestigationRole.Administrator)),
 
         new(MediaUpload, PermissionSection.Media, "Загрузка материалов",
             "Фото, видео и аудио в дело",
@@ -216,6 +222,7 @@ public static class InvestigationPermissions
         new("dashboard", "Дашборд", [CasesView]),
         new("cases", "Дела", [CasesView]),
         new("search", "Поиск", [CasesView]),
+        new("chat", "Чат по материалам", [CasesChat]),
         new("media-search", "Поиск по лицу", [MediaSearch]),
         new("media-verification", "Верификация", [VerificationExpert, VerificationVerifier, VerificationResolve]),
         new("media-import", "Импорт архива", [MediaImport]),

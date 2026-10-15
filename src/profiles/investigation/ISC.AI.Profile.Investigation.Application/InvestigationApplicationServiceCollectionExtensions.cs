@@ -1,7 +1,9 @@
 using FluentValidation;
+using ISC.AI.Abstractions.Grounding;
 using ISC.AI.Profile.Investigation.Domain.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ISC.AI.Profile.Investigation.Application;
 
@@ -40,6 +42,14 @@ public static class InvestigationApplicationServiceCollectionExtensions
         // хранилищами, что ручной ввод (чтение базы драйвером ACE регистрирует слой данных).
         services.AddScoped<Features.AccessImport.AccessImportFiles>();
         services.AddScoped<Features.AccessImport.AccessImporter>();
+
+        // Ссылки в ответах чата по документам дела (ADR-0051, ТБ-040): профиль поставляет извлечение номеров, статей и
+        // кодексов вместо заглушки ядра «ссылок нет»; саму проверку по поданным фрагментам ведёт ядровой валидатор.
+        services.Replace(ServiceDescriptor.Singleton<ICitationExtractor, Features.CaseChat.CaseCitationExtractor>());
+        services.Replace(ServiceDescriptor.Singleton<ICitationNormalizer, Features.CaseChat.CaseCitationNormalizer>());
+
+        // Материалы области чата (ADR-0051): документы дел, расшифровки записей, сводки и справки, сведения дел.
+        services.AddScoped<Features.CaseChat.ChatMaterialResolver>();
 
         services.AddValidatorsFromAssembly(typeof(InvestigationApplicationServiceCollectionExtensions).Assembly);
         return services;

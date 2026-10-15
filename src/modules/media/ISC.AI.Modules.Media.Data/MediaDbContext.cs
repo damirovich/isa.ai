@@ -58,6 +58,9 @@ public class MediaDbContext(DbContextOptions<MediaDbContext> options) : AuditedD
     /// <summary>Строки заданий импорта — файлы архива (ADR-0041).</summary>
     public DbSet<MediaImportItem> ImportItems { get; set; } = null!;
 
+    /// <summary>Мостик расшифровка ↔ документ корпуса ядра (ADR-0051).</summary>
+    public DbSet<TranscriptIndexLink> TranscriptIndexLinks { get; set; } = null!;
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

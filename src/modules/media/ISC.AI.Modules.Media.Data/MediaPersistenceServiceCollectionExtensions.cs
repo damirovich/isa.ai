@@ -65,6 +65,12 @@ public static class MediaPersistenceServiceCollectionExtensions
         // Задания пакетного импорта архива (ADR-0041): переживают перезапуск, строки — под решёткой смотрящего.
         services.AddScoped<IMediaImportStore, MediaImportStore>();
 
+        // Расшифровки в корпусе ядра для поиска по смыслу и чата по материалам (ADR-0051). Выключает только явное
+        // «false»: без индексации чат не видит расшифровок, а это главный материал отдела технических мероприятий.
+        services.AddSingleton(new TranscriptCorpusOptions(
+            !bool.TryParse(configuration[TranscriptCorpusOptions.EnabledKey], out var corpusEnabled) || corpusEnabled));
+        services.AddScoped<ITranscriptCorpus, TranscriptCorpus>();
+
         return services;
     }
 }

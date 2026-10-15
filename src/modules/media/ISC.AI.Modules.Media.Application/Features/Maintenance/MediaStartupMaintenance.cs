@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
+using ISC.AI.Abstractions.BackgroundTasks;
 using ISC.AI.Modules.Media.Domain.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -15,7 +16,8 @@ namespace ISC.AI.Modules.Media.Application.Features.Maintenance;
 /// аварийно остановленного прежнего процесса (<see cref="MediaTempFiles.SweepStale"/>, ТБ-064); (2) переводит
 /// носители, чьи задачи пропали вместе с очередью в памяти, из «в очереди / в работе» в «ошибка»
 /// (<see cref="IMediaStore.RecoverInterruptedAsync"/>) — иначе они висели бы так навсегда, а поиск по
-/// расшифровкам дела молча не находил бы в них слов.
+/// расшифровкам дела молча не находил бы в них слов; (3) ставит в фоновую очередь дозаполнение корпуса ядра
+/// расшифровками, которых там нет или которые устарели (ADR-0051, <see cref="TranscriptCorpusBackfill"/>).
 /// </summary>
 /// <remarks>
 /// Работа — в <see cref="StartAsync"/>, а не в фоне: хост дожидается её до начала приёма запросов, поэтому ни
@@ -34,6 +36,7 @@ public sealed class MediaStartupMaintenance(
     {
         SweepTempFiles();
         await RecoverInterruptedAsync(cancellationToken);
+        await EnqueueCorpusBackfillAsync(cancellationToken);
     }
 
     /// <inheritdoc />
@@ -73,6 +76,23 @@ public sealed class MediaStartupMaintenance(
         {
             // БД недоступна на старте — не роняем хост: носители останутся в прежнем статусе до следующего старта.
             MediaMaintenanceLog.RecoveryFailed(logger, exception);
+        }
+    }
+
+    private async Task EnqueueCorpusBackfillAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Очередь — служба ядра; без неё (тесты пакета) дозаполнения нет. Сами партии — в фоне, старт не ждёт.
+            using var scope = scopeFactory.CreateScope();
+            if (scope.ServiceProvider.GetService<IBackgroundTaskQueue>() is { } queue)
+            {
+                await TranscriptCorpusBackfill.EnqueueAsync(queue, cancellationToken);
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            MediaMaintenanceLog.CorpusBackfillFailed(logger, exception);
         }
     }
 

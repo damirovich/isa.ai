@@ -109,6 +109,21 @@ public sealed class CasePurgeScenarioTests
             Arg.Any<CancellationToken>());
     }
 
+    [Fact(DisplayName = "ADR-0051: диалоги чата по документам дела названы в акте — они уходят вместе с делом")]
+    public async Task Act_names_case_chats()
+    {
+        _cases.GetCompositionAsync(CaseId, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
+            .Returns(new CaseComposition(
+                CaseId, Number, Classification: 2, DivisionId: 5, ExclusiveAssetIds: [], SharedAssetIds: [],
+                Persons: 0, ReferencePhotos: 0, Appearances: 0, Authorizations: 0, DocumentLinks: 1, Chats: 3));
+
+        await SendAsync(Number, "Приказ № 3");
+
+        await _audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.PayloadSensitive!.Contains("диалоги чата по документам 3", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
     [Theory(DisplayName = "ADR-0025: уничтожать может ТОЛЬКО Администратор — остальные и субъект без роли получают отказ, ничего не читается и не удаляется")]
     [InlineData(InvestigationRole.Investigator)]
     [InlineData(InvestigationRole.Head)]

@@ -32,4 +32,8 @@ internal static partial class MediaMaintenanceLog
     [LoggerMessage(Level = LogLevel.Error,
         Message = "Восстановление статусов носителей при старте не выполнено (БД недоступна?) — старт не прерван; носители, прерванные перезапуском, остаются «в очереди / в работе».")]
     public static partial void RecoveryFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Error,
+        Message = "Дозаполнение поиска ИИ расшифровками (корпус ядра, ADR-0051) при старте не поставлено — старт не прерван; повтор при следующем старте.")]
+    public static partial void CorpusBackfillFailed(ILogger logger, Exception exception);
 }

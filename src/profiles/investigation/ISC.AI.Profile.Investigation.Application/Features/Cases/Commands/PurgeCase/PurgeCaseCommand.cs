@@ -159,8 +159,14 @@ public sealed record PurgeCaseCommand(int CaseId, string ConfirmationNumber, str
               .Append(" со всеми производными; история поисков дела; фигуранты ").Append(c.Persons.ToString(inv))
               .Append(", эталоны ").Append(c.ReferencePhotos.ToString(inv))
               .Append(", появления ").Append(c.Appearances.ToString(inv))
-              .Append(", основания поиска ").Append(c.Authorizations.ToString(inv))
-              .AppendLine("; запись дела.");
+              .Append(", основания поиска ").Append(c.Authorizations.ToString(inv));
+            if (c.Chats > 0)
+            {
+                // Переписка чата по документам дела (ADR-0051) — материал дела: уходит вместе с ним.
+                sb.Append(", диалоги чата по документам ").Append(c.Chats.ToString(inv));
+            }
+
+            sb.AppendLine("; запись дела.");
             sb.Append("Сохраняются: документы документооборота ").Append(c.DocumentLinks.ToString(inv))
               .Append(" (снимается только привязка к делу); носители других дел ").Append(c.SharedAssetIds.Count.ToString(inv))
               .Append(" [").Append(string.Join(",", c.SharedAssetIds.Select(id => id.ToString(inv)))).Append(']')

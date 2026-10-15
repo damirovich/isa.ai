@@ -24,6 +24,10 @@ namespace ISC.AI.AI.Retrieval;
 /// <see cref="IAccessPolicy"/> может только СУЖАТЬ (ADR-0014). По умолчанию возвращаются только
 /// актуальные источники (<c>IsCurrent</c>, ADR-0013). Эмбеддинг запроса — отдельной моделью роли
 /// <see cref="ModelRole.Embeddings"/> (ADR-0011). Контекст создаётся через IDbContextFactory (ТС-008).
+/// <para>ОБЛАСТЬ (<see cref="RetrievalFilter.DocumentIds"/>, ADR-0051): поиск только среди фрагментов заданных
+/// документов идёт ТОЧНЫМ перебором, а не по HNSW-индексу. Индекс отдаёт ef_search ближайших по всему корпусу и лишь
+/// потом отбрасывает чужие — при узкой области (документы одного дела) их среди ближайших может не оказаться вовсе,
+/// и ответ «в документах дела ничего нет» был бы ложным. Область мала (десятки документов), перебор дёшев.</para>
 /// </remarks>
 public sealed class PgVectorRetriever(
     IDbContextFactory<CoreDbContext> contextFactory,
@@ -45,6 +49,13 @@ public sealed class PgVectorRetriever(
             throw new AccessContextRequiredException();
         }
 
+        // Пустая область — пустая выдача, а не весь корпус (см. RetrievalFilter.DocumentIds).
+        var scope = filter?.DocumentIds?.Distinct().ToArray();
+        if (scope is { Length: 0 })
+        {
+            return [];
+        }
+
         // Векторизация запроса отдельной моделью эмбеддингов (роль Embeddings). Запрос оборачивается
         // query-префиксом: EmbeddingGemma кодирует запрос и документ асимметрично (Э4-09, ADR-0011).
         var embeddings = await embeddingGenerator.GenerateAsync(
@@ -62,6 +73,14 @@ public sealed class PgVectorRetriever(
         await db.Database.ExecuteSqlAsync(
             $"SELECT set_config('hnsw.ef_search', {efSearch}, true)", cancellationToken);
 
+        // Узкая область — точный перебор (см. remarks): обход индексом в этой транзакции запрещён, битовые карты
+        // B-tree для отбора фрагментов области остаются. SET LOCAL — только на эту транзакцию.
+        if (scope is not null)
+        {
+            await db.Database.ExecuteSqlAsync(
+                $"SELECT set_config('enable_indexscan', 'off', true)", cancellationToken);
+        }
+
         // PRE-FILTER (ТБ-020): floor ядра (гриф ≤ допуск ∧ подразделение ∈ разрешённых) + сужение профиля.
         IQueryable<EmbeddingEntity> candidates = db.Embeddings
             .Where(BaselineAccess.Filter<EmbeddingEntity>(access))
@@ -71,6 +90,12 @@ public sealed class PgVectorRetriever(
         if (filter is null || !filter.IncludeSuperseded)
         {
             candidates = candidates.Where(e => e.IsCurrent);
+        }
+
+        // Область — ПОСЛЕ решётки, не вместо неё: фрагмент области вне допуска отсеян выше.
+        if (scope is not null)
+        {
+            candidates = candidates.Where(e => scope.Contains(e.Chunk!.DocumentId));
         }
 
         // Дистанция ВЫБРАННОЙ метрикой (ТО-мат-04: ранжирование задаётся конфигурацией) — вычисляется ОДИН

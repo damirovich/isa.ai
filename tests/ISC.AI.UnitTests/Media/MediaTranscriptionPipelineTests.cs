@@ -98,6 +98,32 @@ public sealed class MediaTranscriptionPipelineTests : IDisposable
         Path.GetFileName(_transcriber.SourcePath).ShouldStartWith(MediaTempFiles.SpeechPrefix);
     }
 
+    [Fact(DisplayName = "ADR-0051: готовая расшифровка уходит в поиск ИИ; сбой индексации расшифровку неудачной не делает")]
+    public async Task Completed_transcript_is_indexed_for_chat()
+    {
+        _transcriber.Segments = [new TranscriptSegmentDraft(0, 0, 900, "алло")];
+        var corpus = Substitute.For<ITranscriptCorpus>();
+
+        (await Pipeline(corpus).TranscribeAsync(AssetId)).Success.ShouldBeTrue();
+        await corpus.Received(1).IndexAsync(AssetId, Arg.Any<CancellationToken>());
+
+        corpus.IndexAsync(AssetId, Arg.Any<CancellationToken>()).Returns<TranscriptIndexResult>(_ => throw new InvalidOperationException("узел ИИ недоступен"));
+        var result = await Pipeline(corpus).TranscribeAsync(AssetId);
+        result.Success.ShouldBeTrue();
+        await _store.DidNotReceive().FailTranscriptionAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "ADR-0051: неудачная расшифровка в поиск ИИ не индексируется")]
+    public async Task Failed_transcript_is_not_indexed()
+    {
+        _transcriber.FailAfterSegments = new InvalidOperationException("модель не загрузилась");
+        var corpus = Substitute.For<ITranscriptCorpus>();
+
+        (await Pipeline(corpus).TranscribeAsync(AssetId)).Success.ShouldBeFalse();
+
+        await corpus.DidNotReceiveWithAnyArgs().IndexAsync(default, default);
+    }
+
     [Fact(DisplayName = "Имя исходника с кавычкой в расширении (сохранён до фильтра) → временная копия с расширением .bin: командная строка ffmpeg не разрывается")]
     public async Task Unsafe_stored_extension_becomes_bin_in_temp_copy()
     {
@@ -245,8 +271,8 @@ public sealed class MediaTranscriptionPipelineTests : IDisposable
         }
     }
 
-    private MediaTranscriptionPipeline Pipeline() =>
-        new(_store, _files, _transcriber, _audit, _tempFiles, NullLogger<MediaTranscriptionPipeline>.Instance);
+    private MediaTranscriptionPipeline Pipeline(ITranscriptCorpus? corpus = null) =>
+        new(_store, _files, _transcriber, _audit, _tempFiles, NullLogger<MediaTranscriptionPipeline>.Instance, corpus);
 
     /// <summary>
     /// Фейк распознавателя: отдаёт заданные фрагменты, запоминает путь к временной копии (и проверяет, что она

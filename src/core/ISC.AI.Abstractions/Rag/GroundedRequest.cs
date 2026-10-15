@@ -1,5 +1,6 @@
 using ISC.AI.Abstractions.Conversations;
 using ISC.AI.Abstractions.Enums;
+using ISC.AI.Abstractions.Retrieval;
 
 namespace ISC.AI.Abstractions.Rag;
 
@@ -15,9 +16,14 @@ namespace ISC.AI.Abstractions.Rag;
 /// системных правил и ДО текущего запроса; грунтовка нового ответа по-прежнему выполняется на СВЕЖИХ
 /// фрагментах текущего запроса. <see langword="null"/> — одноходовый запрос (без истории).
 /// </param>
+/// <param name="Filter">
+/// Ограничения извлечения (например, область — документы одного дела, ADR-0051). Только сужают выдачу: фильтр доступа
+/// ядро применяет в любом случае (ТБ-020). <see langword="null"/> — весь доступный корпус, только актуальные источники.
+/// </param>
 public sealed record GroundedRequest(
     string Query,
     ModelRole Role = ModelRole.Analysis,
     int TopK = 10,
     string? TaskPrompt = null,
-    IReadOnlyList<ChatTurn>? History = null);
+    IReadOnlyList<ChatTurn>? History = null,
+    RetrievalFilter? Filter = null);
