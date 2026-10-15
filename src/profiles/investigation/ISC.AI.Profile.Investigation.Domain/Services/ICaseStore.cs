@@ -249,7 +249,7 @@ public interface ICaseStore
 
     /// <summary>
     /// Физически удалить дело со всем, что есть в схеме профиля: фигуранты, эталоны, появления, привязки
-    /// носителей и документов, основания поиска, акт закрытия (ADR-0025). Доступ — как у
+    /// носителей и документов, основания поиска, акт закрытия (ADR-0025), диалоги чата по делу (ADR-0051). Доступ — как у
     /// <see cref="SetStatusAsync"/>: дело вне допуска неотличимо от несуществующего.
     /// </summary>
     /// <remarks>Носители и история поисков — в схеме «Медиа» и удаляются ДО этого вызова пакетом «Медиа».</remarks>
@@ -268,6 +268,7 @@ public interface ICaseStore
 /// <param name="Appearances">Подтверждённые появления фигурантов.</param>
 /// <param name="Authorizations">Основания поиска.</param>
 /// <param name="DocumentLinks">Привязанные документы документооборота — САМИ ДОКУМЕНТЫ СОХРАНЯЮТСЯ.</param>
+/// <param name="Chats">Диалоги чата по документам дела (ADR-0051) — уничтожаются с делом.</param>
 public sealed record CaseComposition(
     int CaseId,
     string Number,
@@ -279,7 +280,8 @@ public sealed record CaseComposition(
     int ReferencePhotos,
     int Appearances,
     int Authorizations,
-    int DocumentLinks);
+    int DocumentLinks,
+    int Chats = 0);
 
 /// <summary>Данные исполненного регламента для записи акта (ТФ-ДЕЛ-04).</summary>
 /// <param name="CaseId">Дело.</param>

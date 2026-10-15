@@ -8,4 +8,10 @@ namespace ISC.AI.Abstractions.Retrieval;
 /// Включать ли неактуальные источники (<c>IsCurrent = false</c>, например утратившие силу редакции
 /// для явного показа с пометкой ТЭ-003). По умолчанию <c>false</c> — только актуальные.
 /// </param>
-public sealed record RetrievalFilter(bool IncludeSuperseded = false);
+/// <param name="DocumentIds">
+/// Область извлечения — документы корпуса (<c>core.document.id</c>), например документы одного дела. Только СУЖАЕТ:
+/// фрагмент из области, но вне допуска, всё равно не выдаётся (ТБ-020). <see langword="null"/> — без ограничения;
+/// пустой набор — пустая выдача (у вызывающего в области нет ни одного документа), а не «весь корпус»: эти два
+/// случая различаются намеренно, иначе пустая область молча расширилась бы до всего корпуса.
+/// </param>
+public sealed record RetrievalFilter(bool IncludeSuperseded = false, IReadOnlyCollection<int>? DocumentIds = null);

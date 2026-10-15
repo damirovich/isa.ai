@@ -28,6 +28,17 @@ public sealed record DocumentBrief(
     short Classification);
 
 /// <summary>
+/// Документ, текст которого есть в корпусе ядра (мостик <c>document_index_link</c>): для поиска и чата по документам
+/// чужого реестра (например, документы дела профиля, ADR-0051) — ограничить извлечение именно этими документами.
+/// </summary>
+/// <param name="DocumentId">Документ документооборота.</param>
+/// <param name="CoreDocumentId">Актуальная версия документа в корпусе ядра (<c>core.document.id</c>).</param>
+/// <param name="RegNumber">Регистрационный номер (для подписи источника); <see langword="null"/> — не зарегистрирован.</param>
+/// <param name="RegDate">Дата регистрации.</param>
+/// <param name="TypeName">Вид документа.</param>
+public sealed record DocumentCorpusRef(int DocumentId, int CoreDocumentId, string? RegNumber, DateOnly RegDate, string TypeName);
+
+/// <summary>
 /// Разрешение слабых ссылок «по значению» на документы модуля: другой модуль (например, учёт
 /// нарушений профиля — поле «справка-проверка») хранит RegNumber строкой без FK через границу схем
 /// (ТО-инф-06) и через этот порт обогащает свои карточки метаданными документа.
@@ -53,5 +64,13 @@ public interface IDocumentLookup
     /// несуществующие в словаре отсутствуют (ТБ-021). Идентификаторы сверх предела партии игнорируются.
     /// </summary>
     Task<IReadOnlyDictionary<int, DocumentBrief>> ResolveByIdsAsync(
+        IReadOnlyCollection<int> ids, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Корпусные версии документов по идентификаторам — под той же решёткой видимости (ТБ-020/021): недоступные,
+    /// несуществующие и ещё не проиндексированные документы в ответе отсутствуют. Идентификаторы сверх предела
+    /// партии игнорируются.
+    /// </summary>
+    Task<IReadOnlyList<DocumentCorpusRef>> ResolveCorpusAsync(
         IReadOnlyCollection<int> ids, AccessContext access, CancellationToken cancellationToken = default);
 }

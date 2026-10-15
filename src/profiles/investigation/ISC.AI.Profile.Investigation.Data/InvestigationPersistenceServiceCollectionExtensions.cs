@@ -63,6 +63,12 @@ public static class InvestigationPersistenceServiceCollectionExtensions
         services.AddScoped<ICaseDocumentStore, CaseDocumentStore>();
         services.AddSingleton<ICaseReportRenderer, Reports.CaseReportDocxRenderer>();
 
+        // Чат по материалам дел (ADR-0051): свои диалоги видимых дел, каскад от дела; сведения дела и сводки — в корпус
+        // ядра по запросу и фоновым дозаполнением после старта.
+        services.AddScoped<ICaseChatStore, CaseChatStore>();
+        services.AddScoped<ICaseCorpusSync, CaseCorpusSync>();
+        services.AddHostedService<CaseCorpusStartup>();
+
         // Дозаполнение нормализованных реквизитов прежних фигурантов при старте (ТО-мат-11).
         services.AddHostedService<InvestigationStartupMaintenance>();
 

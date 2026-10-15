@@ -86,4 +86,30 @@ public sealed class DocumentLookup(
                 d.Id, d.RegNumber, d.RegDate, d.Type!.Name, d.ShortContent, d.InspectorUserId, d.AggregatedStatus, d.Classification))
             .ToDictionaryAsync(d => d.Id, cancellationToken);
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<DocumentCorpusRef>> ResolveCorpusAsync(
+        IReadOnlyCollection<int> ids, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        ArgumentNullException.ThrowIfNull(access);
+
+        var wanted = ids.Where(id => id > 0).Distinct().Take(MaxBatch).ToList();
+        if (wanted.Count == 0)
+        {
+            return [];
+        }
+
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Решётка документа — тем же предикатом, что список (ТБ-021); мостик к корпусу — внутри схемы docflow.
+        // Без строки мостика документ ещё не проиндексирован (или текст не извлёкся) — в области его нет.
+        var visible = db.Documents.AsNoTracking()
+            .VisibleTo(access, accessPolicy)
+            .Where(d => wanted.Contains(d.Id));
+        return await visible
+            .Join(db.DocumentIndexLinks.AsNoTracking(), d => d.Id, l => l.DocumentId,
+                (d, l) => new DocumentCorpusRef(d.Id, l.CoreDocumentId, d.RegNumber, d.RegDate, d.Type!.Name))
+            .ToListAsync(cancellationToken);
+    }
 }

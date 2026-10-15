@@ -1,5 +1,6 @@
 using System.Globalization;
 using ISC.AI.Abstractions.Audit;
+using ISC.AI.Abstractions.Corpus;
 using ISC.AI.Abstractions.Enums;
 using ISC.AI.Abstractions.Storage;
 using ISC.AI.Modules.Media.Domain.Model;
@@ -20,11 +21,19 @@ namespace ISC.AI.Modules.Media.Data;
 /// блокировку носителя с момента подсчёта), и только ПОСЛЕ её фиксации — файлы:
 /// осиротевший файл без строки безвреден (недостижим через API, подбирается уборкой), тогда как
 /// строка без файла или файл при откате транзакции — дефект.
+/// <para>Текст расшифровки в корпусе ядра (ADR-0051) — тоже производная носителя: он уничтожается
+/// <paramref name="corpusPurger"/> своим актом ДО строк носителя (иначе мостик уйдёт каскадом и документ корпуса
+/// станет недостижим). Порт ядра регистрирует любой хост; без него (тесты пакета) корпус не трогается.</para>
 /// </remarks>
+/// <param name="contextFactory">Фабрика контекста схемы <c>media</c>.</param>
+/// <param name="auditWriter">Журнал аудита.</param>
+/// <param name="fileStorage">Файловое хранилище.</param>
+/// <param name="corpusPurger">Гарантированное удаление документа корпуса ядра.</param>
 public sealed class MediaPurger(
     IDbContextFactory<MediaDbContext> contextFactory,
     IAuditWriter auditWriter,
-    IFileStorage fileStorage) : IMediaPurger
+    IFileStorage fileStorage,
+    IDocumentPurger? corpusPurger = null) : IMediaPurger
 {
     /// <inheritdoc />
     /// <remarks>
@@ -44,6 +53,21 @@ public sealed class MediaPurger(
         foreach (var copyId in await ListEditedCopiesAsync(assetId, cancellationToken))
         {
             await PurgeAsync(copyId, subjectId, cancellationToken);
+        }
+
+        // Расшифровка в корпусе ядра (ADR-0051) — до строк носителя, своим актом (fail-closed: журнал недоступен —
+        // исключение, носитель не тронут).
+        if (corpusPurger is not null)
+        {
+            await using var lookup = await contextFactory.CreateDbContextAsync(cancellationToken);
+            var coreDocumentId = await lookup.TranscriptIndexLinks.AsNoTracking()
+                .Where(l => l.AssetId == assetId)
+                .Select(l => (int?)l.CoreDocumentId)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (coreDocumentId is { } corpusDocument)
+            {
+                await corpusPurger.PurgeAsync(corpusDocument, subjectId, cancellationToken);
+            }
         }
 
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);

@@ -1068,6 +1068,48 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                     b.ToTable("suggestion_run", "media");
                 });
 
+            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.TranscriptIndexLink", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AssetId")
+                        .HasColumnType("integer")
+                        .HasColumnName("asset_id");
+
+                    b.Property<int>("CoreDocumentId")
+                        .HasColumnType("integer")
+                        .HasColumnName("core_document_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTime>("IndexedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("indexed_at");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_transcript_index_link");
+
+                    b.HasIndex("AssetId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_transcript_index_link_asset_id");
+
+                    b.HasIndex("CoreDocumentId")
+                        .HasDatabaseName("ix_transcript_index_link_core_document_id");
+
+                    b.ToTable("transcript_index_link", "media");
+                });
+
             modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.TranscriptSegment", b =>
                 {
                     b.Property<int>("Id")
@@ -1289,6 +1331,18 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_suggestion_run_asset_asset_id");
+
+                    b.Navigation("Asset");
+                });
+
+            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.TranscriptIndexLink", b =>
+                {
+                    b.HasOne("ISC.AI.Modules.Media.Data.Entities.MediaAsset", "Asset")
+                        .WithMany()
+                        .HasForeignKey("AssetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_transcript_index_link_asset_asset_id");
 
                     b.Navigation("Asset");
                 });

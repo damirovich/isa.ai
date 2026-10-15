@@ -33,4 +33,8 @@ internal static partial class MediaTranscriptionLog
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Расшифровка носителя {AssetId}: временный файл «{TempPath}» не удалён — удалится при следующем старте хоста; до этого удалите его вручную по пути из сообщения (копия материала дела, ТБ-064).")]
     public static partial void TempFileNotDeleted(ILogger logger, Exception exception, int assetId, string tempPath);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Расшифровка носителя {AssetId} записана, но не попала в поиск ИИ (корпус ядра, ADR-0051); дозаполнится при следующем старте хоста.")]
+    public static partial void CorpusIndexFailed(ILogger logger, Exception exception, int assetId);
 }

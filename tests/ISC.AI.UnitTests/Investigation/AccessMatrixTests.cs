@@ -33,6 +33,8 @@ public sealed class AccessMatrixTests
         [InvestigationPermissions.CasesPurge] = [InvestigationRole.Administrator],
         // Новое право (ADR-0043): переноса баз Access прежде не было; по умолчанию — Администратор (учёт отдела целиком).
         [InvestigationPermissions.CasesImport] = [InvestigationRole.Administrator],
+        // Новое право (ADR-0051): чата по документам дела прежде не было; по умолчанию — роли, ведущие дела.
+        [InvestigationPermissions.CasesChat] = [InvestigationRole.Investigator, InvestigationRole.Head, InvestigationRole.Administrator],
         [InvestigationPermissions.MediaUpload] = [InvestigationRole.Investigator, InvestigationRole.Administrator],
         // Новое право (ADR-0041): пакетного импорта прежде не было; по умолчанию — Администратор (диск сервера, архив всех дел).
         [InvestigationPermissions.MediaImport] = [InvestigationRole.Administrator],

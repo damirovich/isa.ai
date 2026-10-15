@@ -188,6 +188,101 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                     b.ToTable("appearance", "investigation");
                 });
 
+            modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.CaseChat", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("CaseId")
+                        .HasColumnType("integer")
+                        .HasColumnName("case_id");
+
+                    b.Property<short>("Classification")
+                        .HasColumnType("smallint")
+                        .HasColumnName("classification");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("OwnerUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("owner_user_id");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("title");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_case_chat");
+
+                    b.HasIndex("CaseId", "OwnerUserId")
+                        .HasDatabaseName("ix_case_chat_case_id_owner_user_id");
+
+                    b.ToTable("case_chat", "investigation");
+                });
+
+            modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.CaseChatMessage", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ChatId")
+                        .HasColumnType("integer")
+                        .HasColumnName("chat_id");
+
+                    b.Property<string>("CheckJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("check_json");
+
+                    b.Property<short>("Classification")
+                        .HasColumnType("smallint")
+                        .HasColumnName("classification");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("Role")
+                        .HasColumnType("integer")
+                        .HasColumnName("role");
+
+                    b.Property<string>("SourcesJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("sources_json");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_case_chat_message");
+
+                    b.HasIndex("ChatId")
+                        .HasDatabaseName("ix_case_chat_message_chat_id");
+
+                    b.ToTable("case_chat_message", "investigation");
+                });
+
             modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.CaseClosureAct", b =>
                 {
                     b.Property<int>("Id")
@@ -241,6 +336,62 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                         .HasDatabaseName("ix_case_closure_act_case_id");
 
                     b.ToTable("case_closure_act", "investigation");
+                });
+
+            modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.CaseCorpusEntry", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CaseId")
+                        .HasColumnType("integer")
+                        .HasColumnName("case_id");
+
+                    b.Property<int>("CoreDocumentId")
+                        .HasColumnType("integer")
+                        .HasColumnName("core_document_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer")
+                        .HasColumnName("kind");
+
+                    b.Property<int>("SourceId")
+                        .HasColumnType("integer")
+                        .HasColumnName("source_id");
+
+                    b.Property<string>("SourceVersion")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("source_version");
+
+                    b.Property<DateTime>("SyncedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("synced_at");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_case_corpus_entry");
+
+                    b.HasIndex("CaseId")
+                        .HasDatabaseName("ix_case_corpus_entry_case_id");
+
+                    b.HasIndex("Kind", "SourceId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_case_corpus_entry_kind_source_id");
+
+                    b.ToTable("case_corpus_entry", "investigation");
                 });
 
             modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.CaseDocumentLink", b =>
@@ -1430,6 +1581,29 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                     b.Navigation("Person");
                 });
 
+            modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.CaseChat", b =>
+                {
+                    b.HasOne("ISC.AI.Profile.Investigation.Domain.Entities.CaseFile", "Case")
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .HasConstraintName("fk_case_chat_cases_case_id");
+
+                    b.Navigation("Case");
+                });
+
+            modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.CaseChatMessage", b =>
+                {
+                    b.HasOne("ISC.AI.Profile.Investigation.Domain.Entities.CaseChat", "Chat")
+                        .WithMany("Messages")
+                        .HasForeignKey("ChatId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_case_chat_message_case_chat_chat_id");
+
+                    b.Navigation("Chat");
+                });
+
             modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.CaseClosureAct", b =>
                 {
                     b.HasOne("ISC.AI.Profile.Investigation.Domain.Entities.CaseFile", "Case")
@@ -1438,6 +1612,18 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_case_closure_act_cases_case_id");
+
+                    b.Navigation("Case");
+                });
+
+            modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.CaseCorpusEntry", b =>
+                {
+                    b.HasOne("ISC.AI.Profile.Investigation.Domain.Entities.CaseFile", "Case")
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_case_corpus_entry_cases_case_id");
 
                     b.Navigation("Case");
                 });
@@ -1620,6 +1806,11 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                         .HasConstraintName("fk_search_authorization_case_file_case_id");
 
                     b.Navigation("Case");
+                });
+
+            modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.CaseChat", b =>
+                {
+                    b.Navigation("Messages");
                 });
 #pragma warning restore 612, 618
         }

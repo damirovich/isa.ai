@@ -40,13 +40,24 @@ namespace ISC.AI.Modules.Media.Application.Features.Transcription;
 /// лиц): оператор видит, что прогон не завершён штатно, и повторяет его.
 /// </para>
 /// </remarks>
+/// <param name="store">Хранилище носителей.</param>
+/// <param name="fileStorage">Файловое хранилище.</param>
+/// <param name="transcriber">Распознаватель речи.</param>
+/// <param name="auditWriter">Журнал аудита.</param>
+/// <param name="tempFiles">Управляемый каталог временных копий.</param>
+/// <param name="logger">Журнал приложения.</param>
+/// <param name="corpus">
+/// Индексация готовой расшифровки в корпус ядра для поиска по смыслу и чата по материалам (ADR-0051); без неё
+/// (тесты конвейера) — не индексируется.
+/// </param>
 public sealed class MediaTranscriptionPipeline(
     IMediaStore store,
     IFileStorage fileStorage,
     IAudioTranscriber transcriber,
     IAuditWriter auditWriter,
     MediaTempFiles tempFiles,
-    ILogger<MediaTranscriptionPipeline> logger) : IMediaTranscriptionPipeline
+    ILogger<MediaTranscriptionPipeline> logger,
+    ITranscriptCorpus? corpus = null) : IMediaTranscriptionPipeline
 {
     /// <summary>Причина отказа для изображения (результат задачи; статус носителя не меняется).</summary>
     public const string NotApplicableToImageError = "К изображению расшифровка неприменима.";
@@ -97,6 +108,7 @@ public sealed class MediaTranscriptionPipeline(
                 cancellationToken);
 
             MediaTranscriptionLog.Completed(logger, assetId, segments.Count, modelVersion);
+            await IndexForChatAsync(assetId, cancellationToken);
             return new MediaTranscriptionResult(true, segments.Count);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -112,6 +124,31 @@ public sealed class MediaTranscriptionPipeline(
             MediaTranscriptionLog.Failed(logger, exception, assetId, segments.Count);
             await store.FailTranscriptionAsync(assetId, exception.Message, CancellationToken.None);
             return new MediaTranscriptionResult(false, segments.Count, exception.Message);
+        }
+    }
+
+    /// <summary>
+    /// Текст готовой расшифровки — в корпус ядра (ADR-0051). Сбой индексации НЕ делает расшифровку неудачной: она уже
+    /// записана и видна в карточке, а недостающее в корпусе дозаполнит обслуживание при следующем старте хоста.
+    /// </summary>
+    private async Task IndexForChatAsync(int assetId, CancellationToken cancellationToken)
+    {
+        if (corpus is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await corpus.IndexAsync(assetId, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Остановка хоста: расшифровка записана, индексация — при следующем старте.
+        }
+        catch (Exception exception)
+        {
+            MediaTranscriptionLog.CorpusIndexFailed(logger, exception, assetId);
         }
     }
 

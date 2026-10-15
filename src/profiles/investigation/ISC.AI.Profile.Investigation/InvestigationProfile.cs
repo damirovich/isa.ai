@@ -82,6 +82,11 @@ public sealed class InvestigationProfile : IProfile
         new ModuleDescriptor("search", "/search", "Поиск", Icons.Material.Filled.ManageSearch,
             typeof(Search), ReadPolicy, GroupCases),
 
+        // Чат по материалам (ТФ-ДДЛ-02/03, ADR-0051): вопросы локальной модели к документам, расшифровкам, сводкам и
+        // сведениям всех доступных дел или выбранного дела; ответ только по найденным фрагментам, со ссылками.
+        new ModuleDescriptor("chat", "/chat", "Чат по материалам", Icons.Material.Filled.QuestionAnswer,
+            typeof(ChatPage), ReadPolicy, GroupCases),
+
         // --- Секция «Медиа»: страницы объявляет САМ пакет (носители, «Поиск по лицу», «Верификация»);
         // профиль лишь включает их в реестр (ADR-0017/0022).
         .. MediaModule.Modules,
@@ -137,7 +142,10 @@ public sealed class InvestigationProfile : IProfile
     public Type? HomeComponent => typeof(InvestigationHome);
 
     /// <inheritdoc />
-    /// <remarks>Языковых моделей профиль не использует (ADR-0021): распознавание лиц — конвейер пакета «Медиа».</remarks>
+    /// <remarks>
+    /// Своих моделей профиль не регистрирует: чат по материалам (ADR-0051) ходит к моделям ядра по ролям (<c>Llm:Models</c>),
+    /// распознавание лиц — конвейер пакета «Медиа».
+    /// </remarks>
     public IReadOnlyList<IModelContributor> ModelContributors { get; } = [];
 
     /// <inheritdoc />

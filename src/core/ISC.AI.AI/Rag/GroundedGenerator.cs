@@ -42,8 +42,9 @@ public sealed class GroundedGenerator(
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(access);
 
-        // 1–3. Извлечение с ОБЯЗАТЕЛЬНЫМ фильтром доступа (ТБ-020, fail-closed) + только актуальные.
-        var fragments = await retriever.RetrieveAsync(request.Query, access, request.TopK, filter: null, cancellationToken);
+        // 1–3. Извлечение с ОБЯЗАТЕЛЬНЫМ фильтром доступа (ТБ-020, fail-closed) + только актуальные; область запроса
+        //      (Filter, например документы дела — ADR-0051) лишь сужает выдачу.
+        var fragments = await retriever.RetrieveAsync(request.Query, access, request.TopK, request.Filter, cancellationToken);
 
         // Гвард бюджета токенов: в промпт (и в грунтовку) идут ТОЛЬКО фрагменты, реально уместившиеся в окно.
         var included = SelectWithinBudget(request, fragments);
@@ -84,7 +85,7 @@ public sealed class GroundedGenerator(
         ArgumentNullException.ThrowIfNull(access);
 
         // 1–3. Извлечение с ОБЯЗАТЕЛЬНЫМ фильтром доступа (ТБ-020, fail-closed) — как и в блокирующем пути.
-        var fragments = await retriever.RetrieveAsync(request.Query, access, request.TopK, filter: null, cancellationToken);
+        var fragments = await retriever.RetrieveAsync(request.Query, access, request.TopK, request.Filter, cancellationToken);
 
         // Гвард бюджета токенов — как в блокирующем пути: грунтовка идёт по фактически отправленным фрагментам.
         var included = SelectWithinBudget(request, fragments);
