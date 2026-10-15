@@ -584,5 +584,672 @@ export function disposeTimeline(rootId) {
     return true;
 }
 
+// --- Проигрыватель аудиозаписи (ADR-0047, ТФ-МЕД-18) ---
+// Разметку (кнопки, скорость, громкость) рисует компонент AudioPlayer; здесь — то, что зависит от ширины экрана и от
+// самого <audio>: волна записи на <canvas> (огибающая громкости с сервера, /media/waveforms/{id}), полоса участков
+// речи, бегунок, время, переход щелчком и перетаскиванием, клавиши. На сервер уходят только смена «играет/пауза»,
+// скорости и звука (OnPlayerState). У элементов, которые меняет этот код (canvas, подсказка, время, состояние волны),
+// НЕТ детей в разметке Blazor — диф Blazor их не трогает. Звук не обрабатывается (ТЭ-007): скорость и громкость —
+// свойства воспроизведения в браузере.
+const audioPlayers = new Map();
+
+// Сколько ждать волну до надписи «строится…»: короткое ожидание не мигает надписью.
+const WAVEFORM_HINT_DELAY_MS = 400;
+
+function audioClock(seconds) {
+    const total = Math.max(0, Math.floor(Number(seconds) || 0));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor(total / 60) % 60;
+    const secs = total % 60;
+    return hours > 0 ? `${hours}:${pad(minutes, 2)}:${pad(secs, 2)}` : `${pad(minutes, 2)}:${pad(secs, 2)}`;
+}
+
+function normalizeAudioOptions(options) {
+    const o = options || {};
+    const ranges = Array.isArray(o.ranges)
+        ? o.ranges.filter((r) => Array.isArray(r) && r.length >= 2).map((r) => [Number(r[0]) || 0, Number(r[1]) || 0])
+        : [];
+    return {
+        elementId: o.elementId || null,
+        waveformUrl: o.waveformUrl || null,
+        durationMs: Math.max(0, Number(o.durationMs) || 0),
+        ranges,
+        keys: o.keys !== false,
+    };
+}
+
+/** Длительность для шкалы, секунды: от браузера, иначе из реквизитов, иначе по волне; 0 — неизвестна. */
+function audioDuration(state) {
+    const media = state.media;
+    if (media && Number.isFinite(media.duration) && media.duration > 0) {
+        return media.duration;
+    }
+    if (state.options.durationMs > 0) {
+        return state.options.durationMs / 1000;
+    }
+    if (state.wave) {
+        return state.wave.stepMs * state.wave.peaks.length / 1000;
+    }
+    return 0;
+}
+
+function cssColor(element, name, fallback) {
+    try {
+        const value = getComputedStyle(element).getPropertyValue(name).trim();
+        return value || fallback;
+    } catch {
+        return fallback;
+    }
+}
+
+function decodePeaks(base64) {
+    const binary = atob(base64 || '');
+    const peaks = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+        peaks[i] = binary.charCodeAt(i);
+    }
+    return peaks;
+}
+
+/**
+ * Высоты столбиков волны под текущую ширину (0–1): столбик — наибольший пик своего отрезка времени, нормировка по
+ * наибольшему пику всей записи и корень — тихая запись тоже видна (только картинка, звук не меняется).
+ */
+function layoutAudioBars(state) {
+    const canvas = state.canvas;
+    const dpr = window.devicePixelRatio || 1;
+    const width = Math.max(1, Math.round(canvas.clientWidth * dpr));
+    const height = Math.max(1, Math.round(canvas.clientHeight * dpr));
+    if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+    }
+    const barWidth = Math.max(1, Math.round(2 * dpr));
+    const gap = Math.max(1, Math.round(dpr));
+    const count = Math.max(1, Math.floor(width / (barWidth + gap)));
+    const duration = audioDuration(state);
+    const bars = new Float32Array(count);
+    if (state.wave && state.wave.peaks.length > 0 && duration > 0) {
+        const { peaks, stepMs } = state.wave;
+        let max = 0;
+        for (let i = 0; i < peaks.length; i++) {
+            if (peaks[i] > max) {
+                max = peaks[i];
+            }
+        }
+        for (let bar = 0; bar < count; bar++) {
+            const from = Math.floor(bar / count * duration * 1000 / stepMs);
+            const to = Math.max(from + 1, Math.ceil((bar + 1) / count * duration * 1000 / stepMs));
+            let level = 0;
+            for (let i = from; i < to && i < peaks.length; i++) {
+                if (peaks[i] > level) {
+                    level = peaks[i];
+                }
+            }
+            bars[bar] = max > 0 ? Math.sqrt(level / max) : 0;
+        }
+    }
+    state.layout = { width, height, dpr, barWidth, gap, count, bars, duration };
+}
+
+/** Перерисовка: волна (сыгранная часть — цветом), полоса речи снизу, бегунок; время — в подписи. */
+function drawAudioPlayer(state) {
+    if (!state.layout || state.layout.duration !== audioDuration(state)) {
+        layoutAudioBars(state);
+    }
+    const { width, height, dpr, barWidth, gap, count, bars, duration } = state.layout;
+    const context = state.canvas.getContext('2d');
+    if (!context) {
+        return;
+    }
+    const position = state.media ? state.media.currentTime : 0;
+    const played = duration > 0 ? Math.min(1, position / duration) : 0;
+    const bandHeight = Math.round(5 * dpr);
+    const bandGap = Math.round(4 * dpr);
+    const waveHeight = Math.max(1, height - bandHeight - bandGap);
+    const middle = waveHeight / 2;
+
+    context.clearRect(0, 0, width, height);
+    const playedColor = state.colors.played;
+    const restColor = state.colors.rest;
+    if (state.wave) {
+        for (let bar = 0; bar < count; bar++) {
+            const x = bar * (barWidth + gap);
+            const h = Math.max(dpr, bars[bar] * (waveHeight - 2 * dpr));
+            context.fillStyle = (bar + 0.5) / count <= played ? playedColor : restColor;
+            context.fillRect(x, middle - h / 2, barWidth, h);
+        }
+    } else {
+        // Волны нет (строится или не построилась) — простая полоса прослушанного.
+        const lineHeight = Math.max(2, Math.round(4 * dpr));
+        context.fillStyle = restColor;
+        context.fillRect(0, middle - lineHeight / 2, width, lineHeight);
+        context.fillStyle = playedColor;
+        context.fillRect(0, middle - lineHeight / 2, width * played, lineHeight);
+    }
+
+    // Полоса речи: участки фрагментов расшифровки.
+    if (duration > 0 && state.options.ranges.length > 0) {
+        context.fillStyle = state.colors.speech;
+        for (const [start, end] of state.options.ranges) {
+            const x0 = Math.max(0, start / 1000 / duration * width);
+            const x1 = Math.min(width, Math.max(x0 + dpr, end / 1000 / duration * width));
+            context.fillRect(x0, height - bandHeight, x1 - x0, bandHeight);
+        }
+    }
+
+    // Бегунок.
+    context.fillStyle = state.colors.playhead;
+    context.fillRect(Math.min(width - dpr * 2, played * width), 0, Math.max(1, Math.round(2 * dpr)), waveHeight);
+
+    if (state.time) {
+        state.time.textContent = `${audioClock(position)} / ${duration > 0 ? audioClock(duration) : '--:--'}`;
+    }
+}
+
+function audioSecondsAt(state, clientX) {
+    const rect = state.area.getBoundingClientRect();
+    const duration = audioDuration(state);
+    if (!(rect.width > 0) || !(duration > 0)) {
+        return 0;
+    }
+    return Math.min(Math.max(clientX - rect.left, 0), rect.width) / rect.width * duration;
+}
+
+function seekAudio(state, seconds) {
+    const media = state.media;
+    if (!media) {
+        return;
+    }
+    try {
+        media.currentTime = Math.max(0, seconds);
+    } catch {
+        /* метаданные записи ещё не загружены — переход не состоялся */
+    }
+    drawAudioPlayer(state);
+}
+
+function reportAudioState(state) {
+    const media = state.media;
+    if (!media || !state.dotNetRef || typeof state.dotNetRef.invokeMethodAsync !== 'function') {
+        return;
+    }
+    const playing = !media.paused && !media.ended;
+    const key = `${playing}|${media.playbackRate}|${media.muted}`;
+    if (key === state.reported) {
+        return;
+    }
+    state.reported = key;
+    state.dotNetRef.invokeMethodAsync('OnPlayerState', playing, media.playbackRate, media.muted)
+        .catch(() => { /* circuit уже закрыт */ });
+}
+
+function toggleAudio(state) {
+    const media = state.media;
+    if (!media) {
+        return;
+    }
+    if (media.paused || media.ended) {
+        const started = media.play();
+        if (started && typeof started.catch === 'function') {
+            started.catch(() => { /* формат не воспроизводится или нет жеста пользователя */ });
+        }
+    } else {
+        media.pause();
+    }
+}
+
+function loadAudioWaveform(state) {
+    const url = state.options.waveformUrl;
+    if (!url || typeof fetch !== 'function') {
+        return;
+    }
+    const request = ++state.waveRequest;
+    const hint = setTimeout(() => {
+        if (state.status && request === state.waveRequest && !state.wave) {
+            state.status.textContent = 'Строится волна записи…';
+        }
+    }, WAVEFORM_HINT_DELAY_MS);
+    fetch(url, { credentials: 'same-origin', cache: 'no-store' })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((data) => {
+            if (request !== state.waveRequest || !audioPlayers.has(state.rootId)) {
+                return;
+            }
+            if (data && Number(data.stepMs) > 0) {
+                state.wave = { stepMs: Number(data.stepMs), peaks: decodePeaks(data.peaks) };
+            }
+            state.layout = null;
+            if (state.status) {
+                // Не построилась — без надписи об ошибке: проигрыватель работает, причина — в журнале сервера.
+                state.status.textContent = '';
+            }
+            drawAudioPlayer(state);
+        })
+        .catch(() => {
+            if (state.status && request === state.waveRequest) {
+                state.status.textContent = '';
+            }
+        })
+        .finally(() => clearTimeout(hint));
+}
+
+function listenAudio(state, target, type, handler, options) {
+    target.addEventListener(type, handler, options);
+    state.listeners.push(() => target.removeEventListener(type, handler, options));
+}
+
+/** Нажатие предназначено полю, списку или самой кнопке — клавиши проигрывателя его не перехватывают. */
+function isOwnKeyTarget(target, key) {
+    if (isTextInput(target)) {
+        return true;
+    }
+    if (!(target instanceof Element)) {
+        return false;
+    }
+    if (target.closest('[role="listbox"],[role="menu"],[role="slider"],[role="tablist"],[role="radiogroup"],[role="dialog"]')) {
+        return true;
+    }
+    // Пробел на кнопке и ссылке — это их нажатие (щелчок по фрагменту расшифровки, кнопки проигрывателя).
+    return key === ' ' && !!target.closest('button,a,[role="button"],[role="switch"],[role="checkbox"]');
+}
+
+/**
+ * Включить проигрыватель в элементе id="rootId" (AudioPlayer). options: elementId (<audio>), waveformUrl, durationMs,
+ * ranges ([[начало, конец], …] мс — участки речи), keys (клавиши). dotNetRef — компонент (OnPlayerState).
+ * Повторный вызов заменяет прежнюю привязку. Возвращает false, если элемента нет.
+ */
+export function initAudioPlayer(rootId, options, dotNetRef) {
+    disposeAudioPlayer(rootId);
+    const root = document.getElementById(rootId);
+    const normalized = normalizeAudioOptions(options);
+    const media = normalized.elementId ? document.getElementById(normalized.elementId) : null;
+    const canvas = root ? root.querySelector('[data-ap-canvas]') : null;
+    const area = root ? root.querySelector('[data-ap-wave]') : null;
+    if (!root || !media || !canvas || !area) {
+        return false;
+    }
+    const state = {
+        rootId,
+        root,
+        media,
+        canvas,
+        area,
+        hover: root.querySelector('[data-ap-hover]'),
+        time: root.querySelector('[data-ap-time]'),
+        status: root.querySelector('[data-ap-status]'),
+        volume: root.querySelector('[data-ap-volume]'),
+        options: normalized,
+        dotNetRef,
+        colors: {
+            played: cssColor(root, '--mud-palette-primary', '#594ae2'),
+            rest: cssColor(root, '--mud-palette-lines-inputs', '#9e9e9e'),
+            speech: cssColor(root, '--mud-palette-info', '#2196f3'),
+            playhead: cssColor(root, '--mud-palette-primary-darken', '#3a2dbd'),
+        },
+        wave: null,
+        waveRequest: 0,
+        layout: null,
+        dragging: false,
+        frame: 0,
+        observer: null,
+        reported: '',
+        listeners: [],
+    };
+    audioPlayers.set(rootId, state);
+
+    // Тон голоса при ускорении сохраняется (по умолчанию так и есть; явно — для старых движков).
+    try {
+        media.preservesPitch = true;
+    } catch {
+        /* свойство не поддерживается — не страшно */
+    }
+
+    const animate = () => {
+        drawAudioPlayer(state);
+        state.frame = !media.paused && !media.ended ? requestAnimationFrame(animate) : 0;
+    };
+    const redraw = () => drawAudioPlayer(state);
+    listenAudio(state, media, 'timeupdate', redraw);
+    listenAudio(state, media, 'seeked', redraw);
+    listenAudio(state, media, 'loadedmetadata', () => {
+        state.layout = null;
+        drawAudioPlayer(state);
+    });
+    listenAudio(state, media, 'play', () => {
+        if (!state.frame) {
+            state.frame = requestAnimationFrame(animate);
+        }
+        reportAudioState(state);
+    });
+    for (const type of ['pause', 'ended', 'ratechange', 'volumechange']) {
+        listenAudio(state, media, type, () => {
+            redraw();
+            reportAudioState(state);
+            if (type === 'volumechange' && state.volume) {
+                state.volume.value = String(media.muted ? 0 : media.volume);
+            }
+        });
+    }
+
+    if (state.volume) {
+        state.volume.value = String(media.muted ? 0 : media.volume);
+        listenAudio(state, state.volume, 'input', () => {
+            const value = Math.min(1, Math.max(0, Number(state.volume.value) || 0));
+            media.volume = value;
+            media.muted = value === 0;
+        });
+    }
+
+    listenAudio(state, area, 'pointerdown', (event) => {
+        if (event.button !== 0) {
+            return;
+        }
+        state.dragging = true;
+        if (typeof area.setPointerCapture === 'function') {
+            area.setPointerCapture(event.pointerId);
+        }
+        seekAudio(state, audioSecondsAt(state, event.clientX));
+        event.preventDefault();
+    });
+    listenAudio(state, area, 'pointermove', (event) => {
+        const seconds = audioSecondsAt(state, event.clientX);
+        if (state.hover) {
+            const duration = audioDuration(state);
+            state.hover.textContent = audioClock(seconds);
+            state.hover.style.left = duration > 0 ? `${seconds / duration * 100}%` : '0%';
+            state.hover.style.display = 'block';
+        }
+        if (state.dragging) {
+            seekAudio(state, seconds);
+        }
+    });
+    listenAudio(state, area, 'pointerup', (event) => {
+        if (state.dragging) {
+            state.dragging = false;
+            seekAudio(state, audioSecondsAt(state, event.clientX));
+        }
+    });
+    listenAudio(state, area, 'pointercancel', () => {
+        state.dragging = false;
+    });
+    listenAudio(state, area, 'pointerleave', () => {
+        if (state.hover && !state.dragging) {
+            state.hover.style.display = 'none';
+        }
+    });
+
+    if (normalized.keys) {
+        // Клавиши — на document (фокус на проигрывателе не нужен): пробел — пуск/пауза, ←/→ — 5 секунд.
+        listenAudio(state, document, 'keydown', (event) => {
+            if (event.ctrlKey || event.altKey || event.metaKey || event.defaultPrevented) {
+                return;
+            }
+            const key = event.key;
+            if ((key !== ' ' && key !== 'ArrowLeft' && key !== 'ArrowRight') || isOwnKeyTarget(event.target, key)) {
+                return;
+            }
+            if (key === ' ') {
+                toggleAudio(state);
+            } else {
+                seekAudio(state, media.currentTime + (key === 'ArrowLeft' ? -5 : 5));
+            }
+            event.preventDefault();
+        });
+    }
+
+    if (typeof ResizeObserver === 'function') {
+        let pending = 0;
+        state.observer = new ResizeObserver(() => {
+            if (!pending) {
+                pending = requestAnimationFrame(() => {
+                    pending = 0;
+                    state.layout = null;
+                    drawAudioPlayer(state);
+                });
+            }
+        });
+        state.observer.observe(canvas);
+    }
+
+    drawAudioPlayer(state);
+    reportAudioState(state);
+    loadAudioWaveform(state);
+    return true;
+}
+
+/** Обновить настройки (пришли участки речи, длительность); волна перечитывается, только если сменилась ссылка. */
+export function updateAudioPlayer(rootId, options) {
+    const state = audioPlayers.get(rootId);
+    if (!state) {
+        return false;
+    }
+    const next = normalizeAudioOptions(options);
+    const reload = next.waveformUrl !== state.options.waveformUrl;
+    state.options = { ...next, elementId: state.options.elementId, keys: state.options.keys };
+    state.layout = null;
+    if (reload) {
+        state.wave = null;
+        loadAudioWaveform(state);
+    }
+    drawAudioPlayer(state);
+    return true;
+}
+
+/**
+ * Команда проигрывателю от кнопок компонента: 'toggle' — пуск/пауза, 'skip' — сдвиг на value секунд, 'rate' —
+ * скорость value, 'mute' — выключить/включить звук. Возвращает false, если проигрывателя нет.
+ */
+export function audioCommand(rootId, command, value) {
+    const state = audioPlayers.get(rootId);
+    if (!state || !state.media) {
+        return false;
+    }
+    const media = state.media;
+    switch (command) {
+        case 'toggle':
+            toggleAudio(state);
+            break;
+        case 'skip':
+            seekAudio(state, media.currentTime + (Number(value) || 0));
+            break;
+        case 'rate': {
+            const rate = Number(value);
+            if (rate > 0) {
+                media.playbackRate = rate;
+            }
+            break;
+        }
+        case 'mute':
+            media.muted = !media.muted;
+            if (!media.muted && media.volume === 0) {
+                media.volume = 1;
+            }
+            break;
+        default:
+            return false;
+    }
+    return true;
+}
+
+/** Снять слушатели проигрывателя (dispose компонента): элемент, указатель, клавиши, наблюдатель размера, анимация. */
+export function disposeAudioPlayer(rootId) {
+    const state = audioPlayers.get(rootId);
+    if (!state) {
+        return false;
+    }
+    for (const remove of state.listeners) {
+        remove();
+    }
+    if (state.observer) {
+        state.observer.disconnect();
+    }
+    if (state.frame) {
+        cancelAnimationFrame(state.frame);
+    }
+    state.waveRequest++;
+    audioPlayers.delete(rootId);
+    return true;
+}
+
+// --- Расшифровка следует за записью (ADR-0047) ---
+// По timeupdate/seeked проигрывателя (<audio> или <video>) находится текущий фрагмент; при его СМЕНЕ — один вызов
+// OnPlaybackSegment панели TranscriptPanel (подсветка строки). Прокрутку к строке панель просит отдельно
+// (revealInList) — и только внутри списка: страница от проигрывателя не уезжает. Если оператор сам прокручивал
+// список последние USER_SCROLL_PAUSE_MS, прокрутка его не перебивает.
+const transcriptFollowers = new Map();
+const listScrollMarks = new Map();
+const USER_SCROLL_PAUSE_MS = 4000;
+
+/** Текущий фрагмент: содержащий момент, иначе последний начавшийся раньше; до первого — −1 (как FindSegment панели). */
+function segmentAt(segments, ms) {
+    let low = 0;
+    let high = segments.length - 1;
+    let found = -1;
+    while (low <= high) {
+        const middle = (low + high) >> 1;
+        if (segments[middle][1] <= ms) {
+            found = middle;
+            low = middle + 1;
+        } else {
+            high = middle - 1;
+        }
+    }
+    return found < 0 ? -1 : segments[found][0];
+}
+
+function markUserScroll(listId) {
+    const list = document.getElementById(listId);
+    if (!list || listScrollMarks.has(listId)) {
+        return;
+    }
+    const mark = () => listScrollMarks.set(listId, { list, at: Date.now(), handlers });
+    const onPointer = (event) => {
+        // Перетаскивание полосы прокрутки самого списка (щелчок по строке — это не прокрутка).
+        if (event.target === list) {
+            mark();
+        }
+    };
+    const handlers = [['wheel', mark], ['touchmove', mark], ['pointerdown', onPointer]];
+    for (const [type, handler] of handlers) {
+        list.addEventListener(type, handler, { passive: true });
+    }
+    listScrollMarks.set(listId, { list, at: 0, handlers });
+}
+
+/**
+ * Следить за проигрывателем id="playerId": segments — [[номер, начало мс, конец мс], …] (порядок любой),
+ * listId — прокручиваемый список фрагментов (для паузы после ручной прокрутки). Повторный вызов заменяет привязку.
+ */
+export function followTranscript(playerId, listId, segments, dotNetRef) {
+    unfollowTranscript(playerId);
+    const media = document.getElementById(playerId);
+    if (!media || !Array.isArray(segments)) {
+        return false;
+    }
+    const sorted = segments
+        .filter((s) => Array.isArray(s) && s.length >= 3)
+        .map((s) => [Number(s[0]), Number(s[1]) || 0, Number(s[2]) || 0])
+        .sort((a, b) => a[1] - b[1]);
+    const starts = sorted.map((s) => [s[0], s[1]]);
+    let current = null;
+    const handler = () => {
+        // Пауза между фрагментами — подсвечивается последний начавшийся (как FindSegment панели).
+        const index = segmentAt(starts, media.currentTime * 1000);
+        if (index !== current) {
+            current = index;
+            if (dotNetRef && typeof dotNetRef.invokeMethodAsync === 'function') {
+                dotNetRef.invokeMethodAsync('OnPlaybackSegment', index).catch(() => { /* circuit уже закрыт */ });
+            }
+        }
+    };
+    media.addEventListener('timeupdate', handler);
+    media.addEventListener('seeked', handler);
+    if (listId) {
+        markUserScroll(listId);
+    }
+    transcriptFollowers.set(playerId, { media, handler, listId });
+    return true;
+}
+
+/** Снять слежение за проигрывателем (dispose панели или новая расшифровка). */
+export function unfollowTranscript(playerId) {
+    const follower = transcriptFollowers.get(playerId);
+    if (!follower) {
+        return false;
+    }
+    follower.media.removeEventListener('timeupdate', follower.handler);
+    follower.media.removeEventListener('seeked', follower.handler);
+    if (follower.listId) {
+        const mark = listScrollMarks.get(follower.listId);
+        if (mark) {
+            for (const [type, handler] of mark.handlers) {
+                mark.list.removeEventListener(type, handler);
+            }
+            listScrollMarks.delete(follower.listId);
+        }
+    }
+    transcriptFollowers.delete(playerId);
+    return true;
+}
+
+/**
+ * Прокрутить СПИСОК id="listId" так, чтобы элемент id="elementId" был виден (на треть высоты от верха); страница не
+ * прокручивается. force = false — не перебивать ручную прокрутку последних секунд; уже видимый элемент не двигается.
+ */
+export function revealInList(elementId, listId, force) {
+    const element = document.getElementById(elementId);
+    const list = document.getElementById(listId);
+    if (!element || !list) {
+        return false;
+    }
+    const mark = listScrollMarks.get(listId);
+    if (!force && mark && Date.now() - mark.at < USER_SCROLL_PAUSE_MS) {
+        return false;
+    }
+    const listRect = list.getBoundingClientRect();
+    const rect = element.getBoundingClientRect();
+    if (rect.top >= listRect.top && rect.bottom <= listRect.bottom) {
+        return true;
+    }
+    const target = list.scrollTop + (rect.top - listRect.top) - list.clientHeight / 3;
+    try {
+        list.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+    } catch {
+        list.scrollTop = Math.max(0, target);
+    }
+    return true;
+}
+
+/**
+ * Скопировать текст в буфер обмена (выгрузка расшифровки, ADR-0047). В изолированном контуре страница часто открыта
+ * по http (небезопасный контекст) — там Clipboard API нет, и копируется через скрытое поле и команду copy.
+ * Возвращает true, если браузер принял текст.
+ */
+export async function copyText(text) {
+    const value = String(text ?? '');
+    try {
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(value);
+            return true;
+        }
+    } catch {
+        /* нет разрешения — пробуем через скрытое поле */
+    }
+    try {
+        const area = document.createElement('textarea');
+        area.value = value;
+        area.setAttribute('readonly', '');
+        area.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;';
+        document.body.appendChild(area);
+        area.select();
+        const copied = document.execCommand('copy');
+        area.remove();
+        return copied;
+    } catch {
+        return false;
+    }
+}
+
 // Глобальный алиас для отладки из консоли; страницы используют экспорт модуля.
 window.iscaiMedia = { seek, reveal, measure, currentTime, stepFrame, bindFrameKeys, unbindFrameKeys };

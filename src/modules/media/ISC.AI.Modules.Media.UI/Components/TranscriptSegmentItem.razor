@@ -6,7 +6,8 @@
    Воспроизводимая запись — НАТИВНАЯ <button type="button">: Enter и пробел браузер сам превращает в щелчок,
    фокус и доступность для экранного диктора — штатные, прочие клавиши на сервер не уходят. Текст — span с
    классами типографики MudBlazor: блочный <p> (MudText) внутри <button> — невалидная разметка.
-   Текст фрагмента выводится только как текст (Razor экранирует) — разметка из расшифровки не исполняется. *@
+   Текст фрагмента выводится только как текст (Razor экранирует) — разметка из расшифровки не исполняется; найденное
+   поиском в расшифровке (ADR-0047) выделяется разбиением строки (TranscriptHighlight), а не вставкой разметки. *@
 @using System.Threading.Tasks
 @using Microsoft.AspNetCore.Components
 @using Microsoft.AspNetCore.Components.Web
@@ -16,14 +17,34 @@
     <button type="button" id="@ElementId" class="transcript-row" style="@RowStyle"
             title="@Title" @onclick="PlayAsync">
         <span class="transcript-time">[@MediaLabels.ClockTimecode(StartMs)]</span>
-        <span class="transcript-text mud-typography mud-typography-body2">@Text</span>
+        <span class="transcript-text mud-typography mud-typography-body2">@foreach (var part in TranscriptHighlight.Split(Text, Query))
+            {
+                if (part.IsMatch)
+                {
+                    <mark style="padding:0;">@part.Text</mark>
+                }
+                else
+                {
+                    @part.Text
+                }
+            }</span>
     </button>
 }
 else
 {
     <div id="@ElementId" class="transcript-row" style="@RowStyle">
         <span class="transcript-time">[@MediaLabels.ClockTimecode(StartMs)]</span>
-        <span class="transcript-text mud-typography mud-typography-body2">@Text</span>
+        <span class="transcript-text mud-typography mud-typography-body2">@foreach (var part in TranscriptHighlight.Split(Text, Query))
+            {
+                if (part.IsMatch)
+                {
+                    <mark style="padding:0;">@part.Text</mark>
+                }
+                else
+                {
+                    @part.Text
+                }
+            }</span>
     </div>
 }
 
@@ -55,19 +76,27 @@ else
     /// <summary>Щелчок (Enter, пробел) по строке: номер фрагмента, с которого воспроизводить.</summary>
     [Parameter] public EventCallback<int> OnPlay { get; set; }
 
-    private (int Index, string ElementId, long StartMs, string? Text, bool IsActive, bool Clickable, string Title) _shown;
+    /// <summary>Искомое поиском в расшифровке (ADR-0047): вхождения выделяются; пусто — без выделения.</summary>
+    [Parameter] public string? Query { get; set; }
+
+    /// <summary>Строка — текущее совпадение поиска (к ней перешли «следующее/предыдущее») — обводится.</summary>
+    [Parameter] public bool IsCurrentMatch { get; set; }
+
+    private (int Index, string ElementId, long StartMs, string? Text, bool IsActive, bool Clickable, string Title, string? Query, bool IsCurrentMatch) _shown;
     private bool _changed = true;
 
-    // Раскладка строки и сброс оформления кнопки — в TranscriptSegmentItem.razor.css; здесь только выделение активной.
+    // Раскладка строки и сброс оформления кнопки — в TranscriptSegmentItem.razor.css; здесь только выделение активной
+    // и обводка текущего совпадения поиска.
     private string RowStyle =>
-        IsActive
+        (IsActive
             ? "border-radius:4px;border-left:3px solid var(--mud-palette-primary);background:var(--mud-palette-background-gray);"
-            : "border-radius:4px;border-left:3px solid transparent;";
+            : "border-radius:4px;border-left:3px solid transparent;")
+        + (IsCurrentMatch ? "outline:2px solid var(--mud-palette-warning);outline-offset:-2px;" : string.Empty);
 
     protected override void OnParametersSet()
     {
         // OnPlay в сравнение не входит: он читается в момент щелчка, а не при отрисовке.
-        var current = (Index, ElementId, StartMs, Text, IsActive, Clickable, Title);
+        var current = (Index, ElementId, StartMs, Text, IsActive, Clickable, Title, Query, IsCurrentMatch);
         _changed = _changed || current != _shown;
         _shown = current;
     }

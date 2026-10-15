@@ -13,10 +13,12 @@
    У каждого лица — «Найти этого человека в других материалах» (проба = лицо носителя, ТФ-ПЛ-03) и
    «Привязать к фигуранту» (ручная привязка создаёт КАНДИДАТА для двойной верификации, ТФ-МЕД-03).
    Допуск проверяет сервер: и запрос карточки, и каждая отдача файла (ТБ-020/021, ТБ-073).
-   АУДИО (ADR-0026): встроенный проигрыватель <audio> (AMR/3GPP браузер не играет — ссылка «скачать»); лиц в
+   АУДИО (ADR-0026, ADR-0047): проигрыватель AudioPlayer — волна записи с участками речи, пуск/пауза, ±5 с, скорость,
+   громкость, клавиши (AMR/3GPP браузер не играет — ссылка «скачать»); реквизиты — одной строкой под названием; лиц в
    записи нет (MediaIndexStatus.NotApplicable) — блоки лиц, поиска по лицу и переиндексации скрыты. У аудио и
-   видео — панель «Расшифровка речи» (TranscriptPanel): фрагменты с таймкодами, щелчок — воспроизведение с места;
-   ?t=<мс> (переход из поиска по расшифровкам дела) — перемотка к месту и подсветка фрагмента. *@
+   видео — панель «Расшифровка речи» (TranscriptPanel): фрагменты с таймкодами, щелчок — воспроизведение с места,
+   следование за записью, поиск, режим «Текстом», выгрузка; ?t=<мс> (переход из поиска по расшифровкам дела) —
+   перемотка к месту и подсветка фрагмента. «Удалить» — в меню «⋯» (ADR-0047). *@
 @page "/media/assets/{Id:int}"
 @rendermode InteractiveServer
 @implements IAsyncDisposable
@@ -79,16 +81,19 @@ else
                 @* Переиндексация = повторный поиск лиц; к аудио неприменима (сервер тоже откажет). *@
                 <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" Disabled="_busy" OnClick="ReindexAsync">Переиндексировать</MudButton>
             }
-            @if (!_details.ViewOnly)
-            {
-                <MudTooltip Text="Гарантированное удаление — роли Администратор/Руководитель">
-                    <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteForever" Disabled="_busy"
-                               OnClick="@(() => _purgeOpen = true)">Удалить</MudButton>
-                </MudTooltip>
-            }
             @if (_details.CaseId is { } caseId)
             {
                 <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" Href="@($"/media/cases/{caseId}")">К медиатеке дела</MudButton>
+            }
+            @if (!_details.ViewOnly)
+            {
+                @* Редкое и необратимое действие — в меню «⋯», а не красной кнопкой у названия (ADR-0047). Права и
+                   подтверждение — как прежде: диалог ниже, проверка роли — на сервере. *@
+                <MudMenu Icon="@Icons.Material.Filled.MoreVert" AriaLabel="Ещё действия" title="Ещё действия" Dense="true"
+                         AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+                    <MudMenuItem Icon="@Icons.Material.Filled.DeleteForever" IconColor="Color.Error" Disabled="_busy"
+                                 OnClick="@(() => _purgeOpen = true)">Удалить носитель…</MudMenuItem>
+                </MudMenu>
             }
         </div>
     </div>
@@ -136,8 +141,14 @@ else
         <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="my-3">Ошибка обработки: @asset.IndexError</MudAlert>
     }
 
-    <MudPaper Outlined="true" Class="pa-4 my-4">
-        <MudText Typo="Typo.subtitle1" Class="mb-2">Реквизиты</MudText>
+    @* У аудио реквизиты — одной строкой под названием (ADR-0047): отдельный блок ради одной строки не нужен. *@
+    var inlineRequisites = asset.Kind == MediaKind.Audio;
+    <MudPaper Outlined="@(!inlineRequisites)" Elevation="0" Class="@(inlineRequisites ? "mt-1 mb-2" : "pa-4 my-4")"
+              Style="@(inlineRequisites ? "background:transparent;" : null)">
+        @if (!inlineRequisites)
+        {
+            <MudText Typo="Typo.subtitle1" Class="mb-2">Реквизиты</MudText>
+        }
         <div class="d-flex gap-4 flex-wrap">
             <MudText Typo="Typo.caption" Class="mud-text-secondary">
                 Дело:
@@ -208,14 +219,11 @@ else
             @if (IsBrowserPlayableAudio(asset.ContentType))
             {
                 @* Тот же эндпоинт раздачи, что у видео: допуск и сужение по делам — на каждый запрос, Range для
-                   перемотки, одна выдача субъекту — одна запись аудита (MediaViewAuditThrottle, ТБ-030). *@
-                <audio id="@AudioElementId" controls preload="metadata" src="@MediaFileUrl.Originals(asset.Id, asset.StoredFileName)"
-                       controlslist="@(_details.ViewOnly ? "nodownload" : null)"
-                       style="width:100%;max-width:720px;display:block;margin:0 auto;"></audio>
-                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
-                    Запись воспроизводится без обработки (ТЭ-007); переход к месту записи — щелчком по фрагменту расшифровки ниже.
-                    Если она не воспроизводится — файла нет либо он вне вашего допуска.
-                </MudText>
+                   перемотки, одна выдача субъекту — одна запись аудита (MediaViewAuditThrottle, ТБ-030). Волна — свой
+                   эндпоинт под той же решёткой (ADR-0047); участки речи — фрагменты из панели расшифровки ниже. *@
+                <AudioPlayer AssetId="@asset.Id" Src="@MediaFileUrl.Originals(asset.Id, asset.StoredFileName)" ElementId="@AudioElementId"
+                             WaveformUrl="@MediaFileUrl.Waveform(asset.Id)" DurationMs="@asset.DurationMs" Segments="@_speechSegments"
+                             AllowDownload="@(!_details.ViewOnly)" DownloadName="@asset.OriginalFileName" />
             }
             else
             {
@@ -287,7 +295,8 @@ else
         {
             @* У видео перемотку по ?t= делает просмотрщик (владелец <video>); у аудио проигрывателем владеет панель. *@
             <TranscriptPanel AssetId="@asset.Id" PlayerElementId="@PlayableElementId(asset)" StartAtMs="@StartAtMs"
-                             SeekToStart="@(asset.Kind != MediaKind.Video)" ReadOnly="@_details.ViewOnly" />
+                             SeekToStart="@(asset.Kind != MediaKind.Video)" ReadOnly="@_details.ViewOnly"
+                             OnSegmentsLoaded="@(asset.Kind == MediaKind.Audio ? _onSegmentsLoaded : default)" />
         }
     }
 
@@ -575,6 +584,10 @@ else
     private bool _busy;
     private bool _purgeOpen;
     private IJSObjectReference? _module;
+
+    // Фрагменты расшифровки аудио — участки речи под волной проигрывателя (ADR-0047); приходят из панели расшифровки.
+    private IReadOnlyList<TranscriptSegmentRow> _speechSegments = [];
+    private EventCallback<IReadOnlyList<TranscriptSegmentRow>> _onSegmentsLoaded;
     private bool _moduleFailed;
     private ImageSize? _imageSize;
     private bool _measureRequested;
@@ -670,6 +683,15 @@ else
 
     private static string Percent(float value, int total) =>
         Math.Clamp(total > 0 ? value / total * 100f : 0f, 0f, 100f).ToString("0.##", CultureInfo.InvariantCulture);
+
+    protected override void OnInitialized()
+    {
+        // Один экземпляр колбэка: панель расшифровки получает равный параметр при каждой перерисовке карточки.
+        _onSegmentsLoaded = EventCallback.Factory.Create<IReadOnlyList<TranscriptSegmentRow>>(this, SpeechSegmentsLoaded);
+    }
+
+    /// <summary>Панель расшифровки загрузила фрагменты: их участки речи — под волной проигрывателя аудио (ADR-0047).</summary>
+    private void SpeechSegmentsLoaded(IReadOnlyList<TranscriptSegmentRow> segments) => _speechSegments = segments;
 
     protected override async Task OnParametersSetAsync()
     {

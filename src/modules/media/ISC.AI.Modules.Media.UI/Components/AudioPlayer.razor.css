@@ -1,0 +1,94 @@
+/* Проигрыватель аудиозаписи (ADR-0047). Волну, полосу речи и бегунок рисует media.js на canvas; здесь — раскладка. */
+.ap {
+    text-align: left;
+    user-select: none;
+}
+
+/* Сам <audio> без браузерных controls не виден — управление ниже. */
+.ap audio {
+    display: none;
+}
+
+/* Область волны: щелчок и перетаскивание — переход к моменту (обработчики указателя — media.js). */
+.ap-wave {
+    position: relative;
+    height: 88px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: var(--mud-palette-background-gray);
+    cursor: pointer;
+    touch-action: none;
+}
+
+.ap-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* «Строится волна записи…» — поверх полосы, пока ждём ответ сервера. */
+.ap-status {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8125rem;
+    color: var(--mud-palette-text-secondary);
+    pointer-events: none;
+}
+
+.ap-status:empty {
+    display: none;
+}
+
+/* Время под курсором. */
+.ap-hover {
+    display: none;
+    position: absolute;
+    top: -22px;
+    transform: translateX(-50%);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.75rem;
+    white-space: nowrap;
+    color: var(--mud-palette-surface);
+    background: var(--mud-palette-text-primary);
+    pointer-events: none;
+}
+
+.ap-bar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    margin-top: 8px;
+}
+
+.ap-time {
+    min-width: 7.5em;
+    font-family: monospace;
+    font-size: 0.9375rem;
+}
+
+.ap-spacer {
+    flex: 1 1 auto;
+}
+
+.ap-label {
+    font-size: 0.8125rem;
+    color: var(--mud-palette-text-secondary);
+}
+
+.ap-volume {
+    width: 96px;
+    accent-color: var(--mud-palette-primary);
+    cursor: pointer;
+}
+
+.ap-info {
+    display: inline-flex;
+    color: var(--mud-palette-text-secondary);
+    cursor: help;
+}

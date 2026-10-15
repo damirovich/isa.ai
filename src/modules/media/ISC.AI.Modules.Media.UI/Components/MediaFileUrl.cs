@@ -24,6 +24,9 @@ public static class MediaFileUrl
     public static string Filmstrip(int assetId, string storedFileName) =>
         MediaFileRoutes.Build(MediaFileCategories.Filmstrips, assetId, storedFileName);
 
+    /// <summary>Волна аудиозаписи (ADR-0047): огибающая громкости для проигрывателя — JSON, та же решётка доступа.</summary>
+    public static string Waveform(int assetId) => MediaFileRoutes.BuildWaveform(assetId);
+
     /// <summary>Вырезка пробы поисковой сессии: сегмент «носитель» маршрута — идентификатор СЕССИИ.</summary>
     public static string ProbeCrop(int sessionId, string storedFileName) =>
         MediaFileRoutes.Build(MediaFileCategories.Probes, sessionId, storedFileName);

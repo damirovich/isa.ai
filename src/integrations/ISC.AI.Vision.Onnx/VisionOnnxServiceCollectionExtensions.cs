@@ -28,6 +28,8 @@ public static class VisionOnnxServiceCollectionExtensions
         services.AddSingleton<IFaceEmbedder>(sp => sp.GetRequiredService<SFaceEmbedder>());
         services.AddSingleton<IFaceQualityAssessor, BasicFaceQualityAssessor>();
         services.AddSingleton<IFrameExtractor, FfmpegFrameExtractor>();
+        // Волна аудиозаписи (ADR-0047) — тот же ffmpeg, свой предел одновременных процессов (singleton = предел на хост).
+        services.AddSingleton<IAudioWaveformExtractor, FfmpegAudioWaveformExtractor>();
         services.AddSingleton<IImageTools, SkiaImageTools>();
         return services;
     }

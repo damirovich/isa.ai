@@ -365,6 +365,18 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("uploaded_by_user_id");
 
+                    b.Property<byte[]>("WaveformPeaks")
+                        .HasColumnType("bytea")
+                        .HasColumnName("waveform_peaks");
+
+                    b.Property<int?>("WaveformStepMs")
+                        .HasColumnType("integer")
+                        .HasColumnName("waveform_step_ms");
+
+                    b.Property<short?>("WaveformVersion")
+                        .HasColumnType("smallint")
+                        .HasColumnName("waveform_version");
+
                     b.HasKey("Id")
                         .HasName("pk_asset");
 

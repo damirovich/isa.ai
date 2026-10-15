@@ -128,4 +128,17 @@ public class MediaAsset : AuditableEntity, IClassified
     /// Не путать с <see cref="CapturedAt"/>: ту подтверждает оператор, эта — как записала камера (не доказательство).
     /// </summary>
     public DateTimeOffset? RecordedAt { get; set; }
+
+    /// <summary>
+    /// Волна аудиозаписи (ADR-0047): пики громкости 0–255 с шагом <see cref="WaveformStepMs"/>. Производная носителя,
+    /// как лента кадров: строится при первом открытии карточки, уничтожается вместе со строкой (ТБ-064).
+    /// <see langword="null"/> — ещё не строилась (или носитель не аудио).
+    /// </summary>
+    public byte[]? WaveformPeaks { get; set; }
+
+    /// <summary>Шаг между пиками волны, мс.</summary>
+    public int? WaveformStepMs { get; set; }
+
+    /// <summary>Версия алгоритма волны (<c>AudioWaveform.CurrentVersion</c>): устаревшая строится заново.</summary>
+    public short? WaveformVersion { get; set; }
 }

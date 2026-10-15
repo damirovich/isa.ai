@@ -376,7 +376,7 @@ public sealed class FfmpegFrameExtractor(VisionOptions options) : IFrameExtracto
     /// кавычку) превращаются в лишние аргументы ffmpeg/ffprobe — посторонний вход или выход. Имена временных
     /// копий конвейер строит сам (GUID и отфильтрованное расширение), так что здесь это страховка.
     /// </summary>
-    private static void EnsureSafePath(string videoPath)
+    internal static void EnsureSafePath(string videoPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(videoPath);
         if (videoPath.Contains('"', StringComparison.Ordinal) || videoPath.EndsWith('\\'))
@@ -427,8 +427,12 @@ public sealed class FfmpegFrameExtractor(VisionOptions options) : IFrameExtracto
     private static bool IsQuarterTurn(int rotation) =>
         Math.Abs(rotation) % 180 == 90;
 
-    private FFOptions FfOptions()
+    private FFOptions FfOptions() => CreateFfOptions(options);
+
+    /// <summary>Настройки FFMpegCore по настройкам зрения: каталог бинарников ffmpeg/ffprobe (пусто — PATH).</summary>
+    internal static FFOptions CreateFfOptions(VisionOptions options)
     {
+        ArgumentNullException.ThrowIfNull(options);
         var ffOptions = new FFOptions();
         if (!string.IsNullOrWhiteSpace(options.FfmpegFolder))
         {
@@ -439,7 +443,7 @@ public sealed class FfmpegFrameExtractor(VisionOptions options) : IFrameExtracto
     }
 
     // Сообщение ffprobe бывает многострочным и длинным; статусу носителя нужна суть, а не весь журнал.
-    private static string Shorten(string message) =>
+    internal static string Shorten(string message) =>
         message.Length <= MaxToolMessageLength ? message : message[..MaxToolMessageLength] + "…";
 
     // Приёмник stdout ffmpeg: читает поток и режет на кадры прямо по мере поступления.
