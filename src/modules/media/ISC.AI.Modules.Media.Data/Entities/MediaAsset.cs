@@ -141,4 +141,11 @@ public class MediaAsset : AuditableEntity, IClassified
 
     /// <summary>Версия алгоритма волны (<c>AudioWaveform.CurrentVersion</c>): устаревшая строится заново.</summary>
     public short? WaveformVersion { get; set; }
+
+    /// <summary>
+    /// Обработанная копия фото (ТФ-МЕД-14, ADR-0050): набор операций в JSON, по которому копия построена из
+    /// <see cref="SourceAssetId"/>. Такой носитель не индексируется и уничтожается вместе с источником (ТНД-008);
+    /// у остальных носителей — <see langword="null"/>.
+    /// </summary>
+    public string? EditOperations { get; set; }
 }

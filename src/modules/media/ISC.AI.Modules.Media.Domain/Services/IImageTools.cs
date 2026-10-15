@@ -29,4 +29,20 @@ public interface IImageTools
     /// слева направо (лента кадров, ADR-0038): ширина результата — число плиток × ширина плитки.
     /// </summary>
     byte[] ComposeStripJpeg(IReadOnlyList<byte[]> tiles, int tileWidth, int tileHeight, int quality = 80);
+
+    /// <summary>
+    /// Обработанная копия фотографии (ТФ-МЕД-14, ADR-0050): изображение с поворотом по EXIF (как его показывает
+    /// браузер), затем операции <paramref name="edit"/> в порядке <see cref="ImageEdit"/>; результат — PNG без потерь.
+    /// Оригинал не меняется (ТЭ-007) — это новая картинка.
+    /// </summary>
+    /// <exception cref="ArgumentException">Набор недопустим для этого изображения (текст — что именно, <see cref="ImageEdit.Validate"/>).</exception>
+    /// <exception cref="InvalidOperationException">Изображение не распознано.</exception>
+    byte[] ApplyEdits(byte[] imageBytes, ImageEdit edit);
+
+    /// <summary>
+    /// Изображение с нанесёнными пометками для выгрузки (ТФ-МЕД-13, ADR-0050): поворот по EXIF, стрелки, рамки и
+    /// подписи их цветом, внизу — полоса с <paramref name="caption"/> (гриф и происхождение); PNG без потерь.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Изображение не распознано.</exception>
+    byte[] RenderAnnotated(byte[] imageBytes, IReadOnlyList<AnnotationRow> annotations, string caption);
 }

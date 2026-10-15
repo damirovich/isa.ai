@@ -203,6 +203,82 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                     b.ToTable("face_template", "media");
                 });
 
+            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.MediaAnnotation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AssetId")
+                        .HasColumnType("integer")
+                        .HasColumnName("asset_id");
+
+                    b.Property<int?>("AuthorUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("author_user_id");
+
+                    b.Property<short>("Classification")
+                        .HasColumnType("smallint")
+                        .HasColumnName("classification");
+
+                    b.Property<string>("Color")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("color");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("DivisionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("division_id");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("Text")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<double>("X1")
+                        .HasColumnType("double precision")
+                        .HasColumnName("x1");
+
+                    b.Property<double>("X2")
+                        .HasColumnType("double precision")
+                        .HasColumnName("x2");
+
+                    b.Property<double>("Y1")
+                        .HasColumnType("double precision")
+                        .HasColumnName("y1");
+
+                    b.Property<double>("Y2")
+                        .HasColumnType("double precision")
+                        .HasColumnName("y2");
+
+                    b.HasKey("Id")
+                        .HasName("pk_annotation");
+
+                    b.HasIndex("AssetId")
+                        .HasDatabaseName("ix_annotation_asset_id");
+
+                    b.HasIndex("Classification", "DivisionId")
+                        .HasDatabaseName("ix_annotation_classification_division_id");
+
+                    b.ToTable("annotation", "media");
+                });
+
             modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.MediaAsset", b =>
                 {
                     b.Property<int>("Id")
@@ -252,6 +328,10 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                     b.Property<long?>("DurationMs")
                         .HasColumnType("bigint")
                         .HasColumnName("duration_ms");
+
+                    b.Property<string>("EditOperations")
+                        .HasColumnType("text")
+                        .HasColumnName("edit_operations");
 
                     b.Property<string>("EmbedderVersion")
                         .HasMaxLength(50)
@@ -1143,6 +1223,18 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                         .HasConstraintName("fk_face_template_face_face_id");
 
                     b.Navigation("Face");
+                });
+
+            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.MediaAnnotation", b =>
+                {
+                    b.HasOne("ISC.AI.Modules.Media.Data.Entities.MediaAsset", "Asset")
+                        .WithMany()
+                        .HasForeignKey("AssetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_annotation_assets_asset_id");
+
+                    b.Navigation("Asset");
                 });
 
             modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.MediaFrame", b =>

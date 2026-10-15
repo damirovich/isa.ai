@@ -1251,5 +1251,371 @@ export async function copyText(text) {
     }
 }
 
+// --- Обработка фото: предпросмотр (ТФ-МЕД-14, ADR-0050) ---
+// Предпросмотр строится в браузере из оригинала теми же операциями и формулами, что и копия на сервере (ImageEditing):
+// поворот → кадрирование → тон (яркость, контраст, гамма — таблица на канал) → резкость (3×3). Картинка уменьшена под
+// экран, поэтому резкость на ней выглядит чуть иначе, чем на полном размере. Ничего не сохраняет: копию строит сервер
+// по набору операций (CreateEditedCopyCommand). В режиме кадрирования показывается всё изображение и выделение мышью;
+// выделенная область уходит компоненту (OnCropSelected) в координатах изображения после поворота.
+const imageEditors = new Map();
+
+function editToneTable(brightness, contrast, gamma) {
+    const table = new Uint8ClampedArray(256);
+    const c = contrast * 2.55;
+    const factor = (259 * (c + 255)) / (255 * (259 - c));
+    for (let i = 0; i < 256; i++) {
+        let v = i + brightness * 2.55;
+        v = factor * (v - 128) + 128;
+        v = Math.min(255, Math.max(0, v));
+        v = 255 * Math.pow(v / 255, 1 / gamma);
+        table[i] = Math.round(Math.min(255, Math.max(0, v)));
+    }
+    return table;
+}
+
+function editSharpen(data, width, height, k) {
+    const source = new Uint8ClampedArray(data);
+    const center = 1 + 4 * k;
+    for (let y = 0; y < height; y++) {
+        const up = Math.max(0, y - 1) * width * 4;
+        const row = y * width * 4;
+        const down = Math.min(height - 1, y + 1) * width * 4;
+        for (let x = 0; x < width; x++) {
+            const left = Math.max(0, x - 1) * 4;
+            const self = x * 4;
+            const right = Math.min(width - 1, x + 1) * 4;
+            for (let ch = 0; ch < 3; ch++) {
+                data[row + self + ch] = center * source[row + self + ch]
+                    - k * (source[up + self + ch] + source[down + self + ch] + source[row + left + ch] + source[row + right + ch]);
+            }
+        }
+    }
+}
+
+/** Изображение, повёрнутое на rotation° по часовой (холст; повтор с тем же поворотом — из кэша). */
+function editRotated(state) {
+    const rotation = state.ops.rotation || 0;
+    if (state.rotated && state.rotatedFor === rotation) {
+        return state.rotated;
+    }
+    const image = state.image;
+    const swap = rotation === 90 || rotation === 270;
+    const canvas = document.createElement('canvas');
+    canvas.width = swap ? image.naturalHeight : image.naturalWidth;
+    canvas.height = swap ? image.naturalWidth : image.naturalHeight;
+    const context = canvas.getContext('2d');
+    context.translate(canvas.width / 2, canvas.height / 2);
+    context.rotate(rotation * Math.PI / 180);
+    context.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2);
+    state.rotated = canvas;
+    state.rotatedFor = rotation;
+    return canvas;
+}
+
+function renderImageEditor(state) {
+    if (!state.image) {
+        return;
+    }
+    const rotated = editRotated(state);
+    const crop = state.ops.crop;
+    const showAll = state.cropMode || !crop;
+    const region = showAll ? { x: 0, y: 0, width: rotated.width, height: rotated.height } : crop;
+    const maxWidth = Math.max(200, Math.min(1400, state.root.clientWidth || 800));
+    const maxHeight = Math.max(200, Math.round(window.innerHeight * 0.65));
+    const scale = Math.min(1, maxWidth / region.width, maxHeight / region.height);
+    const width = Math.max(1, Math.round(region.width * scale));
+    const height = Math.max(1, Math.round(region.height * scale));
+    const canvas = state.canvas;
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
+    context.drawImage(rotated, region.x, region.y, region.width, region.height, 0, 0, width, height);
+    state.view = { region, scale };
+
+    const ops = state.ops;
+    const toned = ops.brightness !== 0 || ops.contrast !== 0 || Math.abs(ops.gamma - 1) >= 0.005;
+    if (!state.cropMode && (toned || ops.sharpen > 0)) {
+        const pixels = context.getImageData(0, 0, width, height);
+        if (toned) {
+            const table = editToneTable(ops.brightness, ops.contrast, ops.gamma);
+            const data = pixels.data;
+            for (let i = 0; i < data.length; i += 4) {
+                data[i] = table[data[i]];
+                data[i + 1] = table[data[i + 1]];
+                data[i + 2] = table[data[i + 2]];
+            }
+        }
+        if (ops.sharpen > 0) {
+            editSharpen(pixels.data, width, height, ops.sharpen / 100);
+        }
+        context.putImageData(pixels, 0, 0);
+    }
+
+    // Режим кадрирования: затемнение вне выделения и рамка.
+    const selection = state.dragCrop || (state.cropMode ? crop : null);
+    if (state.cropMode && selection) {
+        const sx = selection.x * scale;
+        const sy = selection.y * scale;
+        const sw = selection.width * scale;
+        const sh = selection.height * scale;
+        context.fillStyle = 'rgba(0, 0, 0, 0.55)';
+        context.fillRect(0, 0, width, sy);
+        context.fillRect(0, sy + sh, width, height - sy - sh);
+        context.fillRect(0, sy, sx, sh);
+        context.fillRect(sx + sw, sy, width - sx - sw, sh);
+        context.strokeStyle = '#ffeb3b';
+        context.lineWidth = 2;
+        context.strokeRect(sx + 1, sy + 1, Math.max(0, sw - 2), Math.max(0, sh - 2));
+    }
+}
+
+function editPointToImage(state, event) {
+    const rect = state.canvas.getBoundingClientRect();
+    const { region, scale } = state.view;
+    const x = (event.clientX - rect.left) * (state.canvas.width / rect.width) / scale + region.x;
+    const y = (event.clientY - rect.top) * (state.canvas.height / rect.height) / scale + region.y;
+    const rotated = editRotated(state);
+    return { x: Math.min(rotated.width, Math.max(0, x)), y: Math.min(rotated.height, Math.max(0, y)) };
+}
+
+function editRect(a, b) {
+    const x = Math.floor(Math.min(a.x, b.x));
+    const y = Math.floor(Math.min(a.y, b.y));
+    return { x, y, width: Math.max(1, Math.ceil(Math.max(a.x, b.x)) - x), height: Math.max(1, Math.ceil(Math.max(a.y, b.y)) - y) };
+}
+
+/**
+ * Включить предпросмотр обработки в элементе id="rootId": imageUrl — оригинал (эндпоинт раздачи с проверкой допуска),
+ * ops — набор операций, dotNetRef — компонент (OnImageLoaded с размером после EXIF, OnCropSelected).
+ */
+export function initImageEditor(rootId, imageUrl, ops, dotNetRef) {
+    disposeImageEditor(rootId);
+    const root = document.getElementById(rootId);
+    const canvas = root ? root.querySelector('[data-ie-canvas]') : null;
+    if (!root || !canvas) {
+        return false;
+    }
+    const state = { root, canvas, ops: normalizeEditOps(ops), cropMode: false, image: null, rotated: null, rotatedFor: null,
+        view: null, dragStart: null, dragCrop: null, dotNetRef, listeners: [] };
+    imageEditors.set(rootId, state);
+
+    const image = new Image();
+    image.onload = () => {
+        if (!imageEditors.has(rootId)) {
+            return;
+        }
+        state.image = image;
+        renderImageEditor(state);
+        if (dotNetRef && typeof dotNetRef.invokeMethodAsync === 'function') {
+            dotNetRef.invokeMethodAsync('OnImageLoaded', image.naturalWidth, image.naturalHeight).catch(() => { /* circuit закрыт */ });
+        }
+    };
+    image.src = imageUrl;
+
+    const on = (target, type, handler) => {
+        target.addEventListener(type, handler);
+        state.listeners.push(() => target.removeEventListener(type, handler));
+    };
+    on(canvas, 'pointerdown', (event) => {
+        if (!state.cropMode || !state.image || event.button !== 0) {
+            return;
+        }
+        state.dragStart = editPointToImage(state, event);
+        state.dragCrop = null;
+        if (typeof canvas.setPointerCapture === 'function') {
+            canvas.setPointerCapture(event.pointerId);
+        }
+        event.preventDefault();
+    });
+    on(canvas, 'pointermove', (event) => {
+        if (state.dragStart) {
+            state.dragCrop = editRect(state.dragStart, editPointToImage(state, event));
+            renderImageEditor(state);
+        }
+    });
+    on(canvas, 'pointerup', (event) => {
+        if (!state.dragStart) {
+            return;
+        }
+        const crop = editRect(state.dragStart, editPointToImage(state, event));
+        state.dragStart = null;
+        state.dragCrop = null;
+        if (crop.width >= 8 && crop.height >= 8 && dotNetRef && typeof dotNetRef.invokeMethodAsync === 'function') {
+            dotNetRef.invokeMethodAsync('OnCropSelected', crop.x, crop.y, crop.width, crop.height).catch(() => { /* circuit закрыт */ });
+        } else {
+            renderImageEditor(state);
+        }
+    });
+    if (typeof ResizeObserver === 'function') {
+        state.observer = new ResizeObserver(() => renderImageEditor(state));
+        state.observer.observe(root);
+    }
+    return true;
+}
+
+function normalizeEditOps(ops) {
+    const o = ops || {};
+    const crop = o.crop && o.crop.width > 0 && o.crop.height > 0
+        ? { x: Number(o.crop.x) || 0, y: Number(o.crop.y) || 0, width: Number(o.crop.width), height: Number(o.crop.height) }
+        : null;
+    return {
+        brightness: Number(o.brightness) || 0,
+        contrast: Number(o.contrast) || 0,
+        gamma: Number(o.gamma) > 0 ? Number(o.gamma) : 1,
+        sharpen: Number(o.sharpen) || 0,
+        rotation: Number(o.rotation) || 0,
+        crop,
+        zoom: Number(o.zoom) || 1,
+    };
+}
+
+/** Новый набор операций и режим кадрирования — перерисовать предпросмотр. */
+export function updateImageEditor(rootId, ops, cropMode) {
+    const state = imageEditors.get(rootId);
+    if (!state) {
+        return false;
+    }
+    state.ops = normalizeEditOps(ops);
+    state.cropMode = cropMode === true;
+    renderImageEditor(state);
+    return true;
+}
+
+/** Снять слушатели предпросмотра. */
+export function disposeImageEditor(rootId) {
+    const state = imageEditors.get(rootId);
+    if (!state) {
+        return false;
+    }
+    for (const remove of state.listeners) {
+        remove();
+    }
+    if (state.observer) {
+        state.observer.disconnect();
+    }
+    imageEditors.delete(rootId);
+    return true;
+}
+
+// --- Пометки на фото: рисование (ТФ-МЕД-13, ADR-0050) ---
+// Сохранённые пометки рисует Blazor (svg карточки). Здесь — только рисование новой: слой id="svgId" без детей в разметке
+// Blazor, поверх фото, в пикселях изображения (viewBox — натуральный размер). Пока протягивают мышью, видна заготовка;
+// по отпусканию компонент получает вид и две точки (OnAnnotationDrawn), подпись — по щелчку в точке.
+const annotationLayers = new Map();
+
+function annotationPoint(svg, event) {
+    const matrix = svg.getScreenCTM();
+    if (!matrix) {
+        return { x: 0, y: 0 };
+    }
+    const point = svg.createSVGPoint();
+    point.x = event.clientX;
+    point.y = event.clientY;
+    const local = point.matrixTransform(matrix.inverse());
+    return { x: Math.max(0, local.x), y: Math.max(0, local.y) };
+}
+
+/** Включить рисование пометок на слое id="svgId"; dotNetRef — карточка (OnAnnotationDrawn). */
+export function bindAnnotationLayer(svgId, dotNetRef) {
+    unbindAnnotationLayer(svgId);
+    const svg = document.getElementById(svgId);
+    if (!svg) {
+        return false;
+    }
+    const state = { svg, dotNetRef, tool: null, color: '#E53935', start: null, preview: null, listeners: [] };
+    annotationLayers.set(svgId, state);
+    const on = (type, handler) => {
+        svg.addEventListener(type, handler);
+        state.listeners.push(() => svg.removeEventListener(type, handler));
+    };
+    const report = (tool, a, b) => {
+        if (state.dotNetRef && typeof state.dotNetRef.invokeMethodAsync === 'function') {
+            state.dotNetRef.invokeMethodAsync('OnAnnotationDrawn', tool, a.x, a.y, b.x, b.y).catch(() => { /* circuit закрыт */ });
+        }
+    };
+    on('pointerdown', (event) => {
+        if (!state.tool || event.button !== 0) {
+            return;
+        }
+        const point = annotationPoint(svg, event);
+        event.preventDefault();
+        if (state.tool === 'text') {
+            report('text', point, point);
+            return;
+        }
+        state.start = point;
+        const ns = 'http://www.w3.org/2000/svg';
+        state.preview = document.createElementNS(ns, state.tool === 'rect' ? 'rect' : 'line');
+        state.preview.setAttribute('stroke', state.color);
+        state.preview.setAttribute('stroke-width', '3');
+        state.preview.setAttribute('fill', 'none');
+        state.preview.setAttribute('vector-effect', 'non-scaling-stroke');
+        svg.appendChild(state.preview);
+        if (typeof svg.setPointerCapture === 'function') {
+            svg.setPointerCapture(event.pointerId);
+        }
+    });
+    on('pointermove', (event) => {
+        if (!state.start || !state.preview) {
+            return;
+        }
+        const point = annotationPoint(svg, event);
+        if (state.tool === 'rect') {
+            state.preview.setAttribute('x', String(Math.min(state.start.x, point.x)));
+            state.preview.setAttribute('y', String(Math.min(state.start.y, point.y)));
+            state.preview.setAttribute('width', String(Math.abs(point.x - state.start.x)));
+            state.preview.setAttribute('height', String(Math.abs(point.y - state.start.y)));
+        } else {
+            state.preview.setAttribute('x1', String(state.start.x));
+            state.preview.setAttribute('y1', String(state.start.y));
+            state.preview.setAttribute('x2', String(point.x));
+            state.preview.setAttribute('y2', String(point.y));
+        }
+    });
+    on('pointerup', (event) => {
+        if (!state.start) {
+            return;
+        }
+        const point = annotationPoint(svg, event);
+        const start = state.start;
+        state.start = null;
+        if (state.preview) {
+            state.preview.remove();
+            state.preview = null;
+        }
+        report(state.tool === 'rect' ? 'rect' : 'arrow', start, point);
+    });
+    return true;
+}
+
+/** Инструмент рисования: 'arrow', 'rect', 'text' или null (рисование выключено) и цвет заготовки. */
+export function setAnnotationTool(svgId, tool, color) {
+    const state = annotationLayers.get(svgId);
+    if (!state) {
+        return false;
+    }
+    state.tool = tool || null;
+    state.color = color || state.color;
+    return true;
+}
+
+/** Снять слушатели слоя пометок. */
+export function unbindAnnotationLayer(svgId) {
+    const state = annotationLayers.get(svgId);
+    if (!state) {
+        return false;
+    }
+    for (const remove of state.listeners) {
+        remove();
+    }
+    if (state.preview) {
+        state.preview.remove();
+    }
+    annotationLayers.delete(svgId);
+    return true;
+}
+
 // Глобальный алиас для отладки из консоли; страницы используют экспорт модуля.
 window.iscaiMedia = { seek, reveal, measure, currentTime, stepFrame, bindFrameKeys, unbindFrameKeys };

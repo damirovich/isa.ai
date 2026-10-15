@@ -1,0 +1,435 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Пометки на фото (ТФ-МЕД-13, ADR-0050): стрелки, рамки и подписи слоем поверх изображения — сам файл не меняется
+   (ТЭ-007). Компонент оборачивает фото карточки (ChildContent — <img> и рамки лиц): над ним — инструменты, поверх —
+   слой сохранённых пометок (svg в пикселях изображения, viewBox — натуральный размер) и слой рисования новой (media.js
+   bindAnnotationLayer: у него нет детей в разметке Blazor), под ним — список пометок с автором и временем.
+   «Скачать с пометками» — ExportAnnotatedImageQuery: сервер наносит пометки на копию для выгрузки, внизу — гриф и
+   «кто выгрузил»; запись «Выгрузка» в журнале. Постановка и снятие — команды с записью журнала; право и доступ
+   проверяет сервер, здесь только не предлагаются действия в режиме «только просмотр» (ADR-0044). *@
+@implements IAsyncDisposable
+@using System.Globalization
+@using System.IO
+@using ISC.AI.Modules.Media.Application.Features.Annotations
+@using ISC.AI.Modules.Media.Domain.Model
+
+<div class="pa-toolbar">
+    @if (CanEdit)
+    {
+        <span class="pa-label">Пометки:</span>
+        <MudButton Variant="@ToolVariant("arrow")" Size="Size.Small" StartIcon="@Icons.Material.Filled.ArrowOutward"
+                   OnClick="@(() => SetToolAsync("arrow"))" Disabled="@(Natural is null)">Стрелка</MudButton>
+        <MudButton Variant="@ToolVariant("rect")" Size="Size.Small" StartIcon="@Icons.Material.Filled.CropSquare"
+                   OnClick="@(() => SetToolAsync("rect"))" Disabled="@(Natural is null)">Рамка</MudButton>
+        <MudButton Variant="@ToolVariant("text")" Size="Size.Small" StartIcon="@Icons.Material.Filled.TextFields"
+                   OnClick="@(() => SetToolAsync("text"))" Disabled="@(Natural is null)">Подпись</MudButton>
+        <span class="pa-colors" role="radiogroup" aria-label="Цвет пометки">
+            @foreach (var color in AnnotationColors.All)
+            {
+                var value = color;
+                <button type="button" class="@(value == _color ? "pa-color pa-color-on" : "pa-color")" style="@($"background:{value};")"
+                        role="radio" aria-checked="@(value == _color ? "true" : "false")" aria-label="@ColorName(value)" title="@ColorName(value)"
+                        @onclick="@(() => SetColorAsync(value))"></button>
+            }
+        </span>
+    }
+    @if (_items.Count > 0)
+    {
+        <MudSwitch T="bool" @bind-Value="_visible" Color="Color.Primary" Label="@($"Показывать пометки ({_items.Count})")" />
+        @if (CanEdit)
+        {
+            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Download" Disabled="_busy"
+                       OnClick="ExportAsync" title="Изображение с нанесёнными пометками, грифом и подписью «кто выгрузил» (запись в журнале)">Скачать с пометками</MudButton>
+        }
+    }
+    @if (_tool is not null)
+    {
+        <span class="pa-hint">@ToolHint</span>
+    }
+</div>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="my-2"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+<div class="pa-frame">
+    @ChildContent
+    @if (Natural is { } size)
+    {
+        @if (_visible && _items.Count > 0)
+        {
+            <svg class="pa-layer" viewBox="@ViewBox(size)" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                    @foreach (var color in AnnotationColors.All)
+                    {
+                        <marker id="@MarkerId(color)" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse"
+                                markerWidth="@Css(HeadSize(size))" markerHeight="@Css(HeadSize(size))" orient="auto-start-reverse">
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="@color" />
+                        </marker>
+                    }
+                </defs>
+                @foreach (var item in _items)
+                {
+                    switch (item.Kind)
+                    {
+                        case AnnotationKind.Rectangle:
+                            <rect x="@Css(Math.Min(item.X1, item.X2))" y="@Css(Math.Min(item.Y1, item.Y2))"
+                                  width="@Css(Math.Abs(item.X2 - item.X1))" height="@Css(Math.Abs(item.Y2 - item.Y1))"
+                                  fill="none" stroke="@item.Color" stroke-width="@Css(StrokeWidth(size))" />
+                            break;
+                        case AnnotationKind.Arrow:
+                            <line x1="@Css(item.X1)" y1="@Css(item.Y1)" x2="@Css(item.X2)" y2="@Css(item.Y2)"
+                                  stroke="@item.Color" stroke-width="@Css(StrokeWidth(size))" stroke-linecap="round"
+                                  marker-end="@($"url(#{MarkerId(item.Color)})")" />
+                            break;
+                        case AnnotationKind.Text:
+                            @* Обёртка <g>: тег <text> на переходе из кода Razor понимает как свой служебный. *@
+                            <g>
+                                <text x="@Css(item.X1)" y="@Css(item.Y1)" font-size="@Css(FontSize(size))" fill="@item.Color"
+                                      stroke="rgba(0,0,0,0.75)" stroke-width="@Css(FontSize(size) / 7)" paint-order="stroke"
+                                      font-family="Arial, sans-serif">@item.Text</text>
+                            </g>
+                            break;
+                    }
+                }
+            </svg>
+        }
+        @if (CanEdit)
+        {
+            <svg id="@DrawId" class="@(_tool is null ? "pa-draw" : "pa-draw pa-draw-on")" viewBox="@ViewBox(size)" preserveAspectRatio="none"></svg>
+        }
+    }
+</div>
+
+@if (_items.Count > 0)
+{
+    <div class="pa-list">
+        @foreach (var item in _items)
+        {
+            var current = item;
+            <div class="pa-item">
+                <span class="pa-swatch" style="@($"background:{current.Color};")"></span>
+                <span>@KindLabel(current)</span>
+                <span class="pa-meta">@AuthorLabel(current) · @current.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture)</span>
+                @if (CanEdit)
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" aria-label="Снять пометку" title="Снять пометку"
+                                   Disabled="_busy" OnClick="@(() => DeleteAsync(current))" />
+                }
+            </div>
+        }
+    </div>
+}
+
+<MudDialog @bind-Visible="_textOpen" Options="TextDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Подпись на фото</MudText></TitleContent>
+    <DialogContent>
+        <MudTextField T="string" @bind-Value="_text" Label="Текст подписи" Variant="Variant.Outlined" AutoFocus="true"
+                      MaxLength="@AnnotationDraft.MaxTextLength" Immediate="true" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _textOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(string.IsNullOrWhiteSpace(_text) || _busy)"
+                   OnClick="SaveTextAsync">Поставить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private const string MediaModulePath = "./_content/ISC.AI.Modules.Media.UI/js/media.js";
+    private static readonly DialogOptions TextDialogOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true };
+
+    /// <summary>Фото (носитель).</summary>
+    [Parameter, EditorRequired] public int AssetId { get; set; }
+
+    /// <summary>Натуральная ширина изображения (как показывает браузер), пикселей; 0 — пока не известна, слой не рисуется.</summary>
+    [Parameter] public int NaturalWidth { get; set; }
+
+    /// <summary>Натуральная высота изображения, пикселей; 0 — пока не известна.</summary>
+    [Parameter] public int NaturalHeight { get; set; }
+
+    // Размер изображения, когда известен.
+    private (int Width, int Height)? Natural => NaturalWidth > 0 && NaturalHeight > 0 ? (NaturalWidth, NaturalHeight) : null;
+
+    /// <summary>Можно ставить и снимать пометки и выгружать (носитель своего дела, не «только просмотр»).</summary>
+    [Parameter] public bool CanEdit { get; set; }
+
+    /// <summary>Само фото и рамки лиц — внутри слоя (одни координаты).</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private List<AnnotationRow> _items = [];
+    private IReadOnlyDictionary<int, string> _authors = new Dictionary<int, string>();
+    private int? _loadedAssetId;
+    private string? _tool;
+    private string _color = AnnotationColors.Red;
+    private bool _visible = true;
+    private bool _busy;
+    private string? _error;
+    private bool _textOpen;
+    private string? _text;
+    private (double X, double Y) _textPoint;
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<PhotoAnnotations>? _selfRef;
+    private bool _bound;
+
+    private string DrawId => "media-annotation-draw-" + AssetId.ToString(CultureInfo.InvariantCulture);
+
+    private string ToolHint => _tool switch
+    {
+        "arrow" => "Протяните мышью от начала к острию стрелки.",
+        "rect" => "Протяните мышью по диагонали рамки.",
+        _ => "Щёлкните там, где должна стоять подпись.",
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (RendererInfo.IsInteractive && _loadedAssetId != AssetId)
+        {
+            _loadedAssetId = AssetId;
+            _bound = false;
+            await LoadAsync();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_bound || !CanEdit || Natural is null || !RendererInfo.IsInteractive)
+        {
+            return;
+        }
+
+        _bound = true;
+        _selfRef ??= DotNetObjectReference.Create(this);
+        if (await ModuleAsync() is { } module)
+        {
+            await TryAsync(module, "bindAnnotationLayer", DrawId, _selfRef);
+            await TryAsync(module, "setAnnotationTool", DrawId, _tool, _color);
+        }
+    }
+
+    /// <summary>
+    /// Новая пометка нарисована (media.js): вид и две точки в пикселях изображения. Подпись — спросить текст.
+    /// Публичный и с атрибутом — требование JS-interop.
+    /// </summary>
+    [JSInvokable]
+    public Task OnAnnotationDrawn(string tool, double x1, double y1, double x2, double y2) => InvokeAsync(async () =>
+    {
+        if (tool == "text")
+        {
+            _textPoint = (x1, y1);
+            _text = null;
+            _textOpen = true;
+            StateHasChanged();
+            return;
+        }
+
+        var kind = tool == "rect" ? AnnotationKind.Rectangle : AnnotationKind.Arrow;
+        await AddAsync(new AnnotationDraft(AssetId, kind, x1, y1, x2, y2, null, _color));
+    });
+
+    private async Task SaveTextAsync()
+    {
+        _textOpen = false;
+        await AddAsync(new AnnotationDraft(AssetId, AnnotationKind.Text, _textPoint.X, _textPoint.Y, _textPoint.X, _textPoint.Y, _text, _color));
+    }
+
+    private async Task AddAsync(AnnotationDraft draft)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new AddAnnotationCommand(draft));
+            if (!response.Status)
+            {
+                _error = response.StatusMessage;
+            }
+
+            await LoadAsync();
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task DeleteAsync(AnnotationRow item)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new DeleteAnnotationCommand(item.Id));
+            if (!response.Status)
+            {
+                _error = response.StatusMessage;
+            }
+
+            await LoadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        var response = await Dispatcher.Send(new ListAnnotationsQuery(AssetId));
+        if (response is { Status: true, Data: { } layer })
+        {
+            _items = layer.Items.ToList();
+            _authors = layer.Authors;
+        }
+        else
+        {
+            _items = [];
+        }
+    }
+
+    // Инструмент: повторный щелчок по тому же — выключить рисование.
+    private async Task SetToolAsync(string tool)
+    {
+        _tool = _tool == tool ? null : tool;
+        if (await ModuleAsync() is { } module)
+        {
+            await TryAsync(module, "setAnnotationTool", DrawId, _tool, _color);
+        }
+    }
+
+    private async Task SetColorAsync(string color)
+    {
+        _color = color;
+        if (await ModuleAsync() is { } module)
+        {
+            await TryAsync(module, "setAnnotationTool", DrawId, _tool, _color);
+        }
+    }
+
+    private async Task ExportAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new ExportAnnotatedImageQuery(AssetId));
+            if (response is not { Status: true, Data: { } image })
+            {
+                _error = response?.StatusMessage ?? "Выгрузка не выполнена.";
+                return;
+            }
+
+            using var stream = new DotNetStreamReference(new MemoryStream(image.Content));
+            await JS.InvokeVoidAsync("downloadFileFromStream", image.FileName, stream);
+        }
+        catch (JSException exception)
+        {
+            _error = "Изображение подготовлено, но браузер не принял файл: " + exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private Variant ToolVariant(string tool) => _tool == tool ? Variant.Filled : Variant.Outlined;
+
+    private string KindLabel(AnnotationRow item) => item.Kind switch
+    {
+        AnnotationKind.Arrow => "Стрелка",
+        AnnotationKind.Rectangle => "Рамка",
+        _ => "Подпись «" + item.Text + "»",
+    };
+
+    private string AuthorLabel(AnnotationRow item) =>
+        item.AuthorUserId is { } id
+            ? _authors.TryGetValue(id, out var name) ? name : "сотрудник № " + id.ToString(CultureInfo.InvariantCulture)
+            : "автор не указан";
+
+    /// <summary>Название цвета палитры для подсказки и экранного диктора.</summary>
+    public static string ColorName(string color) => color switch
+    {
+        AnnotationColors.Red => "Красный",
+        AnnotationColors.Yellow => "Жёлтый",
+        AnnotationColors.Green => "Зелёный",
+        AnnotationColors.Blue => "Синий",
+        AnnotationColors.White => "Белый",
+        _ => color,
+    };
+
+    // Размеры в пикселях изображения — те же, что у выгрузки (ImageEditing.RenderAnnotated): unit = min(W, H) / 400.
+    private static double Unit((int Width, int Height) size) => Math.Max(1.0, Math.Min(size.Width, size.Height) / 400.0);
+
+    private static double StrokeWidth((int Width, int Height) size) => Math.Max(2.0, 2.5 * Unit(size));
+
+    private static double HeadSize((int Width, int Height) size) => 6.0 * StrokeWidth(size);
+
+    private static double FontSize((int Width, int Height) size) => Math.Max(14.0, 14.0 * Unit(size));
+
+    private static string ViewBox((int Width, int Height) size) =>
+        string.Create(CultureInfo.InvariantCulture, $"0 0 {size.Width} {size.Height}");
+
+    private static string MarkerId(string color) => "pa-arrow-" + color.TrimStart('#');
+
+    private static string Css(double value) => value.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private async Task<IJSObjectReference?> ModuleAsync()
+    {
+        if (_module is null)
+        {
+            try
+            {
+                _module = await JS.InvokeAsync<IJSObjectReference>("import", MediaModulePath);
+            }
+            catch (JSException)
+            {
+                return null;
+            }
+            catch (JSDisconnectedException)
+            {
+                return null;
+            }
+        }
+
+        return _module;
+    }
+
+    private static async Task TryAsync(IJSObjectReference module, string method, params object?[] args)
+    {
+        try
+        {
+            await module.InvokeAsync<bool>(method, args);
+        }
+        catch (JSException)
+        {
+            // Без рисования пометки остаются видимыми; ставить их тогда нельзя — это видно по отсутствию заготовки.
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit уже закрыт.
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.InvokeAsync<bool>("unbindAnnotationLayer", DrawId);
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit уже закрыт.
+            }
+            catch (JSException)
+            {
+                // Сбой очистки не должен ронять уход со страницы.
+            }
+        }
+
+        _selfRef?.Dispose();
+    }
+}

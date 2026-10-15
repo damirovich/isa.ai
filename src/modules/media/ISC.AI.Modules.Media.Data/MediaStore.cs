@@ -103,10 +103,17 @@ public sealed partial class MediaStore(
                 // Происхождение из импорта архива (ADR-0041): какой строкой задания принят файл (ТБ-077).
                 ImportItemId = draft.ImportItemId,
 
+                // Обработанная копия фото (ADR-0050): набор операций — и запрет индексации ниже.
+                EditOperations = draft.EditOperations,
+
                 // Два независимых конвейера (ADR-0026): лица — для фото и видео; к аудио поиск по лицу
                 // НЕПРИМЕНИМ (не «проиндексировано с нулём лиц» — иначе журнал утверждал бы, что биометрия
                 // обрабатывалась). Расшифровка — для аудио и звуковой дорожки видео; к фото неприменима.
-                IndexStatus = draft.Kind == MediaKind.Audio ? MediaIndexStatus.NotApplicable : MediaIndexStatus.Uploaded,
+                // Обработанная копия (ТФ-МЕД-14) лиц не индексирует: иначе один человек получал бы вторые шаблоны с
+                // обработанного изображения и копия попадала бы в эталонную базу.
+                IndexStatus = draft.Kind == MediaKind.Audio || draft.EditOperations is not null
+                    ? MediaIndexStatus.NotApplicable
+                    : MediaIndexStatus.Uploaded,
                 TranscriptStatus = draft.Kind is MediaKind.Audio or MediaKind.Video
                     ? TranscriptStatus.Pending
                     : TranscriptStatus.NotApplicable,
