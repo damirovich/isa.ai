@@ -38,6 +38,14 @@ public sealed class MediaPurger(
     public async Task<MediaPurgeResult> PurgeAsync(
         int assetId, int? subjectId = null, CancellationToken cancellationToken = default)
     {
+        // Обработанные копии фото (ТФ-МЕД-14, ТНД-008) уничтожаются вместе с источником — каждая своим актом и ДО него:
+        // сбой на копии оставляет источник целым, и повтор удаления дочищает остальное. Снимки кадров (ADR-0028) —
+        // не копии, а самостоятельные носители, их удаление источника не трогает.
+        foreach (var copyId in await ListEditedCopiesAsync(assetId, cancellationToken))
+        {
+            await PurgeAsync(copyId, subjectId, cancellationToken);
+        }
+
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
@@ -62,8 +70,9 @@ public sealed class MediaPurger(
             .ToListAsync(cancellationToken);
         var faceCount = await db.Faces.CountAsync(f => f.AssetId == assetId, cancellationToken);
 
-        // Расшифровка речи (ADR-0026) уходит тем же каскадом; её объём — в акт, как и число лиц.
+        // Расшифровка речи (ADR-0026) и пометки (ADR-0050) уходят тем же каскадом; их объём — в акт, как и число лиц.
         var segmentCount = await db.TranscriptSegments.CountAsync(s => s.AssetId == assetId, cancellationToken);
+        var annotationCount = await db.Annotations.CountAsync(a => a.AssetId == assetId, cancellationToken);
 
         // FAIL-CLOSED (ТБ-064): аудит ДО уничтожения данных. Недоступен журнал — WriteAsync бросит, транзакция
         // откатится при выходе и удаление НЕ произойдёт.
@@ -77,8 +86,9 @@ public sealed class MediaPurger(
                 PayloadSensitive:
                     $"Гарантированное удаление носителя и биометрических производных: лиц {faceCount}, вырезок {crops.Count}, "
                     + $"фрагментов расшифровки {segmentCount}"
+                    + (annotationCount == 0 ? string.Empty : $", пометок {annotationCount}")
                     + (asset.FilmstripStoredFileName is null ? string.Empty : ", ленты кадров")
-                    + " (ТБ-064/075, ADR-0026, ADR-0038)."),
+                    + " (ТБ-064/075, ADR-0026, ADR-0038, ADR-0050)."),
             cancellationToken);
 
         // Атомарно и в той же транзакции под блокировкой: носитель → кадры/лица/шаблоны/фрагменты расшифровки
@@ -105,6 +115,16 @@ public sealed class MediaPurger(
         }
 
         return new MediaPurgeResult(Found: true, FacesRemoved: faceCount, FilesRemoved: filesRemoved);
+    }
+
+    // Обработанные копии носителя: производные с набором операций и ссылкой на него (ADR-0050).
+    private async Task<IReadOnlyList<int>> ListEditedCopiesAsync(int assetId, CancellationToken cancellationToken)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        return await db.Assets.AsNoTracking()
+            .Where(a => a.SourceAssetId == assetId && a.EditOperations != null && a.Id != assetId)
+            .Select(a => a.Id)
+            .ToListAsync(cancellationToken);
     }
 
     /// <inheritdoc />

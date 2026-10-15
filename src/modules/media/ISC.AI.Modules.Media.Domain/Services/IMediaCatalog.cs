@@ -16,6 +16,8 @@ namespace ISC.AI.Modules.Media.Domain.Services;
 /// (картинка в категории <c>media-filmstrips</c>, число кадров и шаг между ними; до переиндексации — <see langword="null"/>),
 /// <c>RecordedAt</c> — «встроенное» время начала записи из метаданных файла (ТФ-МЕД-11; не путать с подтверждённой
 /// оператором датой съёмки <c>CapturedAt</c>).
+/// Хвост ADR-0050: <c>EditOperations</c> — у обработанной копии фото набор операций (JSON), по которому она построена из
+/// <c>SourceAssetId</c>; у остальных носителей <see langword="null"/>.
 /// </remarks>
 public sealed record MediaAssetRow(
     int Id,
@@ -46,7 +48,15 @@ public sealed record MediaAssetRow(
     string? FilmstripStoredFileName = null,
     int? FilmstripTileCount = null,
     long? FilmstripStepMs = null,
-    DateTimeOffset? RecordedAt = null);
+    DateTimeOffset? RecordedAt = null,
+    string? EditOperations = null)
+{
+    /// <summary>Обработанная копия фото (ТФ-МЕД-14, ADR-0050): набор операций, по которым она построена из источника.</summary>
+    public ImageEdit? Edit => ImageEdit.FromJson(EditOperations);
+
+    /// <summary>Носитель — обработанная копия (не индексируется, не эталон; удаляется вместе с источником).</summary>
+    public bool IsEditedCopy => EditOperations is not null;
+}
 
 /// <summary>Сведения о материале носителя для строки кандидата (ТФ-ПЛ-02): время съёмки, загрузки и источник.</summary>
 /// <param name="AssetId">Носитель.</param>

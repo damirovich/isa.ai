@@ -1,0 +1,20 @@
+/* Обработка фото (ADR-0050): предпросмотр рисует media.js на canvas. */
+.ie-root {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 240px;
+    background: var(--mud-palette-background-gray);
+    border-radius: 6px;
+}
+
+.ie-canvas {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    touch-action: none;
+}
+
+.ie-crop {
+    cursor: crosshair;
+}

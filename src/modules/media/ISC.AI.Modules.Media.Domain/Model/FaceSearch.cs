@@ -85,6 +85,11 @@ public sealed record FaceCandidate(
 /// Строка задания импорта, которой принят носитель (ADR-0041): происхождение для цепочки хранения (ТБ-077) и
 /// восстановления после аварии посреди приёма. Слабая ссылка — у обычной загрузки <see langword="null"/>.
 /// </param>
+/// <param name="EditOperations">
+/// Обработанная копия фото (ТФ-МЕД-14, ADR-0050): набор операций в JSON (<see cref="ImageEdit.ToJson"/>), по которому
+/// копия построена из <paramref name="SourceAssetId"/>. Такой носитель не индексируется (лиц и шаблонов у него нет — в
+/// эталонную базу не попадает) и уничтожается вместе с источником (ТНД-008).
+/// </param>
 public sealed record MediaAssetDraft(
     string OriginalFileName,
     string ContentType,
@@ -97,7 +102,8 @@ public sealed record MediaAssetDraft(
     int? SourceAssetId = null,
     long? SourceTimestampMs = null,
     string? ExpectedContentHash = null,
-    int? ImportItemId = null);
+    int? ImportItemId = null,
+    string? EditOperations = null);
 
 /// <summary>Результат приёма носителя: идентификатор и признак «такой файл уже был» (дедуп по хешу).</summary>
 /// <param name="AssetId">Носитель в схеме <c>media</c>.</param>

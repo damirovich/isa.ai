@@ -133,6 +133,14 @@ public sealed class SkiaImageTools : IImageTools
         return EncodeJpeg(target, quality, "ленту кадров");
     }
 
+    /// <inheritdoc />
+    /// <remarks>Обработка по явному запросу оператора (ТФ-МЕД-14) — новая картинка; вырезки выдачи выше её не используют.</remarks>
+    public byte[] ApplyEdits(byte[] imageBytes, ImageEdit edit) => ImageEditing.ApplyEdits(imageBytes, edit);
+
+    /// <inheritdoc />
+    public byte[] RenderAnnotated(byte[] imageBytes, IReadOnlyList<AnnotationRow> annotations, string caption) =>
+        ImageEditing.RenderAnnotated(imageBytes, annotations, caption);
+
     private static SKBitmap NewCanvasBitmap(int width, int height) =>
         new(new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul));
 

@@ -346,7 +346,9 @@ public sealed class MediaCatalog(
             a.FilmstripStoredFileName,
             a.FilmstripTileCount,
             a.FilmstripStepMs,
-            a.RecordedAt));
+            a.RecordedAt,
+            // Обработанная копия фото (ADR-0050): набор операций; у остальных — null.
+            a.EditOperations));
 
     private static IQueryable<FaceRow> ProjectFaces(IQueryable<Face> faces) =>
         faces.Select(f => new FaceRow(

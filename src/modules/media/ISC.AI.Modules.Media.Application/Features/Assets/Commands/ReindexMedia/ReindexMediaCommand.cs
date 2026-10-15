@@ -18,6 +18,10 @@ namespace ISC.AI.Modules.Media.Application.Features.Assets;
 /// </summary>
 public sealed record ReindexMediaCommand(int AssetId) : IRequest<ResponseDto<Guid>>, IAuditableRequest
 {
+    /// <summary>Отказ: обработанная копия фото лиц не индексирует (ADR-0050).</summary>
+    public const string EditedCopyNotIndexedMessage =
+        "Обработанная копия не индексируется: лица ищутся по исходному носителю, а не по обработанному изображению.";
+
     /// <inheritdoc />
     public AuditAction AuditAction => AuditAction.Modify;
 
@@ -59,6 +63,13 @@ public sealed record ReindexMediaCommand(int AssetId) : IRequest<ResponseDto<Gui
             }
 
             // ADR-0026: в аудиозаписи лиц нет — переиндексировать нечего; отказ явный, а не пустая задача.
+            // Обработанная копия фото (ТФ-МЕД-14, ADR-0050) не индексируется: шаблоны с обработанного изображения были бы
+            // вторыми шаблонами того же человека, а копия — частью эталонной базы.
+            if (asset.IsEditedCopy)
+            {
+                return ResponseDto<Guid>.BadRequest(EditedCopyNotIndexedMessage);
+            }
+
             if (asset.Kind == MediaKind.Audio)
             {
                 return ResponseDto<Guid>.BadRequest("К аудиозаписи поиск по лицу неприменим: лиц в ней нет.");

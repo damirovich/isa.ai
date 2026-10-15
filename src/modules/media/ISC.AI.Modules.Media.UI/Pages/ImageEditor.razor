@@ -1,0 +1,343 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Обработка фото (ТФ-МЕД-14, ADR-0050): яркость, контрастность, гамма, резкость, поворот, кадрирование и увеличение
+   («зум лица» — кадрирование по найденному лицу с увеличением). Предпросмотр строит media.js в браузере из оригинала
+   (initImageEditor/updateImageEditor) теми же формулами, что и сервер; сохранение — CreateEditedCopyCommand: копия
+   строится на сервере из ОРИГИНАЛА в полном размере и принимается в то же дело отдельным носителем с перечнем
+   операций. Оригинал не меняется никогда (ТЭ-007); копия не индексируется и в эталоны не попадает. «Улучшение
+   нейросетью» не делается (ТЗ §3.3). Право и доступ проверяет сервер; страница лишь не предлагает обработку материала
+   чужого дела (только просмотр, ADR-0044) и самой копии (её обрабатывают от источника). *@
+@page "/media/assets/{Id:int}/edit"
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@inject NavigationManager Navigation
+@using System.Globalization
+@using ISC.AI.Modules.Media.Application.Features.Assets
+@using ISC.AI.Modules.Media.Application.Features.Assets.Commands.EditPhoto
+@using ISC.AI.Modules.Media.Domain.Model
+@using ISC.AI.Modules.Media.Domain.Services
+
+<PageTitle>Обработка фото</PageTitle>
+
+<div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+    <div>
+        <MudText Typo="Typo.h5">Обработка фото</MudText>
+        @if (_asset is { } heading)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">@heading.OriginalFileName · носитель № @heading.Id</MudText>
+        }
+    </div>
+    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" Href="@($"/media/assets/{Id}")">К карточке носителя</MudButton>
+</div>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Class="my-4" />
+}
+else if (_blocked is not null)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="my-3">@_blocked</MudAlert>
+}
+else if (_asset is { } asset)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+        Оригинал не меняется: результат сохраняется отдельной обработанной копией в том же деле, с перечнем операций.
+        Копия не индексируется и в эталоны фигурантов не попадает.
+    </MudAlert>
+
+    <MudGrid Spacing="3">
+        <MudItem xs="12" md="8">
+            <MudPaper Outlined="true" Class="pa-2">
+                <div id="@RootId" class="ie-root">
+                    <canvas data-ie-canvas class="@(_cropMode ? "ie-canvas ie-crop" : "ie-canvas")"></canvas>
+                </div>
+            </MudPaper>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
+                @(_cropMode
+                    ? "Протяните мышью по изображению, чтобы выделить область."
+                    : "Предпросмотр уменьшен под экран; копия строится из оригинала в полном размере.")
+            </MudText>
+        </MudItem>
+
+        <MudItem xs="12" md="4">
+            <MudPaper Outlined="true" Class="pa-3">
+                <MudText Typo="Typo.subtitle2">Тон</MudText>
+                <MudText Typo="Typo.caption">Яркость: @Signed(_edit.Brightness)</MudText>
+                <MudSlider T="int" Min="-100" Max="100" Step="1" Value="_edit.Brightness"
+                           ValueChanged="@(v => SetAsync(_edit with { Brightness = v }))" aria-label="Яркость" />
+                <MudText Typo="Typo.caption">Контрастность: @Signed(_edit.Contrast)</MudText>
+                <MudSlider T="int" Min="-100" Max="100" Step="1" Value="_edit.Contrast"
+                           ValueChanged="@(v => SetAsync(_edit with { Contrast = v }))" aria-label="Контрастность" />
+                <MudText Typo="Typo.caption">Гамма: @_edit.Gamma.ToString("0.00", CultureInfo.GetCultureInfo("ru-RU"))</MudText>
+                <MudSlider T="double" Min="0.3" Max="3" Step="0.05" Value="_edit.Gamma"
+                           ValueChanged="@(v => SetAsync(_edit with { Gamma = Math.Round(v, 2) }))" aria-label="Гамма" />
+                <MudText Typo="Typo.caption">Резкость: @_edit.Sharpen</MudText>
+                <MudSlider T="int" Min="0" Max="100" Step="1" Value="_edit.Sharpen"
+                           ValueChanged="@(v => SetAsync(_edit with { Sharpen = v }))" aria-label="Резкость" />
+
+                <MudDivider Class="my-2" />
+                <MudText Typo="Typo.subtitle2">Поворот: @_edit.Rotation°</MudText>
+                <div class="d-flex gap-1">
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.RotateLeft"
+                               OnClick="@(() => RotateAsync(-90))">Влево</MudButton>
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.RotateRight"
+                               OnClick="@(() => RotateAsync(90))">Вправо</MudButton>
+                </div>
+
+                <MudDivider Class="my-2" />
+                <MudText Typo="Typo.subtitle2">Кадрирование и увеличение</MudText>
+                <div class="d-flex gap-1 flex-wrap mb-1">
+                    <MudButton Variant="@(_cropMode ? Variant.Filled : Variant.Outlined)" Size="Size.Small" Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Crop" OnClick="ToggleCropAsync">@(_cropMode ? "Готово" : "Выделить область")</MudButton>
+                    <MudButton Variant="Variant.Text" Size="Size.Small" Disabled="@(_edit.Crop is null)"
+                               OnClick="@(() => SetAsync(_edit with { Crop = null, Zoom = 1 }))">Без кадрирования</MudButton>
+                </div>
+                @if (_edit.Crop is { } crop)
+                {
+                    <MudText Typo="Typo.caption" Class="d-block">Область: @crop.Width × @crop.Height от (@crop.X, @crop.Y)</MudText>
+                }
+                @if (_faces.Count > 0 && _size is not null)
+                {
+                    @* «Зум лица»: рамка найденного лица с полями и увеличение до читаемого размера. *@
+                    <div class="d-flex gap-1 flex-wrap my-1">
+                        @foreach (var face in _faces)
+                        {
+                            var current = face;
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Face"
+                                     OnClick="@(() => ZoomToFaceAsync(current))">Лицо № @current.Id</MudChip>
+                        }
+                    </div>
+                }
+                <MudText Typo="Typo.caption">Увеличение</MudText>
+                <MudToggleGroup T="int" Value="_edit.Zoom" ValueChanged="@(z => SetAsync(_edit with { Zoom = z }))" Size="Size.Small"
+                                Color="Color.Primary" CheckMark="false">
+                    @for (var zoom = 1; zoom <= ImageEdit.MaxZoom; zoom++)
+                    {
+                        var value = zoom;
+                        <MudToggleItem T="int" Value="@value" Text="@($"×{value}")" />
+                    }
+                </MudToggleGroup>
+
+                <MudDivider Class="my-2" />
+                <MudText Typo="Typo.body2" Class="mb-1"><b>Операции:</b> @_edit.Describe()</MudText>
+                @if (_size is { } size)
+                {
+                    var output = _edit.OutputSize(size.Width, size.Height);
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">Результат: @output.Width × @output.Height пикс.</MudText>
+                    @foreach (var problem in _edit.Validate(size.Width, size.Height))
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block">@problem</MudText>
+                    }
+                }
+                <div class="d-flex gap-2 mt-3 flex-wrap">
+                    <MudButton Variant="Variant.Text" OnClick="@(() => SetAsync(new ImageEdit()))" Disabled="@(_edit.IsIdentity || _saving)">Сбросить</MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                               Disabled="@(!CanSave || _saving)" OnClick="SaveAsync">Сохранить копию</MudButton>
+                </div>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    private const string MediaModulePath = "./_content/ISC.AI.Modules.Media.UI/js/media.js";
+
+    /// <summary>Носитель-источник (фото).</summary>
+    [Parameter] public int Id { get; set; }
+
+    private MediaAssetRow? _asset;
+    private IReadOnlyList<FaceRow> _faces = [];
+    private ImageEdit _edit = new();
+    private (int Width, int Height)? _size;
+    private bool _cropMode;
+    private bool _loading = true;
+    private bool _saving;
+    private string? _error;
+    private string? _blocked;
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<ImageEditor>? _selfRef;
+    private bool _initialized;
+
+    private string RootId => "media-image-editor-" + Id.ToString(CultureInfo.InvariantCulture);
+
+    private bool CanSave => !_edit.IsIdentity && _size is { } size && _edit.Validate(size.Width, size.Height).Count == 0;
+
+    /// <summary>Набор для media.js (camelCase): операции и кадрирование.</summary>
+    private object JsOps => new
+    {
+        brightness = _edit.Brightness,
+        contrast = _edit.Contrast,
+        gamma = _edit.Gamma,
+        sharpen = _edit.Sharpen,
+        rotation = _edit.Rotation,
+        crop = _edit.Crop is { } c ? new { x = c.X, y = c.Y, width = c.Width, height = c.Height } : null,
+        zoom = _edit.Zoom,
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        // ТБ-030: на предрендере носитель не читается (открытие — одна запись журнала).
+        if (!RendererInfo.IsInteractive)
+        {
+            return;
+        }
+
+        var response = await Dispatcher.Send(new GetMediaAssetQuery(Id));
+        _loading = false;
+        if (response is not { Status: true, Data: { } details })
+        {
+            _blocked = response?.StatusMessage ?? "Носитель не найден или недоступен.";
+            return;
+        }
+
+        _asset = details.Asset;
+        _faces = details.Faces.Where(f => f.BoxWidth > 0 && f.BoxHeight > 0).ToList();
+        _blocked = details.Asset.Kind != MediaKind.Image
+            ? CreateEditedCopyCommand.NotImageMessage
+            : details.Asset.IsEditedCopy
+                ? CreateEditedCopyCommand.AlreadyCopyMessage
+                : details.ViewOnly
+                    ? "Материал дела, которое вы не ведёте, открыт только на просмотр: обработать его нельзя."
+                    : null;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_initialized || _asset is null || _blocked is not null || !RendererInfo.IsInteractive)
+        {
+            return;
+        }
+
+        _initialized = true;
+        _selfRef = DotNetObjectReference.Create(this);
+        try
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", MediaModulePath);
+            await _module.InvokeAsync<bool>(
+                "initImageEditor", RootId, MediaFileUrl.Originals(_asset.Id, _asset.StoredFileName), JsOps, _selfRef);
+        }
+        catch (JSException)
+        {
+            _error = "Предпросмотр не загрузился — обновите страницу.";
+            StateHasChanged();
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit уже закрыт.
+        }
+    }
+
+    /// <summary>Размер изображения после поворота по EXIF (как его показывает браузер) — от media.js после загрузки.</summary>
+    [JSInvokable]
+    public Task OnImageLoaded(int width, int height)
+    {
+        _size = (width, height);
+        return InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Выделенная мышью область — в координатах изображения после поворота (от media.js).</summary>
+    [JSInvokable]
+    public Task OnCropSelected(int x, int y, int width, int height) =>
+        InvokeAsync(() => SetAsync(_edit with { Crop = new CropRect(x, y, width, height) }));
+
+    private async Task SetAsync(ImageEdit edit)
+    {
+        _edit = edit;
+        await PushAsync();
+    }
+
+    // Поворот меняет координаты: прежняя область кадрирования к повёрнутому изображению не относится — сбрасывается.
+    private Task RotateAsync(int delta) =>
+        SetAsync(_edit with { Rotation = ((_edit.Rotation + delta) % 360 + 360) % 360, Crop = null, Zoom = 1 });
+
+    private async Task ToggleCropAsync()
+    {
+        _cropMode = !_cropMode;
+        await PushAsync();
+    }
+
+    private Task ZoomToFaceAsync(FaceRow face)
+    {
+        if (_size is not { } size)
+        {
+            return Task.CompletedTask;
+        }
+
+        var (crop, zoom) = ImageEditGeometry.FaceZoom(
+            face.BoxX, face.BoxY, face.BoxWidth, face.BoxHeight, _edit.Rotation, size.Width, size.Height);
+        _cropMode = false;
+        return SetAsync(_edit with { Crop = crop, Zoom = zoom });
+    }
+
+    private async Task PushAsync()
+    {
+        if (_module is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _module.InvokeAsync<bool>("updateImageEditor", RootId, JsOps, _cropMode);
+        }
+        catch (JSException)
+        {
+            // Предпросмотр не обновился — набор операций всё равно применится при сохранении.
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit уже закрыт.
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new CreateEditedCopyCommand(Id, _edit));
+            if (response is { Status: true, Data: { } result })
+            {
+                Navigation.NavigateTo($"/media/assets/{result.AssetId}");
+                return;
+            }
+
+            _error = response?.StatusMessage ?? "Копия не сохранена.";
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private static string Signed(int value) =>
+        (value > 0 ? "+" : string.Empty) + value.ToString(CultureInfo.InvariantCulture);
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.InvokeAsync<bool>("disposeImageEditor", RootId);
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit уже закрыт.
+            }
+            catch (JSException)
+            {
+                // Сбой очистки не должен ронять уход со страницы.
+            }
+        }
+
+        _selfRef?.Dispose();
+    }
+}
