@@ -1,0 +1,44 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@* Быстрый поиск в шапке (ADR-0049): поле на каждой странице — Enter открывает страницу «Поиск» с результатами по
+   этому запросу (сам поиск, его область, журнал и история — там, ADR-0048). На узком экране вместо поля — значок,
+   ведущий на страницу «Поиск». Виджет оболочки объявляет профиль (ТС-003); рисуется только вошедшему (ТБ-010).
+   Здесь ничего не ищется и не хранится: запрос уходит в адрес страницы «Поиск». *@
+@using ISC.AI.Profile.Investigation.Domain.Services
+@inject NavigationManager Navigation
+
+<div class="d-none d-md-flex align-center mr-2">
+    <MudTextField T="string" @bind-Value="_text" Placeholder="Поиск по делам…" Variant="Variant.Outlined" Margin="Margin.Dense"
+                  Immediate="true" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                  OnKeyDown="OnKeyDownAsync" Style="width:240px;" Class="quick-search"
+                  aria-label="Поиск по делам, фигурантам, госномерам, адресам" />
+</div>
+<MudIconButton Icon="@Icons.Material.Filled.ManageSearch" Color="Color.Inherit" Class="d-flex d-md-none" Href="/search"
+               aria-label="Поиск" title="Поиск" />
+
+@code {
+    private string? _text;
+
+    private Task OnKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            Go();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Открыть страницу «Поиск» с запросом. Слишком короткий запрос — просто страница «Поиск» (подсказку о длине даст
+    /// она): шапка ошибок не показывает.
+    /// </summary>
+    private void Go()
+    {
+        var text = _text?.Trim();
+        var uri = text is not null && SearchTerms.Parse(text).IsSearchable
+            ? new SearchPageState(text).ToUri()
+            : "/search";
+        _text = null;
+        Navigation.NavigateTo(uri);
+    }
+}

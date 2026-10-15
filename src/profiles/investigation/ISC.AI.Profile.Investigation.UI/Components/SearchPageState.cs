@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using ISC.AI.Profile.Investigation.Application.Features.Search;
+using ISC.AI.Profile.Investigation.Domain.Services;
 using ISC.AI.Profile.Investigation.Domain.Enums;
 
 namespace ISC.AI.Profile.Investigation.UI;

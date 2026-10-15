@@ -14,7 +14,10 @@
    (ТБ-030/032). Запрос, виды и отдел — в адресе (SearchPageState): «Назад» из карточки повторяет ту же выдачу.
    Каждая строка ведёт на место (ТФ-ПСК-02): дело, фигурант, сводка, документ — в карточку; фрагмент расшифровки — в
    карточку носителя на этом месте записи (?t=). Совпадение выделяется разбиением строки (SearchHighlight), без
-   вставки разметки: текст строк — данные дел. *@
+   вставки разметки: текст строк — данные дел.
+   ИСТОРИЯ (ADR-0049): под строкой — недавние и закреплённые (★) запросы сотрудника, при наборе — подсказки из них;
+   «История» — список с повтором, закреплением, удалением и очисткой. История хранится на сервере и видна только самому
+   сотруднику в пределах его допуска; удаление из неё журнал аудита не меняет. *@
 
 <PageHeader Title="Поиск" Subtitle="Дела, фигуранты, госномера, адреса, сводки, расшифровки и документы — в пределах ваших дел"
             Icon="@Icons.Material.Filled.ManageSearch" />
@@ -44,7 +47,69 @@
                          Label="@SearchPageState.Label(current)" Color="Color.Primary" Size="Size.Small" Dense="true" />
         }
     </div>
+    @if (_history.Count > 0)
+    {
+        @* Недавние и закреплённые запросы; при наборе — подсказки из истории (по тому же правилу: регистр и «ё/е»). *@
+        <div class="d-flex gap-1 align-center flex-wrap mt-2">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary mr-2">@(string.IsNullOrWhiteSpace(_input) ? "Недавние:" : "Из истории:")</MudText>
+            @foreach (var entry in Suggestions)
+            {
+                var item = entry;
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="search-history-chip"
+                         Color="@(item.IsPinned ? Color.Warning : Color.Default)"
+                         Icon="@(item.IsPinned ? Icons.Material.Filled.Star : Icons.Material.Filled.History)"
+                         title="@HistoryHint(item)" OnClick="@(() => RepeatAsync(item))">@item.Text</MudChip>
+            }
+            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.ManageHistory"
+                       OnClick="@(() => _historyOpen = !_historyOpen)">@(_historyOpen ? "Скрыть историю" : $"История ({_history.Count})")</MudButton>
+        </div>
+    }
 </MudPaper>
+
+@if (_historyOpen)
+{
+    <MudPaper Outlined="true" Class="pa-3 mb-4">
+        <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+            <MudText Typo="Typo.subtitle1">История поиска</MudText>
+            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.DeleteSweep"
+                       Disabled="@(!_history.Any(h => !h.IsPinned))" OnClick="ClearHistoryAsync">Очистить недавние</MudButton>
+        </div>
+        @if (_history.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">История пуста — здесь появятся ваши запросы.</MudText>
+        }
+        else
+        {
+            <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
+                <tbody>
+                    @foreach (var entry in _history)
+                    {
+                        var row = entry;
+                        <tr class="search-history-row">
+                            <td style="width:44px;">
+                                <MudIconButton Icon="@(row.IsPinned ? Icons.Material.Filled.Star : Icons.Material.Filled.StarBorder)" Size="Size.Small"
+                                               Color="@(row.IsPinned ? Color.Warning : Color.Default)"
+                                               aria-label="@(row.IsPinned ? "Открепить" : "Закрепить")" title="@(row.IsPinned ? "Открепить" : "Закрепить — не вытесняется новыми запросами")"
+                                               OnClick="@(() => PinAsync(row, !row.IsPinned))" />
+                            </td>
+                            <td><MudLink Typo="Typo.body2" OnClick="@(() => RepeatAsync(row))" title="Искать снова">@row.Text</MudLink></td>
+                            <td class="mud-text-secondary">@KindsLabel(row.Kinds)@(row.Direction is { } direction ? " · " + direction.ShortLabel() : string.Empty)</td>
+                            <td class="mud-text-secondary" style="white-space:nowrap;">найдено @row.ResultCount</td>
+                            <td class="mud-text-secondary" style="white-space:nowrap;">@WhenLabel(row.SearchedAt)</td>
+                            <td style="width:44px;">
+                                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" aria-label="Удалить из истории"
+                                               title="Удалить из истории" OnClick="@(() => DeleteHistoryAsync(row))" />
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        }
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+            История видна только вам. Удаление из истории не стирает запись о поиске в журнале аудита.
+        </MudText>
+    </MudPaper>
+}
 
 @if (_error is not null)
 {
@@ -244,6 +309,27 @@ else if (!_busy)
     private SearchKinds _searchedKinds = SearchKinds.All;
     private bool _busy;
     private string? _error;
+    private List<SearchHistoryRow> _history = [];
+    private bool _historyOpen;
+
+    /// <summary>Сколько запросов из истории показывать строкой под поиском.</summary>
+    public const int SuggestionCount = 8;
+
+    // Подсказки: при пустом поле — недавние (закреплённые первыми); при наборе — те, где есть введённое.
+    private IReadOnlyList<SearchHistoryRow> Suggestions =>
+        _history
+            .Where(h => string.IsNullOrWhiteSpace(_input) || SearchHighlight.Split(h.Text, _input).Any(p => p.IsMatch))
+            .Take(SuggestionCount)
+            .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        // История — только интерактивно (на предрендере данных не грузим).
+        if (RendererInfo.IsInteractive)
+        {
+            await LoadHistoryAsync();
+        }
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -272,7 +358,7 @@ else if (!_busy)
         }
     }
 
-    // «Найти»: состояние — в адрес (поиск выполнит OnParametersSetAsync); тот же адрес — искать заново прямо здесь.
+    // «Найти»: проверка ввода — до сервера.
     private async Task SearchAsync()
     {
         _error = null;
@@ -289,6 +375,22 @@ else if (!_busy)
             return;
         }
 
+        await GoAsync(state);
+    }
+
+    // Повтор запроса из истории — с его видами и отделом.
+    private Task RepeatAsync(SearchHistoryRow row)
+    {
+        _error = null;
+        _input = row.Text;
+        _kinds = row.Kinds;
+        _direction = row.Direction;
+        return GoAsync(new SearchPageState(row.Text, row.Kinds, row.Direction));
+    }
+
+    // Состояние — в адрес (поиск выполнит OnParametersSetAsync); тот же адрес — искать заново прямо здесь.
+    private async Task GoAsync(SearchPageState state)
+    {
         var uri = state.ToUri();
         if (state == _loaded || Navigation.ToBaseRelativePath(Navigation.Uri) == uri.TrimStart('/'))
         {
@@ -311,6 +413,7 @@ else if (!_busy)
             {
                 _result = data;
                 _searchedKinds = state.Kinds;
+                await LoadHistoryAsync(); // поиск записан в историю — наверх
             }
             else
             {
@@ -323,6 +426,56 @@ else if (!_busy)
             _busy = false;
         }
     }
+
+    private async Task LoadHistoryAsync()
+    {
+        var response = await Dispatcher.Send(new ListSearchHistoryQuery());
+        _history = response is { Status: true, Data: { } rows } ? rows.ToList() : [];
+    }
+
+    private async Task PinAsync(SearchHistoryRow row, bool pinned)
+    {
+        var response = await Dispatcher.Send(new PinSearchHistoryCommand(row.Id, pinned));
+        _error = response.Status ? null : response.StatusMessage;
+        await LoadHistoryAsync();
+    }
+
+    private async Task DeleteHistoryAsync(SearchHistoryRow row)
+    {
+        var response = await Dispatcher.Send(new DeleteSearchHistoryCommand(row.Id));
+        _error = response.Status ? null : response.StatusMessage;
+        await LoadHistoryAsync();
+    }
+
+    private async Task ClearHistoryAsync()
+    {
+        var response = await Dispatcher.Send(new ClearSearchHistoryCommand());
+        _error = response.Status ? null : response.StatusMessage;
+        await LoadHistoryAsync();
+    }
+
+    /// <summary>Где искали: «везде» либо перечень видов строчными.</summary>
+    public static string KindsLabel(SearchKinds kinds) =>
+        (kinds & SearchKinds.All) == SearchKinds.All
+            ? "везде"
+            : string.Join(", ", SearchPageState.AllKinds.Where(k => (kinds & k) != 0).Select(k => SearchPageState.Label(k).ToLowerInvariant()));
+
+    /// <summary>Когда искали: «сегодня 14:05», иначе «14.10 09:30» (другой год — с годом).</summary>
+    public static string WhenLabel(DateTime searchedAtUtc)
+    {
+        var local = searchedAtUtc.ToLocalTime();
+        var today = DateTime.Now.Date;
+        return local.Date == today
+            ? "сегодня " + local.ToString("HH:mm", CultureInfo.InvariantCulture)
+            : local.Year == today.Year
+                ? local.ToString("dd.MM HH:mm", CultureInfo.InvariantCulture)
+                : local.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture);
+    }
+
+    private static string HistoryHint(SearchHistoryRow row) =>
+        $"{(row.IsPinned ? "Закреплён · " : string.Empty)}{KindsLabel(row.Kinds)}"
+        + (row.Direction is { } direction ? " · " + direction.ShortLabel() : string.Empty)
+        + $" · найдено {row.ResultCount.ToString(CultureInfo.InvariantCulture)} · {WhenLabel(row.SearchedAt)}";
 
     private void ToggleKind(SearchKinds kind, bool on) => _kinds = on ? _kinds | kind : _kinds & ~kind;
 

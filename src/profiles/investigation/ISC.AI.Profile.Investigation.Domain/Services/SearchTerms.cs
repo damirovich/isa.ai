@@ -61,6 +61,38 @@ public sealed record SearchTerms(string Raw, string Text, string? Plate, string?
     }
 }
 
+/// <summary>Виды выдачи единого поиска (ADR-0048); можно сочетать. Хранится и в истории поиска (ADR-0049).</summary>
+[Flags]
+public enum SearchKinds
+{
+    /// <summary>Ничего.</summary>
+    None = 0,
+
+    /// <summary>Дела: номер, № задания, название.</summary>
+    Cases = 1,
+
+    /// <summary>Фигуранты: ФИО, псевдоним, дата или год рождения.</summary>
+    Persons = 2,
+
+    /// <summary>Автотранспорт: госномер, марка, модель.</summary>
+    Vehicles = 4,
+
+    /// <summary>Адреса фигурантов и место жительства из анкеты.</summary>
+    Addresses = 8,
+
+    /// <summary>Сводки и справки: текст полей бланка.</summary>
+    Reports = 16,
+
+    /// <summary>Расшифровки речи носителей дел.</summary>
+    Transcripts = 32,
+
+    /// <summary>Документы дел: регистрационный номер, вид, краткое содержание.</summary>
+    Documents = 64,
+
+    /// <summary>Все виды.</summary>
+    All = Cases | Persons | Vehicles | Addresses | Reports | Transcripts | Documents,
+}
+
 /// <summary>Автотранспорт, найденный единым поиском: фигурант (владелец записи) и сама запись.</summary>
 /// <param name="PersonId">Фигурант.</param>
 /// <param name="CaseId">Дело фигуранта.</param>
