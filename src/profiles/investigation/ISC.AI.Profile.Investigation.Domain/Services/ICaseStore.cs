@@ -47,7 +47,8 @@ public sealed record CaseDraft(
 /// <remarks>
 /// <paramref name="Direction"/> — отдел ОН/ОУ (ТЭ-008, ADR-0039): дела подразделений, отнесённых к этому отделу
 /// (своей отметкой или через вышестоящее). Это отбор внутри допуска, а не граница доступа: чужие подразделения уже
-/// отсекла решётка (ТБ-020).
+/// отсекла решётка (ТБ-020). Порядок — поле <c>Sort</c> (по умолчанию — дата открытия), <c>SortDescending</c> — в
+/// обратную сторону; по умолчанию новые дела первыми. Порядок на доступ не влияет.
 /// </remarks>
 public sealed record CaseFilter(
     string? Text = null,
@@ -57,7 +58,34 @@ public sealed record CaseFilter(
     int? InvestigatorUserId = null,
     int Page = 1,
     int PageSize = 25,
-    CaseDirection? Direction = null);
+    CaseDirection? Direction = null,
+    CaseSortField Sort = CaseSortField.OpenedAt,
+    bool SortDescending = true);
+
+/// <summary>
+/// Поле сортировки списка дел. При равенстве поля дела идут по дате открытия (новые первыми), затем по
+/// идентификатору — порядок страниц устойчив, дела не «перескакивают» между страницами.
+/// </summary>
+public enum CaseSortField
+{
+    /// <summary>Дата открытия.</summary>
+    OpenedAt = 0,
+
+    /// <summary>Статус: «в производстве», «приостановлено», «закрыто» (по возрастанию — рабочие первыми).</summary>
+    Status = 1,
+
+    /// <summary>Номер дела.</summary>
+    Number = 2,
+
+    /// <summary>Название.</summary>
+    Title = 3,
+
+    /// <summary>Вид дела.</summary>
+    Kind = 4,
+
+    /// <summary>Гриф.</summary>
+    Classification = 5,
+}
 
 /// <summary>Строка списка дел; у задания — ещё № задания и подразделение-инициатор (ТФ-ДЕЛ-05).</summary>
 /// <remarks>
@@ -81,7 +109,11 @@ public sealed record CaseRow(
     CaseDirection? Direction = null);
 
 /// <summary>Страница дел.</summary>
-public sealed record CasePage(IReadOnlyList<CaseRow> Rows, int TotalCount);
+/// <remarks>
+/// <c>StatusCounts</c> — сколько дел каждого статуса при тех же отборах, кроме самого статуса (вкладки реестра со
+/// счётчиками); статуса без дел в словаре нет.
+/// </remarks>
+public sealed record CasePage(IReadOnlyList<CaseRow> Rows, int TotalCount, IReadOnlyDictionary<CaseStatus, int>? StatusCounts = null);
 
 /// <summary>Карточка дела (ТФ-ДЕЛ-02).</summary>
 /// <remarks>

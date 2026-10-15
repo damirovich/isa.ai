@@ -1,6 +1,7 @@
 @namespace ISC.AI.Profile.Investigation.UI
 @page "/cases"
 @rendermode InteractiveServer
+@using System.IO
 @using ISC.AI.Abstractions.Application
 @using ISC.AI.Abstractions.Security
 @using ISC.AI.Profile.Investigation.Application.Features.Directory
@@ -21,10 +22,16 @@
    Отдел ОН/ОУ (ТЭ-008, ADR-0039) — по подразделению дела: отметку ставят в справочнике подразделений, отдельного
    поля у дела нет. Отбор по отделу приходит со стартовой страницы (?direction=on|ou) и сужает список внутри допуска,
    а не открывает чужое (ТБ-020). Новое дело получает подразделение, а с ним и отдел, автоматически, если в допуске
-   одно подразделение. *@
+   одно подразделение.
+   Состояние списка — отборы, вкладка статуса, «только мои», страница, размер страницы и порядок — живёт в адресе
+   (CasesListState): после открытия дела «Назад» возвращает к тому же списку. Отборы применяются сразу (текст — после
+   паузы в наборе). Порядок — на сервере, по всем делам; по умолчанию — по статусу. Выгрузка в Excel — те
+   же отборы, запись «Выгрузка» в журнале (ExportCasesQuery), гриф файла — по наибольшему грифу выгруженных дел. *@
 
 <PageHeader Title="Дела" Subtitle="Уголовные дела, материалы, ОРМ и задания по объектам · только в пределах допуска и роли"
             Icon="@Icons.Material.Filled.FolderOpen">
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" OnClick="ExportAsync"
+               Disabled="@(_busy || _total == 0)">Выгрузить в Excel</MudButton>
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
                OnClick="OpenCreateAsync">Новое дело</MudButton>
 </PageHeader>
@@ -34,13 +41,20 @@
     <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3"
               ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
 }
+@if (_notice is not null)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="my-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _notice = null)">@_notice</MudAlert>
+}
 
 <MudPaper Outlined="true" Class="pa-3 my-4">
-    <div class="d-flex gap-3 align-end flex-wrap">
-        <MudTextField @bind-Value="_filterText" Label="Номер, № задания или название" Variant="Variant.Outlined" Immediate="true"
-                      Style="min-width:260px;" Class="flex-grow-1"
-                      OnKeyDown="@(async e => { if (e.Key == "Enter") { await SearchAsync(); } })" />
-        <MudSelect T="CaseDirection?" Value="_filterDirection" ValueChanged="@(async (CaseDirection? v) => { _filterDirection = v; await SearchAsync(); })"
+    <div class="d-flex gap-3 align-center flex-wrap">
+        @* Текст применяется сам — после паузы в наборе (DebounceInterval), без кнопки «Найти». *@
+        <MudTextField T="string" Value="_textInput" ValueChanged="ApplyTextAsync" Label="Номер, № задания или название"
+                      Variant="Variant.Outlined" Immediate="true" DebounceInterval="400" Clearable="true"
+                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                      Style="min-width:260px;" Class="flex-grow-1" />
+        <MudSelect T="CaseDirection?" Value="_state.Direction" ValueChanged="@(v => ApplyAsync(_state with { Direction = v, Page = 1 }))"
                    Label="Отдел" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:170px;"
                    Placeholder="Все отделы">
             @foreach (var direction in Enum.GetValues<CaseDirection>())
@@ -48,52 +62,67 @@
                 <MudSelectItem T="CaseDirection?" Value="@direction">@direction.ShortLabel() — @direction.Label()</MudSelectItem>
             }
         </MudSelect>
-        <MudSelect T="CaseKind?" Value="_filterKind" ValueChanged="@(async (CaseKind? v) => { _filterKind = v; await SearchAsync(); })"
+        <MudSelect T="CaseKind?" Value="_state.Kind" ValueChanged="@(v => ApplyAsync(_state with { Kind = v, Page = 1 }))"
                    Label="Вид" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:180px;">
             @foreach (var kind in Enum.GetValues<CaseKind>())
             {
                 <MudSelectItem T="CaseKind?" Value="@kind">@kind.Label()</MudSelectItem>
             }
         </MudSelect>
-        <MudSelect T="CaseStatus?" Value="_filterStatus" ValueChanged="@(async (CaseStatus? v) => { _filterStatus = v; await SearchAsync(); })"
-                   Label="Статус" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:180px;">
-            @foreach (var status in Enum.GetValues<CaseStatus>())
-            {
-                <MudSelectItem T="CaseStatus?" Value="@status">@status.Label()</MudSelectItem>
-            }
-        </MudSelect>
-        <MudSelect T="int?" Value="_filterDivisionId" ValueChanged="@(async (int? v) => { _filterDivisionId = v; await SearchAsync(); })"
+        <MudSelect T="int?" Value="_state.DivisionId" ValueChanged="@(v => ApplyAsync(_state with { DivisionId = v, Page = 1 }))"
                    Label="Подразделение" Variant="Variant.Outlined" Clearable="true" Dense="true" Style="min-width:220px;">
             @foreach (var d in _divisions)
             {
                 <MudSelectItem T="int?" Value="@d.Id">@d.Name</MudSelectItem>
             }
         </MudSelect>
-        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Search" OnClick="SearchAsync" Disabled="_busy">Найти</MudButton>
+        @if (_userId is not null)
+        {
+            <MudSwitch T="bool" Value="_state.Mine" ValueChanged="@(v => ApplyAsync(_state with { Mine = v, Page = 1 }))"
+                       Color="Color.Primary" Label="Только мои" title="Дела, которые веду я" />
+        }
+        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.FilterAltOff" OnClick="ResetAsync"
+                   Disabled="@(_state == Defaults)">Сбросить</MudButton>
+    </div>
+    @* Вкладки статуса со счётчиками: числа — при всех остальных отборах (CasePage.StatusCounts). *@
+    <div class="mt-3">
+        <MudToggleGroup T="string" Value="@StatusCode(_state.Status)" ValueChanged="SetStatusAsync" Color="Color.Primary"
+                        Size="Size.Small" CheckMark="false">
+            <MudToggleItem T="string" Value="@AllStatuses" Text="@($"Все ({AllCount})")" />
+            @foreach (var status in Enum.GetValues<CaseStatus>())
+            {
+                <MudToggleItem T="string" Value="@StatusCode(status)" Text="@($"{status.Label()} ({_counts.GetValueOrDefault(status)})")" />
+            }
+        </MudToggleGroup>
     </div>
 </MudPaper>
 
-<MudTable T="CaseRow" Items="_rows" Hover="true" Dense="true" Outlined="true" Loading="_busy"
+@* Сортировка — на сервере, по всем делам, а не по текущей странице: щелчок по заголовку меняет порядок запроса.
+   По умолчанию — по статусу («в производстве» первыми, внутри — новые сверху). Ключ — порядок: стрелки заголовков
+   берутся из состояния заново, когда порядок пришёл не щелчком (из адреса, «Сбросить»). *@
+<MudTable T="CaseRow" @key="@($"{_state.Sort}-{_state.SortDescending}")" Items="_rows" Hover="true" Dense="true" Outlined="true" Loading="_busy" AllowUnsorted="false"
           LoadingProgressColor="Color.Primary" OnRowClick="@(row => Open(row.Item!))" RowClass="cursor-pointer">
     <HeaderContent>
-        <MudTh>Номер</MudTh>
+        <MudTh><MudTableSortLabel T="CaseRow" InitialDirection="@InitialSort(CaseSortField.Number)" SortDirectionChanged="@(d => SortAsync(CaseSortField.Number, d))">Номер</MudTableSortLabel></MudTh>
         <MudTh>Отдел</MudTh>
-        <MudTh>Название</MudTh>
-        <MudTh>Вид</MudTh>
-        <MudTh>Статус</MudTh>
-        <MudTh>Открыто</MudTh>
+        <MudTh><MudTableSortLabel T="CaseRow" InitialDirection="@InitialSort(CaseSortField.Title)" SortDirectionChanged="@(d => SortAsync(CaseSortField.Title, d))">Название</MudTableSortLabel></MudTh>
+        <MudTh><MudTableSortLabel T="CaseRow" InitialDirection="@InitialSort(CaseSortField.Kind)" SortDirectionChanged="@(d => SortAsync(CaseSortField.Kind, d))">Вид</MudTableSortLabel></MudTh>
+        <MudTh><MudTableSortLabel T="CaseRow" InitialDirection="@InitialSort(CaseSortField.Status)" SortDirectionChanged="@(d => SortAsync(CaseSortField.Status, d))">Статус</MudTableSortLabel></MudTh>
+        <MudTh><MudTableSortLabel T="CaseRow" InitialDirection="@InitialSort(CaseSortField.OpenedAt)" SortDirectionChanged="@(d => SortAsync(CaseSortField.OpenedAt, d))">Открыто</MudTableSortLabel></MudTh>
+        <MudTh>Ведёт</MudTh>
         <MudTh>Инициатор (ГУ)</MudTh>
         <MudTh>Подразделение</MudTh>
-        <MudTh>Гриф</MudTh>
+        <MudTh><MudTableSortLabel T="CaseRow" InitialDirection="@InitialSort(CaseSortField.Classification)" SortDirectionChanged="@(d => SortAsync(CaseSortField.Classification, d))">Гриф</MudTableSortLabel></MudTh>
         <MudTh Style="text-align:right;">Носителей</MudTh>
         <MudTh Style="text-align:right;">Фигурантов</MudTh>
     </HeaderContent>
     <RowTemplate>
         <MudTd DataLabel="Номер">
-            @context.Number
-            @if (context.TaskNumber is { } taskNumber)
+            @* Номер — ссылка: Ctrl+щелчок или средняя кнопка открывают дело в новой вкладке; щелчок по строке — здесь же. *@
+            <a href="@($"/cases/{context.Id}")" class="cases-number-link" @onclick:stopPropagation="true">@context.Number</a>
+            @if (CaseListLabels.ShowsTaskNumber(context))
             {
-                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">задание № @taskNumber</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">задание № @context.TaskNumber</MudText>
             }
         </MudTd>
         <MudTd DataLabel="Отдел">
@@ -106,7 +135,7 @@
                 <span class="mud-text-secondary" title="@NoDirectionHint">—</span>
             }
         </MudTd>
-        <MudTd DataLabel="Название">@context.Title</MudTd>
+        <MudTd DataLabel="Название"><span title="@context.Title">@CaseListLabels.DisplayTitle(context)</span></MudTd>
         <MudTd DataLabel="Вид">@context.Kind.Label()</MudTd>
         <MudTd DataLabel="Статус">
             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@Dashboard.StatusColor(context.Status)">
@@ -114,6 +143,7 @@
             </MudChip>
         </MudTd>
         <MudTd DataLabel="Открыто">@context.OpenedAt.ToString("dd.MM.yyyy")</MudTd>
+        <MudTd DataLabel="Ведёт">@InvestigatorName(context.InvestigatorUserId)</MudTd>
         <MudTd DataLabel="Инициатор (ГУ)">@ReferenceLookup.Name(_references, context.InitiatorUnitId)</MudTd>
         <MudTd DataLabel="Подразделение">@DivisionName(context.DivisionId)</MudTd>
         <MudTd DataLabel="Гриф"><ClassificationChip Value="@context.Classification" /></MudTd>
@@ -131,8 +161,18 @@
 @if (_total > 0)
 {
     <div class="d-flex align-center justify-space-between mt-3 flex-wrap gap-2">
-        <MudText Typo="Typo.caption" Class="mud-text-secondary">Всего: @_total · страница @_page из @PageCount</MudText>
-        <MudPagination Count="@PageCount" Selected="_page" SelectedChanged="GoToPageAsync" Color="Color.Primary" Size="Size.Small" />
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">Всего: @_total · страница @_state.Page из @PageCount</MudText>
+        <div class="d-flex align-center gap-3 flex-wrap">
+            <MudSelect T="int" Value="_state.PageSize" ValueChanged="@(size => ApplyAsync(_state with { PageSize = size, Page = 1 }))"
+                       Label="На странице" Variant="Variant.Outlined" Dense="true" Margin="Margin.Dense" Style="width:130px;">
+                @foreach (var size in CasesListState.PageSizes)
+                {
+                    <MudSelectItem T="int" Value="@size">@size</MudSelectItem>
+                }
+            </MudSelect>
+            <MudPagination Count="@PageCount" Selected="_state.Page" SelectedChanged="@(page => ApplyAsync(_state with { Page = page }))"
+                           Color="Color.Primary" Size="Size.Small" />
+        </div>
     </div>
 }
 
@@ -217,7 +257,11 @@
 </MudDialog>
 
 @code {
-    private const int PageSize = 25;
+    /// <summary>Дел на странице реестра по умолчанию.</summary>
+    public const int PageSize = CasesListState.DefaultPageSize;
+
+    private const string AllStatuses = "all";
+    private static readonly CasesListState Defaults = new();
     private static readonly DialogOptions FormDialogOptions =
         new() { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true };
 
@@ -225,16 +269,16 @@
     private readonly List<DivisionNode> _divisions = [];
     private readonly List<DivisionNode> _ownerDivisions = [];
     private readonly List<UserAccountRow> _accounts = [];
+    private readonly List<UserAccountRow> _directory = [];
     private readonly List<ReferenceItemRow> _references = [];
     private AccessScope? _scope;
+    private int? _userId;
 
-    private string? _filterText;
-    private CaseKind? _filterKind;
-    private CaseStatus? _filterStatus;
-    private int? _filterDivisionId;
-
-    // Отбор по отделу ОН/ОУ (ADR-0039): null — все отделы допуска.
-    private CaseDirection? _filterDirection;
+    // Состояние списка — из адреса (CasesListState); загружено ли уже именно это состояние.
+    private CasesListState _state = new();
+    private CasesListState? _loadedState;
+    private string? _textInput;
+    private IReadOnlyDictionary<CaseStatus, int> _counts = new Dictionary<CaseStatus, int>();
     private IReadOnlyDictionary<int, CaseDirection> _divisionDirections = new Dictionary<int, CaseDirection>();
 
     private const string NoDirectionHint = "Подразделение дела не отнесено ни к одному отделу — отметьте его в справочнике подразделений";
@@ -242,10 +286,39 @@
     /// <summary>Отдел со стартовой страницы: <c>?direction=on</c> или <c>?direction=ou</c> (см. <see cref="DirectionQuery"/>).</summary>
     [SupplyParameterFromQuery(Name = DirectionQuery.Name)]
     public string? DirectionParameter { get; set; }
-    private int _page = 1;
+
+    /// <summary>Текст поиска (<c>?q=</c>).</summary>
+    [SupplyParameterFromQuery(Name = "q")] public string? TextParameter { get; set; }
+
+    /// <summary>Вид дела (<c>?kind=</c>).</summary>
+    [SupplyParameterFromQuery(Name = "kind")] public string? KindParameter { get; set; }
+
+    /// <summary>Статус (<c>?status=</c>).</summary>
+    [SupplyParameterFromQuery(Name = "status")] public string? StatusParameter { get; set; }
+
+    /// <summary>Подразделение (<c>?division=</c>).</summary>
+    [SupplyParameterFromQuery(Name = "division")] public string? DivisionParameter { get; set; }
+
+    /// <summary>Только мои дела (<c>?mine=1</c>).</summary>
+    [SupplyParameterFromQuery(Name = "mine")] public string? MineParameter { get; set; }
+
+    /// <summary>Страница (<c>?page=</c>).</summary>
+    [SupplyParameterFromQuery(Name = "page")] public string? PageParameter { get; set; }
+
+    /// <summary>Размер страницы (<c>?size=</c>).</summary>
+    [SupplyParameterFromQuery(Name = "size")] public string? SizeParameter { get; set; }
+
+    /// <summary>Поле порядка (<c>?sort=</c>).</summary>
+    [SupplyParameterFromQuery(Name = "sort")] public string? SortParameter { get; set; }
+
+    /// <summary>Обратный порядок (<c>?desc=1</c>).</summary>
+    [SupplyParameterFromQuery(Name = "desc")] public string? DescendingParameter { get; set; }
+
     private int _total;
     private bool _busy = true; // «загрузка…» до первой интерактивной загрузки (предрендер данных не грузит)
+    private bool _initialized;
     private string? _error;
+    private string? _notice;
 
     // --- Форма заведения дела ---
     private bool _formOpen;
@@ -260,7 +333,10 @@
     private string? _formBasis;
     private TaskRequisitesForm _formTask = new();
 
-    private int PageCount => Math.Max(1, (int)Math.Ceiling(_total / (double)PageSize));
+    private int PageCount => Math.Max(1, (int)Math.Ceiling(_total / (double)_state.PageSize));
+
+    // «Все» — сумма по статусам; без счётчиков (хранилище их не дало) — всего по отбору, если статус не выбран.
+    private int AllCount => _counts.Count == 0 && _state.Status is null ? _total : _counts.Values.Sum();
 
     // Верхняя граница выбора грифа: допуск субъекта, но не выше шкалы валидатора.
     private int SelectableClassificationLimit =>
@@ -286,9 +362,6 @@
         // таблица показывает состояние «загрузка…» (_busy = true с начала).
         if (!RendererInfo.IsInteractive) { return; }
 
-        // Отдел со стартовой страницы (ТЭ-008); дальше его меняют отбором «Отдел».
-        _filterDirection = DirectionQuery.Parse(DirectionParameter);
-
         var divisions = await Dispatcher.Send(new ListDivisionsQuery());
         if (divisions is { Status: true, Data: { } list })
         {
@@ -298,7 +371,43 @@
         }
 
         await LoadReferencesAsync();
-        await ReloadAsync();
+
+        // Имена «Ведёт» — все учётные записи (и отключённые: их дела остаются); отказ не мешает реестру.
+        var directory = await Dispatcher.Send(new ListUserDirectoryQuery());
+        if (directory is { Status: true, Data: { } accounts })
+        {
+            _directory.AddRange(accounts);
+        }
+
+        // Кто я — для «Только мои»; без ответа переключателя просто нет.
+        var scope = await Dispatcher.Send(new GetAccessScopeQuery());
+        _userId = scope is { Status: true, Data: { UserId: { } me } } ? me : null;
+        _initialized = true;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Адрес — единственный источник состояния списка: переход «Назад» или ссылка со стартовой страницы (?direction=)
+        // приходят сюда же. Повторно то же состояние не грузится.
+        _state = CasesListState.Parse(new Dictionary<string, string?>
+        {
+            ["q"] = TextParameter,
+            ["kind"] = KindParameter,
+            ["status"] = StatusParameter,
+            ["division"] = DivisionParameter,
+            [DirectionQuery.Name] = DirectionParameter,
+            ["mine"] = MineParameter,
+            ["page"] = PageParameter,
+            ["size"] = SizeParameter,
+            ["sort"] = SortParameter,
+            ["desc"] = DescendingParameter,
+        });
+        _textInput = _state.Text;
+
+        if (RendererInfo.IsInteractive && _initialized && _state != _loadedState)
+        {
+            await ReloadAsync();
+        }
     }
 
     // Справочники профиля (ТФ-АДМ-07) — для колонки «Инициатор» и формы задания; отказ не мешает реестру.
@@ -312,46 +421,120 @@
         }
     }
 
-    private Task SearchAsync()
+    // Новое состояние списка: загрузить и записать в адрес (replace — без лишних шагов истории «Назад»).
+    private async Task ApplyAsync(CasesListState next)
     {
-        _page = 1; // фильтр всегда на 1-ю страницу
-        return ReloadAsync();
+        if (next == _state && next == _loadedState)
+        {
+            return;
+        }
+
+        _state = next;
+        _textInput = next.Text;
+        await ReloadAsync();
+        Navigation.NavigateTo(next.ToUri(), replace: true);
     }
 
-    private Task GoToPageAsync(int page)
+    private Task ApplyTextAsync(string? text) =>
+        ApplyAsync(_state with { Text = string.IsNullOrWhiteSpace(text) ? null : text.Trim(), Page = 1 });
+
+    private Task SetStatusAsync(string code) =>
+        ApplyAsync(_state with { Status = Enum.TryParse<CaseStatus>(code, out var status) ? status : null, Page = 1 });
+
+    private Task ResetAsync() => ApplyAsync(Defaults);
+
+    private static string StatusCode(CaseStatus? status) => status?.ToString() ?? AllStatuses;
+
+    // Начальное направление заголовка — по порядку из адреса; остальные заголовки без стрелки.
+    private SortDirection InitialSort(CaseSortField field) =>
+        field != _state.Sort ? SortDirection.None : _state.SortDescending ? SortDirection.Descending : SortDirection.Ascending;
+
+    // Щелчок по заголовку колонки: порядок меняется на сервере для всех дел, список — с 1-й страницы. Повтор того же
+    // порядка (в том числе начальная установка заголовка) запрос не повторяет.
+    private Task SortAsync(CaseSortField field, SortDirection direction)
     {
-        _page = page;
-        return ReloadAsync();
+        var descending = direction == SortDirection.Descending;
+        if (direction == SortDirection.None || (field == _state.Sort && descending == _state.SortDescending))
+        {
+            return Task.CompletedTask;
+        }
+
+        return ApplyAsync(_state with { Sort = field, SortDescending = descending, Page = 1 });
     }
 
     private async Task ReloadAsync()
     {
         _busy = true;
         _error = null;
+        var state = _state;
         try
         {
             var response = await Dispatcher.Send(new ListCasesQuery(
-                _filterText, _filterKind, _filterStatus, _filterDivisionId, null, _page, PageSize, _filterDirection));
+                state.Text, state.Kind, state.Status, state.DivisionId, state.Mine ? _userId : null, state.Page, state.PageSize,
+                state.Direction, state.Sort, state.SortDescending));
             _rows.Clear();
             if (response is { Status: true, Data: { } data })
             {
                 _rows.AddRange(data.Rows);
                 _total = data.TotalCount;
+                _counts = data.StatusCounts ?? new Dictionary<CaseStatus, int>();
             }
             else
             {
-                _error = response.StatusMessage;
+                _error = response?.StatusMessage;
                 _total = 0;
+                _counts = new Dictionary<CaseStatus, int>();
             }
+
+            _loadedState = state;
         }
         finally
         {
             _busy = false;
         }
+
+        // Страница из адреса за концом списка (дел стало меньше) — на последнюю существующую.
+        if (_rows.Count == 0 && _total > 0 && state.Page > PageCount)
+        {
+            await ApplyAsync(state with { Page = PageCount });
+        }
+    }
+
+    // Выгрузка в Excel: все дела по текущим отборам и порядку (не только страница); сначала запись в журнал.
+    private async Task ExportAsync()
+    {
+        _error = null;
+        _notice = null;
+        var response = await Dispatcher.Send(new ExportCasesQuery(
+            _state.Text, _state.Kind, _state.Status, _state.DivisionId, _state.Mine ? _userId : null, _state.Direction,
+            _state.Sort, _state.SortDescending));
+        if (response is not { Status: true, Data: { } export })
+        {
+            _error = response?.StatusMessage ?? "Выгрузка не выполнена.";
+            return;
+        }
+
+        var now = DateTime.Now;
+        var bytes = CasesCsv.Build(export.Rows, export.TotalCount,
+            new CasesCsv.Names(DivisionName, id => ReferenceLookup.Name(_references, id), InvestigatorName), export.Author, now);
+        using var stream = new DotNetStreamReference(new MemoryStream(bytes));
+        await JS.InvokeVoidAsync("downloadFileFromStream", $"Реестр дел {now:yyyy-MM-dd HH-mm}.csv", stream);
+        if (export.Truncated)
+        {
+            _notice = $"Выгружено {export.Rows.Count} из {export.TotalCount} дел — это предел одной выгрузки. Сузьте отбор.";
+        }
     }
 
     private string DivisionName(int id) =>
         _divisions.FirstOrDefault(d => d.Id == id)?.Name ?? $"№ {id}";
+
+    private string InvestigatorName(int? id)
+    {
+        if (id is not { } userId) { return "—"; }
+        var account = _directory.FirstOrDefault(a => a.UserId == userId);
+        if (account is null) { return $"сотрудник № {userId}"; }
+        return string.IsNullOrWhiteSpace(account.DisplayName) ? account.UserName : account.DisplayName;
+    }
 
     private static string AccountLabel(UserAccountRow account)
     {
@@ -384,7 +567,7 @@
         else
         {
             _scope = null;
-            _formError = scope.StatusMessage;
+            _formError = scope?.StatusMessage;
         }
 
         // Кандидаты в следователи — активные учётные записи ядра; без роли профиля запрос откажет —

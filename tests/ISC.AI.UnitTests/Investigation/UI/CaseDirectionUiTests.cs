@@ -54,13 +54,16 @@ public sealed class CaseDirectionUiTests : BunitContext, IAsyncLifetime
         RespondOk<ListDivisionsQuery, IReadOnlyList<DivisionNode>>([Root, OnDepartment, OnGroup]);
         RespondOk<ListReferenceItemsQuery, IReadOnlyList<ReferenceItemRow>>([]);
         RespondOk<ListUserDirectoryQuery, IReadOnlyList<UserAccountRow>>([]);
-        _mediator.Send(Arg.Do<ListCasesQuery>(q => _listQueries.Add(q)), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<ResponseDto<CasePage>>(ResponseDto<CasePage>.Ok(new CasePage(
-            [
-                Row(1, "ОН-1", CaseDirection.Surveillance),
-                Row(2, "П-1", direction: null),
-            ], 2))));
+        StubList(new CasePage(
+        [
+            Row(1, "ОН-1", CaseDirection.Surveillance),
+            Row(2, "П-1", direction: null),
+        ], 2));
     }
+
+    private void StubList(CasePage page) =>
+        _mediator.Send(Arg.Do<ListCasesQuery>(q => _listQueries.Add(q)), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<ResponseDto<CasePage>>(ResponseDto<CasePage>.Ok(page)));
 
     Task IAsyncLifetime.InitializeAsync() => Task.CompletedTask;
 
@@ -137,6 +140,118 @@ public sealed class CaseDirectionUiTests : BunitContext, IAsyncLifetime
         cells[0].TextContent.Trim().ShouldBe("ОН");
         cells[1].TextContent.Trim().ShouldBe("—");
         cells[1].QuerySelector("span")!.GetAttribute("title")!.ShouldContain("не отнесено ни к одному отделу");
+    }
+
+    [Fact(DisplayName = "Реестр дел: по 10 на страницу, по умолчанию — по статусу; щелчок по «Открыто» — по дате с 1-й страницы, повторный — в обратную сторону")]
+    public void Cases_list_pages_by_ten_and_sorts_on_server()
+    {
+        Render<MudPopoverProvider>();
+        var cut = Render<Cases>();
+        cut.WaitForAssertion(() => _listQueries.ShouldNotBeEmpty());
+
+        var first = _listQueries[^1];
+        first.PageSize.ShouldBe(Cases.PageSize);
+        Cases.PageSize.ShouldBe(10);
+        first.Sort.ShouldBe(CaseSortField.Status);
+        first.SortDescending.ShouldBeFalse();
+
+        // Порядок строк — как отдал сервер: страница сама не пересортировывает.
+        cut.FindAll("td[data-label='Номер']").Select(c => c.TextContent.Trim()).ShouldBe(["ОН-1", "П-1"]);
+
+        SortHeader(cut, "Открыто").Click();
+        cut.WaitForAssertion(() => _listQueries[^1].Sort.ShouldBe(CaseSortField.OpenedAt));
+        _listQueries[^1].SortDescending.ShouldBeFalse();
+        _listQueries[^1].Page.ShouldBe(1);
+
+        SortHeader(cut, "Открыто").Click();
+        cut.WaitForAssertion(() => _listQueries[^1].SortDescending.ShouldBeTrue());
+    }
+
+    private static AngleSharp.Dom.IElement SortHeader(IRenderedComponent<Cases> cut, string text) =>
+        cut.FindAll(".mud-table-sort-label").Single(e => e.TextContent.Trim() == text);
+
+    [Fact(DisplayName = "Реестр дел: состояние из адреса — статус, страница, размер, порядок и «только мои» (сотрудник из допуска) уходят в запрос")]
+    public void Cases_list_restores_state_from_address()
+    {
+        Scope([OnGroup], CaseDirection.Surveillance);
+        Render<MudPopoverProvider>();
+        Services.GetRequiredService<NavigationManager>().NavigateTo("/cases?status=Closed&page=2&size=25&sort=OpenedAt&desc=1&mine=1&q=14");
+
+        var cut = Render<Cases>();
+
+        cut.WaitForAssertion(() => _listQueries.ShouldNotBeEmpty());
+        var query = _listQueries[^1];
+        query.Status.ShouldBe(CaseStatus.Closed);
+        query.Page.ShouldBe(2);
+        query.PageSize.ShouldBe(25);
+        query.Sort.ShouldBe(CaseSortField.OpenedAt);
+        query.SortDescending.ShouldBeTrue();
+        query.InvestigatorUserId.ShouldBe(7); // AccessScope.UserId
+        query.Text.ShouldBe("14");
+        _listQueries.Count.ShouldBe(1); // одно открытие — один запрос (ТБ-030)
+    }
+
+    [Fact(DisplayName = "Реестр дел: вкладки статуса со счётчиками; щелчок по вкладке — отбор по статусу с 1-й страницы и запись в адрес")]
+    public void Cases_list_status_tabs_show_counts_and_filter()
+    {
+        StubList(new CasePage([Row(1, "ОН-1", CaseDirection.Surveillance)], 7,
+            new Dictionary<CaseStatus, int> { [CaseStatus.InProgress] = 5, [CaseStatus.Suspended] = 2 }));
+        Render<MudPopoverProvider>();
+        var cut = Render<Cases>();
+        cut.WaitForAssertion(() => _listQueries.ShouldNotBeEmpty());
+
+        var tabs = cut.FindAll(".mud-toggle-item").Select(t => t.TextContent.Trim()).ToList();
+        tabs.ShouldBe(["Все (7)", "В производстве (5)", "Приостановлено (2)", "Закрыто (0)"]);
+
+        cut.FindAll(".mud-toggle-item").Single(t => t.TextContent.Contains("Приостановлено")).Click();
+
+        cut.WaitForAssertion(() => _listQueries[^1].Status.ShouldBe(CaseStatus.Suspended));
+        _listQueries[^1].Page.ShouldBe(1);
+        Services.GetRequiredService<NavigationManager>().Uri.ShouldEndWith("/cases?status=Suspended");
+    }
+
+    [Fact(DisplayName = "Строка реестра: номер — ссылка на дело (открывается и в новой вкладке), повтор номера задания убран, «Ведёт» — имя сотрудника")]
+    public void Cases_row_links_number_and_shows_investigator()
+    {
+        RespondOk<ListUserDirectoryQuery, IReadOnlyList<UserAccountRow>>(
+            [new UserAccountRow(2, "ivanov", "Иванов И.И.", IsActive: false, HasLocalPassword: true, MustChangePassword: false)]);
+        StubList(new CasePage(
+        [
+            Row(1, "14/24", null) with { Title = "Задание № 14/24 — Учебный Марат", TaskNumber = "14/24", InvestigatorUserId = 2 },
+        ], 1));
+        Render<MudPopoverProvider>();
+        var cut = Render<Cases>();
+
+        cut.WaitForAssertion(() => cut.FindAll("td[data-label='Номер'] a").Count.ShouldBe(1));
+        cut.Find("td[data-label='Номер'] a").GetAttribute("href").ShouldBe("/cases/1");
+        cut.Find("td[data-label='Номер']").TextContent.ShouldNotContain("задание №");
+        var title = cut.Find("td[data-label='Название'] span");
+        title.TextContent.Trim().ShouldBe("Учебный Марат");
+        title.GetAttribute("title").ShouldBe("Задание № 14/24 — Учебный Марат");
+        cut.Find("td[data-label='Ведёт']").TextContent.Trim().ShouldBe("Иванов И.И."); // и отключённый — его дела остаются
+    }
+
+    [Fact(DisplayName = "Выгрузка в Excel: запрос выгрузки с текущими отборами и порядком, файл .csv отдаётся браузеру")]
+    public void Cases_export_downloads_csv_with_current_filters()
+    {
+        RespondOk<ExportCasesQuery, CasesExport>(new CasesExport([Row(1, "ОН-1", CaseDirection.Surveillance)], 1, "Петров П.П."));
+        ExportCasesQuery? sent = null;
+        _mediator.When(m => m.Send(Arg.Any<ExportCasesQuery>(), Arg.Any<CancellationToken>()))
+            .Do(c => sent = c.Arg<ExportCasesQuery>());
+        Render<MudPopoverProvider>();
+        Services.GetRequiredService<NavigationManager>().NavigateTo("/cases?kind=ObjectTask&sort=Number");
+        var cut = Render<Cases>();
+        cut.WaitForAssertion(() => _listQueries.ShouldNotBeEmpty());
+
+        cut.FindAll("button").Single(b => b.TextContent.Contains("Выгрузить в Excel")).Click();
+
+        cut.WaitForAssertion(() => JSInterop.Invocations["downloadFileFromStream"].Count.ShouldBe(1));
+        sent.ShouldNotBeNull();
+        sent.Kind.ShouldBe(CaseKind.ObjectTask);
+        sent.Sort.ShouldBe(CaseSortField.Number);
+        sent.SortDescending.ShouldBeFalse();
+        JSInterop.Invocations["downloadFileFromStream"][0].Arguments[0]!.ToString()!.ShouldStartWith("Реестр дел ");
+        JSInterop.Invocations["downloadFileFromStream"][0].Arguments[0]!.ToString()!.ShouldEndWith(".csv");
     }
 
     [Fact(DisplayName = "Новое дело: единственное подразделение допуска подставлено само и показывает отдел «ОН» (по вышестоящему)")]

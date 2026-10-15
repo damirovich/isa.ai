@@ -11,7 +11,8 @@ namespace ISC.AI.Profile.Investigation.Application.Features.Cases;
 /// <summary>
 /// Список дел субъекта (ТФ-ДЕЛ-03): следователь — свои дела, руководитель — дела подразделения; решётка
 /// гриф/подразделение применяется хранилищем на стороне БД (ТБ-020). Отдел ОН/ОУ (ТЭ-008, ADR-0039) — отбор по
-/// отметке подразделений внутри допуска, а не граница доступа (см. <see cref="CaseFilter"/>).
+/// отметке подразделений внутри допуска, а не граница доступа (см. <see cref="CaseFilter"/>). Порядок — поле
+/// <paramref name="Sort"/> (по умолчанию — дата открытия, новые первыми); на доступ не влияет.
 /// </summary>
 public sealed record ListCasesQuery(
     string? Text = null,
@@ -21,7 +22,9 @@ public sealed record ListCasesQuery(
     int? InvestigatorUserId = null,
     int Page = 1,
     int PageSize = 25,
-    CaseDirection? Direction = null)
+    CaseDirection? Direction = null,
+    CaseSortField Sort = CaseSortField.OpenedAt,
+    bool SortDescending = true)
     : IRequest<ResponseDto<CasePage>>, IAuditableRequest
 {
     /// <inheritdoc />
@@ -49,7 +52,7 @@ public sealed record ListCasesQuery(
             var page = await cases.ListAsync(
                 new CaseFilter(
                     query.Text, query.Kind, query.Status, query.DivisionId, query.InvestigatorUserId,
-                    query.Page, query.PageSize, query.Direction),
+                    query.Page, query.PageSize, query.Direction, query.Sort, query.SortDescending),
                 access,
                 cancellationToken);
             return ResponseDto<CasePage>.Ok(page, page.TotalCount);

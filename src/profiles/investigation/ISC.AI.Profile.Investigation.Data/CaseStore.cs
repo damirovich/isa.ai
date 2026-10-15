@@ -45,11 +45,6 @@ public sealed class CaseStore(
             query = query.Where(c => c.Kind == kind);
         }
 
-        if (filter.Status is { } status)
-        {
-            query = query.Where(c => c.Status == status);
-        }
-
         if (filter.DivisionId is { } divisionId)
         {
             query = query.Where(c => c.DivisionId == divisionId);
@@ -69,14 +64,23 @@ public sealed class CaseStore(
             query = query.Where(c => divisionIds.Contains(c.DivisionId));
         }
 
-        var total = await query.CountAsync(cancellationToken);
+        // Счётчики по статусам — при всех отборах, кроме статуса (вкладки реестра); затем отбор по статусу.
+        var statusCounts = (await query
+                .GroupBy(c => c.Status)
+                .Select(g => new { Status = g.Key, Count = g.Count() })
+                .ToListAsync(cancellationToken))
+            .ToDictionary(g => g.Status, g => g.Count);
+        if (filter.Status is { } status)
+        {
+            query = query.Where(c => c.Status == status);
+        }
+
+        var total = filter.Status is { } selected ? statusCounts.GetValueOrDefault(selected) : statusCounts.Values.Sum();
 
         var pageSize = Math.Max(1, filter.PageSize);
         var page = Math.Max(1, filter.Page);
 
-        var rows = await query
-            .OrderByDescending(c => c.OpenedAt)
-            .ThenByDescending(c => c.Id)
+        var rows = await Sorted(query, filter.Sort, filter.SortDescending)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(c => new CaseRow(
@@ -88,7 +92,25 @@ public sealed class CaseStore(
                 c.InitiatorUnitId))
             .ToListAsync(cancellationToken);
 
-        return new CasePage(rows.Select(r => r with { Direction = DirectionOf(directions, r.DivisionId) }).ToList(), total);
+        return new CasePage(rows.Select(r => r with { Direction = DirectionOf(directions, r.DivisionId) }).ToList(), total, statusCounts);
+    }
+
+    // Порядок списка (CaseSortField): поле, затем дата открытия (новые первыми) и идентификатор — страницы устойчивы.
+    private static IOrderedQueryable<CaseFile> Sorted(IQueryable<CaseFile> query, CaseSortField sort, bool descending)
+    {
+        IOrderedQueryable<CaseFile> ordered = sort switch
+        {
+            CaseSortField.Status => descending ? query.OrderByDescending(c => c.Status) : query.OrderBy(c => c.Status),
+            CaseSortField.Number => descending ? query.OrderByDescending(c => c.Number) : query.OrderBy(c => c.Number),
+            CaseSortField.Title => descending ? query.OrderByDescending(c => c.Title) : query.OrderBy(c => c.Title),
+            CaseSortField.Kind => descending ? query.OrderByDescending(c => c.Kind) : query.OrderBy(c => c.Kind),
+            CaseSortField.Classification => descending ? query.OrderByDescending(c => c.Classification) : query.OrderBy(c => c.Classification),
+            _ => descending ? query.OrderByDescending(c => c.OpenedAt) : query.OrderBy(c => c.OpenedAt),
+        };
+
+        return sort == CaseSortField.OpenedAt
+            ? (descending ? ordered.ThenByDescending(c => c.Id) : ordered.ThenBy(c => c.Id))
+            : ordered.ThenByDescending(c => c.OpenedAt).ThenByDescending(c => c.Id);
     }
 
     /// <inheritdoc />

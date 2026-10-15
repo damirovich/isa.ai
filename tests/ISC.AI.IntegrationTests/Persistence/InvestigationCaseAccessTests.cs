@@ -21,6 +21,55 @@ public sealed class InvestigationCaseAccessTests : IAsyncLifetime
 
     public Task DisposeAsync() => _postgres.DisposeAsync().AsTask();
 
+    [Fact(DisplayName = "Реестр дел: по статусу — рабочие первыми, внутри новые сверху; обратный порядок; по умолчанию — по дате; страницы устойчивы")]
+    public async Task Case_list_sorts_by_status_and_pages()
+    {
+        var factory = new InvestigationContextFactory(_postgres.GetConnectionString());
+        var core = new CoreContextFactory(_postgres.GetConnectionString());
+        await InvestigationTestKit.MigrateAsync(factory);
+        await InvestigationTestKit.AssignRolesAsync(factory, (30, InvestigationRole.Administrator));
+        var store = InvestigationTestKit.CreateCaseStore(factory, core);
+        var admin = InvestigationTestKit.Access(30, 9, 5);
+
+        async Task CreateAsync(string number, int month, int day, CaseStatus status)
+        {
+            var draft = InvestigationTestKit.Draft(number, 5, 1, 10) with { OpenedAt = new System.DateOnly(2026, month, day) };
+            var created = await store.CreateAsync(draft, admin);
+            created.Result.ShouldBe(CaseWriteResult.Ok);
+            if (status != CaseStatus.InProgress)
+            {
+                (await store.SetStatusAsync(created.CaseId, status, admin)).ShouldBe(CaseWriteResult.Ok);
+            }
+        }
+
+        await CreateAsync("A", 9, 1, CaseStatus.InProgress);
+        await CreateAsync("B", 10, 1, CaseStatus.Suspended);
+        await CreateAsync("C", 10, 5, CaseStatus.InProgress);
+        await CreateAsync("D", 10, 10, CaseStatus.Closed);
+
+        (await store.ListAsync(new CaseFilter(Sort: CaseSortField.Status, SortDescending: false), admin)).Rows
+            .Select(r => r.Number).ShouldBe(["C", "A", "B", "D"]);
+        (await store.ListAsync(new CaseFilter(Sort: CaseSortField.Status, SortDescending: true), admin)).Rows
+            .Select(r => r.Number).ShouldBe(["D", "B", "C", "A"]);
+        (await store.ListAsync(new CaseFilter(), admin)).Rows.Select(r => r.Number).ShouldBe(["D", "C", "B", "A"]);
+
+        var second = await store.ListAsync(new CaseFilter(Page: 2, PageSize: 2, Sort: CaseSortField.Status, SortDescending: false), admin);
+        second.Rows.Select(r => r.Number).ShouldBe(["B", "D"]);
+        second.TotalCount.ShouldBe(4);
+
+        // Счётчики вкладок — при всех отборах, кроме самого статуса: выбранная вкладка не обнуляет соседние.
+        second.StatusCounts.ShouldNotBeNull().ShouldBe(new System.Collections.Generic.Dictionary<CaseStatus, int>
+        {
+            [CaseStatus.InProgress] = 2, [CaseStatus.Suspended] = 1, [CaseStatus.Closed] = 1,
+        }, ignoreOrder: true);
+        var suspended = await store.ListAsync(new CaseFilter(Status: CaseStatus.Suspended), admin);
+        suspended.Rows.Select(r => r.Number).ShouldBe(["B"]);
+        suspended.TotalCount.ShouldBe(1);
+        suspended.StatusCounts!.Values.Sum().ShouldBe(4);
+        (await store.ListAsync(new CaseFilter(Text: "C"), admin)).StatusCounts
+            .ShouldBe(new System.Collections.Generic.Dictionary<CaseStatus, int> { [CaseStatus.InProgress] = 1 });
+    }
+
     [Fact(DisplayName = "Дела вне допуска не выдаются; следователь — только свои; руководитель — подразделения; без роли — пусто")]
     public async Task Case_lattice_enforces_clearance_and_role_on_db_side()
     {
@@ -50,6 +99,8 @@ public sealed class InvestigationCaseAccessTests : IAsyncLifetime
         // Следователь 10 с допуском гриф ≤ 2, подразделение 5: B выше допуска, C — чужое подразделение.
         var investigator10 = InvestigationTestKit.Access(10, 2, 5);
         (await store.ListAsync(new CaseFilter(), investigator10)).Rows.Select(r => r.Number).ShouldBe(["A-1"]);
+        // Счётчики вкладок — под той же решёткой: недоступные дела не выдаются и числом (ТБ-020).
+        (await store.ListAsync(new CaseFilter(), investigator10)).StatusCounts.ShouldNotBeNull().Values.Sum().ShouldBe(1);
         (await store.ListAccessibleIdsAsync(investigator10)).ShouldBe([a.CaseId]);
 
         // Тот же следователь с широким допуском — всё равно только СВОИ дела (A и C), не B.
