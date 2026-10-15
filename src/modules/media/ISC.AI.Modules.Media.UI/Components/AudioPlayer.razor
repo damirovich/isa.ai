@@ -1,0 +1,243 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Проигрыватель аудиозаписи (ADR-0047, ТФ-МЕД-18) карточки носителя. Элемент <audio> — тот же, что и раньше (эндпоинт
+   раздачи оригинала с проверкой допуска на каждый запрос, Range, аудит просмотра — ADR-0026), но без браузерных
+   controls: над ним ВОЛНА записи (огибающая громкости с сервера, /media/waveforms/{id}) с полосой участков речи и
+   бегунком, под ней — пуск/пауза, ±5 с, время, скорость, громкость, «скачать». Звук воспроизводится как есть (ТЭ-007):
+   скорость и громкость — свойства воспроизведения в браузере, файл не меняется.
+   КТО ЧЕМ ВЛАДЕЕТ. Волну, полосу речи, бегунок, время, подсказку под курсором и переход щелчком/перетаскиванием ведёт
+   media.js (initAudioPlayer) — у этих элементов НЕТ детей в разметке Blazor, диф их не трогает; клавиши (пробел, ←/→)
+   — тоже media.js. Blazor рисует кнопки и узнаёт от media.js только «играет/пауза», скорость и «звук выключен»
+   (OnPlayerState) — без обращений к серверу на каждый кадр. Переход к месту записи из расшифровки — прежний seek по
+   id элемента <audio> (TranscriptPanel). *@
+@implements IAsyncDisposable
+@using System
+@using System.Collections.Generic
+@using System.Globalization
+@using System.Linq
+@using System.Threading.Tasks
+@using ISC.AI.Modules.Media.Domain.Model
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.JSInterop
+
+<div id="@RootId" class="ap" role="group" aria-label="Проигрыватель записи">
+    <audio id="@ElementId" preload="metadata" src="@Src" controlslist="@(AllowDownload ? null : "nodownload")"></audio>
+
+    <div class="ap-wave" data-ap-wave title="Щелчок или перетаскивание — перейти к месту записи">
+        <canvas class="ap-canvas" data-ap-canvas role="img" aria-label="Волна записи и участки речи"></canvas>
+        <div class="ap-status" data-ap-status></div>
+        <div class="ap-hover" data-ap-hover></div>
+    </div>
+
+    <div class="ap-bar">
+        <MudIconButton Icon="@(_playing ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)"
+                       Variant="Variant.Filled" Color="Color.Primary" Class="ap-play"
+                       aria-label="@(_playing ? "Пауза" : "Воспроизвести")" title="@(_playing ? "Пауза (пробел)" : "Воспроизвести (пробел)")"
+                       OnClick="@(() => CommandAsync("toggle"))" />
+        <MudIconButton Icon="@Icons.Material.Filled.Replay5" aria-label="Назад на 5 секунд" title="Назад на 5 секунд (←)"
+                       OnClick="@(() => CommandAsync("skip", -SkipSeconds))" />
+        <MudIconButton Icon="@Icons.Material.Filled.Forward5" aria-label="Вперёд на 5 секунд" title="Вперёд на 5 секунд (→)"
+                       OnClick="@(() => CommandAsync("skip", SkipSeconds))" />
+        <span class="ap-time" data-ap-time></span>
+
+        <span class="ap-spacer"></span>
+
+        <span class="ap-label">Скорость</span>
+        <MudToggleGroup T="double" Value="_rate" ValueChanged="SetRateAsync" Color="Color.Primary" Size="Size.Small"
+                        CheckMark="false" Class="ap-rates">
+            @foreach (var rate in Rates)
+            {
+                <MudToggleItem T="double" Value="@rate" Text="@RateLabel(rate)" />
+            }
+        </MudToggleGroup>
+
+        <MudIconButton Icon="@(_muted ? Icons.Material.Filled.VolumeOff : Icons.Material.Filled.VolumeUp)"
+                       aria-label="@(_muted ? "Включить звук" : "Выключить звук")" title="@(_muted ? "Включить звук" : "Выключить звук")"
+                       OnClick="@(() => CommandAsync("mute"))" />
+        <input type="range" class="ap-volume" min="0" max="1" step="0.05" data-ap-volume aria-label="Громкость" title="Громкость" />
+
+        @if (AllowDownload)
+        {
+            <MudIconButton Icon="@Icons.Material.Filled.Download" Href="@Src" download="@DownloadName"
+                           aria-label="Скачать оригинал" title="Скачать оригинал" />
+        }
+        <span class="ap-info" title="@Hint">
+            <MudIcon Icon="@Icons.Material.Outlined.Info" Size="Size.Small" />
+        </span>
+    </div>
+</div>
+
+@code {
+    private const string MediaModulePath = "./_content/ISC.AI.Modules.Media.UI/js/media.js";
+
+    /// <summary>Шаг кнопок и клавиш «назад/вперёд», секунды.</summary>
+    public const int SkipSeconds = 5;
+
+    /// <summary>Скорости воспроизведения: тон голоса при ускорении сохраняется (preservesPitch).</summary>
+    public static IReadOnlyList<double> Rates { get; } = [0.75, 1.0, 1.25, 1.5, 2.0];
+
+    /// <summary>Пояснение под значком (i): что делает проигрыватель и чего не делает.</summary>
+    public const string Hint =
+        "Запись воспроизводится без обработки (ТЭ-007): скорость и громкость меняются только при прослушивании. "
+        + "Клавиши: пробел — пуск/пауза, ← и → — на 5 секунд. Синяя полоса под волной — где в записи найдена речь. "
+        + "Если запись не воспроизводится — файла нет либо он вне вашего допуска.";
+
+    /// <summary>Носитель — для уникальных id элементов.</summary>
+    [Parameter, EditorRequired] public int AssetId { get; set; }
+
+    /// <summary>Ссылка на оригинал записи (эндпоинт раздачи файлов пакета).</summary>
+    [Parameter, EditorRequired] public string Src { get; set; } = string.Empty;
+
+    /// <summary>Id элемента &lt;audio&gt; — по нему расшифровка переходит к месту записи.</summary>
+    [Parameter, EditorRequired] public string ElementId { get; set; } = string.Empty;
+
+    /// <summary>Ссылка на волну записи (<c>/media/waveforms/{id}</c>); <see langword="null"/> — без волны, простая полоса.</summary>
+    [Parameter] public string? WaveformUrl { get; set; }
+
+    /// <summary>Длительность из реквизитов, мс — для шкалы, пока браузер не прочитал заголовок записи.</summary>
+    [Parameter] public long? DurationMs { get; set; }
+
+    /// <summary>Фрагменты расшифровки — участки речи под волной (только их границы).</summary>
+    [Parameter] public IReadOnlyList<TranscriptSegmentRow> Segments { get; set; } = [];
+
+    /// <summary>Можно скачать оригинал (не «только просмотр» материала чужого дела, ADR-0044).</summary>
+    [Parameter] public bool AllowDownload { get; set; }
+
+    /// <summary>Имя файла при скачивании.</summary>
+    [Parameter] public string? DownloadName { get; set; }
+
+    private bool _playing;
+    private double _rate = 1.0;
+    private bool _muted;
+    private IJSObjectReference? _module;
+    private bool _moduleFailed;
+    private bool _initialized;
+    private DotNetObjectReference<AudioPlayer>? _selfRef;
+    private PlayerOptions? _applied;
+
+    private string RootId => "media-audio-player-" + AssetId.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>Настройки для media.js (сериализуются в camelCase): участки речи — парами [начало, конец] мс.</summary>
+    private sealed record PlayerOptions(string ElementId, string? WaveformUrl, long DurationMs, long[][] Ranges, bool Keys)
+    {
+        public bool SameAs(PlayerOptions other) =>
+            ElementId == other.ElementId && WaveformUrl == other.WaveformUrl && DurationMs == other.DurationMs
+            && Ranges.Length == other.Ranges.Length
+            && Ranges.Zip(other.Ranges).All(pair => pair.First.SequenceEqual(pair.Second));
+    }
+
+    /// <summary>Подпись скорости: «0,75×», «1×», «1,25×» — с запятой, как пишут по-русски.</summary>
+    public static string RateLabel(double rate) =>
+        rate.ToString("0.##", CultureInfo.GetCultureInfo("ru-RU")) + "×";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!RendererInfo.IsInteractive)
+        {
+            return;
+        }
+
+        var options = new PlayerOptions(
+            ElementId, WaveformUrl, DurationMs ?? 0,
+            Segments.Select(s => new[] { s.StartMs, Math.Max(s.StartMs, s.EndMs) }).ToArray(),
+            Keys: true);
+        if (_applied is not null && _applied.SameAs(options))
+        {
+            return;
+        }
+
+        _selfRef ??= DotNetObjectReference.Create(this);
+        var ok = _initialized
+            ? await CallAsync("updateAudioPlayer", RootId, options)
+            : await CallAsync("initAudioPlayer", RootId, options, _selfRef);
+        if (ok)
+        {
+            _initialized = true;
+            _applied = options;
+        }
+    }
+
+    /// <summary>
+    /// Состояние проигрывателя от media.js: играет ли, скорость, выключен ли звук (смена иконок и выбранной скорости).
+    /// Публичный и с атрибутом — требование JS-interop.
+    /// </summary>
+    [JSInvokable]
+    public Task OnPlayerState(bool playing, double rate, bool muted)
+    {
+        _playing = playing;
+        _rate = Rates.Contains(rate) ? rate : _rate;
+        _muted = muted;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SetRateAsync(double rate)
+    {
+        _rate = rate;
+        await CommandAsync("rate", rate);
+    }
+
+    private Task CommandAsync(string command) => CommandAsync(command, 0);
+
+    private async Task CommandAsync(string command, double value) => await CallAsync("audioCommand", RootId, command, value);
+
+    /// <summary>Вызов media.js без проброса сбоев: без модуля остаётся сам элемент записи и расшифровка.</summary>
+    private async Task<bool> CallAsync(string method, params object?[] args)
+    {
+        if (_module is null && !_moduleFailed)
+        {
+            try
+            {
+                _module = await JS.InvokeAsync<IJSObjectReference>("import", MediaModulePath);
+            }
+            catch (JSException)
+            {
+                _moduleFailed = true;
+            }
+            catch (JSDisconnectedException)
+            {
+                _moduleFailed = true;
+            }
+        }
+
+        if (_module is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return await _module.InvokeAsync<bool>(method, args);
+        }
+        catch (JSException)
+        {
+            return false;
+        }
+        catch (JSDisconnectedException)
+        {
+            return false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try
+            {
+                // Снять слушатели записи, указателя, клавиш и наблюдатель размера — иначе они переживут страницу.
+                await _module.InvokeAsync<bool>("disposeAudioPlayer", RootId);
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit уже закрыт — освобождать на клиенте нечего.
+            }
+            catch (JSException)
+            {
+                // Сбой очистки не должен ронять уход со страницы.
+            }
+        }
+
+        _selfRef?.Dispose();
+    }
+}

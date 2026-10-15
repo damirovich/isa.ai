@@ -198,7 +198,7 @@ public static class MediaFrameEndpoints
             {
                 try
                 {
-                    tempPath = await CopyToTempAsync(storage, source.StoredFileName, subPath, logger, cancellationToken);
+                    tempPath = await CopyToTempAsync(storage, source.StoredFileName, subPath, TempFilePrefix, logger, cancellationToken);
                 }
                 catch (FileNotFoundException)
                 {
@@ -259,11 +259,11 @@ public static class MediaFrameEndpoints
         return TimeSpan.FromTicks(timestampMs * TimeSpan.TicksPerMillisecond);
     }
 
-    // Временная копия оригинала для хранилища без локальных путей. Источник открывается ПЕРВЫМ: файла нет на
-    // диске — исключение до того, как во временном каталоге появится хоть что-то. Имя — префикс, GUID и
-    // БЕЗОПАСНОЕ расширение (MediaFileNames): путь уходит ffmpeg текстом командной строки.
-    private static async Task<string> CopyToTempAsync(
-        IFileStorage storage, string storedFileName, string subPath, ILogger logger, CancellationToken cancellationToken)
+    // Временная копия оригинала для хранилища без локальных путей (кадр видео, волна аудио — ADR-0047). Источник
+    // открывается ПЕРВЫМ: файла нет на диске — исключение до того, как во временном каталоге появится хоть что-то. Имя —
+    // префикс, GUID и БЕЗОПАСНОЕ расширение (MediaFileNames): путь уходит ffmpeg текстом командной строки.
+    internal static async Task<string> CopyToTempAsync(
+        IFileStorage storage, string storedFileName, string subPath, string prefix, ILogger logger, CancellationToken cancellationToken)
     {
         await using var original = await storage.OpenReadAsync(
             storedFileName, MediaFileCategories.Originals, subPath, cancellationToken);
@@ -271,7 +271,7 @@ public static class MediaFrameEndpoints
         var directory = Path.Combine(Path.GetTempPath(), TempFolderName);
         Directory.CreateDirectory(directory);
         var path = Path.Combine(
-            directory, TempFilePrefix + Guid.NewGuid().ToString("N") + MediaFileNames.SafeExtension(storedFileName));
+            directory, prefix + Guid.NewGuid().ToString("N") + MediaFileNames.SafeExtension(storedFileName));
         try
         {
             await using var copy = new FileStream(
@@ -288,7 +288,7 @@ public static class MediaFrameEndpoints
     }
 
     // Удаление временной копии; неудача пишется в журнал с путём — файл снимет уборка при старте либо оператор.
-    private static void TryDelete(string path, ILogger logger)
+    internal static void TryDelete(string path, ILogger logger)
     {
         try
         {

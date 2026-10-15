@@ -1,0 +1,26 @@
+/* Панель расшифровки (ADR-0026, ADR-0047): пометка одной строкой и панель работы с текстом. */
+.transcript-note {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8125rem;
+    color: var(--mud-palette-text-secondary);
+}
+
+.transcript-note span {
+    cursor: help;
+}
+
+.transcript-tools {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+}
+
+.transcript-matches {
+    min-width: 5.5em;
+    font-size: 0.8125rem;
+    color: var(--mud-palette-text-secondary);
+    white-space: nowrap;
+}

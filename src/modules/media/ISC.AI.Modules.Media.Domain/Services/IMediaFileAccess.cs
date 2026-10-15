@@ -60,6 +60,19 @@ public static class MediaFileRoutes
     public static string BuildFrame(int assetId, long timestampMs) =>
         FramePrefix + "/" + assetId.ToString(System.Globalization.CultureInfo.InvariantCulture)
         + "?" + FrameTimeQuery + "=" + timestampMs.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>Префикс маршрута волны аудиозаписи (ADR-0047).</summary>
+    public const string WaveformPrefix = "/media/waveforms";
+
+    /// <summary>
+    /// Шаблон маршрута волны: <c>/media/waveforms/{assetId}</c> — огибающая громкости аудиозаписи (JSON); те же проверки
+    /// доступа, что у кадра видео и файла носителя.
+    /// </summary>
+    public const string WaveformTemplate = WaveformPrefix + "/{assetId:int}";
+
+    /// <summary>Ссылка на волну аудиозаписи <paramref name="assetId"/>.</summary>
+    public static string BuildWaveform(int assetId) =>
+        WaveformPrefix + "/" + assetId.ToString(System.Globalization.CultureInfo.InvariantCulture);
 }
 
 /// <summary>Категории файлового хранилища пакета «Медиа» (подкаталоги <c>IFileStorage</c>).</summary>

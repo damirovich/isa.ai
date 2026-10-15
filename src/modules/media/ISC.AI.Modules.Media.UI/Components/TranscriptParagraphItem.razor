@@ -1,0 +1,103 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Абзац режима «Текстом» панели TranscriptPanel (ADR-0047): таймкод начала и фрагменты подряд. Каждый фрагмент —
+   НАТИВНАЯ строчная кнопка (Enter и пробел браузер превращает в щелчок) с тем же id, что у строки режима «Фрагменты»
+   (переход по ?t=, следование за записью и поиск прокручивают к нему одинаково). Текст выводится только как текст
+   (Razor экранирует), найденное выделяется разбиением строки (TranscriptHighlight), а не вставкой разметки.
+   Отдельный компонент ради длинных записей: абзац перерисовывается, только когда меняется что-то в нём самом
+   (активный фрагмент, совпадение поиска внутри абзаца, искомое). *@
+@using System.Collections.Generic
+@using System.Globalization
+@using System.Linq
+@using System.Threading.Tasks
+@using ISC.AI.Modules.Media.Domain.Model
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+
+<div class="tp">
+    <span class="transcript-time">[@MediaLabels.ClockTimecode(Paragraph.StartMs)]</span>
+    <span class="tp-text mud-typography mud-typography-body2">
+        @foreach (var segment in Paragraph.Segments)
+        {
+            var index = segment.Index;
+            if (Clickable)
+            {
+                <button type="button" id="@(ElementIdPrefix + index.ToString(CultureInfo.InvariantCulture))"
+                        class="@SegmentClass(index)" title="@Title" @onclick="@(() => OnPlay.InvokeAsync(index))">
+                    @foreach (var part in TranscriptHighlight.Split(segment.Text, Query))
+                    {
+                        if (part.IsMatch)
+                        {
+                            <mark style="padding:0;">@part.Text</mark>
+                        }
+                        else
+                        {
+                            @part.Text
+                        }
+                    }
+                </button>
+            }
+            else
+            {
+                <span id="@(ElementIdPrefix + index.ToString(CultureInfo.InvariantCulture))" class="@SegmentClass(index)">
+                    @foreach (var part in TranscriptHighlight.Split(segment.Text, Query))
+                    {
+                        if (part.IsMatch)
+                        {
+                            <mark style="padding:0;">@part.Text</mark>
+                        }
+                        else
+                        {
+                            @part.Text
+                        }
+                    }
+                </span>
+            }
+            @(" ")
+        }
+    </span>
+</div>
+
+@code {
+    /// <summary>Абзац: начало и фрагменты.</summary>
+    [Parameter, EditorRequired] public TranscriptParagraph Paragraph { get; set; } = new(0, []);
+
+    /// <summary>Начало id фрагмента: id = префикс + номер фрагмента (как у строк режима «Фрагменты»).</summary>
+    [Parameter, EditorRequired] public string ElementIdPrefix { get; set; } = string.Empty;
+
+    /// <summary>Активный фрагмент, если он в этом абзаце; иначе <see langword="null"/>.</summary>
+    [Parameter] public int? ActiveIndex { get; set; }
+
+    /// <summary>Текущее совпадение поиска, если оно в этом абзаце; иначе <see langword="null"/>.</summary>
+    [Parameter] public int? CurrentMatchIndex { get; set; }
+
+    /// <summary>Искомое в расшифровке (выделяется во всех фрагментах абзаца).</summary>
+    [Parameter] public string? Query { get; set; }
+
+    /// <summary>Переход к месту записи возможен — фрагменты кнопки.</summary>
+    [Parameter] public bool Clickable { get; set; }
+
+    /// <summary>Подсказка фрагмента-кнопки.</summary>
+    [Parameter] public string Title { get; set; } = "Воспроизвести с этого места";
+
+    /// <summary>Щелчок по фрагменту: его номер.</summary>
+    [Parameter] public EventCallback<int> OnPlay { get; set; }
+
+    private (TranscriptParagraph Paragraph, string Prefix, int? Active, int? Match, string? Query, bool Clickable, string Title) _shown;
+    private bool _changed = true;
+
+    private string SegmentClass(int index) =>
+        "tp-seg" + (ActiveIndex == index ? " tp-active" : string.Empty) + (CurrentMatchIndex == index ? " tp-match" : string.Empty);
+
+    protected override void OnParametersSet()
+    {
+        // OnPlay в сравнение не входит: он читается в момент щелчка, а не при отрисовке.
+        var current = (Paragraph, ElementIdPrefix, ActiveIndex, CurrentMatchIndex, Query, Clickable, Title);
+        _changed = _changed || current != _shown;
+        _shown = current;
+    }
+
+    /// <summary>Перерисовка — только когда поменялось что-то в этом абзаце.</summary>
+    protected override bool ShouldRender() => _changed;
+
+    protected override void OnAfterRender(bool firstRender) => _changed = false;
+}

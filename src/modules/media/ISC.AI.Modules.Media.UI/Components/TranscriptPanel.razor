@@ -1,5 +1,5 @@
 @namespace ISC.AI.Modules.Media.UI
-@* Панель «Расшифровка речи» карточки носителя (ADR-0026): аудио и звуковая дорожка видео.
+@* Панель «Расшифровка речи» карточки носителя (ADR-0026, ADR-0047): аудио и звуковая дорожка видео.
    Состояние расшифровки, фрагменты «[мм:сс] дословный текст» и переход к месту записи — щелчок по фрагменту
    перематывает проигрыватель карточки (<audio>/<video> по PlayerElementId) и запускает воспроизведение через
    ленивый JS-модуль пакета (только после интерактива — предрендер JS не умеет; eval не используется).
@@ -7,6 +7,12 @@
    обратный вызов OnSeekRequested — щелчок по фрагменту отдаёт ему момент (мс), просмотрщик показывает кадр.
    Ни того ни другого (AMR/3GPP) — фрагменты не кликабельны, таймкоды для сверки.
    Переход из поиска по расшифровкам — параметр ?t=<мс> карточки: перемотка к месту и подсветка фрагмента.
+   РАБОТА С ТЕКСТОМ (ADR-0047): расшифровка СЛЕДУЕТ за записью — media.js сообщает о смене текущего фрагмента
+   (OnPlaybackSegment), строка подсвечивается, список (не страница) прокручивается к ней, если включено «Следовать за
+   записью»; поиск по открытому тексту (выделение, «предыдущее/следующее» — без сервера и без журнала: текст уже открыт
+   в карточке); режим «Текстом» — фрагменты абзацами (TranscriptParagraphs), текст дословный; «Копировать» и «Word» —
+   ExportTranscriptQuery (гриф, исполнитель, пометка «требует проверки», запись «Выгрузка» в журнале); в режиме
+   «только просмотр» (материал чужого дела, ADR-0044) выгрузки нет.
    РЕЖИМ: расшифровку читает GetTranscriptQuery — решётка гриф/подразделение на стороне БД по носителю и по
    каждому фрагменту, поверх неё сужение по делам субъекта (ТБ-020/021, ТБ-071); недоступное неотличимо от
    несуществующего. Запрос НЕ аудируется сам: открытие карточки уже записано в журнал (ТБ-030), поэтому
@@ -14,11 +20,12 @@
    Пометка «автоматическая, требует проверки» показывается ВСЕГДА: текст модели — не протокол. *@
 @implements IAsyncDisposable
 @using System.Globalization
+@using System.IO
 @using ISC.AI.Modules.Media.Application.Features.Transcripts
 @using ISC.AI.Modules.Media.Domain.Model
 
 <MudPaper Outlined="true" Class="pa-4 my-4">
-    <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+    <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-1">
         <div class="d-flex align-center gap-2 flex-wrap">
             <MudText Typo="Typo.subtitle1">Расшифровка речи</MudText>
             @if (_transcript is { } header)
@@ -36,21 +43,19 @@
             {
                 @* Пока расшифровка в очереди или идёт, повторный запуск неактивен: иначе нажатие вместо «Обновить»
                    ставило бы ещё один полный прогон в общую очередь (сервер такой запуск тоже отклоняет). *@
-                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.RecordVoiceOver"
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.RecordVoiceOver"
                            Disabled="@(_busy || _loading || shown.Status.IsInProgress())"
                            OnClick="RetranscribeAsync">@RetranscribeLabel</MudButton>
             }
         </div>
     </div>
 
-    @* Постоянная пометка (ADR-0026): первичный слой — дословный вывод модели, а не документ. *@
-    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
-        Автоматическая расшифровка: дословный текст модели распознавания, без знаков препинания. Требует проверки и не является протоколом.
-        @if (_transcript is { ModelVersion: { Length: > 0 } model } made)
-        {
-            <span> Модель: @model@(made.TranscribedAt is { } at ? $", расшифровано {at.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture)}" : string.Empty).</span>
-        }
-    </MudAlert>
+    @* Постоянная пометка (ADR-0026): первичный слой — дословный вывод модели, а не документ. Одна строка; модель, дата
+       и подробности — в подсказке значка. *@
+    <div class="transcript-note mb-2">
+        <MudIcon Icon="@Icons.Material.Outlined.Info" Size="Size.Small" Color="Color.Info" />
+        <span title="@ModelHint">@NoticeText</span>
+    </div>
 
     @if (_error is not null)
     {
@@ -107,38 +112,87 @@
                     Ниже — прежняя расшифровка; её заменит новая, когда будет успешно завершена.
                 </MudText>
             }
-            @if (PlayerElementId is not null)
+
+            @* Панель работы с текстом (ADR-0047): поиск, следование за записью, вид, выгрузка. *@
+            <div class="transcript-tools mb-2">
+                <MudTextField T="string" Value="_query" ValueChanged="SearchAsync" Placeholder="Найти в расшифровке"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" DebounceInterval="250"
+                              Clearable="true" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                              Style="min-width:200px;max-width:280px;" />
+                @if (_query is not null)
+                {
+                    <span class="transcript-matches">@MatchLabel</span>
+                    <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowUp" Size="Size.Small" Disabled="@(_matches.Count == 0)"
+                                   aria-label="Предыдущее совпадение" title="Предыдущее совпадение" OnClick="@(() => StepMatch(-1))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowDown" Size="Size.Small" Disabled="@(_matches.Count == 0)"
+                                   aria-label="Следующее совпадение" title="Следующее совпадение" OnClick="@(() => StepMatch(1))" />
+                }
+                <MudSpacer />
+                @if (PlayerElementId is not null)
+                {
+                    <MudSwitch T="bool" Value="_follow" ValueChanged="SetFollow" Color="Color.Primary" Label="Следовать за записью"
+                               title="Прокручивать список к фрагменту, который сейчас звучит" />
+                }
+                <MudToggleGroup T="TranscriptView" Value="_view" ValueChanged="SetView" Color="Color.Primary" Size="Size.Small"
+                                CheckMark="false">
+                    <MudToggleItem T="TranscriptView" Value="TranscriptView.Segments" Text="Фрагменты" />
+                    <MudToggleItem T="TranscriptView" Value="TranscriptView.Text" Text="Текстом" />
+                </MudToggleGroup>
+                @if (!ReadOnly)
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" Disabled="_exporting"
+                                   aria-label="Копировать текст" title="Копировать текст расшифровки с грифом (выгрузка записывается в журнал)"
+                                   OnClick="CopyAsync" />
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Description"
+                               Disabled="_exporting" OnClick="ExportWordAsync"
+                               title="Документ Word с грифом, исполнителем и пометкой «требует проверки» (выгрузка записывается в журнал)">Word</MudButton>
+                }
+            </div>
+
+            @if (PlayerElementId is null)
             {
-                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
-                    Щелчок по фрагменту — воспроизвести запись с этого места.
-                </MudText>
-            }
-            else if (OnSeekRequested.HasDelegate)
-            {
-                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
-                    Щелчок по фрагменту — показать кадр с этого места (без звука: браузер не воспроизводит этот контейнер).
-                </MudText>
-            }
-            else
-            {
-                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
-                    Браузер не воспроизводит формат этой записи — переход к месту записи недоступен; таймкоды — для сверки в проигрывателе.
-                </MudText>
+                @if (OnSeekRequested.HasDelegate)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
+                        Щелчок по фрагменту — показать кадр с этого места (без звука: браузер не воспроизводит этот контейнер).
+                    </MudText>
+                }
+                else
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
+                        Браузер не воспроизводит формат этой записи — переход к месту записи недоступен; таймкоды — для сверки в проигрывателе.
+                    </MudText>
+                }
             }
 
             @* Обычная разметка (нативная кнопка на строку), а не MudList: список фрагментов с обработчиком
                щелчка — та же конструкция, что уронила circuit в ленте уведомлений (см. NotificationsPanel пакета
                документооборота). Строка — компонент TranscriptSegmentItem с примитивными параметрами и ОДНИМ
-               колбэком _onPlay: щелчок перерисовывает две строки, а не все (длинные записи — тысячи фрагментов).
-               Без Virtualize: переход по ?t= прокручивает к элементу фрагмента по id (media.js reveal), а
-               виртуализация не держала бы в DOM фрагменты вне видимой части. Прокрутка — внутри списка:
-               страница не уезжает от проигрывателя. *@
-            <div style="max-height:60vh;overflow-y:auto;">
-                @foreach (var segment in transcript.Segments)
+               колбэком _onPlay: щелчок перерисовывает две строки, а не все (длинные записи — тысячи фрагментов);
+               в режиме «Текстом» так же — абзац TranscriptParagraphItem.
+               Без Virtualize: переход по ?t=, следование за записью и поиск прокручивают к элементу фрагмента по id
+               (media.js), а виртуализация не держала бы в DOM фрагменты вне видимой части. Прокрутка — внутри
+               списка: страница не уезжает от проигрывателя. *@
+            <div id="@ListId" class="transcript-list" style="max-height:60vh;overflow-y:auto;">
+                @if (_view == TranscriptView.Text)
                 {
-                    <TranscriptSegmentItem Index="@segment.Index" ElementId="@SegmentElementId(segment.Index)"
-                                           StartMs="@segment.StartMs" Text="@segment.Text" IsActive="@(_activeIndex == segment.Index)"
-                                           Clickable="@CanSeek" Title="@SegmentTitle" OnPlay="@_onPlay" />
+                    @foreach (var paragraph in _paragraphs)
+                    {
+                        <TranscriptParagraphItem Paragraph="@paragraph" ElementIdPrefix="@ElementIdPrefix"
+                                                 ActiveIndex="@InParagraph(paragraph, _activeIndex)"
+                                                 CurrentMatchIndex="@InParagraph(paragraph, CurrentMatchIndex)"
+                                                 Query="@_query" Clickable="@CanSeek" Title="@SegmentTitle" OnPlay="@_onPlay" />
+                    }
+                }
+                else
+                {
+                    @foreach (var segment in transcript.Segments)
+                    {
+                        <TranscriptSegmentItem Index="@segment.Index" ElementId="@SegmentElementId(segment.Index)"
+                                               StartMs="@segment.StartMs" Text="@segment.Text" IsActive="@(_activeIndex == segment.Index)"
+                                               Clickable="@CanSeek" Title="@SegmentTitle" OnPlay="@_onPlay"
+                                               Query="@_query" IsCurrentMatch="@(CurrentMatchIndex == segment.Index)" />
+                    }
                 }
             </div>
         }
@@ -147,6 +201,9 @@
 
 @code {
     private const string MediaModulePath = "./_content/ISC.AI.Modules.Media.UI/js/media.js";
+
+    /// <summary>Постоянная пометка о природе текста (ADR-0026): всегда видна, одной строкой.</summary>
+    public const string NoticeText = "Автоматическая расшифровка: требует проверки и не является протоколом.";
 
     /// <summary>Носитель (аудио или видео), чья расшифровка показывается.</summary>
     [Parameter, EditorRequired] public int AssetId { get; set; }
@@ -179,14 +236,21 @@
 
     /// <summary>
     /// Только чтение: носитель открыт как кандидат взаимного поиска из чужого дела (ADR-0044) — запустить расшифровку
-    /// заново нельзя (сервер такой запуск тоже отклонит).
+    /// заново и выгрузить её нельзя (сервер такие запросы тоже отклонит).
     /// </summary>
     [Parameter] public bool ReadOnly { get; set; }
+
+    /// <summary>
+    /// Фрагменты загружены (или перечитаны): страница рисует по ним участки речи под волной проигрывателя (ADR-0047).
+    /// Без расшифровки — пустой список.
+    /// </summary>
+    [Parameter] public EventCallback<IReadOnlyList<TranscriptSegmentRow>> OnSegmentsLoaded { get; set; }
 
     private MediaTranscript? _transcript;
     private int? _loadedAssetId;
     private bool _loading = true;
     private bool _busy;
+    private bool _exporting;
     private string? _error;
     private string? _notice;
     private int? _activeIndex;
@@ -194,6 +258,18 @@
     private IJSObjectReference? _module;
     private bool _moduleFailed;
     private EventCallback<int> _onPlay;
+    private DotNetObjectReference<TranscriptPanel>? _selfRef;
+
+    // Работа с текстом (ADR-0047).
+    private TranscriptView _view = TranscriptView.Segments;
+    private IReadOnlyList<TranscriptParagraph> _paragraphs = [];
+    private bool _follow = true;
+    private string? _query;
+    private List<int> _matches = [];
+    private int _matchPosition = -1;
+    private int? _revealIndex;
+    private bool _revealForce;
+    private string? _followKey;
 
     private string RetranscribeLabel =>
         _transcript is { Status: TranscriptStatus.NotApplicable } ? "Расшифровать" : "Расшифровать заново";
@@ -203,11 +279,40 @@
 
     private string SegmentTitle => PlayerElementId is not null ? "Воспроизвести с этого места" : "Показать кадр с этого места";
 
+    private string ListId => "media-transcript-list-" + AssetId.ToString(CultureInfo.InvariantCulture);
+
+    private string ElementIdPrefix => "media-transcript-" + AssetId.ToString(CultureInfo.InvariantCulture) + "-";
+
+    private int? CurrentMatchIndex => _matchPosition >= 0 && _matchPosition < _matches.Count ? _matches[_matchPosition] : null;
+
+    private string MatchLabel => _matches.Count == 0
+        ? "не найдено"
+        : string.Create(CultureInfo.InvariantCulture, $"{_matchPosition + 1} из {_matches.Count}");
+
+    /// <summary>Подсказка к пометке: модель, когда расшифровано, и что текст без пунктуации.</summary>
+    private string ModelHint
+    {
+        get
+        {
+            var hint = "Дословный текст модели распознавания речи, без знаков препинания.";
+            if (_transcript is { ModelVersion: { Length: > 0 } model } made)
+            {
+                hint += " Модель: " + model
+                    + (made.TranscribedAt is { } at ? ", расшифровано " + at.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture) : string.Empty)
+                    + ".";
+            }
+
+            return hint;
+        }
+    }
+
     private static string StatusLabel(MediaTranscript transcript) =>
         transcript.Status == TranscriptStatus.NotApplicable ? "не выполнялась" : transcript.Status.Label();
 
-    private string SegmentElementId(int index) =>
-        $"media-transcript-{AssetId.ToString(CultureInfo.InvariantCulture)}-{index.ToString(CultureInfo.InvariantCulture)}";
+    private string SegmentElementId(int index) => ElementIdPrefix + index.ToString(CultureInfo.InvariantCulture);
+
+    private static int? InParagraph(TranscriptParagraph paragraph, int? index) =>
+        index is { } value && paragraph.Segments.Any(s => s.Index == value) ? value : null;
 
     protected override void OnInitialized()
     {
@@ -256,14 +361,41 @@
         {
             _loading = false;
         }
+
+        var segments = _transcript?.Segments ?? [];
+        _paragraphs = TranscriptParagraphs.Group(segments);
+        RecomputeMatches(reveal: false);
+        await OnSegmentsLoaded.InvokeAsync(segments);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        // Переход из поиска (?t=): только после интерактива (предрендер JS не умеет) и после загрузки
-        // фрагментов — иначе подсвечивать нечего. Одно применение на каждое новое значение t.
-        if (!RendererInfo.IsInteractive || _loading || _transcript is null
-            || StartAtMs is not { } startAt || _appliedStartAt == startAt)
+        if (!RendererInfo.IsInteractive || _loading || _transcript is null)
+        {
+            return;
+        }
+
+        await ApplyStartAtAsync();
+        await BindFollowAsync();
+
+        // Прокрутка списка к фрагменту — после отрисовки (строка уже в DOM): следование за записью, поиск, смена вида.
+        if (_revealIndex is { } reveal)
+        {
+            _revealIndex = null;
+            if (await EnsureModuleAsync() is { } module)
+            {
+                await TryInvokeAsync(module, "revealInList", SegmentElementId(reveal), ListId, _revealForce);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Переход из поиска (?t=): только после интерактива (предрендер JS не умеет) и после загрузки фрагментов — иначе
+    /// подсвечивать нечего. Одно применение на каждое новое значение t.
+    /// </summary>
+    private async Task ApplyStartAtAsync()
+    {
+        if (_transcript is null || StartAtMs is not { } startAt || _appliedStartAt == startAt)
         {
             return;
         }
@@ -304,12 +436,121 @@
     }
 
     /// <summary>
+    /// Следование за записью (ADR-0047): media.js сообщает о смене текущего фрагмента. Привязка — заново при новой
+    /// расшифровке (другие фрагменты) или другом проигрывателе.
+    /// </summary>
+    private async Task BindFollowAsync()
+    {
+        if (PlayerElementId is null || _transcript is not { Segments.Count: > 0 } transcript)
+        {
+            return;
+        }
+
+        var key = PlayerElementId + "|" + transcript.Segments.Count.ToString(CultureInfo.InvariantCulture) + "|"
+            + transcript.TranscribedAt?.Ticks.ToString(CultureInfo.InvariantCulture);
+        if (key == _followKey || await EnsureModuleAsync() is not { } module)
+        {
+            return;
+        }
+
+        _selfRef ??= DotNetObjectReference.Create(this);
+        var segments = transcript.Segments.Select(s => new[] { (long)s.Index, s.StartMs, s.EndMs }).ToArray();
+        if (await TryInvokeAsync(module, "followTranscript", PlayerElementId, ListId, segments, _selfRef))
+        {
+            _followKey = key;
+        }
+    }
+
+    /// <summary>
+    /// Смена фрагмента, который сейчас звучит (вызывает media.js по timeupdate/seeked проигрывателя); −1 — запись ещё до
+    /// первого фрагмента. Публичный и с атрибутом — требование JS-interop.
+    /// </summary>
+    /// <param name="index">Номер фрагмента или −1.</param>
+    [JSInvokable]
+    public Task OnPlaybackSegment(int index)
+    {
+        int? next = index < 0 ? null : index;
+        if (next == _activeIndex)
+        {
+            return Task.CompletedTask;
+        }
+
+        _activeIndex = next;
+        if (_follow && next is { } shown)
+        {
+            _revealIndex = shown;
+            _revealForce = false;
+        }
+
+        return InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
     /// Фрагмент, в который попадает место записи: содержащий его, иначе последний начавшийся раньше;
     /// место до первого фрагмента — <see langword="null"/> (подсвечивать нечего).
     /// </summary>
     private static TranscriptSegmentRow? FindSegment(IReadOnlyList<TranscriptSegmentRow> segments, long milliseconds) =>
         segments.FirstOrDefault(s => s.StartMs <= milliseconds && milliseconds < s.EndMs)
         ?? segments.LastOrDefault(s => s.StartMs <= milliseconds);
+
+    /// <summary>Поиск по открытому тексту: совпадения — фрагменты с подстрокой без учёта регистра; к первому — прокрутка.</summary>
+    private Task SearchAsync(string? query)
+    {
+        _query = string.IsNullOrWhiteSpace(query) ? null : query.Trim();
+        RecomputeMatches(reveal: true);
+        return Task.CompletedTask;
+    }
+
+    private void RecomputeMatches(bool reveal)
+    {
+        _matches = _query is null || _transcript is null
+            ? []
+            : _transcript.Segments
+                .Where(s => s.Text?.Contains(_query, StringComparison.OrdinalIgnoreCase) == true)
+                .OrderBy(s => s.StartMs).ThenBy(s => s.Index)
+                .Select(s => s.Index)
+                .ToList();
+        _matchPosition = _matches.Count > 0 ? 0 : -1;
+        if (reveal && CurrentMatchIndex is { } first)
+        {
+            _revealIndex = first;
+            _revealForce = true;
+        }
+    }
+
+    /// <summary>«Предыдущее/следующее совпадение» — по кругу, с прокруткой списка к нему.</summary>
+    private void StepMatch(int direction)
+    {
+        if (_matches.Count == 0)
+        {
+            return;
+        }
+
+        _matchPosition = ((_matchPosition + direction) % _matches.Count + _matches.Count) % _matches.Count;
+        _revealIndex = _matches[_matchPosition];
+        _revealForce = true;
+    }
+
+    private void SetView(TranscriptView view)
+    {
+        _view = view;
+        if ((CurrentMatchIndex ?? _activeIndex) is { } keep)
+        {
+            // В другом виде строки другие — вернуть к тому же месту текста.
+            _revealIndex = keep;
+            _revealForce = true;
+        }
+    }
+
+    private void SetFollow(bool follow)
+    {
+        _follow = follow;
+        if (follow && _activeIndex is { } active)
+        {
+            _revealIndex = active;
+            _revealForce = true;
+        }
+    }
 
     /// <summary>Ленивая загрузка JS-модуля пакета; после первого сбоя не повторяем (панель живёт без него).</summary>
     private async Task<IJSObjectReference?> EnsureModuleAsync()
@@ -333,6 +574,22 @@
         }
 
         return _module;
+    }
+
+    private static async Task<bool> TryInvokeAsync(IJSObjectReference module, string method, params object?[] args)
+    {
+        try
+        {
+            return await module.InvokeAsync<bool>(method, args);
+        }
+        catch (JSException)
+        {
+            return false;
+        }
+        catch (JSDisconnectedException)
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -380,6 +637,69 @@
         catch (JSDisconnectedException)
         {
             // Circuit уже закрыт — показывать некому.
+        }
+    }
+
+    /// <summary>
+    /// «Копировать»: текст с маркировкой грифа и пометкой «требует проверки» (ExportTranscriptQuery — выгрузка в
+    /// журнале) — в буфер обмена браузера.
+    /// </summary>
+    private async Task CopyAsync()
+    {
+        if (await ExportAsync(TranscriptExportFormat.Text) is not { Text: { } text })
+        {
+            return;
+        }
+
+        var module = await EnsureModuleAsync();
+        var copied = module is not null && await TryInvokeAsync(module, "copyText", text);
+        _notice = copied
+            ? "Текст расшифровки скопирован — с грифом и пометкой «требует проверки»; выгрузка записана в журнал."
+            : "Браузер не дал скопировать текст в буфер обмена — выгрузите расшифровку в Word.";
+    }
+
+    /// <summary>«Word»: документ с реквизитами ТБ-033 (ExportTranscriptQuery — выгрузка в журнале) отдаётся браузеру.</summary>
+    private async Task ExportWordAsync()
+    {
+        if (await ExportAsync(TranscriptExportFormat.Docx) is not { } file)
+        {
+            return;
+        }
+
+        try
+        {
+            using var stream = new DotNetStreamReference(new MemoryStream(file.Content));
+            await JS.InvokeVoidAsync("downloadFileFromStream", file.FileName, stream);
+        }
+        catch (JSException ex)
+        {
+            _error = $"Документ сформирован, но браузер не принял файл: {ex.Message}";
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit уже закрыт — отдавать некому.
+        }
+    }
+
+    private async Task<TranscriptExport?> ExportAsync(TranscriptExportFormat format)
+    {
+        _exporting = true;
+        _error = null;
+        _notice = null;
+        try
+        {
+            var response = await Dispatcher.Send(new ExportTranscriptQuery(AssetId, format));
+            if (response is { Status: true, Data: { } export })
+            {
+                return export;
+            }
+
+            _error = response?.StatusMessage ?? "Выгрузка не выполнена.";
+            return null;
+        }
+        finally
+        {
+            _exporting = false;
         }
     }
 
@@ -437,6 +757,12 @@
         {
             try
             {
+                if (_followKey is not null && PlayerElementId is not null)
+                {
+                    // Снять слежение за проигрывателем — иначе слушатель переживёт панель.
+                    await _module.InvokeAsync<bool>("unfollowTranscript", PlayerElementId);
+                }
+
                 await _module.DisposeAsync();
             }
             catch (JSDisconnectedException)
@@ -448,5 +774,7 @@
                 // Сбой очистки не должен ронять уход со страницы.
             }
         }
+
+        _selfRef?.Dispose();
     }
 }

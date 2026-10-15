@@ -72,7 +72,9 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
             .Add(x => x.AssetId, 5)
             .Add(x => x.PlayerElementId, "media-audio-5"));
 
-        cut.Markup.ShouldContain("Автоматическая расшифровка: дословный текст модели распознавания, без знаков препинания. Требует проверки и не является протоколом.");
+        // Пометка видна всегда одной строкой (ADR-0047); «без знаков препинания» и модель — в подсказке к ней.
+        cut.Markup.ShouldContain(TranscriptPanel.NoticeText);
+        cut.Find(".transcript-note span").GetAttribute("title")!.ShouldContain("без знаков препинания");
         cut.Markup.ShouldContain("gigaam-v3-ctc-multilang@1");
         cut.Markup.ShouldContain("[00:01]");
         cut.Markup.ShouldContain("[01:05]");
@@ -372,7 +374,9 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
         if (playable)
         {
             cut.FindAll("audio").Count.ShouldBe(1);
-            cut.Markup.ShouldNotContain("Скачать оригинал");
+            // Проигрыватель (ADR-0047), а не запасная ссылка «Скачать оригинал» текстом: скачивание — значком проигрывателя.
+            cut.FindComponents<AudioPlayer>().Count.ShouldBe(1);
+            cut.FindAll("a").Where(a => a.TextContent.Contains("Скачать оригинал")).ShouldBeEmpty();
         }
         else
         {

@@ -140,13 +140,15 @@ public static class MediaModule
         services.AddMediaPersistence(configuration);
 
     /// <summary>
-    /// Сырые HTTP-эндпоинты пакета: раздача файлов носителей и вырезок (ТБ-073) и кадр видео по времени для
-    /// покадрового просмотра с сервера (<c>GET /media/frames/{id}?t=</c>, ADR-0028) — под той же решёткой.
+    /// Сырые HTTP-эндпоинты пакета: раздача файлов носителей и вырезок (ТБ-073), кадр видео по времени для
+    /// покадрового просмотра с сервера (<c>GET /media/frames/{id}?t=</c>, ADR-0028) и волна аудиозаписи
+    /// (<c>GET /media/waveforms/{id}</c>, ADR-0047) — под той же решёткой.
     /// </summary>
     public static IEndpointRouteBuilder MapEndpoints(IEndpointRouteBuilder endpoints)
     {
         endpoints.MapMediaFileEndpoints();
         endpoints.MapMediaFrameEndpoints();
+        endpoints.MapMediaWaveformEndpoints();
         return endpoints;
     }
 }

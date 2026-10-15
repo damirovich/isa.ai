@@ -49,6 +49,7 @@ public static class MediaPersistenceServiceCollectionExtensions
         services.AddScoped<IMediaStore, MediaStore>();
         services.AddScoped<IMediaPurger, MediaPurger>();
         services.AddScoped<IMediaFileAccess, MediaFileAccessResolver>();
+        services.AddScoped<IAudioWaveformCache, MediaWaveformCache>();
 
         // Журнал просмотров файлов: одна выдача субъекту — одна запись (ТБ-030), состояние в памяти процесса.
         services.AddSingleton<MediaViewAuditThrottle>();
