@@ -75,7 +75,8 @@ else if (_setup is not null)
             <MudText Typo="Typo.h6">2. Сопоставление полей</MudText>
             <MudText Typo="Typo.body2" Class="mud-text-secondary">
                 Система предложила соответствие по названиям столбцов — проверьте его. Пустое поле не переносится.
-                Связи привязываются к заданию по № задания (или по коду записи задания, если номера в связях нет).
+                Связи и сведения об инициаторе привязываются к заданию по № задания (связи — или по коду записи задания, если
+                номера в связях нет). Пустые строки пропускаются.
             </MudText>
 
             <MudGrid Spacing="2" Class="mt-1">
@@ -125,6 +126,36 @@ else if (_setup is not null)
                                 }
                             </MudSelect>
                         }
+                    }
+
+                    @* Сведения об инициаторе задания — отдельной таблицей по № задания (так в реальной базе отдела). *@
+                    <MudSelect T="string" Value="_initiatorsTable" ValueChanged="OnInitiatorsTableChanged" Label="Таблица инициаторов"
+                               Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Placeholder="не переносится"
+                               Class="mt-4 access-initiators-table" Disabled="_busy">
+                        @foreach (var table in database.Tables.Where(t => t.Name != _tasksTable && t.Name != _linksTable))
+                        {
+                            <MudSelectItem T="string" Value="@table.Name">@table.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                    @if (_initiatorsTable is not null)
+                    {
+                        @foreach (var field in AccessFields.InitiatorFields)
+                        {
+                            var current = field;
+                            <MudSelect T="string" Value="@_initiatorColumns.GetValueOrDefault(current)"
+                                       ValueChanged="@((string? v) => SetColumn(_initiatorColumns, current, v))"
+                                       Label="@current.Label()" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                                       Clearable="true" Placeholder="не переносится" Class="mt-2" Disabled="_busy">
+                                @foreach (var column in ColumnsOf(_initiatorsTable))
+                                {
+                                    <MudSelectItem T="string" Value="@column.Name">@column.Name (@column.TypeName)</MudSelectItem>
+                                }
+                            </MudSelect>
+                        }
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
+                            Управление — инициатор (ГУ) задания; исполнитель — ФИО инициатора; телефон — его телефон; начальник
+                            управления и отдел — прочие реквизиты инициатора.
+                        </MudText>
                     }
                 </MudItem>
             </MudGrid>
@@ -198,12 +229,21 @@ else if (_setup is not null)
             <MudText Typo="Typo.h6">4. Итог проверки</MudText>
             <MudText Typo="Typo.body1" Class="mt-1">
                 В базе <b>@plan.TaskCount</b> заданий и <b>@plan.LinkCount</b> связей. Будет перенесено заданий — <b>@plan.NewTaskCount</b>
-                (с фото — @plan.PhotoCount), связей — <b>@plan.NewLinkCount</b>.
+                (с фото — @plan.PhotoCount@(_initiatorsTable is null ? string.Empty : $", со сведениями об инициаторе — {plan.InitiatorsApplied}")),
+                связей — <b>@plan.NewLinkCount</b>@(plan.LinkPhotoCount > 0 ? $" (с фото — {plan.LinkPhotoCount})" : string.Empty).
                 @if (plan.AlreadyImportedTasks > 0)
                 {
                     <span> Перенесены раньше — @plan.AlreadyImportedTasks (повтор их пропустит).</span>
                 }
-                С ошибками — <b>@plan.Problems.Count</b> записей: они не переносятся (или переносятся без фото).
+                @if (plan.EmptyRows > 0)
+                {
+                    <span class="access-empty-rows"> Пустых строк — @plan.EmptyRows: в них ничего не заполнено, они пропускаются.</span>
+                }
+                С ошибками — <b class="access-errors">@plan.ErrorCount</b> записей: они не переносятся.
+                @if (plan.WarningCount > 0)
+                {
+                    <span class="access-warnings"> С предупреждениями — <b>@plan.WarningCount</b>: переносятся, но не так, как в базе (№ дела с пометкой, без фото, обрезанное примечание).</span>
+                }
             </MudText>
             @if (plan.InitiatorsToCreate.Count > 0 || plan.LinkTypesToCreate.Count > 0)
             {
@@ -277,8 +317,12 @@ else if (_setup is not null)
             }
             <MudText Typo="Typo.body1" Class="mt-1">
                 Заведено дел — <b>@report.CasesCreated</b>, объектов — <b>@report.ObjectsCreated</b>, связей — <b>@report.LinksCreated</b>;
-                фото в материалах — @report.PhotosAccepted, автомобилей — @report.VehiclesSaved, адресов посещения — @report.AddressesSaved,
-                записей справочников — @report.ReferencesCreated.
+                фото в материалах — @report.PhotosAccepted@(report.LinkPhotosAccepted > 0 ? $" (и фото связей — {report.LinkPhotosAccepted})" : string.Empty),
+                автомобилей — @report.VehiclesSaved, адресов посещения — @report.AddressesSaved, записей справочников — @report.ReferencesCreated.
+                @if (report.EmptyRows > 0)
+                {
+                    <span> Пустых строк пропущено — @report.EmptyRows.</span>
+                }
                 @if (report.AlreadyImported > 0)
                 {
                     <span> Перенесены раньше и пропущены — @report.AlreadyImported.</span>
@@ -303,8 +347,10 @@ else if (_setup is not null)
     private AccessDatabaseInfo? _database;
     private string? _tasksTable;
     private string? _linksTable;
+    private string? _initiatorsTable;
     private readonly Dictionary<AccessField, string> _taskColumns = [];
     private readonly Dictionary<AccessField, string> _linkColumns = [];
+    private readonly Dictionary<AccessField, string> _initiatorColumns = [];
 
     private int? _divisionId;
     private short? _classification;
@@ -419,8 +465,10 @@ else if (_setup is not null)
     {
         _tasksTable = mapping.TasksTable;
         _linksTable = mapping.LinksTable;
+        _initiatorsTable = mapping.InitiatorsTable;
         _taskColumns.Clear();
         _linkColumns.Clear();
+        _initiatorColumns.Clear();
         foreach (var (field, column) in mapping.TaskColumns)
         {
             _taskColumns[field] = column;
@@ -429,6 +477,11 @@ else if (_setup is not null)
         foreach (var (field, column) in mapping.LinkColumns)
         {
             _linkColumns[field] = column;
+        }
+
+        foreach (var (field, column) in mapping.InitiatorColumns)
+        {
+            _initiatorColumns[field] = column;
         }
     }
 
@@ -449,6 +502,11 @@ else if (_setup is not null)
             OnLinksTableChanged(null);
         }
 
+        if (_initiatorsTable == table)
+        {
+            OnInitiatorsTableChanged(null);
+        }
+
         ResetCheck();
     }
 
@@ -461,6 +519,26 @@ else if (_setup is not null)
             foreach (var (field, column) in AccessAutoMapper.SuggestColumns(selected, AccessFields.LinkFields))
             {
                 _linkColumns[field] = column;
+            }
+        }
+
+        if (table is not null && _initiatorsTable == table)
+        {
+            OnInitiatorsTableChanged(null);
+        }
+
+        ResetCheck();
+    }
+
+    private void OnInitiatorsTableChanged(string? table)
+    {
+        _initiatorsTable = table;
+        _initiatorColumns.Clear();
+        if (TableOf(table) is { } selected)
+        {
+            foreach (var (field, column) in AccessAutoMapper.SuggestColumns(selected, AccessFields.InitiatorFields))
+            {
+                _initiatorColumns[field] = column;
             }
         }
 
@@ -486,7 +564,12 @@ else if (_setup is not null)
     private IReadOnlyList<AccessColumn> ColumnsOf(string? table) => TableOf(table)?.Columns ?? [];
 
     private AccessMapping CurrentMapping() => new(
-        _tasksTable, new Dictionary<AccessField, string>(_taskColumns), _linksTable, new Dictionary<AccessField, string>(_linkColumns));
+        _tasksTable,
+        new Dictionary<AccessField, string>(_taskColumns),
+        _linksTable,
+        new Dictionary<AccessField, string>(_linkColumns),
+        _initiatorsTable,
+        new Dictionary<AccessField, string>(_initiatorColumns));
 
     private AccessImportOptions? CurrentOptions() => _divisionId is { } division && _classification is { } classification
         ? new AccessImportOptions(division, classification, _status, _createReferences)

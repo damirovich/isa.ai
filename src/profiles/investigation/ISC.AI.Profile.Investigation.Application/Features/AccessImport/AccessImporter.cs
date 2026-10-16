@@ -13,8 +13,9 @@ using ISC.AI.Profile.Investigation.Domain.Services;
 namespace ISC.AI.Profile.Investigation.Application.Features.AccessImport;
 
 /// <summary>
-/// Перенос базы Access в рабочие поля (ADR-0043): задание → дело вида «задание по объекту» с реквизитами, объект →
-/// фигурант с анкетой, фото → материалы дела, связи → фигуранты-связи с автомобилями и адресами посещения.
+/// Перенос базы Access в рабочие поля (ADR-0043): задание → дело вида «задание по объекту» с реквизитами (и сведениями
+/// таблицы инициаторов), объект → фигурант с анкетой, фото → материалы дела, связи → фигуранты-связи с кличкой,
+/// автомобилями, адресами посещения и фото в материалах дела.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -57,6 +58,27 @@ public sealed class AccessImporter(
     public const string ChangedDuringReadMessage =
         "Строки таблицы заданий при повторном чтении не совпали — база изменилась во время переноса. Загрузите её заново.";
 
+    /// <summary>Отказ: таблица связей изменилась между двумя чтениями.</summary>
+    public const string LinksChangedDuringReadMessage =
+        "Строки таблицы связей при повторном чтении не совпали — база изменилась во время переноса. Загрузите её заново.";
+
+    /// <summary>Запись задания, в которой есть только фото.</summary>
+    public const string OnlyPhotoTaskMessage = "в записи только фото — нет ФИО объекта, запись не переносится";
+
+    /// <summary>Запись связи, в которой есть только фото.</summary>
+    public const string OnlyPhotoLinkMessage = "в записи связи только фото — нет № задания и сведений, запись не переносится";
+
+    /// <summary>
+    /// Таблица соответствий, отмечающая принятое фото связи: «связи#фото» + код связи. Отметка, а не дедупликация,
+    /// решает «фото уже перенесено»: повтор доводит прерванный проход фото, а совпавший со снимком другого дела файл
+    /// всё равно считается и пишется в журнал (материал этого дела появился).
+    /// </summary>
+    public static string LinkPhotoTable(AccessMapping mapping)
+    {
+        ArgumentNullException.ThrowIfNull(mapping);
+        return mapping.LinksTable + "#фото";
+    }
+
     /// <summary>Примечание к адресу посещения.</summary>
     public const string VisitAddressNote = "адрес посещения (перенос из Access)";
 
@@ -87,10 +109,21 @@ public sealed class AccessImporter(
         var newTasks = 0;
         var alreadyImported = 0;
         var photos = 0;
+        var initiatorsApplied = 0;
         var sample = new List<AccessTaskPreview>();
         var planWarnings = new List<AccessImportProblem>();
         await foreach (var (task, blob) in WithPhotosAsync(database, mapping, snapshot, cancellationToken))
         {
+            if (task.IsEmpty)
+            {
+                if (blob is not null)
+                {
+                    task.Problem = OnlyPhotoTaskMessage;
+                }
+
+                continue;
+            }
+
             if (task.Problem is not null)
             {
                 continue;
@@ -103,12 +136,17 @@ public sealed class AccessImporter(
             }
 
             newTasks++;
-            planWarnings.AddRange(task.Warnings.Select(w => new AccessImportProblem(mapping.TasksTable!, task.Key, "задание перенесётся, но " + w)));
+            if (task.HasInitiatorRow)
+            {
+                initiatorsApplied++;
+            }
+
+            planWarnings.AddRange(task.Warnings.Select(w => new AccessImportProblem(mapping.TasksTable!, task.Key, "задание перенесётся, но " + w, Warning: true)));
             if (blob is not null)
             {
                 if (AccessPhotoExtractor.TryExtract(blob) is null)
                 {
-                    planWarnings.Add(new AccessImportProblem(mapping.TasksTable!, task.Key, "задание перенесётся, но " + AccessPhotoExtractor.UnrecognizedMessage));
+                    planWarnings.Add(new AccessImportProblem(mapping.TasksTable!, task.Key, "задание перенесётся, но " + AccessPhotoExtractor.UnrecognizedMessage, Warning: true));
                 }
                 else
                 {
@@ -124,24 +162,48 @@ public sealed class AccessImporter(
             }
         }
 
+        // Фото связей — вторым чтением: и у новых связей, и у перенесённых раньше, если их фото ещё не принято (прерванный
+        // проход фото доводит повтор).
+        var linkPhotos = 0;
+        await foreach (var (link, blob) in WithLinkPhotosAsync(database, mapping, snapshot, cancellationToken))
+        {
+            if (blob is null || link.IsEmpty || link.Problem is not null || done.ContainsKey((LinkPhotoTable(mapping), link.Key)))
+            {
+                continue;
+            }
+
+            if (AccessPhotoExtractor.TryExtract(blob) is null)
+            {
+                var prefix = done.ContainsKey((mapping.LinksTable!, link.Key)) ? string.Empty : "связь перенесётся, но ";
+                planWarnings.Add(new AccessImportProblem(mapping.LinksTable!, link.Key, prefix + AccessPhotoExtractor.UnrecognizedMessage, Warning: true));
+            }
+            else
+            {
+                linkPhotos++;
+            }
+        }
+
         var linksToImport = mapping.LinksTable is null
             ? []
-            : snapshot.Links.Where(l => l.Problem is null && !done.ContainsKey((mapping.LinksTable, l.Key))).ToList();
+            : snapshot.Links.Where(l => !l.IsEmpty && l.Problem is null && !done.ContainsKey((mapping.LinksTable, l.Key))).ToList();
         planWarnings.AddRange(linksToImport.SelectMany(l =>
-            l.Warnings.Select(w => new AccessImportProblem(mapping.LinksTable!, l.Key, "связь перенесётся, но " + w))));
+            l.Warnings.Select(w => new AccessImportProblem(mapping.LinksTable!, l.Key, "связь перенесётся, но " + w, Warning: true))));
 
         return new AccessImportPlan(
-            snapshot.Tasks.Count,
+            snapshot.Tasks.Count(t => !t.IsEmpty),
             newTasks,
             alreadyImported,
-            snapshot.Links.Count,
+            snapshot.Links.Count(l => !l.IsEmpty),
             linksToImport.Count,
             photos,
             initiatorsToCreate,
             linkTypesToCreate,
             [.. CollectProblems(snapshot, mapping), .. planWarnings],
             sample,
-            AccessSnapshot.Fingerprint(file.Sha256, mapping, options));
+            AccessSnapshot.Fingerprint(file.Sha256, mapping, options),
+            snapshot.EmptyRows,
+            linkPhotos,
+            initiatorsApplied);
     }
 
     /// <summary>Перенос. Возвращает итог; ошибки по записям — в отчёте, перенос остальных продолжается.</summary>
@@ -198,6 +260,16 @@ public sealed class AccessImporter(
         {
             await foreach (var (task, blob) in WithPhotosAsync(database, mapping, snapshot, cancellationToken))
             {
+                if (task.IsEmpty)
+                {
+                    if (blob is not null)
+                    {
+                        task.Problem = OnlyPhotoTaskMessage;
+                    }
+
+                    continue;
+                }
+
                 progress?.Report(++processed);
                 if (task.Problem is null)
                 {
@@ -207,10 +279,11 @@ public sealed class AccessImporter(
         }
         catch (StopImportException stop)
         {
-            return run.Report([new AccessImportProblem(mapping.TasksTable!, stop.Key, stop.Message), .. CollectProblems(snapshot, mapping), .. warnings], stopped: true);
+            return run.Report([new AccessImportProblem(mapping.TasksTable!, stop.Key, stop.Message), .. CollectProblems(snapshot, mapping), .. warnings], stopped: true, snapshot.EmptyRows);
         }
 
-        return run.Report([.. CollectProblems(snapshot, mapping), .. warnings], stopped: false);
+        await ImportLinkPhotosAsync(run, database, snapshot, warnings, cancellationToken);
+        return run.Report([.. CollectProblems(snapshot, mapping), .. warnings], stopped: false, snapshot.EmptyRows);
     }
 
     private async Task<AccessSnapshot> LoadAsync(
@@ -237,6 +310,7 @@ public sealed class AccessImporter(
         [
             .. snapshot.Tasks.Where(t => t.Problem is not null).Select(t => new AccessImportProblem(mapping.TasksTable!, t.Key, t.Problem!)),
             .. snapshot.Links.Where(l => l.Problem is not null).Select(l => new AccessImportProblem(mapping.LinksTable!, l.Key, l.Problem!)),
+            .. snapshot.InitiatorProblems.Select(p => new AccessImportProblem(mapping.InitiatorsTable!, p.Key, p.Message)),
         ];
     }
 
@@ -270,7 +344,7 @@ public sealed class AccessImporter(
         var seenLinkTypes = new HashSet<string>(StringComparer.Ordinal);
 
         // Инициатор нужен только для заведения дела: у задания, дело которого уже заведено, он не сверяется.
-        foreach (var task in snapshot.Tasks.Where(t => t.Problem is null && !done.ContainsKey((mapping.TasksTable!, t.Key))))
+        foreach (var task in snapshot.Tasks.Where(t => !t.IsEmpty && t.Problem is null && !done.ContainsKey((mapping.TasksTable!, t.Key))))
         {
             var name = task.Initiator ?? PlaceholderInitiator;
             if (catalog.Find(ReferenceKind.InitiatorUnit, name) is not null)
@@ -292,7 +366,7 @@ public sealed class AccessImporter(
             }
         }
 
-        foreach (var link in snapshot.Links.Where(l => l.Problem is null && l.LinkType is not null
+        foreach (var link in snapshot.Links.Where(l => !l.IsEmpty && l.Problem is null && l.LinkType is not null
             && !done.ContainsKey((mapping.LinksTable!, l.Key))))
         {
             var name = link.LinkType!;
@@ -383,7 +457,15 @@ public sealed class AccessImporter(
                 run.Options.Classification,
                 Basis: null,
                 run.OperatorUserId,
-                new TaskRequisites(task.CaseNumber, initiatorId, task.Justification, task.Purpose, Notes: task.TaskNotes));
+                new TaskRequisites(
+                    task.Number ?? task.CaseNumber,
+                    initiatorId,
+                    task.Justification,
+                    task.Purpose,
+                    InitiatorName: task.InitiatorName,
+                    InitiatorPhone: task.InitiatorPhone,
+                    InitiatorDetails: task.InitiatorDetails,
+                    Notes: task.TaskNotes));
             var (result, createdId) = await cases.CreateAsync(draft, run.Access, cancellationToken);
             switch (result)
             {
@@ -409,7 +491,7 @@ public sealed class AccessImporter(
             caseId = createdId;
             run.CasesCreated++;
             outcome.Add("дело заведено");
-            warnings.AddRange(task.Warnings.Select(w => new AccessImportProblem(table, task.Key, "задание перенесено, но " + w)));
+            warnings.AddRange(task.Warnings.Select(w => new AccessImportProblem(table, task.Key, "задание перенесено, но " + w, Warning: true)));
             record = new AccessImportRecord(run.File.Sha256, table, task.Key, caseId, null);
             await records.SaveAsync(record, cancellationToken);
 
@@ -453,14 +535,15 @@ public sealed class AccessImporter(
 
             if (photo is not null)
             {
-                var photoOutcome = await ImportPhotoAsync(run, task, caseId, photo, cancellationToken);
+                var photoOutcome = await ImportPhotoAsync(
+                    run, "запись " + task.Key, "access-" + SafeName(task.Key), caseId, photo, isLink: false, cancellationToken);
                 if (photoOutcome is null)
                 {
                     outcome.Add("фото принято");
                 }
                 else
                 {
-                    warnings.Add(new AccessImportProblem(table, task.Key, "задание перенесено, но " + photoOutcome));
+                    warnings.Add(new AccessImportProblem(table, task.Key, "задание перенесено, но " + photoOutcome, Warning: true));
                     outcome.Add("фото: " + photoOutcome);
                 }
             }
@@ -478,7 +561,7 @@ public sealed class AccessImporter(
             if (await ImportLinkAsync(run, link, caseId, objectId.Value, cancellationToken))
             {
                 links++;
-                warnings.AddRange(link.Warnings.Select(w => new AccessImportProblem(run.Mapping.LinksTable!, link.Key, "связь перенесена, но " + w)));
+                warnings.AddRange(link.Warnings.Select(w => new AccessImportProblem(run.Mapping.LinksTable!, link.Key, "связь перенесена, но " + w, Warning: true)));
             }
         }
 
@@ -493,9 +576,13 @@ public sealed class AccessImporter(
         }
     }
 
-    /// <summary>Фото объекта в материалы дела; <see langword="null"/> — принято, иначе причина для отчёта.</summary>
+    /// <summary>
+    /// Фото объекта или связи в материалы дела; <see langword="null"/> — принято, иначе причина для отчёта. Совпавший
+    /// с уже принятым файл (дедупликация) привязывается к делу и тоже считается: повтор фото связи отсекает отметка
+    /// <see cref="LinkPhotoTable"/>, а не дедупликация.
+    /// </summary>
     private async Task<string?> ImportPhotoAsync(
-        RunContext run, AccessTaskData task, int caseId, byte[] blob, CancellationToken cancellationToken)
+        RunContext run, string what, string fileStem, int caseId, byte[] blob, bool isLink, CancellationToken cancellationToken)
     {
         var photo = AccessPhotoExtractor.TryExtract(blob);
         if (photo is null)
@@ -514,14 +601,14 @@ public sealed class AccessImporter(
         var now = time.GetUtcNow();
         var head = photo.Content.AsSpan(0, Math.Min(photo.Content.Length, CaptureTimeProbe.HeadBytes));
         var captured = CaptureTimeProbe.TryRead(head, time.LocalTimeZone, now);
-        var source = $"Перенос из базы Access «{run.File.FileName}», запись {task.Key}"
+        var source = $"Перенос из базы Access «{run.File.FileName}», {what}"
             + (captured is null ? "; дата съёмки неизвестна — указана дата переноса" : string.Empty);
 
         var intake = new MediaIntake(mediaStore, caseScope, uploadOptions);
         var result = await intake.ReceiveAsync(
             new MediaIntakeRequest(
                 target,
-                "access-" + SafeName(task.Key) + photo.Extension,
+                fileStem + photo.Extension,
                 photo.ContentType,
                 photo.Content.Length,
                 AccessValues.Fit(source, 500),
@@ -535,7 +622,15 @@ public sealed class AccessImporter(
             return "фото не принято: " + (result.Message ?? "отказ приёма");
         }
 
-        run.PhotosAccepted++;
+        if (isLink)
+        {
+            run.LinkPhotosAccepted++;
+        }
+        else
+        {
+            run.PhotosAccepted++;
+        }
+
         if (!result.Receipt!.Duplicate)
         {
             // Обработка (поиск лиц) — тем же путём, что у загрузки: эталоном снимок делает сотрудник.
@@ -545,11 +640,90 @@ public sealed class AccessImporter(
         return null;
     }
 
+    /// <summary>
+    /// Фото связей — после всех заданий, вторым чтением таблицы связей по одной строке (снимки тысяч связей в память
+    /// разом не берутся). Фото принимается в дело перенесённой связи — этой или прошлой попыткой — и отмечается записью
+    /// <see cref="LinkPhotoTable"/>: повтор той же базы после сбоя доводит непринятые фото и не трогает принятые.
+    /// </summary>
+    private async Task ImportLinkPhotosAsync(
+        RunContext run, IAccessDatabase database, AccessSnapshot snapshot, List<AccessImportProblem> warnings, CancellationToken cancellationToken)
+    {
+        var table = run.Mapping.LinksTable;
+        var photoTable = LinkPhotoTable(run.Mapping);
+        await foreach (var (link, blob) in WithLinkPhotosAsync(database, run.Mapping, snapshot, cancellationToken))
+        {
+            if (blob is null || link.IsEmpty || link.Problem is not null || run.Done.ContainsKey((photoTable, link.Key)))
+            {
+                continue;
+            }
+
+            (int CaseId, int PersonId)? target = run.LinkCases.TryGetValue(link.Key, out var created) ? created
+                : run.Done.TryGetValue((table!, link.Key), out var record) && record.PersonId is { } personId ? (record.CaseId, personId)
+                : null;
+            if (target is not { } owner)
+            {
+                continue;
+            }
+
+            var outcome = await ImportPhotoAsync(
+                run, "связь, код записи " + link.Key, "access-link-" + SafeName(link.Key), owner.CaseId, blob, isLink: true, cancellationToken);
+            if (outcome is not null)
+            {
+                warnings.Add(new AccessImportProblem(table!, link.Key, "связь перенесена, но " + outcome, Warning: true));
+                continue;
+            }
+
+            await records.SaveAsync(new AccessImportRecord(run.File.Sha256, photoTable, link.Key, owner.CaseId, owner.PersonId), cancellationToken);
+            await WriteAuditAsync(run, owner.CaseId, "перенесено", $"связь, код записи {link.Key}; фото связи принято", cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Связи вместе с полем фото — вторым чтением в том же порядке, по одной строке. Строки сверяются с первым чтением по
+    /// коду связи (если он сопоставлен) и по числу. Фото связей не сопоставлено — ничего не читается.
+    /// </summary>
+    private static async IAsyncEnumerable<(AccessLinkData Link, byte[]? Photo)> WithLinkPhotosAsync(
+        IAccessDatabase database, AccessMapping mapping, AccessSnapshot snapshot,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (mapping.LinksTable is null || !mapping.LinkColumns.TryGetValue(AccessField.LinkPhoto, out var photoColumn))
+        {
+            yield break;
+        }
+
+        var keyColumn = mapping.LinkColumns.GetValueOrDefault(AccessField.LinkKey);
+        string[] columns = keyColumn is null ? [photoColumn] : [keyColumn, photoColumn];
+        var index = 0;
+        await foreach (var row in database.ReadRowsAsync(mapping.LinksTable, columns, AccessSnapshot.LinkOrder(mapping), cancellationToken))
+        {
+            if (index >= snapshot.Links.Count)
+            {
+                throw new AccessDatabaseReadException(LinksChangedDuringReadMessage);
+            }
+
+            var link = snapshot.Links[index++];
+            if (keyColumn is not null
+                && !string.Equals(AccessValues.Text(row.GetValueOrDefault(keyColumn)), link.KeyText, StringComparison.Ordinal))
+            {
+                throw new AccessDatabaseReadException(LinksChangedDuringReadMessage);
+            }
+
+            yield return (link, row.GetValueOrDefault(photoColumn) as byte[]);
+        }
+
+        if (index != snapshot.Links.Count)
+        {
+            throw new AccessDatabaseReadException(LinksChangedDuringReadMessage);
+        }
+    }
+
     private async Task<bool> ImportLinkAsync(RunContext run, AccessLinkData link, int caseId, int objectId, CancellationToken cancellationToken)
     {
         var linkTypeId = link.LinkType is null ? null : run.Catalog.Find(ReferenceKind.LinkType, link.LinkType);
         var (result, personId) = await persons.CreateAsync(
-            new PersonDraft(caseId, link.Name, link.Name is null, null, link.Notes, PersonRole.Link, null, objectId, linkTypeId),
+            new PersonDraft(
+                caseId, link.Name, link.Name is null, null, link.Notes, PersonRole.Link,
+                link.Alias is null ? null : new PersonQuestionnaire(Alias: link.Alias), objectId, linkTypeId),
             run.Access,
             cancellationToken);
         if (result != PersonWriteResult.Ok)
@@ -581,6 +755,7 @@ public sealed class AccessImporter(
         }
 
         await records.SaveAsync(new AccessImportRecord(run.File.Sha256, run.Mapping.LinksTable!, link.Key, caseId, personId), cancellationToken);
+        run.LinkCases[link.Key] = (caseId, personId);
         run.LinksCreated++;
         return true;
     }
@@ -607,10 +782,18 @@ public sealed class AccessImporter(
             cancellationToken);
     }
 
-    private Task WriteTaskAuditAsync(RunContext run, AccessTaskData task, int? caseId, string what, CancellationToken cancellationToken)
-    {
-        var result = task.Problem is null ? "перенесено" : "отказ";
-        return audit.WriteAsync(
+    private Task WriteTaskAuditAsync(RunContext run, AccessTaskData task, int? caseId, string what, CancellationToken cancellationToken) =>
+        WriteAuditAsync(
+            run,
+            caseId,
+            task.Problem is null ? "перенесено" : "отказ",
+            $"задание, код записи {task.Key}; дело № {task.CaseNumber}; {what}" + (task.Problem is null ? string.Empty : "; причина: " + task.Problem),
+            cancellationToken);
+
+    // Запись журнала по записи базы (ТБ-030): дело и итог — в метаданных; код записи, № дела и SHA-256 файла — в
+    // защищённой части (№ задания в метаданные не идёт, ТБ-032).
+    private Task WriteAuditAsync(RunContext run, int? caseId, string result, string what, CancellationToken cancellationToken) =>
+        audit.WriteAsync(
             new AuditEntry(
                 AuditAction.Ingest,
                 Math.Max(run.Access.MaxClassification, run.Options.Classification),
@@ -619,10 +802,8 @@ public sealed class AccessImporter(
                     CultureInfo.InvariantCulture,
                     $"investigation:access-import:sha={run.File.Sha256[..16]};case={caseId?.ToString(CultureInfo.InvariantCulture) ?? "-"};result={result}"),
                 run.Options.DivisionId,
-                PayloadSensitive: $"перенос из Access: файл «{run.File.FileName}» (sha256={run.File.Sha256}); задание, код записи {task.Key}; "
-                    + $"дело № {task.CaseNumber}; {what}" + (task.Problem is null ? string.Empty : "; причина: " + task.Problem)),
+                PayloadSensitive: $"перенос из Access: файл «{run.File.FileName}» (sha256={run.File.Sha256}); {what}"),
             cancellationToken);
-    }
 
     private static string Title(AccessTaskData task) =>
         AccessValues.Fit($"Задание № {task.CaseNumber} — {task.DisplayName}", CreateCaseValidator.MaxTitleLength);
@@ -682,9 +863,14 @@ public sealed class AccessImporter(
 
         public int AlreadyImported { get; set; }
 
-        public AccessImportReport Report(IReadOnlyList<AccessImportProblem> problems, bool stopped) =>
+        public int LinkPhotosAccepted { get; set; }
+
+        /// <summary>Связи, заведённые этой попыткой, — дело и фигурант для их фото.</summary>
+        public Dictionary<string, (int CaseId, int PersonId)> LinkCases { get; } = new(StringComparer.Ordinal);
+
+        public AccessImportReport Report(IReadOnlyList<AccessImportProblem> problems, bool stopped, int emptyRows) =>
             new(CasesCreated, ObjectsCreated, LinksCreated, PhotosAccepted, VehiclesSaved, AddressesSaved, ReferencesCreated,
-                AlreadyImported, problems, stopped);
+                AlreadyImported, problems, stopped, LinkPhotosAccepted, emptyRows);
     }
 
     /// <summary>Записи справочников ГУ и типов связей по нормализованному наименованию.</summary>
