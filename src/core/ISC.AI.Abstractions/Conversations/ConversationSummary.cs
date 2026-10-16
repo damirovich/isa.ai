@@ -5,4 +5,5 @@ namespace ISC.AI.Abstractions.Conversations;
 /// <param name="Title">Заголовок (обычно — начало первого запроса).</param>
 /// <param name="Classification">Максимальный гриф содержимого диалога (для маркировки).</param>
 /// <param name="UpdatedAt">Время последнего сообщения (для сортировки списка).</param>
-public sealed record ConversationSummary(int Id, string Title, short Classification, DateTime UpdatedAt);
+/// <param name="Area">Область профиля, в которой ведётся диалог (ADR-0052); <see langword="null"/> — область по умолчанию.</param>
+public sealed record ConversationSummary(int Id, string Title, short Classification, DateTime UpdatedAt, string? Area = null);

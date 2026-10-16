@@ -3,6 +3,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
     <ProjectReference Include="..\ISC.AI.Profile.Inspector.Domain\ISC.AI.Profile.Inspector.Domain.csproj" />
+    <!-- Порт пакета «Чат» (ADR-0052): профиль закрывает IChatProfile — «Чат-ассистент» по всему корпусу. -->
+    <ProjectReference Include="..\..\..\modules\chat\ISC.AI.Modules.Chat.Domain\ISC.AI.Modules.Chat.Domain.csproj" />
   </ItemGroup>
 
   <!-- Сценарии (use-cases), валидаторы, мапперы. Промпты — файлы-шаблоны Scriban (НЕ хардкод). -->

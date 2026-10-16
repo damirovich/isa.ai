@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Сценарии пакета «Чат» (ADR-0052): вопрос к материалам области и свободный режим, поиск по смыслу, диалоги.
+       Поиск, генерация, грунтовка и журнал — портами ЯДРА (IRetriever, IGroundedGenerator, IConversationalGenerator,
+       IAuditWriter), диалоги — IConversationStore ядра, поэтому слоя данных у пакета нет; область и материалы — порт
+       профиля IChatProfile. Обработчики регистрирует source-генератор Mediator хоста. -->
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+    <ProjectReference Include="..\ISC.AI.Modules.Chat.Domain\ISC.AI.Modules.Chat.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Mediator.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+  </ItemGroup>
+
+</Project>

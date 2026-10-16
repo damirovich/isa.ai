@@ -2,6 +2,7 @@ using ISC.AI.Abstractions.AI;
 using ISC.AI.Abstractions.Modules;
 using ISC.AI.Abstractions.Profiles;
 using ISC.AI.Modules.Admin;
+using ISC.AI.Modules.Chat;
 using ISC.AI.Modules.DocFlow;
 using ISC.AI.Profile.Inspector.Application;
 using ISC.AI.Profile.Inspector.Data;
@@ -79,8 +80,9 @@ public sealed class InspectorProfile : IProfile
         // документа, сверка проекта — вдумчивая роль Analysis (размышления по-ролево, ADR-0011).
         new ModuleDescriptor("analysis", "/analysis", "Анализ / Сравнение", Icons.Material.Filled.CompareArrows,
             typeof(Analysis), ReadPolicy, GroupAi),
-        new ModuleDescriptor("chat", "/chat", "Чат-ассистент", Icons.Material.Filled.Forum,
-            typeof(ChatAssistant), ReadPolicy, GroupAi),
+        // Чат-ассистент (Э4-34): страницу даёт пакет «Чат» (ADR-0052) — тот же, что у «Следствия»; профиль — название,
+        // секцию и порт IChatProfile (весь корпус по допуску, свободный режим и «По документам»).
+        ChatModule.Page("Чат-ассистент", GroupAi, Icons.Material.Filled.Forum),
 
         // --- Секция «Нормативная база»: поиск, ведение и наполнение — в одном месте ---
         new ModuleDescriptor("npa-search", "/npa", "База НПА", Icons.Material.Filled.Gavel,
@@ -163,8 +165,9 @@ public sealed class InspectorProfile : IProfile
         // Передача черновика Генератор → Редактор без копирования руками (scoped = одна сессия).
         services.AddScoped<EditorDraftHandoff>();
 
-        // Прикладные сервисы подключённых пакетов модулей (ADR-0017).
+        // Прикладные сервисы подключённых пакетов модулей (ADR-0017); порт чата — в AddInspectorApplication.
         DocFlowModule.RegisterServices(services);
+        ChatModule.RegisterServices(services);
 
         // Пакет администрирования (ADR-0023): валидаторы его сценариев и стартовая сверка допусков
         // со справочником подразделений. Сами ПОРТЫ пакета регистрирует слой данных профиля —

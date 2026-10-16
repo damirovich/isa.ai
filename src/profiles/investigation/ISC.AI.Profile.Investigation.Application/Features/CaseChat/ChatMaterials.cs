@@ -41,10 +41,10 @@ public sealed record ChatMaterials(IReadOnlyList<ChatMaterial> Items, ChatCovera
     public ChatMaterial? ByCoreId(int coreDocumentId) => Items.FirstOrDefault(i => i.CoreDocumentId == coreDocumentId);
 }
 
-/// <summary>Область чата: одно дело или все доступные сотруднику дела.</summary>
+/// <summary>Область чата в терминах дел: одно дело или все доступные сотруднику дела.</summary>
 /// <param name="Cases">Дела области (уже под решёткой).</param>
-/// <param name="Single">Выбранное дело или <see langword="null"/> — все доступные.</param>
-public sealed record ChatArea(IReadOnlyList<CaseChatScope> Cases, CaseChatScope? Single)
+/// <param name="Selected">Выбранное дело или <see langword="null"/> — все доступные.</param>
+public sealed record CaseChatArea(IReadOnlyList<CaseChatScope> Cases, CaseChatScope? Selected)
 {
     /// <summary>Дела области.</summary>
     public IReadOnlyList<int> CaseIds => Cases.Select(c => c.CaseId).ToList();
@@ -53,7 +53,7 @@ public sealed record ChatArea(IReadOnlyList<CaseChatScope> Cases, CaseChatScope?
     public short MaxClassification => Cases.Count == 0 ? (short)0 : Cases.Max(c => c.Classification);
 
     /// <summary>Область словами — для промпта и журнала.</summary>
-    public string Describe() => Single is { } single
+    public string Describe() => Selected is { } single
         ? $"дела № {single.Number}" + (string.IsNullOrWhiteSpace(single.Title) ? string.Empty : $" «{single.Title}»")
         : string.Create(CultureInfo.InvariantCulture, $"всех доступных вам дел ({Cases.Count})");
 
@@ -63,15 +63,15 @@ public sealed record ChatArea(IReadOnlyList<CaseChatScope> Cases, CaseChatScope?
     /// <summary>
     /// Область для субъекта: выбранное дело, если видно (иначе <see langword="null"/>, ТБ-021), или все видимые дела.
     /// </summary>
-    public static async Task<ChatArea?> ResolveAsync(ICaseChatStore chats, int? caseId, AccessContext access, CancellationToken cancellationToken)
+    public static async Task<CaseChatArea?> ResolveAsync(ICaseChatScopes scopes, int? caseId, AccessContext access, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(chats);
+        ArgumentNullException.ThrowIfNull(scopes);
         if (caseId is { } id)
         {
-            return await chats.GetScopeAsync(id, access, cancellationToken) is { } scope ? new ChatArea([scope], scope) : null;
+            return await scopes.GetScopeAsync(id, access, cancellationToken) is { } scope ? new CaseChatArea([scope], scope) : null;
         }
 
-        return new ChatArea(await chats.ListScopesAsync(access, cancellationToken), null);
+        return new CaseChatArea(await scopes.ListScopesAsync(access, cancellationToken), null);
     }
 }
 
@@ -80,10 +80,11 @@ public sealed record ChatArea(IReadOnlyList<CaseChatScope> Cases, CaseChatScope?
 /// «Сведения дела» — всё, что положено в корпус ядра и видно сотруднику.
 /// </summary>
 /// <remarks>
-/// ИНВАРИАНТ ОБЛАСТИ (ТБ-020/021/071). Дела области — уже под решёткой дел (<see cref="ChatArea"/>). Документы — те, что
+/// ИНВАРИАНТ ОБЛАСТИ (ТБ-020/021/071). Дела области — уже под решёткой дел (<see cref="CaseChatArea"/>). Документы — те, что
 /// сотрудник видит в документообороте (вкладка «Документы»); расшифровки — носителей этих дел под решёткой пакета
 /// «Медиа»; сводки и сведения дела — этих дел. Поверх области ядро ещё раз применяет floor допуска к фрагментам.
-/// Материал вне видимости не входит в область ни строкой, ни счётчиком.
+/// Материал вне видимости не входит в область ни строкой, ни счётчиком. Сборщик — часть порта профиля для пакета
+/// «Чат» (<see cref="InvestigationChatProfile"/>, ADR-0052).
 /// </remarks>
 public sealed class ChatMaterialResolver(
     ICaseDocumentStore caseDocuments,
@@ -107,7 +108,7 @@ public sealed class ChatMaterialResolver(
     /// Материалы области. <paramref name="sync"/> — перед вопросом синхронизировать сведения дел и сводки с корпусом
     /// (может обратиться к модели эмбеддингов); без него — только уже положенное (для строки готовности).
     /// </summary>
-    public async Task<ChatMaterials> ResolveAsync(ChatArea area, AccessContext access, bool sync, CancellationToken cancellationToken)
+    public async Task<ChatMaterials> ResolveAsync(CaseChatArea area, AccessContext access, bool sync, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(area);
         ArgumentNullException.ThrowIfNull(access);

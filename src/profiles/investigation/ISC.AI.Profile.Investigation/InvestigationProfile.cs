@@ -2,6 +2,7 @@ using ISC.AI.Abstractions.AI;
 using ISC.AI.Abstractions.Modules;
 using ISC.AI.Abstractions.Profiles;
 using ISC.AI.Modules.Admin;
+using ISC.AI.Modules.Chat;
 using ISC.AI.Modules.DocFlow;
 using ISC.AI.Modules.Media;
 using ISC.AI.Profile.Investigation.Application;
@@ -17,8 +18,8 @@ namespace ISC.AI.Profile.Investigation;
 /// <summary>
 /// Манифест профиля «СледствиеAI» (ADR-0021, ДОК-13 §6) — декларативное описание вертикали
 /// следственного подразделения: дела и фигуранты (свои страницы), пакет «Медиа» (носители, поиск по
-/// лицу, верификация — ADR-0022), пакет «Документооборот» («Документы дела») и пакет
-/// «Администрирование платформы» (учётные записи, допуски, журнал аудита — ADR-0023).
+/// лицу, верификация — ADR-0022), пакет «Документооборот» («Документы дела»), пакет «Чат» («Чат по материалам» —
+/// ADR-0051/0052) и пакет «Администрирование платформы» (учётные записи, допуски, журнал аудита — ADR-0023).
 /// Подключается единственным профилем в хосте <c>ISC.AI.Web</c> при <c>IscProfile=investigation</c>
 /// (ТС-004, ТС-006).
 /// </summary>
@@ -26,11 +27,12 @@ namespace ISC.AI.Profile.Investigation;
 /// <para>
 /// ПОРТЫ ПАКЕТОВ, которые профиль обязан закрыть: <see cref="DocFlowModule.RequiredServices"/> (справочник
 /// подразделений, право настройки, кандидаты в исполнители), <see cref="MediaModule.RequiredServices"/>
-/// (область дел субъекта, права по ролям, роли стадий верификации) и <see cref="AdminModule.RequiredServices"/>
+/// (область дел субъекта, права по ролям, роли стадий верификации), <see cref="ChatModule.RequiredServices"/>
+/// (области-дела и материалы чата, право «Чат по материалам дел») и <see cref="AdminModule.RequiredServices"/>
 /// (право вести учётные записи и допуски, право читать журнал, справочник подразделений, роли для
-/// показа). Все реализации — в
-/// <c>Investigation.Data</c> (<c>AddInvestigationPersistence</c>). Отсутствие любого порта профиль
-/// обнаруживает САМ в конце <see cref="RegisterDataContexts"/> (<see cref="EnsureModulePortsRegistered"/>)
+/// показа). Реализации — в <c>Investigation.Data</c> (<c>AddInvestigationPersistence</c>), порт чата — в
+/// <c>Investigation.Application</c> (<c>AddInvestigationApplication</c>): он собирает материалы и рендерит промпт.
+/// Отсутствие любого порта профиль обнаруживает САМ в конце <see cref="RegisterDataContexts"/> (<see cref="EnsureModulePortsRegistered"/>)
 /// и бросает <see cref="InvalidOperationException"/> с именем порта — приложение не стартует в ЛЮБОМ
 /// окружении, а не только в Development, где контейнер ASP.NET валидирует граф при сборке. Факт
 /// регистрации закреплён тестом <c>InvestigationProfileTests</c>.
@@ -84,8 +86,8 @@ public sealed class InvestigationProfile : IProfile
 
         // Чат по материалам (ТФ-ДДЛ-02/03, ADR-0051): вопросы локальной модели к документам, расшифровкам, сводкам и
         // сведениям всех доступных дел или выбранного дела; ответ только по найденным фрагментам, со ссылками.
-        new ModuleDescriptor("chat", "/chat", "Чат по материалам", Icons.Material.Filled.QuestionAnswer,
-            typeof(ChatPage), ReadPolicy, GroupCases),
+        // Страницу даёт пакет «Чат» (ADR-0052), профиль — название, секцию и порт IChatProfile.
+        ChatModule.Page("Чат по материалам", GroupCases, Icons.Material.Filled.QuestionAnswer),
 
         // --- Секция «Медиа»: страницы объявляет САМ пакет (носители, «Поиск по лицу», «Верификация»);
         // профиль лишь включает их в реестр (ADR-0017/0022).
@@ -143,7 +145,7 @@ public sealed class InvestigationProfile : IProfile
 
     /// <inheritdoc />
     /// <remarks>
-    /// Своих моделей профиль не регистрирует: чат по материалам (ADR-0051) ходит к моделям ядра по ролям (<c>Llm:Models</c>),
+    /// Своих моделей профиль не регистрирует: чат по материалам (ADR-0051/0052) ходит к моделям ядра по ролям (<c>Llm:Models</c>),
     /// распознавание лиц — конвейер пакета «Медиа».
     /// </remarks>
     public IReadOnlyList<IModelContributor> ModelContributors { get; } = [];
@@ -158,6 +160,7 @@ public sealed class InvestigationProfile : IProfile
         // у «Администрирования» — валидаторы сценариев и стартовая сверка допусков со справочником.
         DocFlowModule.RegisterServices(services);
         MediaModule.RegisterServices(services, configuration);
+        ChatModule.RegisterServices(services);
         AdminModule.RegisterServices(services);
     }
 
@@ -180,7 +183,8 @@ public sealed class InvestigationProfile : IProfile
 
     /// <summary>
     /// Проверить, что профиль закрыл КАЖДЫЙ порт подключённых пакетов (<see cref="DocFlowModule.RequiredServices"/>,
-    /// <see cref="MediaModule.RequiredServices"/>, <see cref="AdminModule.RequiredServices"/>): отсутствие
+    /// <see cref="MediaModule.RequiredServices"/>, <see cref="ChatModule.RequiredServices"/>,
+    /// <see cref="AdminModule.RequiredServices"/>): отсутствие
     /// любого — <see cref="InvalidOperationException"/>
     /// с именем порта ещё на регистрации сервисов, то есть до старта хоста, в любом окружении (ТС-013).
     /// </summary>
@@ -192,6 +196,7 @@ public sealed class InvestigationProfile : IProfile
 
         var missing = DocFlowModule.RequiredServices
             .Concat(MediaModule.RequiredServices)
+            .Concat(ChatModule.RequiredServices)
             .Concat(AdminModule.RequiredServices)
             .Where(port => !services.Any(d => d.ServiceType == port))
             .Select(port => port.FullName ?? port.Name)
@@ -201,7 +206,8 @@ public sealed class InvestigationProfile : IProfile
         {
             throw new InvalidOperationException(
                 $"Профиль «{nameof(InvestigationProfile)}» не закрыл порты подключённых пакетов: {string.Join(", ", missing)}. "
-                + "Без реализации порта приложение не запускается (ТС-013): зарегистрируйте её в AddInvestigationPersistence.");
+                + "Без реализации порта приложение не запускается (ТС-013): зарегистрируйте её в AddInvestigationPersistence "
+                + "(порт чата — в AddInvestigationApplication).");
         }
     }
 

@@ -7,6 +7,7 @@
 @using ISC.AI.Modules.Media.Application.Features.Search
 @using ISC.AI.Modules.Media.Domain.Model
 @using ISC.AI.Modules.Media.Domain.Services
+@using ISC.AI.Profile.Investigation.Application.Features.CaseChat
 @using ISC.AI.Profile.Investigation.Application.Features.Directory
 @using ISC.AI.Profile.Investigation.Application.Features.Cases
 @using ISC.AI.Profile.Investigation.Application.Features.Divisions
@@ -395,10 +396,10 @@ else
         <CaseReportsPanel CaseId="@_case.Id" Persons="@_persons" Accounts="@_accounts" />
     </MudTabPanel>
 
-    @* --- Чат и поиск по смыслу по материалам дела (ТФ-ДДЛ-02/03, ADR-0051): документы, расшифровки, сводки, сведения;
-           компонент грузится при первом открытии --- *@
+    @* --- Чат и поиск по смыслу по материалам дела (ТФ-ДДЛ-02/03, ADR-0051): документы, расшифровки, сводки, сведения.
+           Компонент — пакета «Чат» (ADR-0052), область — это дело; грузится при первом открытии вкладки --- *@
     <MudTabPanel Text="Чат по материалам" Icon="@Icons.Material.Filled.QuestionAnswer">
-        <div class="pt-3"><CaseChatPanel CaseId="@_case.Id" /></div>
+        <div class="pt-3"><ISC.AI.Modules.Chat.UI.ChatPanel AreaKey="@CaseChatAreas.KeyOf(_case.Id)" /></div>
     </MudTabPanel>
     </MudTabs>
 }

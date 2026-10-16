@@ -82,12 +82,6 @@ public class InvestigationDbContext(DbContextOptions<InvestigationDbContext> opt
     /// <summary>История единого поиска сотрудников (ADR-0049).</summary>
     public DbSet<SearchHistoryEntry> SearchHistory { get; set; } = null!;
 
-    /// <summary>Диалоги чата по документам дела (ADR-0051).</summary>
-    public DbSet<CaseChat> CaseChats { get; set; } = null!;
-
-    /// <summary>Сообщения диалогов чата по документам дела (ADR-0051).</summary>
-    public DbSet<CaseChatMessage> CaseChatMessages { get; set; } = null!;
-
     /// <summary>Материалы дел в корпусе ядра: сведения дела, сводки и справки (ADR-0051).</summary>
     public DbSet<CaseCorpusEntry> CaseCorpusEntries { get; set; } = null!;
 

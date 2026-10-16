@@ -2,17 +2,16 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using ISC.AI.Abstractions.AI;
-using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.Enums;
 using ISC.AI.Abstractions.Grounding;
-using ISC.AI.Abstractions.Rag;
 using ISC.AI.Abstractions.Retrieval;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.AI.Grounding;
+using ISC.AI.Modules.Chat.Application;
+using ISC.AI.Modules.Chat.Domain.Services;
 using ISC.AI.Modules.DocFlow.Domain.Enums;
 using ISC.AI.Modules.DocFlow.Domain.Services;
 using ISC.AI.Modules.Media.Domain.Model;
@@ -28,9 +27,10 @@ using Xunit;
 namespace ISC.AI.UnitTests.Investigation;
 
 /// <summary>
-/// Чат и поиск по смыслу по материалам дел (ТФ-ДДЛ-02/03, ADR-0051): ссылки ответа проверяются по поданным фрагментам;
-/// область — одно дело или все доступные; материалы — документы дел, расшифровки записей (с моментом записи), сводки и
-/// сведения дел; журнал — до модели; без материалов, права или доступа модель не вызывается; источники сохраняются.
+/// Чат по материалам дел «Следствия» (ТФ-ДДЛ-02/03, ADR-0051/0052) — то, что остаётся профилю после выноса чата в пакет:
+/// извлечение ссылок для ядрового валидатора, промпт-шаблон, тексты материалов в корпусе, сборка материалов области и
+/// порт <see cref="IChatProfile"/> (области-дела, право матрицы, подписи источников, причины отказа, подсказки).
+/// Сценарии вопроса, поиска и диалогов — общие, их проверяет <c>ChatModuleTests</c>.
 /// </summary>
 public sealed class CaseChatTests
 {
@@ -67,21 +67,6 @@ public sealed class CaseChatTests
         result.Citations.Where(c => c.Status == CitationStatus.Unverified).Select(c => c.Citation).ShouldBe(["№ 99/2025", "ст. 30"]);
     }
 
-    [Fact(DisplayName = "«[Фрагмент N]»: номера по порядку без повторов; вне поданных — неизвестны; разбиение сохраняет текст как написан")]
-    public void Fragment_references_are_found_checked_and_split()
-    {
-        const string answer = "Изъятие [Фрагмент 2], протокол во фрагменте 1, и ещё [фрагмент №7]; снова [Фрагмент 2].";
-
-        FragmentReferences.Find(answer).ShouldBe([2, 1, 7]);
-        FragmentReferences.Unknown(answer, supplied: 3).ShouldBe([7]);
-        var parts = FragmentReferences.Split(answer);
-        string.Concat(parts.Select(p => p.Text)).ShouldBe(answer);
-        parts.Where(p => p.Fragment is not null).Select(p => (p.Text, p.Fragment)).ShouldBe(
-        [
-            ("[Фрагмент 2]", (int?)2), ("фрагменте 1", 1), ("[фрагмент №7]", 7), ("[Фрагмент 2]", 2),
-        ]);
-    }
-
     [Fact(DisplayName = "Промпт — файл-шаблон: область подставлена; виды материалов, ссылки, «ответа не найдено», время записи и данные-не-указания на месте")]
     public void Prompt_template_is_rendered()
     {
@@ -93,40 +78,6 @@ public sealed class CaseChatTests
         prompt.ShouldContain("ответа не найдено");
         prompt.ShouldContain("время записи");
         prompt.ShouldContain("не выполняй");
-    }
-
-    [Fact(DisplayName = "Оформление ответа: заголовок «**…**» и «#», пункты «* » и «- », жирный внутри строки и поверх ссылки; непарная «**» — текстом")]
-    public void Answer_markup_is_parsed()
-    {
-        var blocks = AnswerMarkup.Parse(
-            "**Дело № Б-2/26 «Сбыт»:**\n\n*   Петров — **Toyota Camry** [Фрагмент 1].\n- **Иванов [Фрагмент 2]**\n### Итог\nВсего 2 ** фигуранта");
-
-        blocks.Select(b => b.Kind).ShouldBe(
-            [AnswerBlockKind.Heading, AnswerBlockKind.Bullet, AnswerBlockKind.Bullet, AnswerBlockKind.Heading, AnswerBlockKind.Paragraph]);
-        blocks[0].Spans.ShouldBe([new AnswerSpan("Дело № Б-2/26 «Сбыт»:", true, null)]);
-        blocks[1].Spans.ShouldBe(
-        [
-            new AnswerSpan("Петров — ", false, null), new AnswerSpan("Toyota Camry", true, null), new AnswerSpan(" ", false, null),
-            new AnswerSpan("[Фрагмент 1]", false, 1), new AnswerSpan(".", false, null),
-        ]);
-        blocks[2].Spans.ShouldBe([new AnswerSpan("Иванов ", true, null), new AnswerSpan("[Фрагмент 2]", true, 2)]);
-        blocks[3].Spans.ShouldBe([new AnswerSpan("Итог", true, null)]);
-        string.Concat(blocks[4].Spans.Select(s => s.Text)).ShouldBe("Всего 2 ** фигуранта");
-        blocks[4].Spans.ShouldAllBe(s => !s.Bold);
-        AnswerMarkup.Parse("  \n ").ShouldBeEmpty();
-    }
-
-    [Fact(DisplayName = "Подсказки: свои для всех дел, для одного дела и для поиска по смыслу; не пустые и без повторов")]
-    public void Suggestions_are_defined()
-    {
-        ChatSuggestions.For(null).ShouldBe(ChatSuggestions.AllCases);
-        ChatSuggestions.For(CaseId).ShouldBe(ChatSuggestions.OneCase);
-        foreach (var list in new[] { ChatSuggestions.AllCases, ChatSuggestions.OneCase, ChatSuggestions.Sense })
-        {
-            list.Count.ShouldBeGreaterThanOrEqualTo(3);
-            list.ShouldAllBe(s => !string.IsNullOrWhiteSpace(s) && s.Length <= CaseChatLimits.MaxQuestionLength);
-            list.ShouldBeUnique();
-        }
     }
 
     // ---------------- тексты материалов ----------------
@@ -174,32 +125,23 @@ public sealed class CaseChatTests
         reference.ShouldNotContain("Событие");
     }
 
-    [Theory(DisplayName = "Источник открывается на месте: документ, сводка, дело или носитель на моменте записи")]
-    [InlineData(ChatSourceKind.Document, 77, null, "/docflow/documents/77")]
-    [InlineData(ChatSourceKind.Report, 55, null, "/reports/55")]
-    [InlineData(ChatSourceKind.CaseCard, 3, null, "/cases/3")]
-    [InlineData(ChatSourceKind.Transcript, 9, 65_000L, "/media/assets/9?t=65000")]
-    [InlineData(ChatSourceKind.Transcript, 9, null, "/media/assets/9")]
-    public void Source_href(ChatSourceKind kind, int target, long? startMs, string href) =>
-        new CaseChatSource(1, kind, target, CaseId, "x", 1, 0, "x", startMs).Href.ShouldBe(href);
-
     // ---------------- область и материалы ----------------
 
-    [Fact(DisplayName = "Область: одно дело (не видно — null) или все видимые; описание для промпта и наибольший гриф")]
+    [Fact(DisplayName = "Область в терминах дел: одно дело (не видно — null) или все видимые; описание для промпта и наибольший гриф")]
     public async Task Area_resolution()
     {
-        var chats = Substitute.For<ICaseChatStore>();
-        chats.GetScopeAsync(CaseId, Access, Arg.Any<CancellationToken>()).Returns(Case3);
-        chats.ListScopesAsync(Access, Arg.Any<CancellationToken>()).Returns([Case3, Case4]);
+        var scopes = Substitute.For<ICaseChatScopes>();
+        scopes.GetScopeAsync(CaseId, Access, Arg.Any<CancellationToken>()).Returns(Case3);
+        scopes.ListScopesAsync(Access, Arg.Any<CancellationToken>()).Returns([Case3, Case4]);
 
-        var single = (await ChatArea.ResolveAsync(chats, CaseId, Access, CancellationToken.None)).ShouldNotBeNull();
+        var single = (await CaseChatArea.ResolveAsync(scopes, CaseId, Access, CancellationToken.None)).ShouldNotBeNull();
         single.Describe().ShouldBe("дела № 12-2026/045 «Наблюдение за Ивановым»");
         single.CaseIds.ShouldBe([CaseId]);
-        var all = (await ChatArea.ResolveAsync(chats, null, Access, CancellationToken.None)).ShouldNotBeNull();
+        var all = (await CaseChatArea.ResolveAsync(scopes, null, Access, CancellationToken.None)).ShouldNotBeNull();
         all.Describe().ShouldBe("всех доступных вам дел (2)");
         all.MaxClassification.ShouldBe((short)2);
         all.NumberOf(OtherCaseId).ShouldBe("12-2026/046");
-        (await ChatArea.ResolveAsync(chats, 99, Access, CancellationToken.None)).ShouldBeNull();
+        (await CaseChatArea.ResolveAsync(scopes, 99, Access, CancellationToken.None)).ShouldBeNull();
     }
 
     [Fact(DisplayName = "Материалы: видимые документы дел (в области — проиндексированные), расшифровки записей дел, сводки и сведения; готовность по видам")]
@@ -207,7 +149,7 @@ public sealed class CaseChatTests
     {
         var kit = new Kit();
 
-        var materials = await kit.Resolver.ResolveAsync(new ChatArea([Case3, Case4], null), Access, sync: true, CancellationToken.None);
+        var materials = await kit.Resolver.ResolveAsync(new CaseChatArea([Case3, Case4], null), Access, sync: true, CancellationToken.None);
 
         materials.Items.ShouldBe(
         [
@@ -220,196 +162,180 @@ public sealed class CaseChatTests
         materials.CoreDocumentIds.ShouldBe([501, 601, 701, 801]);
         await kit.Corpus.Received(1).SyncAsync(Arg.Is<IReadOnlyCollection<int>>(ids => ids.SequenceEqual(new[] { CaseId, OtherCaseId })), Arg.Any<CancellationToken>());
 
-        await kit.Resolver.ResolveAsync(new ChatArea([Case3], Case3), Access, sync: false, CancellationToken.None);
+        await kit.Resolver.ResolveAsync(new CaseChatArea([Case3], Case3), Access, sync: false, CancellationToken.None);
         await kit.Corpus.Received(1).ListAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>());
-        (await kit.Resolver.ResolveAsync(new ChatArea([], null), Access, sync: true, CancellationToken.None)).ShouldBe(ChatMaterials.Empty);
+        (await kit.Resolver.ResolveAsync(new CaseChatArea([], null), Access, sync: true, CancellationToken.None)).ShouldBe(ChatMaterials.Empty);
     }
 
-    // ---------------- вопрос ----------------
+    // ---------------- порт профиля для пакета «Чат» (ADR-0052) ----------------
 
-    [Fact(DisplayName = "Вопрос по делу: новый диалог, журнал — до модели, модель ищет только в материалах области; источники с моментом записи и проверка")]
-    public async Task Question_on_case_goes_through_scope_audit_and_grounding()
+    [Fact(DisplayName = "Настройки «Следствия»: без свободного режима, с поиском по смыслу; режим по материалам — «Спросить»")]
+    public void Settings_of_investigation()
     {
-        var kit = new Kit();
-        var order = new List<string>();
-        kit.Audit.When(a => a.WriteAsync(Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>())).Do(_ => order.Add("audit"));
-        GroundedRequest? sent = null;
-        kit.Generator.GenerateStreamingAsync(Arg.Do<GroundedRequest>(r => { sent = r; order.Add("model"); }), Access, Arg.Any<CancellationToken>())
-            .Returns(Stream(
-                new GroundedStreamUpdate("Изъяли ", null),
-                new GroundedStreamUpdate(null, Final("Изъяли телефон [Фрагмент 1]; в записи [Фрагмент 2] — встреча; см. [Фрагмент 5] и № 99/2025."))));
+        var settings = new Kit().Profile.Settings;
 
-        var updates = await kit.SendAsync(new SendCaseChatMessageCommand(CaseId, null, "  Что изъяли?  "));
-
-        order.ShouldBe(["audit", "model"]);
-        updates[0].ChatId.ShouldBe(15);
-        updates[1].TextDelta.ShouldBe("Изъяли ");
-        var final = updates[^1].Final.ShouldNotBeNull();
-
-        await kit.Chats.Received(1).CreateAsync(CaseId, "Что изъяли?", Access, Arg.Any<CancellationToken>());
-        await kit.Chats.Received(1).AppendAsync(15, Arg.Is<CaseChatMessageDraft>(m =>
-            m.Role == ConversationMessageRole.User && m.Text == "Что изъяли?" && m.Classification == 2), Access, Arg.Any<CancellationToken>());
-        await kit.Audit.Received(1).WriteAsync(Arg.Is<AuditEntry>(e =>
-            e.Action == AuditAction.Search && e.ObjectRef == "investigation:case:3:chat:15" && e.Classification == 2 && e.DivisionId == 5
-            && e.SubjectId == UserId && e.PayloadSensitive!.Contains("Что изъяли?", StringComparison.Ordinal)
-            && e.PayloadSensitive.Contains("дела № 12-2026/045", StringComparison.Ordinal)), Arg.Any<CancellationToken>());
-
-        sent.ShouldNotBeNull();
-        sent.Filter.ShouldNotBeNull().DocumentIds.ShouldBe([501, 601, 701, 801]);
-        sent.Role.ShouldBe(ModelRole.Draft);
-        sent.TopK.ShouldBe(CaseChatMessages.TopK);
-        sent.TaskPrompt.ShouldNotBeNull().ShouldContain("материалами дела № 12-2026/045");
-
-        final.Sources.ShouldBe(
-        [
-            new CaseChatSource(1, ChatSourceKind.Document, 77, CaseId, "№ 12-3/2026 от 01.10.2026 · Справка · дело № 12-2026/045", 900, 1, "Изъяты телефон и записная книжка по ст. 158."),
-            new CaseChatSource(2, ChatSourceKind.Transcript, 9, CaseId, "Расшифровка «звонок.mp3» · носитель № 9 · дело № 12-2026/045", 901, 1,
-                "[00:01:05] Встречаемся у рынка", 65_000),
-        ]);
-        final.Check.Unverified.ShouldBe(["№ 99/2025"]);
-        final.Check.UnknownFragments.ShouldBe([5]);
-        final.Classification.ShouldBe((short)2);
-        await kit.Chats.Received(1).AppendAsync(15, Arg.Is<CaseChatMessageDraft>(m =>
-            m.Role == ConversationMessageRole.Assistant && m.Sources!.Count == 2 && m.Check!.UnknownFragments.Count == 1), Access, Arg.Any<CancellationToken>());
+        settings.AllowFreeMode.ShouldBeFalse();
+        settings.AllowSenseSearch.ShouldBeTrue();
+        settings.GroundedModeLabel.ShouldBe("Спросить");
+        settings.TopK.ShouldBe(10);
+        settings.HistoryTurns.ShouldBe(6);
+        settings.HistoryTurnLength.ShouldBe(1_500);
+        settings.SenseSearchTopK.ShouldBe(20);
     }
 
-    [Fact(DisplayName = "Вопрос по всем делам: диалог без дела, журнал на диалог с наибольшим грифом области, вопрос без грифа, промпт — «всех доступных дел»")]
-    public async Task Question_on_all_cases()
+    [Theory(DisplayName = "Право на чат — «Чат по материалам дел» матрицы доступа")]
+    [InlineData(InvestigationRole.Investigator, true)]
+    [InlineData(InvestigationRole.Head, true)]
+    [InlineData(InvestigationRole.Verifier, false)]
+    public async Task Right_comes_from_access_matrix(InvestigationRole role, bool allowed)
     {
         var kit = new Kit();
-        GroundedRequest? sent = null;
-        kit.Generator.GenerateStreamingAsync(Arg.Do<GroundedRequest>(r => sent = r), Access, Arg.Any<CancellationToken>())
-            .Returns(Stream(new GroundedStreamUpdate(null, Final("Ответ [Фрагмент 1]."))));
+        kit.Roles.GetRoleAsync(UserId, Arg.Any<CancellationToken>()).Returns(role);
 
-        var updates = await kit.SendAsync(new SendCaseChatMessageCommand(null, null, "Кто ездит на Camry?"));
-
-        updates[^1].Final.ShouldNotBeNull().Classification.ShouldBe((short)1);
-        await kit.Chats.Received(1).CreateAsync(null, "Кто ездит на Camry?", Access, Arg.Any<CancellationToken>());
-        await kit.Chats.Received(1).AppendAsync(15, Arg.Is<CaseChatMessageDraft>(m =>
-            m.Role == ConversationMessageRole.User && m.Classification == 0), Access, Arg.Any<CancellationToken>());
-        await kit.Audit.Received(1).WriteAsync(Arg.Is<AuditEntry>(e =>
-            e.ObjectRef == "investigation:chat:15" && e.Classification == 2 && e.DivisionId == null
-            && e.PayloadSensitive!.Contains("всех доступных вам дел (2)", StringComparison.Ordinal)), Arg.Any<CancellationToken>());
-        sent.ShouldNotBeNull().TaskPrompt.ShouldNotBeNull().ShouldContain("всех доступных вам дел (2)");
+        (await kit.Profile.CanUseAsync()).ShouldBe(allowed);
     }
 
-    [Fact(DisplayName = "Вопрос в прежний диалог: история — последние реплики; диалог другой области — «не найдено», модель не вызывается")]
-    public async Task Existing_chat_passes_history_and_rejects_other_area()
+    [Fact(DisplayName = "Области: «Все мои дела» первой (без грифа вопросов, журнал — с наибольшим грифом), затем каждое дело со своим грифом, подразделением, ключом уничтожения и ссылкой на карточку")]
+    public async Task Areas_are_cases()
     {
-        var kit = new Kit();
-        var messages = Enumerable.Range(1, 8)
-            .Select(i => new CaseChatMessageRow(i, i % 2 == 1 ? ConversationMessageRole.User : ConversationMessageRole.Assistant, "реплика " + i, 2, DateTime.UtcNow, [], null))
-            .ToList();
-        kit.Chats.GetAsync(15, Access, Arg.Any<CancellationToken>()).Returns(new CaseChatThread(15, CaseId, "Т", 2, messages, 0));
-        GroundedRequest? sent = null;
-        kit.Generator.GenerateStreamingAsync(Arg.Do<GroundedRequest>(r => sent = r), Access, Arg.Any<CancellationToken>())
-            .Returns(Stream(new GroundedStreamUpdate(null, Final("Ответ [Фрагмент 1]."))));
+        var areas = await new Kit().Profile.ListAreasAsync(Access);
 
-        await kit.SendAsync(new SendCaseChatMessageCommand(CaseId, 15, "Ещё вопрос"));
+        areas.Select(a => a.Key).ShouldBe([null, "case:3", "case:4"]);
+        var all = areas[0];
+        all.Title.ShouldBe("Все мои дела (2)");
+        all.Description.ShouldBe("всех доступных вам дел (2)");
+        (all.Classification, all.AuditClassification, all.DivisionId, all.AuditRef).ShouldBe(((short)0, (short)2, (int?)null, "investigation"));
+        all.ScopeKeys.ShouldBeEmpty();
+        all.Link.ShouldBeNull();
 
-        sent.ShouldNotBeNull().History.ShouldNotBeNull().Select(t => t.Text).ShouldBe(messages.Skip(2).Select(m => m.Text));
-        await kit.Chats.DidNotReceiveWithAnyArgs().CreateAsync(default, default!, default!, default);
-
-        kit.Generator.ClearReceivedCalls();
-        (await kit.SendAsync(new SendCaseChatMessageCommand(null, 15, "Вопрос"))).ShouldHaveSingleItem().Error.ShouldBe(CaseChatMessages.NotFound);
-        kit.Generator.DidNotReceiveWithAnyArgs().GenerateStreamingAsync(default!, default!, default);
+        var one = areas[1];
+        one.Title.ShouldBe("№ 12-2026/045 — Наблюдение за Ивановым");
+        one.Description.ShouldBe("дела № 12-2026/045 «Наблюдение за Ивановым»");
+        (one.Classification, one.AuditClassification, one.DivisionId, one.AuditRef).ShouldBe(((short)2, (short)2, (int?)5, "investigation:case:3"));
+        one.ScopeKeys.ShouldBe(["case:3"]);
+        one.Link.ShouldBe(new ChatLink("/cases/3", "Карточка дела"));
+        areas[2].Title.ShouldBe("№ 12-2026/046 — Другое дело");
     }
 
-    [Fact(DisplayName = "Отказы до модели: пустой вопрос, нет права, дело не видно, нет дел, нет материалов, узел ИИ недоступен при синхронизации")]
-    public async Task Refusals_before_model()
+    [Theory(DisplayName = "Область по ключу: без ключа — все дела, «case:N» — видимое дело; чужое, невидимое и непонятное — null")]
+    [InlineData(null, null, true)]
+    [InlineData("  ", null, true)]
+    [InlineData("case:3", "case:3", true)]
+    [InlineData(" case:3 ", "case:3", true)]
+    [InlineData("case:99", null, false)]
+    [InlineData("case:0", null, false)]
+    [InlineData("case:-3", null, false)]
+    [InlineData("case:abc", null, false)]
+    [InlineData("cases:3", null, false)]
+    [InlineData("CASE:3", null, false)]
+    public async Task Area_by_key(string? key, string? expectedKey, bool found)
+    {
+        var area = await new Kit().Profile.ResolveAreaAsync(key, Access);
+
+        if (found)
+        {
+            area.ShouldNotBeNull().Key.ShouldBe(expectedKey);
+        }
+        else
+        {
+            area.ShouldBeNull();
+        }
+    }
+
+    [Fact(DisplayName = "Материалы области: документы корпуса, строка «что видит чат»; подписи — документ, расшифровка на моменте записи, сводка, сведения; ключ уничтожения — дело материала")]
+    public async Task Scope_describes_sources()
     {
         var kit = new Kit();
-        (await kit.SendAsync(new SendCaseChatMessageCommand(CaseId, null, "   "))).ShouldHaveSingleItem().Error.ShouldBe(CaseChatMessages.EmptyQuestion);
-        (await kit.SendAsync(new SendCaseChatMessageCommand(99, null, "Вопрос"))).ShouldHaveSingleItem().Error.ShouldBe(CaseChatMessages.NotFound);
+        var all = (await kit.Profile.ResolveAreaAsync(null, Access)).ShouldNotBeNull();
+
+        var scope = await kit.Profile.ResolveScopeAsync(all, Access, forQuestion: true);
+
+        scope.DocumentIds.ShouldBe([501, 601, 701, 801]);
+        scope.Unavailable.ShouldBeNull();
+        scope.Coverage.ShouldBe("Дел: 2 · Чат видит: документов 1 из 2 · расшифровок 1 из 2 · сводок и справок 1 · сведений дел 1");
+        scope.CoverageHint.ShouldNotBeNullOrWhiteSpace();
+        await kit.Corpus.Received(1).SyncAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>());
+
+        scope.Describe(Chunk(501, "Изъяты телефон")).ShouldBe(new ChatSourceRef(
+            "документ", "№ 12-3/2026 от 01.10.2026 · Справка · дело № 12-2026/045", "/docflow/documents/77", "case:3"));
+        scope.Describe(Chunk(601, "[00:01:05] Встречаемся у рынка")).ShouldBe(new ChatSourceRef(
+            "расшифровка", "Расшифровка «звонок.mp3» · носитель № 9 · дело № 12-2026/046 · [00:01:05]", "/media/assets/9?t=65000", "case:4"));
+        scope.Describe(Chunk(601, "без меток времени")).ShouldNotBeNull().Href.ShouldBe("/media/assets/9");
+        scope.Describe(Chunk(701, "Событие")).ShouldBe(new ChatSourceRef("сводка/справка", "Сводка ОН от 12.10.2026 · дело № 12-2026/045", "/reports/55", "case:3"));
+        scope.Describe(Chunk(801, "Сведения")).ShouldBe(new ChatSourceRef("сведения дела", "Сведения дела № 12-2026/045", "/cases/3", "case:3"));
+        scope.Describe(Chunk(999, "чужой")).ShouldBeNull();
+
+        // Строка готовности — без подготовки материалов (без синхронизации с корпусом).
+        await kit.Profile.ResolveScopeAsync(all, Access, forQuestion: false);
+        await kit.Corpus.Received(1).ListAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "Спрашивать нельзя: нет дел, нечего читать, дело стало недоступно — причина профиля; узел ИИ при синхронизации — исключение для пакета")]
+    public async Task Scope_unavailable_reasons()
+    {
+        var kit = new Kit();
+        var one = (await kit.Profile.ResolveAreaAsync("case:3", Access)).ShouldNotBeNull();
 
         kit.Corpus.SyncAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>()).Throws(new ModelUnavailableException(ModelRole.Embeddings, null));
-        (await kit.SendAsync(new SendCaseChatMessageCommand(CaseId, null, "Вопрос"))).ShouldHaveSingleItem().Error.ShouldBe(CaseChatMessages.ModelUnavailable);
+        await Should.ThrowAsync<ModelUnavailableException>(() => kit.Profile.ResolveScopeAsync(one, Access, forQuestion: true));
 
         kit.Corpus.SyncAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>()).Returns([]);
         kit.Documents.ResolveCorpusAsync(Arg.Any<IReadOnlyCollection<int>>(), Access, Arg.Any<CancellationToken>()).Returns([]);
         kit.Transcripts.ResolveAsync(Arg.Any<IReadOnlyCollection<int>>(), Access, Arg.Any<CancellationToken>()).Returns(new TranscriptCorpusScope([], 0));
-        (await kit.SendAsync(new SendCaseChatMessageCommand(CaseId, null, "Вопрос"))).ShouldHaveSingleItem().Error.ShouldBe(CaseChatMessages.NoMaterials);
-        await kit.Chats.DidNotReceiveWithAnyArgs().CreateAsync(default, default!, default!, default);
+        var empty = await kit.Profile.ResolveScopeAsync(one, Access, forQuestion: true);
+        empty.Unavailable.ShouldBe(CaseChatTexts.NoMaterials);
+        empty.DocumentIds.ShouldBeEmpty();
 
-        kit.Chats.ListScopesAsync(Access, Arg.Any<CancellationToken>()).Returns([]);
-        (await kit.SendAsync(new SendCaseChatMessageCommand(null, null, "Вопрос"))).ShouldHaveSingleItem().Error.ShouldBe(CaseChatMessages.NoCases);
+        kit.Scopes.ListScopesAsync(Access, Arg.Any<CancellationToken>()).Returns([]);
+        var all = (await kit.Profile.ResolveAreaAsync(null, Access)).ShouldNotBeNull();
+        all.Title.ShouldBe("Все мои дела (0)");
+        (await kit.Profile.ResolveScopeAsync(all, Access, forQuestion: true)).Unavailable.ShouldBe(CaseChatTexts.NoCases);
 
-        kit.Roles.GetRoleAsync(UserId, Arg.Any<CancellationToken>()).Returns(InvestigationRole.Verifier);
-        (await kit.SendAsync(new SendCaseChatMessageCommand(CaseId, null, "Вопрос"))).ShouldHaveSingleItem().Error.ShouldBe(CaseChatMessages.NoRight);
-
-        kit.Generator.DidNotReceiveWithAnyArgs().GenerateStreamingAsync(default!, default!, default);
-        await kit.Audit.DidNotReceiveWithAnyArgs().WriteAsync(default!, default);
+        kit.Scopes.GetScopeAsync(CaseId, Access, Arg.Any<CancellationToken>()).Returns((CaseChatScope?)null);
+        (await kit.Profile.ResolveScopeAsync(one, Access, forQuestion: true)).Unavailable.ShouldBe(CaseChatTexts.CaseGone);
     }
 
-    [Fact(DisplayName = "Узел ИИ недоступен при ответе: понятная ошибка с номером диалога, вопрос уже сохранён, ответа нет")]
-    public async Task Model_unavailable_is_reported()
+    [Fact(DisplayName = "Промпт области — файл-шаблон с описанием области; подсказки — свои для одного дела и для всех дел, плюс поиск по смыслу")]
+    public async Task Prompt_and_suggestions()
     {
         var kit = new Kit();
-        kit.Generator.GenerateStreamingAsync(Arg.Any<GroundedRequest>(), Access, Arg.Any<CancellationToken>())
-            .Returns(Failing(new ModelUnavailableException(ModelRole.Draft, null)));
+        var one = (await kit.Profile.ResolveAreaAsync("case:3", Access)).ShouldNotBeNull();
+        var all = (await kit.Profile.ResolveAreaAsync(null, Access)).ShouldNotBeNull();
 
-        var updates = await kit.SendAsync(new SendCaseChatMessageCommand(CaseId, null, "Вопрос"));
-
-        updates[^1].Error.ShouldNotBeNull().ShouldStartWith(CaseChatMessages.ModelUnavailable);
-        updates[^1].ChatId.ShouldBe(15);
-        await kit.Chats.Received(1).AppendAsync(15, Arg.Is<CaseChatMessageDraft>(m => m.Role == ConversationMessageRole.User), Access, Arg.Any<CancellationToken>());
-        await kit.Chats.DidNotReceive().AppendAsync(15, Arg.Is<CaseChatMessageDraft>(m => m.Role == ConversationMessageRole.Assistant), Access, Arg.Any<CancellationToken>());
+        kit.Profile.TaskPrompt(one).ShouldNotBeNull().ShouldContain("материалами дела № 12-2026/045 «Наблюдение за Ивановым»");
+        kit.Profile.TaskPrompt(all).ShouldNotBeNull().ShouldContain("всех доступных вам дел (2)");
+        kit.Profile.Suggestions(one).Grounded.ShouldBe(CaseChatSuggestions.OneCase);
+        kit.Profile.Suggestions(all).Grounded.ShouldBe(CaseChatSuggestions.AllCases);
+        kit.Profile.Suggestions(all).Sense.ShouldBe(CaseChatSuggestions.Sense);
+        kit.Profile.Suggestions(all).Free.ShouldBeEmpty();
+        foreach (var list in new[] { CaseChatSuggestions.AllCases, CaseChatSuggestions.OneCase, CaseChatSuggestions.Sense })
+        {
+            list.Count.ShouldBeGreaterThanOrEqualTo(3);
+            list.ShouldAllBe(s => !string.IsNullOrWhiteSpace(s) && s.Length <= ChatLimits.MaxQuestionLength);
+            list.ShouldBeUnique();
+        }
     }
 
-    // ---------------- поиск по смыслу ----------------
-
-    [Fact(DisplayName = "Поиск по смыслу: в материалах области, близость = 1 − расстояние, источник с моментом записи; журнал — с текстом запроса")]
-    public async Task Sense_search_scopes_to_materials()
+    [Theory(DisplayName = "Ключ области дела: «case:N» туда и обратно; иное — не дело")]
+    [InlineData("case:3", true, 3)]
+    [InlineData("case:12345", true, 12345)]
+    [InlineData("case:", false, 0)]
+    [InlineData("case: 3", false, 0)]
+    [InlineData("case:3x", false, 0)]
+    [InlineData(null, false, 0)]
+    public void Area_key_round_trip(string? key, bool parsed, int caseId)
     {
-        var kit = new Kit();
-        RetrievalFilter? filter = null;
-        kit.Retriever.RetrieveAsync("встреча на рынке", Access, CaseChatMessages.SenseSearchTopK, Arg.Do<RetrievalFilter?>(f => filter = f), Arg.Any<CancellationToken>())
-            .Returns([new RetrievedChunk(901, 601, "[00:01:05] Встречаемся у рынка", 1, 5, true, 0.25)]);
-
-        var response = await kit.SearchAsync(new SearchCaseDocumentsQuery(null, "  встреча на рынке "));
-
-        filter.ShouldNotBeNull().DocumentIds.ShouldBe([501, 601, 701, 801]);
-        var hit = response.Data.ShouldNotBeNull().Hits.ShouldHaveSingleItem();
-        hit.Similarity.ShouldBe(0.75);
-        hit.Source.Href.ShouldBe("/media/assets/9?t=65000");
-        hit.Source.Label.ShouldBe("Расшифровка «звонок.mp3» · носитель № 9 · дело № 12-2026/046");
-        new SearchCaseDocumentsQuery(CaseId, " изъятие ").AuditSummary.ShouldBe("investigation:case:3:materials:sense-search;text=изъятие");
-        new SearchCaseDocumentsQuery(null, "x").AuditSummary.ShouldBe("investigation:materials:sense-search;text=x");
-        new SearchCaseDocumentsQuery(null, "x").AuditAction.ShouldBe(AuditAction.Search);
+        CaseChatAreas.TryParse(key, out var id).ShouldBe(parsed);
+        id.ShouldBe(caseId);
+        if (parsed)
+        {
+            CaseChatAreas.KeyOf(id).ShouldBe(key);
+        }
     }
 
     // ---------------- обвязка ----------------
 
-    private static GroundedResponse Final(string answer) => new(
-        answer,
-        new GroundingValidator(new CaseCitationExtractor(), new CaseCitationNormalizer()).Validate(answer, Fragments),
-        Fragments,
-        1);
-
-    private static readonly List<RetrievedChunk> Fragments =
-    [
-        new(900, 501, "Изъяты телефон и записная книжка по ст. 158.", 1, 5, true, 0.2),
-        new(901, 601, "[00:01:05] Встречаемся у рынка", 1, 5, true, 0.3),
-    ];
-
-    private static async IAsyncEnumerable<GroundedStreamUpdate> Stream(params GroundedStreamUpdate[] updates)
-    {
-        foreach (var update in updates)
-        {
-            await Task.Yield();
-            yield return update;
-        }
-    }
-
-#pragma warning disable CS1998 // асинхронный итератор, который сразу бросает: так ведёт себя генератор при недоступной модели
-    private static async IAsyncEnumerable<GroundedStreamUpdate> Failing(Exception exception, [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        throw exception;
-#pragma warning disable CS0162
-        yield break;
-#pragma warning restore CS0162
-    }
-#pragma warning restore CS1998
+    private static RetrievedChunk Chunk(int documentId, string text) => new(900 + documentId, documentId, text, 1, 5, true, 0.2);
 
     private sealed class Kit
     {
@@ -417,11 +343,9 @@ public sealed class CaseChatTests
         {
             Subject.GetCurrentUserIdAsync(Arg.Any<CancellationToken>()).Returns((int?)UserId);
             Roles.GetRoleAsync(UserId, Arg.Any<CancellationToken>()).Returns(InvestigationRole.Investigator);
-            AccessProvider.GetCurrentAsync(Arg.Any<CancellationToken>()).Returns(Access);
-            Chats.GetScopeAsync(CaseId, Access, Arg.Any<CancellationToken>()).Returns(Case3);
-            Chats.ListScopesAsync(Access, Arg.Any<CancellationToken>()).Returns([Case3, Case4]);
-            Chats.CreateAsync(Arg.Any<int?>(), Arg.Any<string>(), Access, Arg.Any<CancellationToken>()).Returns((int?)15);
-            Chats.AppendAsync(Arg.Any<int>(), Arg.Any<CaseChatMessageDraft>(), Access, Arg.Any<CancellationToken>()).Returns(true);
+            Scopes.GetScopeAsync(CaseId, Access, Arg.Any<CancellationToken>()).Returns(Case3);
+            Scopes.GetScopeAsync(OtherCaseId, Access, Arg.Any<CancellationToken>()).Returns(Case4);
+            Scopes.ListScopesAsync(Access, Arg.Any<CancellationToken>()).Returns([Case3, Case4]);
 
             CaseDocuments.ListLinksAsync(Arg.Any<IReadOnlyCollection<int>>(), Access, Arg.Any<CancellationToken>())
                 .Returns([new CaseDocumentRef(CaseId, 77), new CaseDocumentRef(CaseId, 78), new CaseDocumentRef(OtherCaseId, 77)]);
@@ -451,9 +375,10 @@ public sealed class CaseChatTests
             Corpus.SyncAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>()).Returns(profile);
             Corpus.ListAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>()).Returns(profile);
             Resolver = new ChatMaterialResolver(CaseDocuments, Documents, Cases, Transcripts, Corpus);
+            Profile = new InvestigationChatProfile(Scopes, Resolver, Roles, Subject);
         }
 
-        public ICaseChatStore Chats { get; } = Substitute.For<ICaseChatStore>();
+        public ICaseChatScopes Scopes { get; } = Substitute.For<ICaseChatScopes>();
 
         public ICaseDocumentStore CaseDocuments { get; } = Substitute.For<ICaseDocumentStore>();
 
@@ -467,32 +392,10 @@ public sealed class CaseChatTests
 
         public ChatMaterialResolver Resolver { get; }
 
-        public IGroundedGenerator Generator { get; } = Substitute.For<IGroundedGenerator>();
-
-        public IRetriever Retriever { get; } = Substitute.For<IRetriever>();
-
-        public IAuditWriter Audit { get; } = Substitute.For<IAuditWriter>();
+        public InvestigationChatProfile Profile { get; }
 
         public IUserRoleStore Roles { get; } = Substitute.For<IUserRoleStore>();
 
         public ISubjectProvider Subject { get; } = Substitute.For<ISubjectProvider>();
-
-        public IAccessContextProvider AccessProvider { get; } = Substitute.For<IAccessContextProvider>();
-
-        public async Task<List<CaseChatUpdate>> SendAsync(SendCaseChatMessageCommand command)
-        {
-            var handler = new SendCaseChatMessageCommand.Handler(Chats, Resolver, Generator, Audit, Roles, Subject, AccessProvider);
-            var updates = new List<CaseChatUpdate>();
-            await foreach (var update in handler.Handle(command, CancellationToken.None))
-            {
-                updates.Add(update);
-            }
-
-            return updates;
-        }
-
-        public async Task<ISC.AI.Abstractions.Application.ResponseDto<CaseSenseSearchResult>> SearchAsync(SearchCaseDocumentsQuery query) =>
-            await new SearchCaseDocumentsQuery.Handler(Chats, Resolver, Retriever, Roles, Subject, AccessProvider)
-                .Handle(query, CancellationToken.None);
     }
 }

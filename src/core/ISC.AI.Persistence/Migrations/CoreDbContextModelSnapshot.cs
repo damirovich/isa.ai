@@ -324,6 +324,11 @@ namespace ISC.AI.Persistence.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("Area")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("area");
+
                     b.Property<short>("Classification")
                         .HasColumnType("smallint")
                         .HasColumnName("classification");
@@ -335,6 +340,13 @@ namespace ISC.AI.Persistence.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean")
                         .HasColumnName("is_deleted");
+
+                    b.PrimitiveCollection<List<string>>("ScopeKeys")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasColumnName("scope_keys")
+                        .HasDefaultValueSql("'{}'::text[]");
 
                     b.Property<int>("SubjectId")
                         .HasColumnType("integer")
@@ -356,6 +368,9 @@ namespace ISC.AI.Persistence.Migrations
                     b.HasIndex("SubjectId")
                         .HasDatabaseName("ix_conversation_subject_id");
 
+                    b.HasIndex("SubjectId", "Area")
+                        .HasDatabaseName("ix_conversation_subject_id_area");
+
                     b.ToTable("conversation", "core");
                 });
 
@@ -367,6 +382,10 @@ namespace ISC.AI.Persistence.Migrations
                         .HasColumnName("id");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("CheckJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("check_json");
 
                     b.Property<short>("Classification")
                         .HasColumnType("smallint")
@@ -392,6 +411,10 @@ namespace ISC.AI.Persistence.Migrations
                     b.Property<int>("Role")
                         .HasColumnType("integer")
                         .HasColumnName("role");
+
+                    b.Property<string>("SourcesJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("sources_json");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")

@@ -14,6 +14,10 @@ namespace ISC.AI.Abstractions.Retrieval;
 /// <param name="IsCurrent">Флаг годности: источник актуален (не утратил силу).</param>
 /// <param name="Score">Оценка релевантности (меньше — ближе; косинусное расстояние).</param>
 /// <param name="Metadata">Доменный «багаж» профиля (для НПА — идентификатор нормы и статус редакции).</param>
+/// <param name="DocumentTitle">
+/// Заголовок документа-владельца (<c>core.document.title</c>) — нейтральная подпись источника для любого профиля
+/// (ADR-0052); <see langword="null"/>, если источник фрагмента его не дал.
+/// </param>
 public sealed record RetrievedChunk(
     int ChunkId,
     int DocumentId,
@@ -22,4 +26,5 @@ public sealed record RetrievedChunk(
     int DivisionId,
     bool IsCurrent,
     double Score,
-    IReadOnlyDictionary<string, string>? Metadata = null);
+    IReadOnlyDictionary<string, string>? Metadata = null,
+    string? DocumentTitle = null);

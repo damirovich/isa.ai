@@ -25,6 +25,12 @@ public class ConversationMessageEntity : AuditableEntity
     /// <summary>Итог грунтовки ответа (jsonb: список ссылок и их статусы). <see langword="null"/> для реплики пользователя.</summary>
     public string? GroundingJson { get; set; }
 
+    /// <summary>Источники ответа (jsonb; формат знает пакет чата, ADR-0052). <see langword="null"/> у вопроса.</summary>
+    public string? SourcesJson { get; set; }
+
+    /// <summary>Итог проверки ссылок ответа (jsonb; формат знает пакет чата, ADR-0052). <see langword="null"/> у вопроса.</summary>
+    public string? CheckJson { get; set; }
+
     /// <summary>Навигация к диалогу-владельцу.</summary>
     public ConversationEntity? Conversation { get; set; }
 }

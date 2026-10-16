@@ -1,0 +1,106 @@
+@namespace ISC.AI.Modules.Chat.UI
+@page "/chat"
+@rendermode InteractiveServer
+@using ISC.AI.Abstractions.Modules
+@using ISC.AI.Abstractions.Profiles
+@using ISC.AI.Modules.Chat.Application
+@using ISC.AI.Modules.Chat.Application.Features
+@using ISC.AI.Modules.Chat.Domain.Services
+@inject NavigationManager Navigation
+@inject ChatSettings Settings
+@inject IProfile Profile
+
+@* Страница чата пакета (ADR-0052). Заголовок и значок — из записи реестра профиля (ChatModule.Page): одно место на
+   меню и шапку. Если областей у профиля больше одной («все мои дела» и каждое дело), сверху — выбор «Где искать»,
+   выбор хранится в адресе (?area=…), «Назад» возвращает ту же область. Сам чат — ChatPanel. Области и их доступность
+   решает сервер (порт профиля); список здесь — только для выбора. *@
+
+<PageHeader Title="@Title" Subtitle="@Settings.Subtitle" Icon="@Icon" />
+
+@if (_error is not null)
+{
+    <MudAlert Severity="@(_noRight ? Severity.Info : Severity.Warning)" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_error</MudAlert>
+}
+else if (_areas is null)
+{
+    <MudProgressLinear Indeterminate="true" Class="my-2" />
+}
+else
+{
+    @if (_areas.Count > 1)
+    {
+        <MudPaper Outlined="true" Class="pa-3 mb-3">
+            <div class="d-flex align-center gap-3 flex-wrap">
+                <MudSelect T="string" Value="_selected" ValueChanged="SelectAsync" Label="@Settings.AreaLabel" Variant="Variant.Outlined" Dense="true"
+                           Style="min-width:320px; max-width:640px;" AnchorOrigin="Origin.BottomLeft">
+                    @foreach (var area in _areas)
+                    {
+                        <MudSelectItem T="string" Value="@(area.Key ?? string.Empty)">@area.Title</MudSelectItem>
+                    }
+                </MudSelect>
+                @if (SelectedArea?.Link is { } link)
+                {
+                    <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.OpenInNew" Href="@link.Href">@link.Text</MudButton>
+                }
+            </div>
+        </MudPaper>
+    }
+
+    @* Высота — до низа окна: шапка страницы и выбор области — сверху. *@
+    <ChatPanel @key="_selected" AreaKey="@(_selected.Length == 0 ? null : _selected)"
+               Height="@(_areas.Count > 1 ? "calc(100vh - 330px)" : "calc(100vh - 230px)")" />
+}
+
+@code {
+    /// <summary>Выбранная область из адреса (?area=…); нет — область профиля по умолчанию.</summary>
+    [SupplyParameterFromQuery(Name = "area")] public string? Area { get; set; }
+
+    private IReadOnlyList<ChatArea>? _areas;
+    private string _selected = string.Empty;
+    private string? _error;
+    private bool _noRight;
+
+    // Запись реестра профиля, которой смонтирована эта страница: её название и значок — заголовок страницы.
+    private IModule? Entry => Profile.Modules.FirstOrDefault(m => m.ComponentType == typeof(ChatPage));
+
+    private string Title => Entry?.MenuTitle ?? "Чат";
+
+    private string Icon => Entry?.MenuIcon ?? Icons.Material.Filled.Forum;
+
+    private ChatArea? SelectedArea => _areas?.FirstOrDefault(a => (a.Key ?? string.Empty) == _selected);
+
+    protected override async Task OnInitializedAsync()
+    {
+        // ТБ-030: на предрендере ничего не читается.
+        if (!RendererInfo.IsInteractive)
+        {
+            return;
+        }
+
+        var response = await Dispatcher.Send(new ListChatAreasQuery());
+        if (response is { Status: true, Data: { } areas })
+        {
+            _areas = areas;
+        }
+        else
+        {
+            _noRight = response?.StatusMessage == ChatMessages.NoRight;
+            _error = response?.StatusMessage ?? ChatMessages.NotFound;
+        }
+    }
+
+    protected override void OnParametersSet()
+    {
+        // Область из адреса — только если она среди доступных; иначе — по умолчанию (чужой ключ ничего не открывает).
+        var requested = Area?.Trim() ?? string.Empty;
+        _selected = _areas is not null && _areas.Any(a => (a.Key ?? string.Empty) == requested) ? requested : string.Empty;
+    }
+
+    private Task SelectAsync(string key)
+    {
+        _selected = key ?? string.Empty;
+        Navigation.NavigateTo(
+            _selected.Length == 0 ? "/chat" : "/chat?area=" + Uri.EscapeDataString(_selected), replace: true);
+        return Task.CompletedTask;
+    }
+}

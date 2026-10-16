@@ -128,7 +128,8 @@ public sealed class PgVectorRetriever(
                 s.Embedding.DivisionId,
                 s.Embedding.IsCurrent,
                 s.Distance,
-                s.Embedding.Chunk.Document!.Metadata))
+                s.Embedding.Chunk.Document!.Metadata,
+                s.Embedding.Chunk.Document.Title))
             .ToListAsync(cancellationToken);
 
         // Транзакция только скоупит SET LOCAL — изменений данных нет.

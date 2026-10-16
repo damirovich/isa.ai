@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <!-- Экраны пакета «Чат» (ADR-0052): страница /chat (монтируется хостом через реестр профиля) и компонент ChatPanel,
+       который профиль может вставить и в свою страницу (вкладка дела). Ссылки только на Abstractions, Domain и
+       Application пакета: профиля пакет не знает (проверяется архитектурным тестом). -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+    <ProjectReference Include="..\ISC.AI.Modules.Chat.Domain\ISC.AI.Modules.Chat.Domain.csproj" />
+    <ProjectReference Include="..\ISC.AI.Modules.Chat.Application\ISC.AI.Modules.Chat.Application.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
+    <PackageReference Include="MudBlazor" />
+  </ItemGroup>
+
+</Project>

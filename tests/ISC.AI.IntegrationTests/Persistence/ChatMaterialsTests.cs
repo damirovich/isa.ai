@@ -231,8 +231,8 @@ public sealed class ChatMaterialsTests : IAsyncLifetime
         var transcripts = new TranscriptCorpus(_media, new AllowAllAccessPolicy(), _ingestion, _purger, new TranscriptCorpusOptions());
         var transcriptDocument = (await transcripts.IndexAsync(asset.AssetId)).CoreDocumentId.ShouldNotBeNull();
 
-        var chats = new CaseChatStore(_investigation, new InvestigationAccessPolicy(_investigation), new UserRoleStore(_core, _investigation), TimeProvider.System);
-        var area = (await ChatArea.ResolveAsync(chats, caseId, admin, CancellationToken.None)).ShouldNotBeNull();
+        var scopes = new CaseChatScopes(_investigation, new InvestigationAccessPolicy(_investigation), new UserRoleStore(_core, _investigation));
+        var area = (await CaseChatArea.ResolveAsync(scopes, caseId, admin, CancellationToken.None)).ShouldNotBeNull();
         var resolver = new ChatMaterialResolver(
             new CaseDocumentStore(_investigation, new InvestigationAccessPolicy(_investigation), new UserRoleStore(_core, _investigation)),
             new DocumentLookup(_docflow, new InvestigationAccessPolicy(_investigation)),
@@ -253,6 +253,24 @@ public sealed class ChatMaterialsTests : IAsyncLifetime
         materials.Items[0].CoreDocumentId.ShouldBe(transcriptDocument);
         materials.Items[0].Label.ShouldBe($"Расшифровка «запись.ogg» · носитель № {asset.AssetId} · дело № ОБЛ-1");
         materials.Coverage.CaseCards.ShouldBe(1);
+
+        // Порт профиля для пакета «Чат» (ADR-0052) на тех же настоящих хранилищах: область дела, её материалы и подпись
+        // найденного фрагмента расшифровки — с моментом записи и ссылкой на него; ключ уничтожения — дело.
+        var profile = new InvestigationChatProfile(scopes, resolver, new UserRoleStore(_core, _investigation), new FixedSubjectProvider(20));
+        var key = CaseChatAreas.KeyOf(caseId);
+        var chatArea = (await profile.ResolveAreaAsync(key, admin)).ShouldNotBeNull();
+        chatArea.ScopeKeys.ShouldBe([key]);
+        (await profile.ResolveAreaAsync(CaseChatAreas.KeyOf(caseId + 1000), admin)).ShouldBeNull();
+        (await profile.CanUseAsync()).ShouldBeTrue();
+
+        var chatScope = await profile.ResolveScopeAsync(chatArea, admin, forQuestion: false);
+        chatScope.Unavailable.ShouldBeNull();
+        chatScope.DocumentIds.ShouldNotBeNull().ShouldContain(transcriptDocument);
+        var source = chatScope.Describe(new ISC.AI.Abstractions.Retrieval.RetrievedChunk(1, transcriptDocument, "[00:00:03] Деньги передам завтра", 1, 6, true, 0.1))
+            .ShouldNotBeNull();
+        source.Href.ShouldBe($"/media/assets/{asset.AssetId}?t=3000");
+        source.Label.ShouldEndWith("· [00:00:03]");
+        source.ScopeKey.ShouldBe(key);
     }
 
     // ---------- обвязка ----------

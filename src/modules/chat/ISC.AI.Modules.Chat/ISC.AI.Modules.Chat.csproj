@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Манифест пакета модулей «Чат» (ADR-0052): собирает Domain, Application и UI и отдаёт профилю страницу чата для
+       его меню и регистрацию сервисов. -->
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ISC.AI.Modules.Chat.Domain\ISC.AI.Modules.Chat.Domain.csproj" />
+    <ProjectReference Include="..\ISC.AI.Modules.Chat.Application\ISC.AI.Modules.Chat.Application.csproj" />
+    <ProjectReference Include="..\ISC.AI.Modules.Chat.UI\ISC.AI.Modules.Chat.UI.csproj" />
+  </ItemGroup>
+
+</Project>

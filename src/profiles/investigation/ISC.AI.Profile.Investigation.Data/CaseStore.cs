@@ -498,9 +498,7 @@ public sealed class CaseStore(
             ReferencePhotos: await db.ReferencePhotos.CountAsync(r => personIds.Contains(r.PersonId), cancellationToken),
             Appearances: await db.Appearances.CountAsync(a => a.CaseId == caseId, cancellationToken),
             Authorizations: await db.SearchAuthorizations.CountAsync(a => a.CaseId == caseId, cancellationToken),
-            DocumentLinks: await db.CaseDocumentLinks.CountAsync(l => l.CaseId == caseId, cancellationToken),
-            Chats: await db.CaseChats.CountAsync(c => c.CaseId == caseId, cancellationToken)
-                + await CountGlobalChatsAsync(db, caseId, cancellationToken));
+            DocumentLinks: await db.CaseDocumentLinks.CountAsync(l => l.CaseId == caseId, cancellationToken));
     }
 
     /// <inheritdoc />
@@ -522,32 +520,15 @@ public sealed class CaseStore(
         // внешний ключ у них на фигуранта, и каскад от дела их тоже снял бы, но только через фигурантов;
         // явное удаление не оставляет шанса «появлению» с фигурантом из другого дела. Остальное —
         // фигуранты (→ эталоны, появления), привязки носителей и документов, основания поиска, акт
-        // закрытия, диалоги чата по делу (ADR-0051) — уходит каскадом внешних ключей от дела.
+        // закрытия, записи материалов в корпусе (case_corpus_entry) — уходит каскадом внешних ключей от дела.
+        // Переписку чата (таблицы ядра, ADR-0052) и тексты в корпусе уничтожает сценарий ДО этого шага.
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await db.Appearances.Where(a => a.CaseId == caseId).ExecuteDeleteAsync(cancellationToken);
-
-        // Диалоги чата по ВСЕМ делам (ADR-0051), где хоть один ответ опирался на материалы этого дела, — материал дела:
-        // уходят вместе с ним. Источники ответа хранят дело (jsonb, ключ caseId); диалоги самого дела — каскадом ниже.
-        await db.Database.ExecuteSqlInterpolatedAsync(
-            $@"DELETE FROM investigation.case_chat c
-               WHERE c.case_id IS NULL AND EXISTS (
-                   SELECT 1 FROM investigation.case_chat_message m
-                   WHERE m.chat_id = c.id AND m.sources_json @> jsonb_build_array(jsonb_build_object('caseId', {caseId})))",
-            cancellationToken);
         await db.Cases.Where(c => c.Id == caseId).ExecuteDeleteAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         return CaseWriteResult.Ok;
     }
-
-    // Диалоги по всем делам, опиравшиеся на материалы дела (см. PurgeAsync).
-    private static async Task<int> CountGlobalChatsAsync(InvestigationDbContext db, int caseId, CancellationToken cancellationToken) =>
-        await db.Database.SqlQuery<int>(
-            $@"SELECT count(*)::int AS ""Value"" FROM investigation.case_chat c
-               WHERE c.case_id IS NULL AND EXISTS (
-                   SELECT 1 FROM investigation.case_chat_message m
-                   WHERE m.chat_id = c.id AND m.sources_json @> jsonb_build_array(jsonb_build_object('caseId', {caseId})))")
-            .SingleAsync(cancellationToken);
 
     /// <summary>
     /// Согласованы ли реквизиты задания с видом дела (ТФ-ДЕЛ-05) и справочниками (ТФ-АДМ-07): у задания —

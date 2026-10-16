@@ -20,6 +20,8 @@
     <!-- Администрирование платформы (ADR-0023): учётные записи, допуски, журнал аудита и смена
          своего пароля приходят ПАКЕТОМ — одни и те же экраны у обоих профилей, а не две копии. -->
     <ProjectReference Include="..\..\..\modules\admin\ISC.AI.Modules.Admin\ISC.AI.Modules.Admin.csproj" />
+    <!-- Чат (ADR-0052): страница чата для меню и регистрация сервисов пакета; порт IChatProfile — в Application. -->
+    <ProjectReference Include="..\..\..\modules\chat\ISC.AI.Modules.Chat\ISC.AI.Modules.Chat.csproj" />
   </ItemGroup>
 
   <!-- MapEndpoints делегирует пакетам (файлы docflow и медиа) — сигнатура несёт IEndpointRouteBuilder.

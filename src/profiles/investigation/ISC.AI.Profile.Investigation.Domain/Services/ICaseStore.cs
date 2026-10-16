@@ -252,7 +252,11 @@ public interface ICaseStore
     /// носителей и документов, основания поиска, акт закрытия (ADR-0025), диалоги чата по делу (ADR-0051). Доступ — как у
     /// <see cref="SetStatusAsync"/>: дело вне допуска неотличимо от несуществующего.
     /// </summary>
-    /// <remarks>Носители и история поисков — в схеме «Медиа» и удаляются ДО этого вызова пакетом «Медиа».</remarks>
+    /// <remarks>
+    /// Носители и история поисков — в схеме «Медиа» и удаляются ДО этого вызова пакетом «Медиа»; тексты материалов в
+    /// корпусе ядра (<see cref="ICaseCorpusSync.PurgeCaseAsync"/>) и переписка чата (таблицы ядра, ADR-0052) — тоже до
+    /// него, сценарием уничтожения.
+    /// </remarks>
     Task<CaseWriteResult> PurgeAsync(int caseId, AccessContext access, CancellationToken cancellationToken = default);
 }
 
@@ -268,7 +272,13 @@ public interface ICaseStore
 /// <param name="Appearances">Подтверждённые появления фигурантов.</param>
 /// <param name="Authorizations">Основания поиска.</param>
 /// <param name="DocumentLinks">Привязанные документы документооборота — САМИ ДОКУМЕНТЫ СОХРАНЯЮТСЯ.</param>
-/// <param name="Chats">Диалоги чата по документам дела (ADR-0051) — уничтожаются с делом.</param>
+/// <param name="Chats">
+/// Диалоги чата (пакет «Чат», ADR-0052) по делу и по всем делам, опиравшиеся на его материалы, — уничтожаются с делом.
+/// Хранятся в таблицах ядра: число заполняет сценарий уничтожения, а не хранилище дел.
+/// </param>
+/// <param name="CorpusTexts">
+/// Тексты «Сведений дела» и сводок/справок в корпусе ядра (ADR-0051) — уничтожаются с делом. Заполняет сценарий.
+/// </param>
 public sealed record CaseComposition(
     int CaseId,
     string Number,
@@ -281,7 +291,8 @@ public sealed record CaseComposition(
     int Appearances,
     int Authorizations,
     int DocumentLinks,
-    int Chats = 0);
+    int Chats = 0,
+    int CorpusTexts = 0);
 
 /// <summary>Данные исполненного регламента для записи акта (ТФ-ДЕЛ-04).</summary>
 /// <param name="CaseId">Дело.</param>
