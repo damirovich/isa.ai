@@ -26,12 +26,13 @@
     <PackageReference Include="FluentValidation" />
     <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
-    <!-- Промпты чата по документам дела (ADR-0051) — файлы-шаблоны Scriban, не хардкод в C#. -->
+    <!-- Промпты чата по материалам (ADR-0051) и справок (ADR-0053) — файлы-шаблоны Scriban, не хардкод в C#. -->
     <PackageReference Include="Scriban" />
   </ItemGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="Features\CaseChat\Prompts\*.scriban" />
+    <EmbeddedResource Include="Features\Briefs\Prompts\*.scriban" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,417 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@page "/cases/{CaseId:int}/brief"
+@page "/persons/{PersonId:int}/brief"
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@using System.Globalization
+@using ISC.AI.Profile.Investigation.Application.Features.Briefs
+@using ISC.AI.Profile.Investigation.Domain.Services
+
+@* Справка по делу или по фигуранту (ТФ-ОТЧ-01/02, ADR-0053). Факты собирает сервер при открытии — из тех же хранилищ и
+   под той же решёткой, что карточки (ТБ-020/021); здесь не видно ничего, чего не видно на карточках. «Краткое
+   изложение» пишет локальная модель только по кнопке, потоком, с остановкой; это черновик: сотрудник проверяет и правит
+   текст (ТБ-042), под ним — что проверка ссылок и чисел не нашла в фактах. «Скачать .docx» — сервер заново собирает
+   факты и гриф (со страницы уходит только текст изложения), запись в журнал — до выдачи файла. *@
+
+<PageHeader Title="@(_brief?.Title ?? (IsPerson ? "Справка по фигуранту" : "Справка по делу"))" Subtitle="@_brief?.Subtitle"
+            Icon="@Icons.Material.Filled.Summarize">
+    @if (_brief is { } loaded)
+    {
+        <ClassificationChip Value="@loaded.Classification" Prefix="гриф справки " />
+    }
+    <MudButton Href="@BackHref" Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.ArrowBack">@BackLabel</MudButton>
+</PageHeader>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="@(_brief is not null)" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@if (_loading && _brief is null)
+{
+    <MudProgressLinear Indeterminate="true" Class="my-3" />
+}
+else if (_brief is { } brief)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Text" Dense="true" Class="mb-3 brief-notice">
+        Факты — расчёт системы по материалам в пределах вашего допуска. «Краткое изложение» пишет локальная модель:
+        это черновик — проверьте и при необходимости поправьте его перед выгрузкой.
+    </MudAlert>
+
+    @if (!IsPerson)
+    {
+        <MudPaper Outlined="true" Class="pa-3 mb-3">
+            <div class="d-flex align-center gap-3 flex-wrap">
+                @* Ширина пикера — обёрткой div, не Style (MudBlazor копирует Style на календарь). *@
+                <div><MudDatePicker @bind-Date="_from" Label="Период с" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" Disabled="Busy" /></div>
+                <div><MudDatePicker @bind-Date="_to" Label="по" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" Disabled="Busy" /></div>
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ReloadAsync" Disabled="Busy"
+                           Class="brief-period">Показать за период</MudButton>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Период сужает поиски по лицу и сводки; остальное — по делу целиком.</MudText>
+            </div>
+            @if (PeriodPending)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-1 brief-period-pending">
+                    Период изменён — нажмите «Показать за период»: изложение и файл строятся по показанным фактам.
+                </MudText>
+            }
+        </MudPaper>
+    }
+
+    @* ================= Краткое изложение ================= *@
+    <MudPaper Outlined="true" Class="pa-3 mb-3">
+        <div class="d-flex align-center gap-2 flex-wrap mb-2">
+            <MudText Typo="Typo.h6">Краткое изложение</MudText>
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning">черновик локальной модели</MudChip>
+            <MudSpacer />
+            @if (_writing)
+            {
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Stop" OnClick="Stop" Class="brief-stop">Остановить</MudButton>
+            }
+            else
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="WriteAsync"
+                           Disabled="@(Busy || PeriodPending)" Class="brief-write">@(_summary.Length == 0 ? "Написать изложение" : "Написать заново")</MudButton>
+            }
+            <MudButton Variant="Variant.Filled" Color="Color.Default" StartIcon="@Icons.Material.Filled.Download" OnClick="ExportAsync"
+                       Disabled="@(Busy || PeriodPending)" Class="brief-export">Скачать .docx</MudButton>
+        </div>
+
+        @if (_writing)
+        {
+            <div class="d-flex align-center gap-2 mb-2">
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+                <MudText Typo="Typo.caption">@(_draft.Length == 0 ? "Модель читает факты справки…" : "Черновик — проверки ещё не выполнены")</MudText>
+            </div>
+            <MudText Typo="Typo.body2" Style="white-space:pre-wrap;" Class="brief-draft">@_draft</MudText>
+        }
+        else if (_summary.Length > 0 || _checked is not null)
+        {
+            <MudTextField T="string" @bind-Value="_summary" Variant="Variant.Outlined" Lines="10" Immediate="true"
+                          MaxLength="@BriefTexts.MaxSummaryLength" Class="brief-summary"
+                          HelperText="Текст можно поправить: в файл уйдёт он, без разметки модели." />
+            @if (_checked is { } check)
+            {
+                @if (check.Unverified.Count > 0)
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Text" Dense="true" Class="mt-2 brief-unverified">
+                        Ссылки, которых нет в источниках (номера, статьи): @string.Join(", ", check.Unverified). Уберите их или сверьте с таблицами.
+                    </MudAlert>
+                }
+                @if (check.NotInFacts.Count > 0)
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Text" Dense="true" Class="mt-2 brief-not-in-facts">
+                        Числа и даты, которых нет в фактах справки: @string.Join(", ", check.NotInFacts). Модель могла их досчитать или исказить — проверьте.
+                    </MudAlert>
+                }
+                @if (check.AllConfirmed)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1 d-block brief-checked">
+                        Проверка ссылок и чисел замечаний не нашла. Смысл текста всё равно сверяйте с таблицами.
+                    </MudText>
+                }
+            }
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                Изложения пока нет. Его можно не писать: справку можно скачать и с одними фактами.
+            </MudText>
+        }
+    </MudPaper>
+
+    @* ================= Факты ================= *@
+    @foreach (var section in brief.Sections)
+    {
+        <MudPaper Outlined="true" Class="pa-3 mb-3 brief-section">
+            <MudText Typo="Typo.h6" Class="mb-1">@section.Title</MudText>
+            @if (section.IsEmpty)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">Сведений нет.</MudText>
+            }
+            else
+            {
+                @foreach (var fact in section.Facts)
+                {
+                    <MudText Typo="Typo.body2"><b>@fact.Label:</b> @fact.Value</MudText>
+                }
+                @if (section.Table is { TotalRows: > 0 } table)
+                {
+                    <MudSimpleTable Dense="true" Hover="true" Bordered="true" Class="mt-2 brief-table">
+                        <thead>
+                            <tr>
+                                @foreach (var column in table.Columns)
+                                {
+                                    <th>@column</th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in table.Rows)
+                            {
+                                <tr>
+                                    @for (var i = 0; i < table.Columns.Count; i++)
+                                    {
+                                        <td data-label="@table.Columns[i]">@(i < row.Count ? row[i] : string.Empty)</td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                    @if (table.Omitted > 0)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">Не вошло в таблицу: @table.Omitted из @table.TotalRows.</MudText>
+                    }
+                }
+            }
+            @if (!string.IsNullOrWhiteSpace(section.Note))
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">@section.Note</MudText>
+            }
+        </MudPaper>
+    }
+}
+
+@code {
+    /// <summary>Дело (маршрут справки по делу).</summary>
+    [Parameter] public int? CaseId { get; set; }
+
+    /// <summary>Фигурант (маршрут справки по фигуранту).</summary>
+    [Parameter] public int? PersonId { get; set; }
+
+    private Brief? _brief;
+    private bool _loading;
+    private bool _writing;
+    private bool _exporting;
+    private string? _error;
+    private string _draft = string.Empty;
+    private string _summary = string.Empty;
+    private BriefSummary? _checked;
+    private short _summaryClassification;
+    private DateTime? _from;
+    private DateTime? _to;
+    private (BriefKind, int)? _loadedFor;
+
+    // Поток изложения, который идёт сейчас; null — не идёт. Чужой (устаревший) поток состояние страницы не меняет.
+    private CancellationTokenSource? _cts;
+
+    private bool IsPerson => PersonId is not null;
+
+    private BriefKind Kind => IsPerson ? BriefKind.Person : BriefKind.Case;
+
+    private int TargetId => PersonId ?? CaseId ?? 0;
+
+    private bool Busy => _loading || _writing || _exporting;
+
+    private string BackHref => IsPerson ? $"/persons/{TargetId}" : $"/cases/{TargetId}";
+
+    private string BackLabel => IsPerson ? "К фигуранту" : "К делу";
+
+    private DateOnly? From => !IsPerson && _from is { } from ? DateOnly.FromDateTime(from) : null;
+
+    private DateOnly? To => !IsPerson && _to is { } to ? DateOnly.FromDateTime(to) : null;
+
+    // Период ПОКАЗАННЫХ фактов: изложение и файл строятся по нему, а не по пикерам — иначе модель описала бы и сервер
+    // выгрузил бы не те факты, что на экране (и под их грифом, ТБ-033).
+    private DateOnly? LoadedFrom => IsPerson ? null : _brief?.From;
+
+    private DateOnly? LoadedTo => IsPerson ? null : _brief?.To;
+
+    // Пикеры изменены, но факты за новый период не показаны: изложение и выгрузка ждут «Показать за период».
+    private bool PeriodPending => !IsPerson && _brief is { } brief && (From != brief.From || To != brief.To);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // ТБ-030: на предрендере ничего не читается — одно открытие, одна запись в журнале.
+        if (!RendererInfo.IsInteractive || _loadedFor == (Kind, TargetId))
+        {
+            return;
+        }
+
+        // Другая справка на той же странице: прежнее состояние не переносится, поток изложения прежней справки
+        // останавливается — его текст и проверки не должны попасть в эту.
+        _loadedFor = (Kind, TargetId);
+        if (_cts is { } running)
+        {
+            _cts = null;
+            await running.CancelAsync();
+        }
+
+        _writing = false;
+        _brief = null;
+        _from = null;
+        _to = null;
+        ClearSummary();
+        _error = null;
+        await LoadAsync();
+    }
+
+    private void ClearSummary()
+    {
+        _draft = string.Empty;
+        _summary = string.Empty;
+        _checked = null;
+        _summaryClassification = 0;
+    }
+
+    private Task ReloadAsync()
+    {
+        if (From is { } from && To is { } to && from > to)
+        {
+            _error = BriefMessages.BadPeriod;
+            return Task.CompletedTask;
+        }
+
+        return LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new GetBriefQuery(Kind, TargetId, From, To));
+            if (response is { Status: true, Data: { } brief })
+            {
+                if (_brief is { } previous && (previous.From != brief.From || previous.To != brief.To))
+                {
+                    // Изложение написано по фактам прежнего периода (и под их грифом) — к новым фактам оно не относится.
+                    ClearSummary();
+                }
+
+                _brief = brief;
+                _from = brief.From?.ToDateTime(TimeOnly.MinValue);
+                _to = brief.To?.ToDateTime(TimeOnly.MinValue);
+            }
+            else
+            {
+                _error = response?.StatusMessage ?? BriefMessages.NotFound;
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task WriteAsync()
+    {
+        if (Busy || PeriodPending || _brief is null)
+        {
+            return;
+        }
+
+        var run = new CancellationTokenSource();
+        _cts = run;
+        _writing = true;
+        _error = null;
+        _draft = string.Empty;
+        try
+        {
+            await foreach (var update in Dispatcher.CreateStream(new WriteBriefSummaryCommand(Kind, TargetId, LoadedFrom, LoadedTo), run.Token))
+            {
+                if (!ReferenceEquals(_cts, run))
+                {
+                    // Страница уже показывает другую справку.
+                    break;
+                }
+
+                if (update.Error is { } error)
+                {
+                    _error = error;
+                    break;
+                }
+
+                if (update.TextDelta is { } delta)
+                {
+                    _draft += delta;
+                    StateHasChanged();
+                }
+
+                if (update.Final is { } final)
+                {
+                    // Текст, проверки и гриф меняются только вместе: прерванное или неудачное «Написать заново» оставляет
+                    // прежнее изложение с его замечаниями, а не прежний текст без них.
+                    _checked = final;
+                    _summary = BriefTexts.Plain(final.Text);
+                    _summaryClassification = final.Classification;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            if (ReferenceEquals(_cts, run))
+            {
+                _error = "Изложение остановлено.";
+            }
+        }
+        catch (Exception)
+        {
+            // Подробности сбоя — в журнале сервера; сотруднику — понятный текст без внутренностей системы.
+            if (ReferenceEquals(_cts, run))
+            {
+                _error = "Не удалось написать изложение — попробуйте ещё раз.";
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(_cts, run))
+            {
+                _cts = null;
+                _writing = false;
+                _draft = string.Empty;
+            }
+
+            run.Dispose();
+        }
+    }
+
+    private void Stop() => _cts?.Cancel();
+
+    private async Task ExportAsync()
+    {
+        if (Busy || PeriodPending)
+        {
+            return;
+        }
+
+        _exporting = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new ExportBriefCommand(Kind, TargetId, LoadedFrom, LoadedTo, _summary, _summaryClassification));
+            if (response is not { Status: true, Data: { } file })
+            {
+                _error = response?.StatusMessage ?? BriefMessages.NotFound;
+                return;
+            }
+
+            using var stream = new DotNetStreamReference(new MemoryStream(file.Content));
+            await JS.InvokeVoidAsync("downloadFileFromStream", file.FileName, stream);
+        }
+        catch (JSException)
+        {
+            _error = "Браузер не принял файл — попробуйте ещё раз.";
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit уже закрыт.
+        }
+        finally
+        {
+            _exporting = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        // Уход со страницы освобождает слот сервера инференса (отмена потока; источник отмены освобождает сам поток).
+        if (_cts is { } running)
+        {
+            _cts = null;
+            await running.CancelAsync();
+        }
+    }
+}

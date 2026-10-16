@@ -21,6 +21,10 @@ namespace ISC.AI.Profile.Investigation.Domain.Services;
 /// <param name="Decision">Решение по пересечению, если принято.</param>
 /// <param name="DecidedByUserId">Кто принял решение.</param>
 /// <param name="DecidedAt">Когда принято решение (UTC).</param>
+/// <param name="OtherCaseClassification">
+/// Гриф чужого дела (в пределах допуска субъекта) — только для грифа справки, где упомянуто это дело (ТБ-033, ADR-0053);
+/// на экран не выводится (ТБ-084).
+/// </param>
 public sealed record IntersectionRow(
     IntersectionKind Kind,
     string Key,
@@ -34,7 +38,8 @@ public sealed record IntersectionRow(
     bool CanOpenCase,
     IntersectionDecision? Decision,
     int? DecidedByUserId,
-    DateTime? DecidedAt);
+    DateTime? DecidedAt,
+    short OtherCaseClassification = 0);
 
 /// <summary>
 /// Пересечения между делами (ТФ-ПЕР-07, ТБ-084, ADR-0029): совпадения нормализованных реквизитов фигуранта

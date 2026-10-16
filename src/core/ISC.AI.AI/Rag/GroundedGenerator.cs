@@ -23,7 +23,8 @@ namespace ISC.AI.AI.Rag;
 /// Режимные инварианты: модель получает ТОЛЬКО отфильтрованные фрагменты (фильтр доступа применён в
 /// retriever ДО неё — ТБ-020); системное правило грунтовки ставится ПЕРВЫМ и профилем не отменяется
 /// (ТБ-041); грунтовка вывода обязательна (ТБ-040, GATE-2); итоговый гриф = максимум грифов
-/// использованных фрагментов (наследование, ТБ-032/033).
+/// использованных фрагментов и грифа данных задачного промпта (<see cref="GroundedRequest.InputClassification"/>,
+/// наследование, ТБ-032/033).
 /// </remarks>
 public sealed class GroundedGenerator(
     IRetriever retriever,
@@ -188,12 +189,14 @@ public sealed class GroundedGenerator(
         // 6. Грунтовка вывода против извлечённых фрагментов (ТБ-040, GATE-2).
         var grounding = groundingValidator.Validate(answer, fragments);
 
-        // 7. Итоговый гриф = максимум грифов использованных фрагментов (наследование, ТБ-032/033).
-        var resultClassification = MaxClassification(fragments);
+        // 7. Итоговый гриф = максимум грифов использованных фрагментов и данных задачного промпта (наследование,
+        //    ТБ-032/033): ответ пересказывает и то, и другое.
+        var resultClassification = ResultClassification(request, fragments);
 
         // Аудит генерации (ТБ-030 «кто/что/когда»): субъект — из контекста доступа (единственная запись
         // события; команда намеренно не IAuditableRequest, чтобы не задвоить журнал). Метаданные (id
-        // фрагментов) отдельно от чувствительного (запрос/ответ, ТБ-032).
+        // фрагментов) отдельно от чувствительного (запрос/ответ, ТБ-032). Подразделение — данных задачного промпта,
+        // если вызывающий его указал: запись читают только аудиторы этого подразделения (ТБ-032).
         var usedChunkIds = string.Join(",", fragments.Select(f => f.ChunkId));
         await auditWriter.WriteAsync(
             new AuditEntry(
@@ -201,11 +204,17 @@ public sealed class GroundedGenerator(
                 resultClassification,
                 SubjectId: access.NumericSubjectId,
                 ObjectRef: usedChunkIds,
+                DivisionId: request.InputDivisionId,
                 PayloadSensitive: $"Запрос: {request.Query}\nОтвет: {answer}"),
             cancellationToken);
 
         return new GroundedResponse(answer, grounding, fragments, resultClassification);
     }
+
+    // Гриф результата: максимум грифов фрагментов и грифа данных, которые вызывающий сам положил в задачный промпт.
+    // ИНВАРИАНТ (ТБ-032/033): InputClassification только поднимает гриф — заниженное значение ничего не понижает.
+    private static short ResultClassification(GroundedRequest request, IReadOnlyList<RetrievedChunk> fragments) =>
+        Math.Max(MaxClassification(fragments), Math.Max(request.InputClassification, (short)0));
 
     // Итоговый гриф результата = максимум грифов использованных фрагментов (наследование, ТБ-032/033).
     private static short MaxClassification(IReadOnlyList<RetrievedChunk> fragments)
@@ -229,9 +238,10 @@ public sealed class GroundedGenerator(
         auditWriter.WriteAsync(
             new AuditEntry(
                 AuditAction.Generate,
-                MaxClassification(fragments),
+                ResultClassification(request, fragments),
                 SubjectId: access.NumericSubjectId,
                 ObjectRef: string.Join(",", fragments.Select(f => f.ChunkId)),
+                DivisionId: request.InputDivisionId,
                 PayloadSensitive: $"Генерация НЕ завершена: {reason}. Запрос: {request.Query}"),
             CancellationToken.None);
 

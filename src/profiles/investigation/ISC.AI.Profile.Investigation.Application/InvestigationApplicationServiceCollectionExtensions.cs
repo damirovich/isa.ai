@@ -53,6 +53,10 @@ public static class InvestigationApplicationServiceCollectionExtensions
         services.AddScoped<Features.CaseChat.ChatMaterialResolver>();
         services.AddScoped<ISC.AI.Modules.Chat.Domain.Services.IChatProfile, Features.CaseChat.InvestigationChatProfile>();
 
+        // Справки по делу и фигуранту (ТФ-ОТЧ-01/02, ADR-0053): факты собирает код под решёткой субъекта, изложение пишет
+        // модель; отрисовку .docx регистрирует слой данных (OpenXml).
+        services.AddScoped<Features.Briefs.BriefCollector>();
+
         services.AddValidatorsFromAssembly(typeof(InvestigationApplicationServiceCollectionExtensions).Assembly);
         return services;
     }

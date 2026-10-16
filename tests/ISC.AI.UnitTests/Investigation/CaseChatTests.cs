@@ -52,6 +52,10 @@ public sealed class CaseChatTests
 
         citations.ShouldBe(["№ 12-3/2026", "ч. 2", "ст. 158", "Уголовного кодекса", "статью 158"]);
         new CaseCitationExtractor().Extract("Ответа не найдено [Фрагмент 2].").ShouldBeEmpty();
+
+        // Адреса и слова, внутри которых есть «част…», «ст.», «п.», — не ссылки (ADR-0053); формы «части 3», «частью 1» — ссылки.
+        new CaseCitationExtractor().Extract("Земельный участок 12, ул. Частная 5, пост. 3, сп. 4.").ShouldBeEmpty();
+        new CaseCitationExtractor().Extract("по части 3 и частью 1").ShouldBe(["части 3", "частью 1"]);
     }
 
     [Fact(DisplayName = "Проверка ядром: ссылка из поданного фрагмента подтверждена в любой форме записи, «по памяти» — не подтверждена")]

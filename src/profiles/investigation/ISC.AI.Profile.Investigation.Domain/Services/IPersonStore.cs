@@ -69,6 +69,8 @@ public sealed record PersonRow(
 /// <summary>
 /// Подтверждённое появление (ТФ-ПЕР-02). Отрезок появления в видео (<c>TrackStartMs</c>..<c>TrackEndMs</c>, кадров —
 /// <c>TrackFrames</c>) заполняет сценарий чтения по треку лица пакета «Медиа» (ADR-0037); хранилище его не знает.
+/// <c>Classification</c> — гриф строки появления (с кандидата, может быть выше грифа фигуранта): на экран не выводится,
+/// нужен для грифа справки (ТБ-033, ADR-0053).
 /// </summary>
 public sealed record AppearanceRow(
     int Id,
@@ -90,7 +92,8 @@ public sealed record AppearanceRow(
     string? RevokeReason = null,
     long? TrackStartMs = null,
     long? TrackEndMs = null,
-    int? TrackFrames = null)
+    int? TrackFrames = null,
+    short Classification = 0)
 {
     /// <summary>Появление отозвано как ошибочное.</summary>
     public bool IsRevoked => Status == AppearanceStatus.Revoked;

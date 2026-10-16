@@ -65,6 +65,9 @@ else
         @* Граф связей (ТФ-ПЕР-10, ADR-0045): фигурант в центре — дело, связи, транспорт, адреса, пересечения. *@
         <MudButton Href="@($"/persons/{Id}/graph")" Variant="Variant.Outlined" Size="Size.Small"
                    StartIcon="@Icons.Material.Filled.AccountTree">Граф связей</MudButton>
+        @* Справка по фигуранту (ТФ-ОТЧ-01, ADR-0053): факты — расчёт системы, краткое изложение — локальная модель. *@
+        <MudButton Href="@($"/persons/{Id}/brief")" Variant="Variant.Outlined" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Summarize">Справка по фигуранту</MudButton>
         <MudButton Href="@($"/cases/{_person.CaseId}")" Variant="Variant.Text" Size="Size.Small"
                    StartIcon="@Icons.Material.Filled.ArrowBack">К делу</MudButton>
     </PageHeader>

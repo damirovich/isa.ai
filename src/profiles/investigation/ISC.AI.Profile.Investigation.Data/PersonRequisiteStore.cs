@@ -38,7 +38,7 @@ public sealed class PersonRequisiteStore(
             .Where(a => a.PersonId == personId)
             .OrderBy(a => a.Kind)
             .ThenBy(a => a.Id)
-            .Select(a => new PersonAddressRow(a.Id, a.PersonId, a.Kind, a.Text, a.Notes))
+            .Select(a => new PersonAddressRow(a.Id, a.PersonId, a.Kind, a.Text, a.Notes, a.Classification))
             .ToListAsync(cancellationToken);
 
         var vehicles = await db.PersonVehicles.AsNoTracking()
@@ -46,7 +46,7 @@ public sealed class PersonRequisiteStore(
             .Where(policy.BuildFilter<PersonVehicle>(access))
             .Where(v => v.PersonId == personId)
             .OrderBy(v => v.Id)
-            .Select(v => new PersonVehicleRow(v.Id, v.PersonId, v.PlateNumber, v.Make, v.Model, v.Color, v.Notes))
+            .Select(v => new PersonVehicleRow(v.Id, v.PersonId, v.PlateNumber, v.Make, v.Model, v.Color, v.Notes, v.Classification))
             .ToListAsync(cancellationToken);
 
         return new PersonRequisites(addresses, vehicles);
@@ -247,7 +247,7 @@ public sealed class PersonRequisiteStore(
             .Select(x => new VehicleSearchRow(
                 x.Vehicle.PersonId, x.CaseId, x.DisplayName,
                 new PersonVehicleRow(x.Vehicle.Id, x.Vehicle.PersonId, x.Vehicle.PlateNumber, x.Vehicle.Make, x.Vehicle.Model,
-                    x.Vehicle.Color, x.Vehicle.Notes)))
+                    x.Vehicle.Color, x.Vehicle.Notes, x.Vehicle.Classification)))
             .ToListAsync(cancellationToken);
         return rows;
     }
