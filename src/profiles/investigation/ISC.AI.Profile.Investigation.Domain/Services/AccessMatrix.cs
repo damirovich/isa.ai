@@ -86,6 +86,9 @@ public static class InvestigationPermissions
     /// <summary>Чат и поиск по смыслу по материалам дел — локальная модель (ADR-0051).</summary>
     public const string CasesChat = "cases.chat";
 
+    /// <summary>Справки по делу и по фигуранту: факты считает система, изложение пишет локальная модель (ADR-0053).</summary>
+    public const string CasesBriefs = "cases.briefs";
+
     /// <summary>Загрузка материалов в дело.</summary>
     public const string MediaUpload = "media.upload";
 
@@ -155,6 +158,9 @@ public static class InvestigationPermissions
             Roles(InvestigationRole.Administrator)),
         new(CasesChat, PermissionSection.Cases, "Чат по материалам дел",
             "Вопросы к документам, расшифровкам, сводкам и сведениям доступных дел и поиск по смыслу: локальная модель отвечает только по найденным фрагментам, со ссылками",
+            Roles(InvestigationRole.Investigator, InvestigationRole.Head, InvestigationRole.Administrator)),
+        new(CasesBriefs, PermissionSection.Cases, "Справки по делу и фигуранту",
+            "Справка по делу или фигуранту для доступных дел: факты собирает система, краткое изложение пишет локальная модель; выгрузка в Word с грифом",
             Roles(InvestigationRole.Investigator, InvestigationRole.Head, InvestigationRole.Administrator)),
 
         new(MediaUpload, PermissionSection.Media, "Загрузка материалов",

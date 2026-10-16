@@ -268,7 +268,7 @@ public sealed class IntersectionStore(
             .Where(BaselineAccess.Filter<CaseFile>(access))
             .Where(policy.BuildFilter<CaseFile>(access))
             .Where(c => caseIds.Contains(c.Id))
-            .Select(c => new { c.Id, c.Number, c.Kind, c.Status, c.InvestigatorUserId })
+            .Select(c => new { c.Id, c.Number, c.Kind, c.Status, c.InvestigatorUserId, c.Classification })
             .ToDictionaryAsync(c => c.Id, cancellationToken);
 
         // Карточку чужого дела можно открыть только по правилу ТФ-ДЕЛ-03 (полная решётка с ролью).
@@ -304,7 +304,8 @@ public sealed class IntersectionStore(
                     openable.Contains(c.Id),
                     review?.Decision,
                     review?.DecidedByUserId,
-                    review?.DecidedAt);
+                    review?.DecidedAt,
+                    c.Classification);
             })
             .OrderBy(r => r.Kind)
             .ThenBy(r => r.OtherCaseNumber, StringComparer.Ordinal)

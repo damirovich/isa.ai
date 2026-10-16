@@ -73,6 +73,9 @@ else
         @* Граф связей (ТФ-ПЕР-10, ADR-0045): дело в центре, вокруг — его фигуранты и их связи. *@
         <MudButton Href="@($"/cases/{Id}/graph")" Variant="Variant.Outlined" Size="Size.Small"
                    StartIcon="@Icons.Material.Filled.AccountTree">Граф связей</MudButton>
+        @* Справка по делу (ТФ-ОТЧ-02, ADR-0053): факты — расчёт системы, краткое изложение — локальная модель. *@
+        <MudButton Href="@($"/cases/{Id}/brief")" Variant="Variant.Outlined" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Summarize">Справка по делу</MudButton>
         <MudButton Href="/cases" Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.ArrowBack">К списку</MudButton>
     </PageHeader>
 

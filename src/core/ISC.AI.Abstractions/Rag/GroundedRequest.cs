@@ -20,10 +20,22 @@ namespace ISC.AI.Abstractions.Rag;
 /// Ограничения извлечения (например, область — документы одного дела, ADR-0051). Только сужают выдачу: фильтр доступа
 /// ядро применяет в любом случае (ТБ-020). <see langword="null"/> — весь доступный корпус, только актуальные источники.
 /// </param>
+/// <param name="InputClassification">
+/// Гриф данных, которые вызывающий сам кладёт в задачный промпт (например, факты справки, посчитанные системой, ADR-0053).
+/// Гриф результата и записи журнала генерации — не ниже него (ТБ-032/033): ответ пересказывает эти данные. Значение может
+/// только ПОДНЯТЬ гриф, понизить нельзя. 0 — данных с грифом в промпте нет.
+/// </param>
+/// <param name="InputDivisionId">
+/// Подразделение данных задачного промпта (например, дело справки, ADR-0053). Пишется в записи журнала генерации, чтобы
+/// ответ, пересказывающий сведения подразделения, читали только аудиторы этого подразделения (ТБ-032).
+/// <see langword="null"/> — данных подразделения в промпте нет (запись без подразделения, как раньше).
+/// </param>
 public sealed record GroundedRequest(
     string Query,
     ModelRole Role = ModelRole.Analysis,
     int TopK = 10,
     string? TaskPrompt = null,
     IReadOnlyList<ChatTurn>? History = null,
-    RetrievalFilter? Filter = null);
+    RetrievalFilter? Filter = null,
+    short InputClassification = 0,
+    int? InputDivisionId = null);

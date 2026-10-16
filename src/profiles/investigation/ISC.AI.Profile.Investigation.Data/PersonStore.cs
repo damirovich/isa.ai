@@ -180,7 +180,8 @@ public sealed class PersonStore(
             .Select(a => new AppearanceRow(
                 a.Id, a.PersonId, a.CaseId, a.MediaAssetId, a.MediaFaceId, a.FrameIndex, a.FrameTimestampMs,
                 a.SearchSessionId, a.CandidateId, a.Similarity, a.Status, a.ConfirmedAtUtc,
-                a.ExpertUserId, a.VerifierUserId, a.RevokedAtUtc, a.RevokedByUserId, a.RevokeReason))
+                a.ExpertUserId, a.VerifierUserId, a.RevokedAtUtc, a.RevokedByUserId, a.RevokeReason,
+                null, null, null, a.Classification))
             .ToListAsync(cancellationToken);
     }
 

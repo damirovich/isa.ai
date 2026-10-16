@@ -9,7 +9,8 @@ namespace ISC.AI.Profile.Investigation.Domain.Services;
 /// <param name="Kind">Вид адреса.</param>
 /// <param name="Text">Адрес как введён.</param>
 /// <param name="Notes">Примечание.</param>
-public sealed record PersonAddressRow(int Id, int PersonId, AddressKind Kind, string Text, string? Notes);
+/// <param name="Classification">Гриф строки — для грифа справки (ТБ-033, ADR-0053); на экран не выводится.</param>
+public sealed record PersonAddressRow(int Id, int PersonId, AddressKind Kind, string Text, string? Notes, short Classification = 0);
 
 /// <summary>Автотранспорт фигуранта для карточки (ТФ-ПЕР-06).</summary>
 /// <param name="Id">Идентификатор.</param>
@@ -19,7 +20,9 @@ public sealed record PersonAddressRow(int Id, int PersonId, AddressKind Kind, st
 /// <param name="Model">Модель.</param>
 /// <param name="Color">Цвет.</param>
 /// <param name="Notes">Примечание.</param>
-public sealed record PersonVehicleRow(int Id, int PersonId, string? PlateNumber, string? Make, string? Model, string? Color, string? Notes);
+/// <param name="Classification">Гриф строки — для грифа справки (ТБ-033, ADR-0053); на экран не выводится.</param>
+public sealed record PersonVehicleRow(
+    int Id, int PersonId, string? PlateNumber, string? Make, string? Model, string? Color, string? Notes, short Classification = 0);
 
 /// <summary>Адреса и транспорт фигуранта.</summary>
 /// <param name="Addresses">Адреса.</param>

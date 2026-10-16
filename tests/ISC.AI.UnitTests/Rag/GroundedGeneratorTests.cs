@@ -193,6 +193,43 @@ public sealed class GroundedGeneratorTests
             Arg.Any<CancellationToken>());
     }
 
+    [Theory(DisplayName = "ADR-0053: гриф данных задачного промпта поднимает гриф результата и записи журнала — и при успехе, и при сбое; понизить нельзя; подразделение данных — в записи журнала")]
+    [InlineData((short)3, (short)3, 9)]
+    [InlineData((short)1, (short)2, null)]
+    [InlineData((short)-5, (short)2, 9)]
+    public async Task Input_classification_only_raises(short input, short expected, int? division)
+    {
+        var fragments = new List<RetrievedChunk> { Chunk(10, "текст A", 1), Chunk(11, "текст B", 2) };
+        var retriever = Substitute.For<IRetriever>();
+        retriever.RetrieveAsync(Arg.Any<string>(), Arg.Any<AccessContext>(), Arg.Any<int>(), Arg.Any<RetrievalFilter?>(), Arg.Any<CancellationToken>())
+            .Returns(fragments);
+        var chatClient = Substitute.For<IChatClient>();
+        chatClient.GetResponseAsync(Arg.Any<IEnumerable<ChatMessage>>(), Arg.Any<ChatOptions?>(), Arg.Any<CancellationToken>())
+            .Returns(new ChatResponse(new ChatMessage(ChatRole.Assistant, "ответ")));
+        var grounding = Substitute.For<IGroundingValidator>();
+        grounding.Validate(Arg.Any<string>(), Arg.Any<IReadOnlyList<RetrievedChunk>>()).Returns(new GroundingResult([], AllConfirmed: true));
+        var audit = Substitute.For<IAuditWriter>();
+        var provider = new ServiceCollection().AddKeyedSingleton<IChatClient>(ModelRole.Draft, chatClient).BuildServiceProvider();
+        var generator = new GroundedGenerator(retriever, grounding, audit, provider, GenerationOptions.Default, NullLogger<GroundedGenerator>.Instance);
+        var access = new AccessContext("42", MaxClassification: 4, AllowedDivisions: [7]);
+        var request = new GroundedRequest("справка", ModelRole.Draft, InputClassification: input, InputDivisionId: division);
+
+        // Подразделение данных — в записи: ответ о деле подразделения читают только его аудиторы (без него — как раньше).
+        (await generator.GenerateAsync(request, access)).ResultClassification.ShouldBe(expected);
+        await audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.Action == AuditAction.Generate && e.Classification == expected && e.DivisionId == division),
+            Arg.Any<CancellationToken>());
+
+        // Сбой модели: запись о попытке — с тем же грифом и подразделением (ДСП из промпта уже ушёл к модели).
+        audit.ClearReceivedCalls();
+        chatClient.GetResponseAsync(Arg.Any<IEnumerable<ChatMessage>>(), Arg.Any<ChatOptions?>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("сервер модели недоступен"));
+        await Should.ThrowAsync<InvalidOperationException>(() => generator.GenerateAsync(request, access));
+        await audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.Action == AuditAction.Generate && e.Classification == expected && e.DivisionId == division),
+            Arg.Any<CancellationToken>());
+    }
+
     [Fact(DisplayName = "Параметры генерации из конфига (temperature/max_tokens/seed) передаются модели")]
     public async Task Generation_options_are_passed_to_model()
     {
