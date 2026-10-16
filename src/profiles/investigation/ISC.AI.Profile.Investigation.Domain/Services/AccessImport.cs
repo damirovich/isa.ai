@@ -2,7 +2,8 @@ namespace ISC.AI.Profile.Investigation.Domain.Services;
 
 /// <summary>
 /// Поле системы, в которое переносится столбец базы Access (ADR-0043). Задания — личные и оперативные данные объекта;
-/// связи — связь объекта с автомобилем и адресами посещения.
+/// связи — связь объекта с автомобилем, адресами посещения и фото; инициаторы — сведения об инициаторе задания (таблица
+/// «инициатор» реальной базы отдела: управление, начальник, исполнитель, отдел, телефон — по № задания).
 /// </summary>
 public enum AccessField
 {
@@ -66,6 +67,9 @@ public enum AccessField
     /// <summary>Результат мероприятия.</summary>
     Result = 20,
 
+    /// <summary>Гражданство объекта (в анкете поля нет — в примечание объекта).</summary>
+    Citizenship = 21,
+
     /// <summary>Код записи связи.</summary>
     LinkKey = 101,
 
@@ -92,6 +96,30 @@ public enum AccessField
 
     /// <summary>Адреса посещения связи.</summary>
     VisitAddresses = 109,
+
+    /// <summary>Кличка объекта связи (в реальной базе ФИО связи нет — связь узнают по кличке).</summary>
+    LinkAlias = 110,
+
+    /// <summary>Фото объекта связи (поле OLE).</summary>
+    LinkPhoto = 111,
+
+    /// <summary>№ задания, к которому относятся сведения об инициаторе.</summary>
+    InitiatorTaskNumber = 201,
+
+    /// <summary>Инициатор задания — управление (ГУ), запись справочника.</summary>
+    InitiatorUnit = 202,
+
+    /// <summary>Начальник управления-инициатора (ФИО).</summary>
+    InitiatorHead = 203,
+
+    /// <summary>Исполнитель у инициатора (ФИО).</summary>
+    InitiatorExecutor = 204,
+
+    /// <summary>Отдел инициатора.</summary>
+    InitiatorDepartment = 205,
+
+    /// <summary>Телефон инициатора.</summary>
+    InitiatorPhone = 206,
 }
 
 /// <summary>Перечни и подписи полей переноса из Access.</summary>
@@ -102,16 +130,28 @@ public static class AccessFields
     [
         AccessField.TaskKey, AccessField.TaskNumber, AccessField.TaskDate, AccessField.LastName, AccessField.FirstName,
         AccessField.MiddleName, AccessField.FullName, AccessField.BirthYear, AccessField.Sex, AccessField.BirthPlace,
-        AccessField.WorkPlace, AccessField.Residence, AccessField.Photo, AccessField.Alias, AccessField.Measure,
-        AccessField.Initiator, AccessField.Justification, AccessField.Purpose, AccessField.ObjectInfo, AccessField.Result,
+        AccessField.WorkPlace, AccessField.Residence, AccessField.Citizenship, AccessField.Photo, AccessField.Alias,
+        AccessField.Measure, AccessField.Initiator, AccessField.Justification, AccessField.Purpose, AccessField.ObjectInfo,
+        AccessField.Result,
     ];
 
     /// <summary>Поля таблицы связей в порядке экрана.</summary>
     public static IReadOnlyList<AccessField> LinkFields { get; } =
     [
         AccessField.LinkKey, AccessField.LinkTaskNumber, AccessField.LinkType, AccessField.LinkInfo, AccessField.LinkName,
-        AccessField.CarMake, AccessField.CarPlate, AccessField.CarOwner, AccessField.VisitAddresses,
+        AccessField.LinkAlias, AccessField.CarMake, AccessField.CarPlate, AccessField.CarOwner, AccessField.VisitAddresses,
+        AccessField.LinkPhoto,
     ];
+
+    /// <summary>Поля таблицы инициаторов в порядке экрана.</summary>
+    public static IReadOnlyList<AccessField> InitiatorFields { get; } =
+    [
+        AccessField.InitiatorTaskNumber, AccessField.InitiatorUnit, AccessField.InitiatorHead, AccessField.InitiatorExecutor,
+        AccessField.InitiatorDepartment, AccessField.InitiatorPhone,
+    ];
+
+    /// <summary>Поле фото: ему подходит только двоичный столбец (объект OLE), остальным — только не двоичные.</summary>
+    public static bool IsPhoto(this AccessField field) => field is AccessField.Photo or AccessField.LinkPhoto;
 
     /// <summary>Подпись поля на экране.</summary>
     public static string Label(this AccessField field) => field switch
@@ -136,6 +176,7 @@ public static class AccessFields
         AccessField.Purpose => "Цель мероприятия",
         AccessField.ObjectInfo => "Сведения об объекте",
         AccessField.Result => "Результат мероприятия",
+        AccessField.Citizenship => "Гражданство",
         AccessField.LinkKey => "Код связи",
         AccessField.LinkTaskNumber => "№ задания",
         AccessField.LinkType => "Связь объекта",
@@ -145,6 +186,14 @@ public static class AccessFields
         AccessField.CarPlate => "Гос. номер",
         AccessField.CarOwner => "Владелец авто",
         AccessField.VisitAddresses => "Адреса посещения",
+        AccessField.LinkAlias => "Кличка объекта связи",
+        AccessField.LinkPhoto => "Фото связи",
+        AccessField.InitiatorTaskNumber => "№ задания",
+        AccessField.InitiatorUnit => "Инициатор задания (ГУ)",
+        AccessField.InitiatorHead => "Начальник управления",
+        AccessField.InitiatorExecutor => "Исполнитель",
+        AccessField.InitiatorDepartment => "Отдел",
+        AccessField.InitiatorPhone => "Телефон",
         _ => field.ToString(),
     };
 }
@@ -165,14 +214,19 @@ public sealed record AccessTable(string Name, IReadOnlyList<AccessColumn> Column
 /// <param name="TaskColumns">Столбцы таблицы заданий по полям системы.</param>
 /// <param name="LinksTable">Таблица связей; <see langword="null"/> — связи не переносятся.</param>
 /// <param name="LinkColumns">Столбцы таблицы связей по полям системы.</param>
+/// <param name="InitiatorsTable">Таблица сведений об инициаторе (по № задания); <see langword="null"/> — не переносится.</param>
+/// <param name="InitiatorColumns">Столбцы таблицы инициаторов по полям системы.</param>
 public sealed record AccessMapping(
     string? TasksTable,
     IReadOnlyDictionary<AccessField, string> TaskColumns,
     string? LinksTable,
-    IReadOnlyDictionary<AccessField, string> LinkColumns)
+    IReadOnlyDictionary<AccessField, string> LinkColumns,
+    string? InitiatorsTable,
+    IReadOnlyDictionary<AccessField, string> InitiatorColumns)
 {
     /// <summary>Пустое сопоставление.</summary>
-    public static AccessMapping Empty { get; } = new(null, new Dictionary<AccessField, string>(), null, new Dictionary<AccessField, string>());
+    public static AccessMapping Empty { get; } = new(
+        null, new Dictionary<AccessField, string>(), null, new Dictionary<AccessField, string>(), null, new Dictionary<AccessField, string>());
 }
 
 /// <summary>

@@ -10,7 +10,9 @@ namespace ISC.AI.Profile.Investigation.Application.Features.AccessImport;
 /// <remarks>
 /// Названия сравниваются нормализованными: нижний регистр, «ё» как «е», только буквы и цифры («Гос. номер» →
 /// «госномер», «№ задания» → «задания»). Точное совпадение важнее вхождения; каждый столбец достаётся одному полю.
-/// Двоичные столбцы (объект OLE) предлагаются только в «Фото», текстовые — только в остальные поля.
+/// Двоичные столбцы (объект OLE) предлагаются только в поля фото, текстовые — только в остальные поля. Синонимы
+/// включают названия реальной базы отдела (16.10.2026): «место жительство», «гражданство», «Кличка объекта», «Фото» в
+/// связях и таблицу «инициатор» (ADR-0043 v0.3).
 /// </remarks>
 public static class AccessAutoMapper
 {
@@ -31,7 +33,8 @@ public static class AccessAutoMapper
         [AccessField.Sex] = ["пол", "sex", "gender"],
         [AccessField.BirthPlace] = ["месторождения"],
         [AccessField.WorkPlace] = ["местоработы", "работа", "работает"],
-        [AccessField.Residence] = ["местожительства", "местопроживания", "проживает", "адреспроживания", "адрес"],
+        [AccessField.Residence] = ["местожительства", "местожительство", "местопроживания", "проживает", "адреспроживания", "адрес"],
+        [AccessField.Citizenship] = ["гражданство", "подданство"],
         [AccessField.Photo] = ["фото", "фотография", "photo", "снимок", "изображение"],
         [AccessField.Alias] = ["кличка", "псевдоним", "прозвище"],
         [AccessField.Measure] = ["мероприятие", "видмероприятия"],
@@ -49,6 +52,14 @@ public static class AccessAutoMapper
         [AccessField.CarPlate] = ["госномер", "гос", "номеравто", "госномеравто", "госзнак"],
         [AccessField.CarOwner] = ["владелец", "владелецавто", "владелецавтомобиля"],
         [AccessField.VisitAddresses] = ["адресапосещения", "местапосещения", "адреса", "адрес"],
+        [AccessField.LinkAlias] = ["кличкаобъекта", "кличкасвязи", "кличка", "псевдоним", "прозвище"],
+        [AccessField.LinkPhoto] = ["фото", "фотография", "фотосвязи", "photo", "снимок", "изображение"],
+        [AccessField.InitiatorTaskNumber] = ["номерзадания", "задания", "nзадания", "задание"],
+        [AccessField.InitiatorUnit] = ["инициаторзадания", "инициатор", "управление", "гу", "инициаторгу"],
+        [AccessField.InitiatorHead] = ["начуправления", "начальникуправления", "начальник", "руководитель"],
+        [AccessField.InitiatorExecutor] = ["исполнитель", "фиоисполнителя", "фиоинициатора"],
+        [AccessField.InitiatorDepartment] = ["отдел", "отделинициатора"],
+        [AccessField.InitiatorPhone] = ["телефон", "тел", "телефонинициатора", "контактныйтелефон"],
     };
 
     /// <summary>Нормализованное название: нижний регистр, «ё» → «е», только буквы и цифры.</summary>
@@ -71,7 +82,7 @@ public static class AccessAutoMapper
         return builder.ToString();
     }
 
-    /// <summary>Предлагает таблицы заданий и связей и столбцы для каждого поля.</summary>
+    /// <summary>Предлагает таблицы заданий, связей и инициаторов и столбцы для каждого поля.</summary>
     /// <param name="tables">Таблицы базы.</param>
     public static AccessMapping Suggest(IReadOnlyList<AccessTable> tables)
     {
@@ -98,11 +109,21 @@ public static class AccessAutoMapper
             .OrderByDescending(c => Score(c.Table, c.Columns, "связ"))
             .FirstOrDefault();
 
+        // Таблица инициаторов — третья, со ссылкой на задание и хотя бы одним сведением об инициаторе.
+        var initiators = tables
+            .Where(t => !ReferenceEquals(t, tasks.Table) && !ReferenceEquals(t, links.Table))
+            .Select(t => (Table: t, Columns: SuggestColumns(t, AccessFields.InitiatorFields)))
+            .Where(c => c.Columns.ContainsKey(AccessField.InitiatorTaskNumber) && c.Columns.Count > 1)
+            .OrderByDescending(c => Score(c.Table, c.Columns, "инициатор"))
+            .FirstOrDefault();
+
         return new AccessMapping(
             tasks.Table.Name,
             tasks.Columns,
             links.Table?.Name,
-            links.Table is null ? new Dictionary<AccessField, string>() : links.Columns);
+            links.Table is null ? new Dictionary<AccessField, string>() : links.Columns,
+            initiators.Table?.Name,
+            initiators.Table is null ? new Dictionary<AccessField, string>() : initiators.Columns);
     }
 
     private static int Score(AccessTable table, Dictionary<AccessField, string> columns, string nameHint) =>
@@ -110,7 +131,7 @@ public static class AccessAutoMapper
 
     /// <summary>Столбцы одной таблицы для указанных полей — когда оператор сам выбрал таблицу.</summary>
     /// <param name="table">Таблица.</param>
-    /// <param name="fields">Поля (<see cref="AccessFields.TaskFields"/> или <see cref="AccessFields.LinkFields"/>).</param>
+    /// <param name="fields">Поля (<see cref="AccessFields.TaskFields"/>, <see cref="AccessFields.LinkFields"/> или <see cref="AccessFields.InitiatorFields"/>).</param>
     public static Dictionary<AccessField, string> SuggestColumns(AccessTable table, IReadOnlyList<AccessField> fields)
     {
         ArgumentNullException.ThrowIfNull(table);
@@ -123,7 +144,7 @@ public static class AccessAutoMapper
             var synonyms = Synonyms[field];
             foreach (var column in table.Columns)
             {
-                if (column.IsBinary != (field == AccessField.Photo))
+                if (column.IsBinary != field.IsPhoto())
                 {
                     continue;
                 }

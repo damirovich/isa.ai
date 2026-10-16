@@ -26,7 +26,11 @@ public sealed record AccessDatabaseFile(string StoredFileName, string FileName, 
 /// <param name="Table">Таблица базы.</param>
 /// <param name="Key">Код записи (или № задания).</param>
 /// <param name="Message">Причина для человека.</param>
-public sealed record AccessImportProblem(string Table, string Key, string Message);
+/// <param name="Warning">
+/// Предупреждение: запись переносится, но не так, как в базе (№ дела с пометкой, обрезанное примечание, фото не
+/// принято); <see langword="false"/> — ошибка, запись не переносится.
+/// </param>
+public sealed record AccessImportProblem(string Table, string Key, string Message, bool Warning = false);
 
 /// <summary>Образец задания для проверки сопоставления глазами.</summary>
 /// <param name="Key">Код записи.</param>
@@ -49,6 +53,12 @@ public sealed record AccessTaskPreview(string Key, string CaseNumber, string Obj
 /// <param name="Problems">Записи с ошибками.</param>
 /// <param name="Sample">Первые задания для сверки сопоставления.</param>
 /// <param name="Fingerprint">Отпечаток «файл + сопоставление + выбор оператора» — запуск сверяет его с проверкой.</param>
+/// <param name="EmptyRows">
+/// Пустых строк (все сопоставленные поля пусты — так в Access остаются строки, начатые в форме и брошенные): не
+/// переносятся и ошибками не считаются, но число видно.
+/// </param>
+/// <param name="LinkPhotoCount">Фото связей к приёму: у переносимых связей и у перенесённых раньше без принятого фото.</param>
+/// <param name="InitiatorsApplied">Переносимых заданий, к которым найдены сведения в таблице инициаторов.</param>
 public sealed record AccessImportPlan(
     int TaskCount,
     int NewTaskCount,
@@ -60,10 +70,19 @@ public sealed record AccessImportPlan(
     IReadOnlyList<string> LinkTypesToCreate,
     IReadOnlyList<AccessImportProblem> Problems,
     IReadOnlyList<AccessTaskPreview> Sample,
-    string Fingerprint)
+    string Fingerprint,
+    int EmptyRows = 0,
+    int LinkPhotoCount = 0,
+    int InitiatorsApplied = 0)
 {
-    /// <summary>Есть что переносить.</summary>
-    public bool HasWork => NewTaskCount > 0 || NewLinkCount > 0;
+    /// <summary>Есть что переносить (и фото связей, не принятые прошлой попыткой).</summary>
+    public bool HasWork => NewTaskCount > 0 || NewLinkCount > 0 || LinkPhotoCount > 0;
+
+    /// <summary>Записей с ошибками — они не переносятся.</summary>
+    public int ErrorCount => Problems.Count(p => !p.Warning);
+
+    /// <summary>Записей с предупреждениями — переносятся с пометкой.</summary>
+    public int WarningCount => Problems.Count(p => p.Warning);
 }
 
 /// <summary>Итог переноса.</summary>
@@ -77,6 +96,8 @@ public sealed record AccessImportPlan(
 /// <param name="AlreadyImported">Заданий пропущено как перенесённые раньше.</param>
 /// <param name="Problems">Записи с ошибками.</param>
 /// <param name="Stopped">Перенос прерван целиком (причина — первая в <paramref name="Problems"/>).</param>
+/// <param name="LinkPhotosAccepted">Новых фото связей в материалах дел (повтор той же базы их не дублирует и не считает).</param>
+/// <param name="EmptyRows">Пустых строк пропущено.</param>
 public sealed record AccessImportReport(
     int CasesCreated,
     int ObjectsCreated,
@@ -87,4 +108,6 @@ public sealed record AccessImportReport(
     int ReferencesCreated,
     int AlreadyImported,
     IReadOnlyList<AccessImportProblem> Problems,
-    bool Stopped = false);
+    bool Stopped = false,
+    int LinkPhotosAccepted = 0,
+    int EmptyRows = 0);
