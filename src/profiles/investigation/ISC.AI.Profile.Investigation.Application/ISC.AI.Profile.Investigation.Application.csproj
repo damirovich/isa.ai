@@ -16,6 +16,8 @@
     <ProjectReference Include="..\..\..\modules\media\ISC.AI.Modules.Media.Application\ISC.AI.Modules.Media.Application.csproj" />
     <!-- Документы дела (ТФ-ДЕЛ-02): порт документооборота (карточки по id) и его сценарии регистрации — направление профиль → модуль. -->
     <ProjectReference Include="..\..\..\modules\docflow\ISC.AI.Modules.DocFlow.Domain\ISC.AI.Modules.DocFlow.Domain.csproj" />
+    <!-- Порт пакета «Чат» (ADR-0052): профиль закрывает IChatProfile своими делами и материалами. -->
+    <ProjectReference Include="..\..\..\modules\chat\ISC.AI.Modules.Chat.Domain\ISC.AI.Modules.Chat.Domain.csproj" />
     <ProjectReference Include="..\..\..\modules\docflow\ISC.AI.Modules.DocFlow.Application\ISC.AI.Modules.DocFlow.Application.csproj" />
   </ItemGroup>
 

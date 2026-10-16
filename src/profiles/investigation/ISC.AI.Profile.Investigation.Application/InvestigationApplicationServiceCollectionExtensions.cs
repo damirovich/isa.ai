@@ -43,13 +43,15 @@ public static class InvestigationApplicationServiceCollectionExtensions
         services.AddScoped<Features.AccessImport.AccessImportFiles>();
         services.AddScoped<Features.AccessImport.AccessImporter>();
 
-        // Ссылки в ответах чата по документам дела (ADR-0051, ТБ-040): профиль поставляет извлечение номеров, статей и
+        // Ссылки в ответах чата по материалам дел (ADR-0051, ТБ-040): профиль поставляет извлечение номеров, статей и
         // кодексов вместо заглушки ядра «ссылок нет»; саму проверку по поданным фрагментам ведёт ядровой валидатор.
         services.Replace(ServiceDescriptor.Singleton<ICitationExtractor, Features.CaseChat.CaseCitationExtractor>());
         services.Replace(ServiceDescriptor.Singleton<ICitationNormalizer, Features.CaseChat.CaseCitationNormalizer>());
 
-        // Материалы области чата (ADR-0051): документы дел, расшифровки записей, сводки и справки, сведения дел.
+        // Чат — пакет «Чат» (ADR-0052); профиль закрывает его порт: области — дела под решёткой, материалы (ADR-0051) —
+        // документы дел, расшифровки записей, сводки и справки, сведения дел; право — «Чат по материалам дел».
         services.AddScoped<Features.CaseChat.ChatMaterialResolver>();
+        services.AddScoped<ISC.AI.Modules.Chat.Domain.Services.IChatProfile, Features.CaseChat.InvestigationChatProfile>();
 
         services.AddValidatorsFromAssembly(typeof(InvestigationApplicationServiceCollectionExtensions).Assembly);
         return services;

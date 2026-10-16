@@ -26,6 +26,8 @@
          (ListCaseMediaQuery, ListCaseSearchSessionsQuery). -->
     <ProjectReference Include="..\..\..\modules\media\ISC.AI.Modules.Media.Domain\ISC.AI.Modules.Media.Domain.csproj" />
     <ProjectReference Include="..\..\..\modules\media\ISC.AI.Modules.Media.Application\ISC.AI.Modules.Media.Application.csproj" />
+    <!-- Профиль → чат (ADR-0052): компонент ChatPanel пакета во вкладке «Чат по материалам» карточки дела. -->
+    <ProjectReference Include="..\..\..\modules\chat\ISC.AI.Modules.Chat.UI\ISC.AI.Modules.Chat.UI.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -18,6 +18,18 @@ public class ConversationEntity : AuditableEntity, ISoftDeletable
     /// <summary>Максимальный гриф содержимого диалога — для маркировки и потенциальной фильтрации.</summary>
     public short Classification { get; set; }
 
+    /// <summary>
+    /// Область профиля, в которой ведётся диалог (ADR-0052): строка, смысл которой знает только профиль (например,
+    /// <c>case:45</c>). <see langword="null"/> — область по умолчанию, в том числе у диалогов, заведённых до областей.
+    /// </summary>
+    public string? Area { get; set; }
+
+    /// <summary>
+    /// Ключи уничтожения (ADR-0052, ТБ-064): область и материалы, на которые опирались ответы. Профиль уничтожает свой
+    /// объект — и уничтожает все диалоги с его ключом. Ядро ключи не толкует.
+    /// </summary>
+    public List<string> ScopeKeys { get; set; } = [];
+
     /// <inheritdoc />
     public bool IsDeleted { get; set; }
 

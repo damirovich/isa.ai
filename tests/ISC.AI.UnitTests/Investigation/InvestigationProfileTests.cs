@@ -4,6 +4,8 @@ using System.Linq;
 using System.Reflection;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.Admin;
+using ISC.AI.Modules.Chat;
+using ISC.AI.Modules.Chat.Domain.Services;
 using ISC.AI.Modules.DocFlow;
 using ISC.AI.Modules.Media;
 using ISC.AI.Profile.Investigation;
@@ -30,6 +32,7 @@ public sealed class InvestigationProfileTests
         "ISC.AI.Modules.Media.UI",
         "ISC.AI.Modules.DocFlow.UI",
         "ISC.AI.Modules.Admin.UI",
+        "ISC.AI.Modules.Chat.UI",
     ];
 
     // Порты ВСЕХ подключённых пакетов: профиль обязан закрыть каждый, иначе приложение не стартует (ТС-013).
@@ -37,6 +40,7 @@ public sealed class InvestigationProfileTests
     [
         .. DocFlowModule.RequiredServices,
         .. MediaModule.RequiredServices,
+        .. ChatModule.RequiredServices,
         .. AdminModule.RequiredServices,
     ];
 
@@ -94,6 +98,14 @@ public sealed class InvestigationProfileTests
                 .ShouldBe("ISC.AI.Modules.Admin.UI");
         }
 
+        // «Чат по материалам» — страница ПАКЕТА «Чат» (ADR-0052) в секции «Дела»; своей страницы чата у профиля нет.
+        var chat = profile.Modules.Single(m => m.Route == ChatModule.Route);
+        chat.ComponentType.Assembly.GetName().Name.ShouldBe("ISC.AI.Modules.Chat.UI");
+        chat.Id.ShouldBe("chat");
+        chat.MenuTitle.ShouldBe("Чат по материалам");
+        chat.MenuGroup.ShouldBe("Дела");
+        chat.RequiredPolicy.ShouldBe(ChatModule.ReadPolicy);
+
         // Порядок секций — порядок первого появления: «Дела» первой, «Администрирование» последней.
         var groups = profile.Modules.Select(m => m.MenuGroup).Where(g => g is not null).Distinct().ToList();
         groups.First().ShouldBe("Дела");
@@ -101,7 +113,7 @@ public sealed class InvestigationProfileTests
         groups.ShouldContain(DocFlowModule.MenuGroup);
     }
 
-    [Fact(DisplayName = "Контракт пакетов: после RegisterServices + RegisterDataContexts зарегистрированы все порты docflow, «Медиа» и «Администрирования» и IAccessPolicy профиля")]
+    [Fact(DisplayName = "Контракт пакетов: после RegisterServices + RegisterDataContexts зарегистрированы все порты docflow, «Медиа», «Чата» и «Администрирования» и IAccessPolicy профиля")]
     public void Profile_registers_every_required_port_of_attached_modules()
     {
         var profile = new InvestigationProfile();
@@ -127,6 +139,11 @@ public sealed class InvestigationProfileTests
 
         // Самопроверка профиля на полной регистрации молчит — это она вызывается в конце RegisterDataContexts.
         Should.NotThrow(() => InvestigationProfile.EnsureModulePortsRegistered(services));
+
+        // Порт чата — реализация профиля (ADR-0052), а настройки экранам пакет отдаёт из него же.
+        services.Last(d => d.ServiceType == typeof(IChatProfile)).ImplementationType.ShouldBe(
+            typeof(ISC.AI.Profile.Investigation.Application.Features.CaseChat.InvestigationChatProfile));
+        registered.ShouldContain(typeof(ChatSettings));
     }
 
     /// <summary>
@@ -166,15 +183,22 @@ public sealed class InvestigationProfileTests
         }
     }
 
-    [Fact(DisplayName = "Контракт пакетов: RegisterDataContexts на пустой коллекции (без RegisterServices) всё равно закрывает порты — проверка не бросает")]
-    public void RegisterDataContexts_alone_registers_every_port()
+    [Fact(DisplayName = "Контракт пакетов: RegisterDataContexts без RegisterServices закрывает все порты слоя данных; не хватает только порта чата — он в слое сценариев")]
+    public void RegisterDataContexts_alone_registers_every_data_port()
     {
         var profile = new InvestigationProfile();
         var services = new ServiceCollection();
 
-        // Порты живут в слое данных профиля: их регистрирует именно RegisterDataContexts, и он же
-        // проверяет результат — исключения быть не должно.
-        Should.NotThrow(() => profile.RegisterDataContexts(services, Configuration()));
+        // Порты пакетов живут в слое данных профиля — кроме порта чата (ADR-0052): он собирает материалы и рендерит
+        // промпт, поэтому живёт в Application и регистрируется в RegisterServices. Хост вызывает RegisterServices ДО
+        // RegisterDataContexts, где стоит проверка; без этого порядка приложение не стартует и называет порт чата.
+        var error = Should.Throw<InvalidOperationException>(() => profile.RegisterDataContexts(services, Configuration()));
+
+        error.Message.ShouldContain(nameof(IChatProfile), Case.Sensitive);
+        foreach (var port in AllRequiredPorts.Where(p => p != typeof(IChatProfile)))
+        {
+            error.Message.ShouldNotContain(port.Name, Case.Sensitive, $"порт {port.Name} закрывает слой данных");
+        }
     }
 
     [Fact(DisplayName = "Виджеты оболочки: кнопка смены пароля — из пакета администрирования, колокольчик уведомлений — из docflow")]

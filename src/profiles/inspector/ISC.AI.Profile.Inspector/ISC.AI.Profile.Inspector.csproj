@@ -15,6 +15,8 @@
          своего пароля. Профиль их больше НЕ держит у себя — подключает пакет и реализует три порта
          (право администрировать, справочник подразделений, роли), см. Inspector.Data. -->
     <ProjectReference Include="..\..\..\modules\admin\ISC.AI.Modules.Admin\ISC.AI.Modules.Admin.csproj" />
+    <!-- Чат (ADR-0052): «Чат-ассистент» — страница пакета, тот же чат, что у «Следствия»; порт — в Application. -->
+    <ProjectReference Include="..\..\..\modules\chat\ISC.AI.Modules.Chat\ISC.AI.Modules.Chat.csproj" />
   </ItemGroup>
 
   <ItemGroup>

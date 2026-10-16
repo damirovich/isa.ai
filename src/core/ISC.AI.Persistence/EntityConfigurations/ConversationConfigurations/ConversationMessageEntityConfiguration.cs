@@ -17,6 +17,10 @@ public class ConversationMessageEntityConfiguration : IEntityTypeConfiguration<C
         // Итог грунтовки ответа — jsonb (список ссылок и их статусы); null для реплики пользователя.
         builder.Property(e => e.GroundingJson).HasColumnType("jsonb");
 
+        // Источники ответа и итог проверки ссылок (ADR-0052) — jsonb пакета чата; null у вопроса.
+        builder.Property(e => e.SourcesJson).HasColumnType("jsonb");
+        builder.Property(e => e.CheckJson).HasColumnType("jsonb");
+
         // Загрузка истории диалога по возрастанию времени.
         builder.HasIndex(e => e.ConversationId);
 

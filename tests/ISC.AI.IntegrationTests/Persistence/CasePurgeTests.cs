@@ -3,13 +3,18 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ISC.AI.Abstractions.Audit;
+using ISC.AI.Abstractions.Conversations;
 using ISC.AI.Abstractions.Enums;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.Media.Data;
 using ISC.AI.Modules.Media.Data.Entities;
 using ISC.AI.Modules.Media.Domain.Model;
 using ISC.AI.Modules.Media.Domain.Services;
+using ISC.AI.Ingestion;
 using ISC.AI.Persistence.Audit;
+using ISC.AI.Persistence.Conversations;
+using ISC.AI.Persistence.Corpus;
+using ISC.AI.Persistence.Entities;
 using ISC.AI.Profile.Investigation.Application.Features.Cases;
 using ISC.AI.Profile.Investigation.Data;
 using ISC.AI.Profile.Investigation.Domain.Entities;
@@ -33,7 +38,8 @@ namespace ISC.AI.IntegrationTests.Persistence;
 /// уничтожается; у него есть носитель, общий с делом B (дедупликация по хешу), и дело B искало по лицам
 /// дела A. После уничтожения A: всё «своё» у A исчезает физически, а общий носитель, привязка B к нему,
 /// сессия поиска B и документ документооборота — на месте. Стереть материалы соседнего дела — самая
-/// тяжёлая ошибка, которую может сделать эта операция.
+/// тяжёлая ошибка, которую может сделать эта операция. Так же — тексты дела в корпусе ядра (ADR-0051) и
+/// переписка чата (ADR-0052): уходит всё, что опиралось на A (и скрытое сотрудником), переписка B остаётся.
 /// </remarks>
 [Trait("Category", "Gate")]
 public sealed class CasePurgeTests : IAsyncLifetime
@@ -120,15 +126,38 @@ public sealed class CasePurgeTests : IAsyncLifetime
             FrameIndex: 0, FrameTimestampMs: 0, Similarity: 0.9, Classification: 2, DivisionId: 5,
             ExpertUserId: 40, VerifierUserId: 41, ConfirmedAtUtc: DateTime.UtcNow));
 
+        // Тексты «Сведений дела» обоих дел — в корпусе ядра (эмбеддер — фиксированный фейк).
+        var audit = new AuditWriter(core);
+        var corpus = new CaseCorpusSync(
+            investigation,
+            new IngestionPort(core, new FixedEmbeddingGenerator(EmbeddingEntity.Dimensions), new SimpleTextChunker()),
+            new DocumentPurger(core, audit),
+            TimeProvider.System);
+        var cardA = (await corpus.SyncAsync([caseA.CaseId])).Single(r => r.Kind == CaseCorpusKind.CaseCard).CoreDocumentId;
+        var cardB = (await corpus.SyncAsync([caseB.CaseId])).Single(r => r.Kind == CaseCorpusKind.CaseCard).CoreDocumentId;
+
+        // Переписка чата (таблицы ядра): диалог дела A, диалог «по всем делам» с ответом по материалам A, скрытый
+        // сотрудником диалог дела A — все уходят с A; диалог дела B и «общий» диалог только по B — остаются.
+        var conversations = new ConversationStore(core);
+        var chatA = await conversations.CreateAsync(AdminId, "по делу A", $"case:{caseA.CaseId}", 2, [$"case:{caseA.CaseId}"]);
+        var chatAll = await conversations.CreateAsync(AdminId, "по всем делам", null, 0, []);
+        await conversations.AppendMessageAsync(chatAll, AdminId, new ConversationMessageDraft(
+            ConversationMessageRole.Assistant, "Ответ [Фрагмент 1]", 2, ScopeKeys: [$"case:{caseA.CaseId}"]));
+        var chatHidden = await conversations.CreateAsync(AdminId, "скрытый", $"case:{caseA.CaseId}", 2, [$"case:{caseA.CaseId}"]);
+        (await conversations.DeleteAsync(chatHidden, AdminId)).ShouldBeTrue();
+        var chatB = await conversations.CreateAsync(AdminId, "по делу B", $"case:{caseB.CaseId}", 2, [$"case:{caseB.CaseId}"]);
+        var chatAllB = await conversations.CreateAsync(AdminId, "по всем делам, только B", null, 0, []);
+        await conversations.AppendMessageAsync(chatAllB, AdminId, new ConversationMessageDraft(
+            ConversationMessageRole.Assistant, "Ответ [Фрагмент 1]", 2, ScopeKeys: [$"case:{caseB.CaseId}"]));
+
         // --- Уничтожение дела A настоящими компонентами ---
         var storage = new RecordingFileStorage();
-        var audit = new AuditWriter(core);
         var accessProvider = Substitute.For<IAccessContextProvider>();
         accessProvider.GetCurrentAsync(Arg.Any<CancellationToken>()).Returns(admin);
 
         var handler = new PurgeCaseCommand.Handler(
             cases, new UserRoleStore(core, investigation), new FixedSubjectProvider(AdminId), accessProvider,
-            new MediaPurger(media, audit, storage), audit);
+            new MediaPurger(media, audit, storage), corpus, conversations, audit);
 
         var response = await handler.Handle(
             new PurgeCaseCommand(caseA.CaseId, "A-2026/1", "Решение руководителя от 20.09.2026 № 17"), CancellationToken.None);
@@ -183,19 +212,39 @@ public sealed class CasePurgeTests : IAsyncLifetime
         storage.Deleted.ShouldNotContain(f => f.Contains("probe-b", StringComparison.Ordinal));
         storage.Deleted.ShouldNotContain(f => f.Contains($"/{shared}/", StringComparison.Ordinal));
 
-        // Журнал: акт — ПЕРВАЯ запись уничтожения (fail-closed), за ним носитель и история поисков.
+        // Тексты дела A в корпусе — физически; тексты дела B — на месте. Переписка: всё, что опиралось на A, — физически
+        // (и скрытое); переписка по B — на месте.
+        await using (var db = core.CreateDbContext())
+        {
+            (await db.Documents.AnyAsync(d => d.Id == cardA)).ShouldBeFalse();
+            (await db.Documents.AnyAsync(d => d.Id == cardB)).ShouldBeTrue();
+
+            (await db.Conversations.IgnoreQueryFilters().Where(c => new[] { chatA, chatAll, chatHidden }.Contains(c.Id)).AnyAsync())
+                .ShouldBeFalse();
+            (await db.ConversationMessages.IgnoreQueryFilters().AnyAsync(m => m.ConversationId == chatAll)).ShouldBeFalse();
+            (await db.Conversations.Where(c => c.Id == chatB || c.Id == chatAllB).CountAsync()).ShouldBe(2);
+        }
+
+        (await corpus.ListAsync([caseA.CaseId])).ShouldBeEmpty();
+
+        // Журнал: акт — ПЕРВАЯ запись уничтожения (fail-closed), за ним носитель, история поисков и текст дела в корпусе.
         await using (var db = core.CreateDbContext())
         {
             var purges = await db.AuditRecords
                 .Where(r => r.Action == AuditAction.Purge)
                 .OrderBy(r => r.Id)
-                .Select(r => r.ObjectRef)
+                .Select(r => new { r.ObjectRef, r.PayloadSensitive })
                 .ToListAsync();
 
-            purges.ShouldBe([
+            purges.Select(p => p.ObjectRef).ShouldBe([
                 $"investigation:case:{caseA.CaseId}:destroy",
                 $"media:asset:{own}",
-                $"media:case:{caseA.CaseId}:searches"]);
+                $"media:case:{caseA.CaseId}:searches",
+                cardA.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+
+            // В акте — и тексты в корпусе, и диалоги чата: три диалога опирались на материалы дела A.
+            purges[0].PayloadSensitive.ShouldNotBeNull().ShouldContain("тексты сведений дела и сводок в корпусе поиска 1");
+            purges[0].PayloadSensitive.ShouldNotBeNull().ShouldContain("диалоги чата по материалам дела 3");
         }
     }
 

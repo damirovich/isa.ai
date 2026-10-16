@@ -1,0 +1,744 @@
+@namespace ISC.AI.Modules.Chat.UI
+@* Чат пакета (ADR-0052) — один для всех профилей: страница /chat и вкладка, куда профиль вставит компонент (у
+   «Следствия» — карточка дела). Слева свои диалоги области («Новый чат», переименовать, удалить), справа лента с
+   пузырями и поле вопроса; сверху — режимы, которые разрешил профиль («Свободный чат», по материалам, «Найти по
+   смыслу»), и строка «что видит чат». Подсказки (готовые вопросы, щелчок задаёт вопрос сразу) видны всегда: на показе
+   и новому сотруднику. Ответ рисуется ТЕКСТОМ по разбору AnswerMarkup (списки, жирный, ссылки «[Фрагмент N]») — HTML
+   из ответа в страницу не попадает. Ответ — черновик: ссылки, которых нет в поданных фрагментах, — предупреждением
+   (ТБ-040/042). Право, область и доступ проверяет сервер. Раскладка — классами MudBlazor и стилями в разметке:
+   изолированный CSS компонента не доходит до корневых элементов MudPaper. *@
+@implements IAsyncDisposable
+@using System.Globalization
+@using Microsoft.JSInterop
+@using ISC.AI.Abstractions.Conversations
+@using ISC.AI.Abstractions.Enums
+@using ISC.AI.Abstractions.Security
+@using ISC.AI.Modules.Chat.Application
+@using ISC.AI.Modules.Chat.Application.Answers
+@using ISC.AI.Modules.Chat.Application.Features
+@using ISC.AI.Modules.Chat.Domain.Services
+@inject ChatSettings Settings
+@inject IJSRuntime JS
+
+@if (_noRight)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-3">@ChatMessages.NoRight</MudAlert>
+}
+else if (_overview is null && _error is null)
+{
+    <MudProgressLinear Indeterminate="true" Class="my-3" />
+}
+else if (_overview is null)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-3">@_error</MudAlert>
+}
+else
+{
+    <div class="d-flex" style="@($"gap:16px; height:{Height}; min-height:460px;")">
+
+        @* ================= Слева: свои диалоги области ================= *@
+        <MudPaper Outlined="true" Class="pa-2 d-flex flex-column" Style="width:280px; min-width:230px; flex:0 0 auto;">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="NewChat" Disabled="_busy" Class="mb-2">Новый чат</MudButton>
+            @* flex:0 0 auto — иначе .mud-divider-fullwidth (flex-grow:1) растягивается и сдвигает список в середину. *@
+            <MudDivider Class="mb-2" Style="flex:0 0 auto;" />
+            <div style="overflow-y:auto; flex:1 1 0; min-height:0;">
+                @if (_overview.Conversations.Count == 0)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary pa-2 d-block">Диалогов пока нет</MudText>
+                }
+                @foreach (var conversation in _overview.Conversations)
+                {
+                    var current = conversation;
+                    <MudPaper Outlined="true" Class="pa-2 mb-1 cc-chat" Style="@ConversationStyle(current)">
+                        <div class="d-flex align-center justify-space-between">
+                            <button type="button" class="cc-chat-open" disabled="@_busy" @onclick="@(() => SelectAsync(current.Id))" title="@current.Title">
+                                <span class="cc-chat-title">@current.Title</span>
+                                <span class="cc-chat-meta">@current.UpdatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture)</span>
+                            </button>
+                            <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Dense="true" AriaLabel="Действия с диалогом">
+                                <MudMenuItem OnClick="@(() => OpenRename(current))">Переименовать</MudMenuItem>
+                                <MudMenuItem OnClick="@(() => _deleteTarget = current)">Удалить</MudMenuItem>
+                            </MudMenu>
+                        </div>
+                        @if (current.Classification > ClassificationLevels.Unclassified)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text" Class="ma-0 pa-0">@ClassificationLevels.Label(current.Classification)</MudChip>
+                        }
+                    </MudPaper>
+                }
+            </div>
+        </MudPaper>
+
+        @* ================= Справа: режимы, лента и вопрос ================= *@
+        <MudPaper Outlined="true" Class="pa-3 d-flex flex-column flex-grow-1" Style="min-width:0;">
+            <div class="d-flex align-center gap-2 mb-2 flex-wrap">
+                @if (Modes.Count > 1)
+                {
+                    <MudToggleGroup T="ChatPanelMode" Value="_mode" ValueChanged="SetMode" Color="Color.Primary" Size="Size.Small" CheckMark="false">
+                        @foreach (var mode in Modes)
+                        {
+                            <MudToggleItem T="ChatPanelMode" Value="mode" Text="@ModeLabel(mode)" />
+                        }
+                    </MudToggleGroup>
+                }
+                <MudText Typo="Typo.caption" Class="mud-text-secondary cc-mode-hint">@ModeHint(_mode)</MudText>
+                <MudSpacer />
+                @if (_overview.Coverage is { } coverage)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary cc-coverage" title="@_overview.CoverageHint">@coverage</MudText>
+                }
+            </div>
+
+            @if (_mode != ChatPanelMode.Sense)
+            {
+                <div id="@FeedId" style="overflow-y:auto; flex:1 1 0; min-height:0;" class="mb-2">
+                    @if (_hidden > 0)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">Скрыто сообщений: @_hidden — их гриф выше вашего текущего допуска.</MudText>
+                    }
+                    @if (_messages.Count == 0 && !_busy)
+                    {
+                        <div class="cc-empty">
+                            <MudIcon Icon="@Icons.Material.Filled.QuestionAnswer" Style="font-size:3rem;" Class="mud-text-secondary" />
+                            <MudText Typo="Typo.body1">@EmptyTitle</MudText>
+                            @if (!string.IsNullOrWhiteSpace(Settings.EmptyHint))
+                            {
+                                <MudText Typo="Typo.body2" Class="mud-text-secondary">@Settings.EmptyHint</MudText>
+                            }
+                            @if (Suggestions.Count > 0)
+                            {
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2">Например:</MudText>
+                                <div class="d-flex flex-wrap justify-center gap-2">
+                                    @foreach (var suggestion in Suggestions)
+                                    {
+                                        var text = suggestion;
+                                        <MudChip T="string" Variant="Variant.Outlined" Color="Color.Primary" Icon="@Icons.Material.Filled.Lightbulb"
+                                                 OnClick="@(() => AskAsync(text))" Class="cc-suggestion">@text</MudChip>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                    @foreach (var message in _messages)
+                    {
+                        <div class="d-flex mb-2" style="@(message.Role == ConversationMessageRole.User ? "justify-content:flex-end;" : "justify-content:flex-start;")">
+                            <MudPaper Class="pa-2" Elevation="0" Style="@BubbleStyle(message.Role)">
+                                @if (message.Role == ConversationMessageRole.User)
+                                {
+                                    <MudText Typo="Typo.body2" Style="white-space:pre-wrap;" Class="cc-question">@message.Text</MudText>
+                                }
+                                else
+                                {
+                                    <div class="cc-answer">
+                                        @foreach (var block in AnswerMarkup.Parse(message.Text))
+                                        {
+                                            <div class="@BlockClass(block.Kind)">
+                                                @foreach (var span in block.Spans)
+                                                {
+                                                    @if (span.Fragment is { } number && message.Grounded)
+                                                    {
+                                                        <span class="@(Source(message, number) is null ? "cc-mark cc-mark-bad" : "cc-mark")"
+                                                              title="@(Source(message, number)?.Label ?? "Такого фрагмента модели не подавали")">@span.Text</span>
+                                                    }
+                                                    else if (span.Bold)
+                                                    {
+                                                        <b>@span.Text</b>
+                                                    }
+                                                    else
+                                                    {
+                                                        @span.Text
+                                                    }
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                    @if (message.Pending)
+                                    {
+                                        <div class="d-flex align-center gap-2 mt-1">
+                                            <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+                                            <MudText Typo="Typo.caption">@PendingText(message)</MudText>
+                                        </div>
+                                    }
+                                    @if (message.Check is { AllConfirmed: false } check)
+                                    {
+                                        <MudAlert Severity="Severity.Warning" Variant="Variant.Text" Dense="true" Class="mt-1 cc-check">
+                                            @if (check.Unverified.Count > 0)
+                                            {
+                                                <div>Не найдено в поданных фрагментах (могло быть сказано моделью «по памяти»): @string.Join(", ", check.Unverified).</div>
+                                            }
+                                            @if (check.UnknownFragments.Count > 0)
+                                            {
+                                                <div>Ссылки на фрагменты, которых модели не подавали: @string.Join(", ", check.UnknownFragments).</div>
+                                            }
+                                            <div>Проверьте по материалам.</div>
+                                        </MudAlert>
+                                    }
+                                    @if (message.Sources.Count > 0)
+                                    {
+                                        <div class="cc-sources">
+                                            <MudText Typo="Typo.caption" Class="mud-text-secondary">Источники:</MudText>
+                                            @foreach (var source in message.Sources)
+                                            {
+                                                <div class="cc-source" title="@source.Excerpt">
+                                                    <span class="cc-ref">@source.Number</span>
+                                                    @if (source.Href is { } href)
+                                                    {
+                                                        <MudLink Href="@href" Typo="Typo.caption">@source.Label</MudLink>
+                                                    }
+                                                    else
+                                                    {
+                                                        <MudText Typo="Typo.caption">@source.Label</MudText>
+                                                    }
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                }
+                            </MudPaper>
+                        </div>
+                    }
+                </div>
+
+                @if (_error is not null)
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-2"
+                              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+                }
+
+                @if (_messages.Count > 0 && Suggestions.Count > 0)
+                {
+                    @* Подсказки видны и в идущем диалоге — на показе не нужно вспоминать, что спросить. *@
+                    <div class="d-flex align-center gap-1 mb-2 cc-hints">
+                        <MudIcon Icon="@Icons.Material.Filled.Lightbulb" Size="Size.Small" Class="mud-text-secondary" />
+                        @foreach (var suggestion in Suggestions)
+                        {
+                            var text = suggestion;
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Disabled="_busy"
+                                     OnClick="@(() => AskAsync(text))" Class="cc-suggestion">@text</MudChip>
+                        }
+                    </div>
+                }
+
+                <div class="d-flex gap-2 align-end">
+                    <MudTextField T="string" @bind-Value="_input" Placeholder="@Settings.QuestionPlaceholder" Variant="Variant.Outlined"
+                                  Lines="2" Immediate="true" Disabled="_busy" MaxLength="@ChatLimits.MaxQuestionLength" Class="flex-grow-1" />
+                    @if (_busy)
+                    {
+                        <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="Stop" StartIcon="@Icons.Material.Filled.Stop">Остановить</MudButton>
+                    }
+                    else
+                    {
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SendAsync" StartIcon="@Icons.Material.Filled.Send" Class="cc-ask"
+                                   Disabled="@string.IsNullOrWhiteSpace(_input)">Отправить</MudButton>
+                    }
+                </div>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1 d-block">@FooterText</MudText>
+            }
+            else
+            {
+                @* --- Поиск по смыслу: фрагменты без модели --- *@
+                <div class="d-flex gap-2 align-end">
+                    <MudTextField T="string" @bind-Value="_senseInput" Label="Что найти (по смыслу, а не точными словами)" Variant="Variant.Outlined"
+                                  Immediate="true" Disabled="_senseBusy" MaxLength="@ChatLimits.MaxQuestionLength" Class="flex-grow-1"
+                                  OnKeyDown="OnSenseKeyDownAsync" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Search" OnClick="SenseSearchAsync"
+                               Disabled="@(_senseBusy || string.IsNullOrWhiteSpace(_senseInput))">Найти</MudButton>
+                </div>
+                @if (_overview.Suggestions.Sense.Count > 0)
+                {
+                    <div class="d-flex align-center flex-wrap gap-1 mt-2 cc-hints">
+                        <MudIcon Icon="@Icons.Material.Filled.Lightbulb" Size="Size.Small" Class="mud-text-secondary" />
+                        @foreach (var suggestion in _overview.Suggestions.Sense)
+                        {
+                            var text = suggestion;
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Disabled="_senseBusy"
+                                     OnClick="@(() => SenseSearchAsync(text))" Class="cc-suggestion">@text</MudChip>
+                        }
+                    </div>
+                }
+                @if (_error is not null)
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-2"
+                              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+                }
+                @if (_senseBusy)
+                {
+                    <MudProgressLinear Indeterminate="true" Class="my-2" />
+                }
+                <div style="overflow-y:auto; flex:1 1 0; min-height:0;" class="mt-2">
+                    @if (_senseResult is { } result)
+                    {
+                        @if (result.Hits.Count == 0)
+                        {
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary mt-3">Ничего близкого по смыслу в материалах не найдено.</MudText>
+                        }
+                        @foreach (var hit in result.Hits)
+                        {
+                            <div class="cc-hit">
+                                <div class="d-flex align-center gap-2 flex-wrap">
+                                    @if (hit.Source.Href is { } href)
+                                    {
+                                        <MudLink Href="@href" Typo="Typo.body2">@hit.Source.Label</MudLink>
+                                    }
+                                    else
+                                    {
+                                        <MudText Typo="Typo.body2">@hit.Source.Label</MudText>
+                                    }
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@hit.Source.Kind · близость @hit.Similarity.ToString("0.00", CultureInfo.GetCultureInfo("ru-RU"))</MudText>
+                                    @if (hit.Source.Classification > ClassificationLevels.Unclassified)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Class="ma-0">@ClassificationLevels.Label(hit.Source.Classification)</MudChip>
+                                    }
+                                </div>
+                                <MudText Typo="Typo.body2" Class="cc-hit-text">@hit.Text</MudText>
+                            </div>
+                        }
+                    }
+                </div>
+            }
+        </MudPaper>
+    </div>
+}
+
+<MudDialog @bind-Visible="_renameOpen" Options="DialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Название диалога</MudText></TitleContent>
+    <DialogContent>
+        <MudTextField T="string" @bind-Value="_renameTitle" Label="Название" Variant="Variant.Outlined" AutoFocus="true"
+                      MaxLength="@ChatLimits.MaxTitleLength" Immediate="true" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _renameOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@string.IsNullOrWhiteSpace(_renameTitle)" OnClick="RenameAsync">Сохранить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudDialog Visible="@(_deleteTarget is not null)" VisibleChanged="@((bool v) => { if (!v) { _deleteTarget = null; } })" Options="DialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Удалить диалог?</MudText></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2">
+            Диалог «@_deleteTarget?.Title» пропадёт из списка без восстановления. Записи о вопросах в журнале аудита останутся.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _deleteTarget = null)">Отмена</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Filled" OnClick="DeleteAsync">Удалить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private const string ModulePath = "./_content/ISC.AI.Modules.Chat.UI/js/chat.js";
+    private static readonly DialogOptions DialogOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true };
+
+    /// <summary>Область (ключ профиля, например <c>case:45</c>); <see langword="null"/> — область профиля по умолчанию.</summary>
+    [Parameter] public string? AreaKey { get; set; }
+
+    /// <summary>Высота чата (CSS): на странице — до низа окна, во вкладке — фиксированная.</summary>
+    [Parameter] public string Height { get; set; } = "640px";
+
+    // Сообщение ленты: текст ответа дописывается по мере прихода черновика.
+    private sealed class Message(ConversationMessageRole role, string text, bool grounded)
+    {
+        public ConversationMessageRole Role { get; } = role;
+
+        public string Text { get; set; } = text;
+
+        // Ответ по материалам: ссылки «[Фрагмент N]» в нём сверяются с источниками.
+        public bool Grounded { get; } = grounded;
+
+        public bool Pending { get; set; }
+
+        public IReadOnlyList<ChatSource> Sources { get; set; } = [];
+
+        public ChatCheck? Check { get; set; }
+    }
+
+    private readonly List<Message> _messages = [];
+    private ChatOverview? _overview;
+    private ChatPanelMode _mode;
+    private int? _conversationId;
+    private int _hidden;
+    private string _input = string.Empty;
+    private bool _busy;
+    private bool _noRight;
+    private string? _error;
+    private CancellationTokenSource? _cts;
+    private bool _scrollPending;
+    private bool _forceScroll;
+    private IJSObjectReference? _module;
+
+    private string _senseInput = string.Empty;
+    private bool _senseBusy;
+    private ChatSenseResult? _senseResult;
+
+    private bool _renameOpen;
+    private string? _renameTitle;
+    private int? _renameId;
+    private ConversationSummary? _deleteTarget;
+
+    private string FeedId => "chat-feed-" + (AreaKey ?? "default");
+
+    // Режимы, которые разрешил профиль: по материалам — всегда.
+    private List<ChatPanelMode> Modes
+    {
+        get
+        {
+            var modes = new List<ChatPanelMode>();
+            if (Settings.AllowFreeMode)
+            {
+                modes.Add(ChatPanelMode.Free);
+            }
+
+            modes.Add(ChatPanelMode.Grounded);
+            if (Settings.AllowSenseSearch)
+            {
+                modes.Add(ChatPanelMode.Sense);
+            }
+
+            return modes;
+        }
+    }
+
+    private IReadOnlyList<string> Suggestions => _overview is null
+        ? []
+        : _mode == ChatPanelMode.Free ? _overview.Suggestions.Free : _overview.Suggestions.Grounded;
+
+    private string EmptyTitle => _mode == ChatPanelMode.Free
+        ? "Свободный чат: пояснения, формулировки, черновики"
+        : "Задайте вопрос по материалам " + (_overview?.Area.Description ?? string.Empty);
+
+    private string FooterText => _mode == ChatPanelMode.Free
+        ? $"Свободный ответ не сверяется с материалами: для точного ответа со ссылками переключитесь на «{Settings.GroundedModeLabel}»."
+        : "Ответ — черновик локальной модели: ссылки проверяются по найденным фрагментам, сверяйте с источниками.";
+
+    protected override void OnInitialized() =>
+        _mode = Settings.AllowFreeMode && Settings.StartInFreeMode ? ChatPanelMode.Free : ChatPanelMode.Grounded;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // ТБ-030: на предрендере ничего не читается — открытие страницы не должно давать двойных записей.
+        if (RendererInfo.IsInteractive)
+        {
+            await LoadOverviewAsync();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_scrollPending || !RendererInfo.IsInteractive)
+        {
+            return;
+        }
+
+        var force = _forceScroll;
+        _scrollPending = false;
+        _forceScroll = false;
+        try
+        {
+            _module ??= await JS.InvokeAsync<IJSObjectReference>("import", ModulePath);
+            await _module.InvokeAsync<bool>("scrollToEnd", FeedId, force);
+        }
+        catch (JSException)
+        {
+            // Без прокрутки лента остаётся читаемой — листается вручную.
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit уже закрыт.
+        }
+    }
+
+    private async Task LoadOverviewAsync()
+    {
+        var response = await Dispatcher.Send(new GetChatOverviewQuery(AreaKey));
+        if (response is { Status: true, Data: { } overview })
+        {
+            _overview = overview;
+            return;
+        }
+
+        _noRight = response?.StatusMessage == ChatMessages.NoRight;
+        _error = response?.StatusMessage ?? ChatMessages.NotFound;
+    }
+
+    private void SetMode(ChatPanelMode mode)
+    {
+        _mode = mode;
+        _error = null;
+    }
+
+    private void NewChat()
+    {
+        _conversationId = null;
+        _messages.Clear();
+        _hidden = 0;
+        _error = null;
+    }
+
+    private async Task SelectAsync(int conversationId)
+    {
+        _error = null;
+        var response = await Dispatcher.Send(new GetChatConversationQuery(conversationId));
+        if (response is not { Status: true, Data: { } thread })
+        {
+            _error = response?.StatusMessage ?? ChatMessages.NotFound;
+            return;
+        }
+
+        _conversationId = thread.Id;
+        _hidden = thread.HiddenMessages;
+        _messages.Clear();
+        foreach (var row in thread.Messages)
+        {
+            _messages.Add(new Message(row.Role, row.Text, row.Check is not null || row.Sources.Count > 0)
+            {
+                Sources = row.Sources,
+                Check = row.Check,
+            });
+        }
+
+        // Из поиска по смыслу выбор диалога возвращает к ленте вопросов.
+        if (_mode == ChatPanelMode.Sense)
+        {
+            _mode = ChatPanelMode.Grounded;
+        }
+
+        _scrollPending = true;
+        _forceScroll = true;
+    }
+
+    // Подсказка — обычный вопрос: подставить и отправить.
+    private Task AskAsync(string question)
+    {
+        if (_busy)
+        {
+            return Task.CompletedTask;
+        }
+
+        _input = question;
+        return SendAsync();
+    }
+
+    private async Task SendAsync()
+    {
+        var text = (_input ?? string.Empty).Trim();
+        if (text.Length == 0 || _busy)
+        {
+            return;
+        }
+
+        var grounded = _mode != ChatPanelMode.Free;
+        _input = string.Empty;
+        _error = null;
+        _messages.Add(new Message(ConversationMessageRole.User, text, grounded));
+        var answer = new Message(ConversationMessageRole.Assistant, string.Empty, grounded) { Pending = true };
+        _messages.Add(answer);
+        _busy = true;
+        _scrollPending = true;
+        _forceScroll = true;
+        _cts?.Dispose();
+        _cts = new CancellationTokenSource();
+        try
+        {
+            var command = new SendChatMessageCommand(AreaKey, _conversationId, text, grounded ? ChatMode.Grounded : ChatMode.Free);
+            await foreach (var update in Dispatcher.CreateStream(command, _cts.Token))
+            {
+                if (update.Error is { } error)
+                {
+                    _error = error;
+                    break;
+                }
+
+                if (update.ConversationId is { } conversationId && _conversationId != conversationId)
+                {
+                    _conversationId = conversationId;
+                    await LoadOverviewAsync();
+                }
+
+                if (update.TextDelta is { } delta)
+                {
+                    answer.Text += delta;
+                    _scrollPending = true;
+                    StateHasChanged();
+                }
+
+                if (update.Final is { } final)
+                {
+                    answer.Text = final.Text;
+                    answer.Sources = final.Sources;
+                    answer.Check = final.Check;
+                    _scrollPending = true;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            _error = "Ответ остановлен. Вопрос сохранён в диалоге.";
+        }
+        catch (Exception)
+        {
+            // Подробности сбоя — в журнале сервера; сотруднику — понятный текст без внутренностей системы.
+            _error = "Не удалось получить ответ — попробуйте ещё раз.";
+        }
+        finally
+        {
+            answer.Pending = false;
+            if (answer.Text.Length == 0)
+            {
+                _messages.Remove(answer);
+            }
+
+            _busy = false;
+        }
+    }
+
+    private void Stop() => _cts?.Cancel();
+
+    private async Task OnSenseKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter" && !_senseBusy)
+        {
+            await SenseSearchAsync();
+        }
+    }
+
+    private Task SenseSearchAsync(string text)
+    {
+        _senseInput = text;
+        return SenseSearchAsync();
+    }
+
+    private async Task SenseSearchAsync()
+    {
+        var text = (_senseInput ?? string.Empty).Trim();
+        if (text.Length == 0 || _senseBusy)
+        {
+            return;
+        }
+
+        _senseBusy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new SearchChatMaterialsQuery(AreaKey, text));
+            if (response is { Status: true, Data: { } result })
+            {
+                _senseResult = result;
+            }
+            else
+            {
+                _error = response?.StatusMessage ?? ChatMessages.NotFound;
+            }
+        }
+        finally
+        {
+            _senseBusy = false;
+        }
+    }
+
+    private void OpenRename(ConversationSummary conversation)
+    {
+        _renameId = conversation.Id;
+        _renameTitle = conversation.Title;
+        _renameOpen = true;
+    }
+
+    private async Task RenameAsync()
+    {
+        _renameOpen = false;
+        if (_renameId is not { } id || string.IsNullOrWhiteSpace(_renameTitle))
+        {
+            return;
+        }
+
+        var response = await Dispatcher.Send(new RenameChatConversationCommand(id, _renameTitle));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        await LoadOverviewAsync();
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_deleteTarget is not { } target)
+        {
+            return;
+        }
+
+        _deleteTarget = null;
+        var response = await Dispatcher.Send(new DeleteChatConversationCommand(target.Id));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+
+        if (_conversationId == target.Id)
+        {
+            NewChat();
+        }
+
+        await LoadOverviewAsync();
+    }
+
+    private string ModeLabel(ChatPanelMode mode) => mode switch
+    {
+        ChatPanelMode.Free => "Свободный чат",
+        ChatPanelMode.Sense => "Найти по смыслу",
+        _ => Settings.GroundedModeLabel,
+    };
+
+    private static string ModeHint(ChatPanelMode mode) => mode switch
+    {
+        ChatPanelMode.Free => "Свободное общение и помощь — ответ общий, без поиска и проверки по материалам",
+        ChatPanelMode.Sense => "Показываются сами найденные фрагменты — без ответа модели",
+        _ => "Ответ строится только по найденным фрагментам материалов, со ссылками на источники",
+    };
+
+    private static string PendingText(Message message) => message.Text.Length > 0
+        ? message.Grounded ? "Черновик — ссылки ещё не проверены" : "Печатаю ответ…"
+        : message.Grounded ? "Ищу в материалах по допуску и формирую ответ…" : "Формирую ответ…";
+
+    private string ConversationStyle(ConversationSummary conversation) =>
+        _conversationId == conversation.Id
+            ? "border-color: var(--mud-palette-primary); border-left:3px solid var(--mud-palette-primary);"
+            : string.Empty;
+
+    private static string BubbleStyle(ConversationMessageRole role) =>
+        role == ConversationMessageRole.User
+            ? "max-width:78%; background: var(--mud-palette-primary); color: var(--mud-palette-primary-text);"
+            : "max-width:85%; background: var(--mud-palette-background-gray);";
+
+    private static string BlockClass(AnswerBlockKind kind) => kind switch
+    {
+        AnswerBlockKind.Bullet => "cc-li",
+        AnswerBlockKind.Heading => "cc-h",
+        _ => "cc-p",
+    };
+
+    private static ChatSource? Source(Message message, int number) =>
+        message.Sources.FirstOrDefault(s => s.Number == number);
+
+    public async ValueTask DisposeAsync()
+    {
+        // Уход со страницы освобождает слот сервера инференса (отмена потока).
+        if (_cts is not null)
+        {
+            await _cts.CancelAsync();
+            _cts.Dispose();
+        }
+
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit уже закрыт.
+            }
+        }
+    }
+}

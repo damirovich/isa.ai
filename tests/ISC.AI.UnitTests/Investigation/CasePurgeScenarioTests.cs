@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Audit;
+using ISC.AI.Abstractions.Conversations;
 using ISC.AI.Abstractions.Enums;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.Media.Domain.Model;
@@ -21,7 +22,8 @@ namespace ISC.AI.UnitTests.Investigation;
 
 /// <summary>
 /// Уничтожение дела целиком (ADR-0025): право только у Администратора, подтверждение номером, акт в
-/// журнале ДО удаления, общие носители не трогаются, документы сохраняются.
+/// журнале ДО удаления, общие носители не трогаются, документы сохраняются; тексты дела в корпусе (ADR-0051) и
+/// переписка чата по его материалам (ADR-0052) уходят вместе с делом.
 /// </summary>
 /// <remarks>
 /// Физическое удаление проверяется на настоящей базе в <c>CasePurgeTests</c>. Здесь — то, чего не видно
@@ -39,6 +41,8 @@ public sealed class CasePurgeScenarioTests
     private readonly ISubjectProvider _subject = Substitute.For<ISubjectProvider>();
     private readonly IAccessContextProvider _access = Substitute.For<IAccessContextProvider>();
     private readonly IMediaPurger _purger = Substitute.For<IMediaPurger>();
+    private readonly ICaseCorpusSync _corpus = Substitute.For<ICaseCorpusSync>();
+    private readonly IConversationStore _conversations = Substitute.For<IConversationStore>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly List<string> _calls = [];
 
@@ -67,15 +71,30 @@ public sealed class CasePurgeScenarioTests
             .AndDoes(_ => _calls.Add("searches"));
         _audit.When(a => a.WriteAsync(Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>()))
             .Do(_ => _calls.Add("act"));
+
+        // Тексты «Сведений дела» и сводок в корпусе и переписка чата — вне схемы профиля: число и уничтожение — у ядра.
+        _corpus.ListAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+            .Returns([new CaseCorpusRef(CaseCorpusKind.CaseCard, CaseId, CaseId, 801, "Сведения дела"),
+                new CaseCorpusRef(CaseCorpusKind.Report, 55, CaseId, 701, "Сводка")]);
+        _corpus.PurgeCaseAsync(CaseId, Arg.Any<int?>(), Arg.Any<CancellationToken>())
+            .Returns(2)
+            .AndDoes(_ => _calls.Add("corpus"));
+        _conversations.CountScopeAsync("case:7", Arg.Any<CancellationToken>()).Returns(3);
+        _conversations.PurgeScopeAsync("case:7", Arg.Any<CancellationToken>())
+            .Returns(3)
+            .AndDoes(_ => _calls.Add("chats"));
     }
 
-    [Fact(DisplayName = "ADR-0025: акт — первым; уничтожаются только носители этого дела, общий носитель остаётся; затем поиски и само дело")]
+    [Fact(DisplayName = "ADR-0025: акт — первым; уничтожаются только носители этого дела, общий носитель остаётся; затем поиски, тексты в корпусе, переписка чата и само дело")]
     public async Task Administrator_destroys_case_in_fail_closed_order()
     {
         var response = await SendAsync(Number, "Решение руководителя от 20.09.2026 № 17");
 
         response.Status.ShouldBeTrue();
-        _calls.ShouldBe(["act", "asset:11", "asset:12", "searches", "case"]);
+
+        // Тексты корпуса — до дела: их строки учёта уходят каскадом от дела, и после него тексты было бы не найти.
+        _calls.ShouldBe(["act", "asset:11", "asset:12", "searches", "corpus", "chats", "case"]);
+        await _corpus.Received(1).PurgeCaseAsync(CaseId, UserId, Arg.Any<CancellationToken>());
 
         // Общий носитель 13 — материал другого дела: уничтожать его нельзя ни при каких условиях.
         await _purger.DidNotReceive().PurgeAsync(13, Arg.Any<int?>(), Arg.Any<CancellationToken>());
@@ -109,18 +128,30 @@ public sealed class CasePurgeScenarioTests
             Arg.Any<CancellationToken>());
     }
 
-    [Fact(DisplayName = "ADR-0051: диалоги чата по документам дела названы в акте — они уходят вместе с делом")]
-    public async Task Act_names_case_chats()
+    [Fact(DisplayName = "ADR-0051/0052: тексты дела в корпусе и диалоги чата по его материалам названы в акте — числа даёт ядро, они уходят вместе с делом")]
+    public async Task Act_names_corpus_texts_and_chats()
     {
-        _cases.GetCompositionAsync(CaseId, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>())
-            .Returns(new CaseComposition(
-                CaseId, Number, Classification: 2, DivisionId: 5, ExclusiveAssetIds: [], SharedAssetIds: [],
-                Persons: 0, ReferencePhotos: 0, Appearances: 0, Authorizations: 0, DocumentLinks: 1, Chats: 3));
+        await SendAsync(Number, "Приказ № 3");
+
+        await _audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e =>
+                e.PayloadSensitive!.Contains("тексты сведений дела и сводок в корпусе поиска 2", StringComparison.Ordinal)
+                && e.PayloadSensitive.Contains("диалоги чата по материалам дела 3", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "Без текстов в корпусе и без диалогов в акте о них не пишется")]
+    public async Task Act_omits_empty_corpus_and_chats()
+    {
+        _corpus.ListAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>()).Returns([]);
+        _conversations.CountScopeAsync("case:7", Arg.Any<CancellationToken>()).Returns(0);
 
         await SendAsync(Number, "Приказ № 3");
 
         await _audit.Received(1).WriteAsync(
-            Arg.Is<AuditEntry>(e => e.PayloadSensitive!.Contains("диалоги чата по документам 3", StringComparison.Ordinal)),
+            Arg.Is<AuditEntry>(e =>
+                !e.PayloadSensitive!.Contains("корпусе поиска", StringComparison.Ordinal)
+                && !e.PayloadSensitive.Contains("диалоги чата", StringComparison.Ordinal)),
             Arg.Any<CancellationToken>());
     }
 
@@ -189,6 +220,8 @@ public sealed class CasePurgeScenarioTests
 
         await _purger.DidNotReceive().PurgeAsync(Arg.Any<int>(), Arg.Any<int?>(), Arg.Any<CancellationToken>());
         await _purger.DidNotReceive().PurgeCaseSearchesAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>());
+        await _corpus.DidNotReceive().PurgeCaseAsync(Arg.Any<int>(), Arg.Any<int?>(), Arg.Any<CancellationToken>());
+        await _conversations.DidNotReceive().PurgeScopeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
         await _cases.DidNotReceive().PurgeAsync(Arg.Any<int>(), Arg.Any<AccessContext>(), Arg.Any<CancellationToken>());
     }
 
@@ -204,7 +237,7 @@ public sealed class CasePurgeScenarioTests
 
     private async Task<ResponseDto<CasePurgeSummary>> SendAsync(string typedNumber, string reason)
     {
-        var handler = new PurgeCaseCommand.Handler(_cases, _roles, _subject, _access, _purger, _audit);
+        var handler = new PurgeCaseCommand.Handler(_cases, _roles, _subject, _access, _purger, _corpus, _conversations, _audit);
         return await handler.Handle(new PurgeCaseCommand(CaseId, typedNumber, reason), CancellationToken.None);
     }
 }

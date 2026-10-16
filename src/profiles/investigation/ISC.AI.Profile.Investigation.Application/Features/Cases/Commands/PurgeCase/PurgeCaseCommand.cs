@@ -3,9 +3,11 @@ using System.Text;
 using FluentValidation;
 using ISC.AI.Abstractions.Application;
 using ISC.AI.Abstractions.Audit;
+using ISC.AI.Abstractions.Conversations;
 using ISC.AI.Abstractions.Enums;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.Media.Domain.Services;
+using ISC.AI.Profile.Investigation.Application.Features.CaseChat;
 using ISC.AI.Profile.Investigation.Application.Features.Common;
 using ISC.AI.Profile.Investigation.Domain.Enums;
 using ISC.AI.Profile.Investigation.Domain.Services;
@@ -22,7 +24,8 @@ namespace ISC.AI.Profile.Investigation.Application.Features.Cases;
 /// <remarks>
 /// ЧТО УНИЧТОЖАЕТСЯ: носители, привязанные ТОЛЬКО к этому делу, со всеми производными (кадры, лица,
 /// шаблоны, вырезки, файлы); история поисков дела (сессии, кандидат-листы, решения верификации, вырезки
-/// проб); фигуранты, эталоны, появления, основания поиска, акт закрытия, само дело.
+/// проб); фигуранты, эталоны, появления, основания поиска, акт закрытия, само дело; тексты «Сведений дела» и
+/// сводок в корпусе ядра (ADR-0051) и переписка чата по делу и по всем делам, опиравшаяся на его материалы (ADR-0052).
 ///
 /// ЧТО ОСТАЁТСЯ — и почему:
 /// <list type="bullet">
@@ -45,7 +48,9 @@ namespace ISC.AI.Profile.Investigation.Application.Features.Cases;
 /// акт (решение заказчика — без отдельного .docx), и он переживает само дело.
 ///
 /// ПОРЯДОК — FAIL-CLOSED: запись-акт → носители (каждый — со своей записью, ТБ-064) → история поисков
-/// (со своей записью) → дело в схеме профиля. Недоступен журнал — не удалено ничего. Сбой посередине
+/// (со своей записью) → тексты дела в корпусе (каждый — своим актом ядра) → переписка чата → дело в схеме профиля.
+/// Тексты корпуса — ДО дела: их строки учёта уходят каскадом от дела, и после него тексты было бы уже не найти.
+/// Недоступен журнал — не удалено ничего. Сбой посередине
 /// оставляет дело с частью материалов; повтор безопасен — каждый шаг идемпотентен, а журнал покажет
 /// обе попытки.
 ///
@@ -62,6 +67,8 @@ public sealed record PurgeCaseCommand(int CaseId, string ConfirmationNumber, str
         ISubjectProvider subjectProvider,
         IAccessContextProvider accessProvider,
         IMediaPurger purger,
+        ICaseCorpusSync corpus,
+        IConversationStore conversations,
         IAuditWriter auditWriter)
         : IRequestHandler<PurgeCaseCommand, ResponseDto<CasePurgeSummary>>
     {
@@ -96,6 +103,14 @@ public sealed record PurgeCaseCommand(int CaseId, string ConfirmationNumber, str
                 return ResponseDto<CasePurgeSummary>.BadRequest(NumberMismatch);
             }
 
+            // Переписка чата и тексты в корпусе — не в схеме профиля: их число в акт даёт ядро (ADR-0051/0052).
+            var chatScope = CaseChatAreas.KeyOf(command.CaseId);
+            composition = composition with
+            {
+                Chats = await conversations.CountScopeAsync(chatScope, cancellationToken),
+                CorpusTexts = (await corpus.ListAsync([command.CaseId], cancellationToken)).Count,
+            };
+
             var subjectId = access.NumericSubjectId;
             var reason = $"уничтожение дела №{composition.Number}: {command.Reason.Trim()}";
 
@@ -120,6 +135,11 @@ public sealed record PurgeCaseCommand(int CaseId, string ConfirmationNumber, str
             }
 
             var searches = await purger.PurgeCaseSearchesAsync(command.CaseId, reason, subjectId, cancellationToken);
+
+            // Тексты «Сведений дела» и сводок в корпусе (каждый — своим актом Purge ядра, ТБ-064) и переписка чата: и по
+            // делу, и по всем делам, где ответ опирался на его материалы, — включая скрытые сотрудником диалоги.
+            await corpus.PurgeCaseAsync(command.CaseId, subjectId, cancellationToken);
+            await conversations.PurgeScopeAsync(chatScope, cancellationToken);
 
             var result = await cases.PurgeAsync(command.CaseId, access, cancellationToken);
             if (result != CaseWriteResult.Ok)
@@ -160,10 +180,16 @@ public sealed record PurgeCaseCommand(int CaseId, string ConfirmationNumber, str
               .Append(", эталоны ").Append(c.ReferencePhotos.ToString(inv))
               .Append(", появления ").Append(c.Appearances.ToString(inv))
               .Append(", основания поиска ").Append(c.Authorizations.ToString(inv));
+            if (c.CorpusTexts > 0)
+            {
+                // Тексты дела для поиска и чата (ADR-0051) — копии его материалов: уходят вместе с ним.
+                sb.Append(", тексты сведений дела и сводок в корпусе поиска ").Append(c.CorpusTexts.ToString(inv));
+            }
+
             if (c.Chats > 0)
             {
-                // Переписка чата по документам дела (ADR-0051) — материал дела: уходит вместе с ним.
-                sb.Append(", диалоги чата по документам ").Append(c.Chats.ToString(inv));
+                // Переписка чата по материалам дела (ADR-0052) — материал дела: уходит вместе с ним.
+                sb.Append(", диалоги чата по материалам дела ").Append(c.Chats.ToString(inv));
             }
 
             sb.AppendLine("; запись дела.");

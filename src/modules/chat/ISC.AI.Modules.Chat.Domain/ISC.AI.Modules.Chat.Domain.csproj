@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Домен пакета модулей «Чат» (ADR-0052): ПОРТ IChatProfile, который пакет объявляет, но закрыть не может, —
+       где спрашивать, что видно сотруднику и как подписать источник, знает только профиль. Диалоги живут в схеме
+       core и берутся портом ядра IConversationStore, поэтому своего слоя данных у пакета НЕТ. Зависит только от
+       Abstractions. -->
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\core\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>
