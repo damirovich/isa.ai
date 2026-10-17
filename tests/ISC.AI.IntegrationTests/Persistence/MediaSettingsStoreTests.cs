@@ -33,14 +33,14 @@ public sealed class MediaSettingsStoreTests : IAsyncLifetime
 
     public Task DisposeAsync() => _postgres.DisposeAsync().AsTask();
 
-    [Fact(DisplayName = "Пустая таблица и пустая конфигурация — умолчания поставки: один оператор, 85 % и 70 %, «не менялись»")]
+    [Fact(DisplayName = "Пустая таблица и пустая конфигурация — умолчания поставки: один оператор, 70 %, без нижней границы, «не менялись»")]
     public async Task Empty_table_gives_defaults()
     {
         var settings = await Store().GetAsync();
 
         settings.Mode.ShouldBe(ConfirmationMode.SingleOperator);
-        settings.ThresholdPercent.ShouldBe(85);
-        settings.MinThresholdPercent.ShouldBe(70);
+        settings.ThresholdPercent.ShouldBe(70);
+        settings.MinThresholdPercent.ShouldBe(1);
         settings.UpdatedAtUtc.ShouldBeNull();
     }
 
@@ -81,7 +81,7 @@ public sealed class MediaSettingsStoreTests : IAsyncLifetime
     public async Task Invalid_values_are_not_saved()
     {
         var store = Store();
-        (await store.SaveAsync(ConfirmationMode.SingleOperator, 100, 70, 1)).ShouldNotBeNull().ShouldContain("от 40 до 99 %");
+        (await store.SaveAsync(ConfirmationMode.SingleOperator, 100, 70, 1)).ShouldNotBeNull().ShouldContain("от 1 до 99 %");
         (await store.SaveAsync(ConfirmationMode.SingleOperator, 70, 85, 1)).ShouldNotBeNull().ShouldContain("ниже нижней границы");
 
         await using var db = _media.CreateDbContext();

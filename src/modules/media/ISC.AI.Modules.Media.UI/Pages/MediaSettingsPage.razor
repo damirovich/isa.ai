@@ -68,8 +68,8 @@ else
     <MudPaper Outlined="true" Class="pa-4 my-4" Style="max-width:720px;">
         <MudText Typo="Typo.subtitle1" Class="mb-1">Порог схожести</MudText>
         <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">
-            С рабочим порогом открывается поиск по лицу; ниже нижней границы оператор порог не опустит. Кандидаты ниже порога
-            не показываются.
+            С рабочим порогом открывается поиск по лицу; оператор может выбрать любой порог от 1 до 100 %. Нижняя граница —
+            по желанию: 1 % — без ограничения, выше — оператор не опустит порог ниже неё. Кандидаты ниже порога не показываются.
         </MudText>
         <div class="d-flex gap-3 flex-wrap">
             <MudNumericField T="int" @bind-Value="_threshold" Label="Рабочий порог, %" Variant="Variant.Outlined"
@@ -77,7 +77,7 @@ else
                              Disabled="@(!view.CanManage || _busy)" HelperText="@($"от {MediaSettings.MinPercent} до {MediaSettings.MaxPercent}")" />
             <MudNumericField T="int" @bind-Value="_minThreshold" Label="Нижняя граница, %" Variant="Variant.Outlined"
                              Min="@MediaSettings.MinPercent" Max="@MediaSettings.MaxPercent" Style="max-width:200px;"
-                             Disabled="@(!view.CanManage || _busy)" HelperText="не выше рабочего порога" />
+                             Disabled="@(!view.CanManage || _busy)" HelperText="1 % — без ограничения; не выше рабочего" />
         </div>
         @if (ValidationError is { } validation)
         {
@@ -93,7 +93,7 @@ else
         <MudText Typo="Typo.caption" Class="mud-text-secondary">
             @(view.UpdatedAtUtc is { } at
                 ? $"Последнее изменение: {at.ToLocalTime():dd.MM.yyyy HH:mm}, пользователь № {view.UpdatedByUserId}"
-                : "Не менялись: действуют значения поставки (один оператор, 85 % и 70 %) или конфигурации.")
+                : "Не менялись: действуют значения поставки (один оператор, рабочий порог 70 %, без нижней границы) или конфигурации.")
         </MudText>
         @if (view.CanManage)
         {

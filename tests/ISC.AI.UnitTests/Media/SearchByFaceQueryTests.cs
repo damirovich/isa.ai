@@ -152,6 +152,7 @@ public sealed class SearchByFaceQueryTests
     [Fact(DisplayName = "ТФ-ПЛ-08: без порога оператора — рабочий порог Администратора; порог в процентах — в журнале поиска")]
     public async Task Working_threshold_applies_by_default_and_is_audited()
     {
+        _settings = MediaTestSettings.Store(thresholdPercent: 85, minThresholdPercent: 70);
         var response = await HandleAsync(new SearchByFaceQuery(3, 9, ProbeImage: Probe));
 
         var expected = new MediaSearchOptions().MaxCosineDistanceFor(85);
@@ -165,9 +166,10 @@ public sealed class SearchByFaceQueryTests
             Arg.Any<CancellationToken>());
     }
 
-    [Fact(DisplayName = "ТФ-ПЛ-08: порог ниже нижней границы сервер поднимает до границы и пишет запрошенный в журнал")]
+    [Fact(DisplayName = "ТФ-ПЛ-08: порог ниже нижней границы, поднятой Администратором, сервер поднимает до границы и пишет запрошенный в журнал")]
     public async Task Threshold_below_bound_is_raised_on_server()
     {
+        _settings = MediaTestSettings.Store(thresholdPercent: 85, minThresholdPercent: 70);
         var response = await HandleAsync(new SearchByFaceQuery(3, 9, ProbeImage: Probe, MinSimilarityPercent: 50));
 
         response.Data!.MaxCosineDistance.ShouldBe(new MediaSearchOptions().MaxCosineDistanceFor(70));
@@ -179,6 +181,21 @@ public sealed class SearchByFaceQueryTests
         // Выше границы — как задал оператор.
         (await HandleAsync(new SearchByFaceQuery(3, 9, ProbeImage: Probe, MinSimilarityPercent: 92))).Data!.MaxCosineDistance
             .ShouldBe(new MediaSearchOptions().MaxCosineDistanceFor(92));
+    }
+
+    [Fact(DisplayName = "Решение Заказчика 17.10.2026: по умолчанию границы нет — поиск идёт по выбранному оператором порогу, и 30 % тоже; рабочий — 70 %")]
+    public async Task Default_settings_let_operator_search_by_any_threshold()
+    {
+        var low = await HandleAsync(new SearchByFaceQuery(3, 9, ProbeImage: Probe, MinSimilarityPercent: 30));
+        low.Data!.MaxCosineDistance.ShouldBe(new MediaSearchOptions().MaxCosineDistanceFor(30));
+        new MediaSearchOptions().MaxCosineDistanceFor(30).ShouldBe(1 - 0.363 * 30 / 70, 1e-9); // предел эксплуатанта не мешает
+        await _audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.Action == AuditAction.Search && e.PayloadSensitive!.Contains("порог=30 %")
+                && !e.PayloadSensitive.Contains("поднято")),
+            Arg.Any<CancellationToken>());
+
+        (await HandleAsync(new SearchByFaceQuery(3, 9, ProbeImage: Probe))).Data!.MaxCosineDistance
+            .ShouldBe(new MediaSearchOptions().MaxCosineDistanceFor(70));
     }
 
     [Fact(DisplayName = "Валидатор: порог оператора — от 1 до 100 %")]

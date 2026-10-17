@@ -173,10 +173,11 @@ public sealed class PersonSuggesterTests
         {
             [MediaSearchOptions.AutoSuggestEnabledKey] = "false",
             [MediaSearchOptions.AutoSuggestMaxCosineDistanceKey] = "0.95",
+            [MediaSearchOptions.MaxAllowedCosineDistanceKey] = "0.8",
             [MediaSearchOptions.AutoSuggestCandidatesPerReferenceKey] = "500",
         }).Build());
         read.AutoSuggestEnabled.ShouldBeFalse();
-        read.AutoSuggestMaxCosineDistance.ShouldBe(MediaSearchOptions.DefaultMaxAllowedCosineDistance);
+        read.AutoSuggestMaxCosineDistance.ShouldBe(0.8); // не дальше предела эксплуатанта
         read.AutoSuggestCandidatesPerReference.ShouldBe(MediaSearchOptions.DefaultMaxCandidateListSize);
 
         MediaSearchOptions.Read(new ConfigurationBuilder().Build()).AutoSuggestEnabled.ShouldBeTrue();

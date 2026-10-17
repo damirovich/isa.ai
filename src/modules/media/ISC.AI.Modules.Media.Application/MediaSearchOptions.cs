@@ -97,8 +97,11 @@ public sealed record MediaSearchOptions(
     /// <summary>ТН-008: верхняя граница.</summary>
     public const int DefaultMaxCandidateListSize = 50;
 
-    /// <summary>Предел ослабления порога по умолчанию (косинусное расстояние 0,8 ≈ схожесть 0,2).</summary>
-    public const double DefaultMaxAllowedCosineDistance = 0.8;
+    /// <summary>
+    /// Предел ослабления порога по умолчанию — косинусное расстояние 1,0 (схожесть 0): оператор ищет на всей шкале
+    /// 1–100 % (решение Заказчика от 17.10.2026, ADR-0054 v0.2). Эксплуатант может ужесточить его в конфигурации.
+    /// </summary>
+    public const double DefaultMaxAllowedCosineDistance = 1.0;
 
     /// <summary>Копия пробы в аудите — до 4 МБ.</summary>
     public const long DefaultProbeCopyMaxBytes = 4L * 1024 * 1024;
