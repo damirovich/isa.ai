@@ -24,7 +24,7 @@
     </div>
 </div>
 
-<MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="my-3">
+<MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="my-3">
     Результат — кандидат-лист. @MediaLabels.ConfirmationRule(_settings?.Mode)
     Балл схожести — вероятностная оценка модели, не установление личности (ТЭ-006).
 </MudAlert>
@@ -36,20 +36,24 @@
 }
 
 <MudPaper Outlined="true" Class="pa-4 my-3">
-    <MudGrid Spacing="2">
-        <MudItem xs="12" sm="6">
+    @* Форма читается сверху вниз: дело и основание → где искать и порог (две карточки одной высоты) → проба →
+       строка действия со сводкой того, что уйдёт в поиск. Тексты ТБ/ТФ — в комментариях, на экране — только смысл. *@
+    <MudGrid Spacing="3">
+        <MudItem xs="12" md="6">
             <MudSelect T="int?" Value="_caseId" ValueChanged="OnCaseChangedAsync" Label="Дело *" Variant="Variant.Outlined"
-                       Placeholder="Выберите дело" Dense="true" Disabled="_busy">
+                       Placeholder="Выберите дело" Dense="true" Disabled="_busy" AdornmentIcon="@Icons.Material.Outlined.FolderOpen"
+                       Adornment="Adornment.Start">
                 @foreach (var c in _cases)
                 {
                     <MudSelectItem T="int?" Value="@c.CaseId">№ @c.Number · @c.Title</MudSelectItem>
                 }
             </MudSelect>
         </MudItem>
-        <MudItem xs="12" sm="6">
+        <MudItem xs="12" md="6">
             @* Основание — ОБЯЗАТЕЛЬНО (ТБ-071): фиксируется в сессии и аудите. *@
             <MudSelect T="int?" @bind-Value="_authorizationId" Label="Основание поиска *" Variant="Variant.Outlined"
-                       Placeholder="Выберите основание" Dense="true" Disabled="@(_busy || _caseId is null)">
+                       Placeholder="Выберите основание" Dense="true" Disabled="@(_busy || _caseId is null)"
+                       AdornmentIcon="@Icons.Material.Outlined.Gavel" Adornment="Adornment.Start">
                 @foreach (var a in _authorizations)
                 {
                     <MudSelectItem T="int?" Value="@a.AuthorizationId">@a.Reference</MudSelectItem>
@@ -62,182 +66,228 @@
                 </MudText>
             }
         </MudItem>
-        <MudItem xs="12" sm="6">
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">Область поиска (ТФ-ПЛ-05)</MudText>
-            <MudRadioGroup T="SearchScopeKind" @bind-Value="_scope">
-                <MudRadio T="SearchScopeKind" Value="SearchScopeKind.CurrentCase" Dense="true">текущее дело</MudRadio>
-                <MudRadio T="SearchScopeKind" Value="SearchScopeKind.SelectedCases" Dense="true">выбранные дела</MudRadio>
-                <MudRadio T="SearchScopeKind" Value="SearchScopeKind.AllAccessibleCases" Dense="true">все дела в пределах допуска</MudRadio>
-            </MudRadioGroup>
-            @if (_scope == SearchScopeKind.AllAccessibleCases)
-            {
-                @* Взаимный поиск (ТБ-071, ТФ-ПЛ-05, ADR-0044): дела и других сотрудников — в пределах грифа и подразделений
-                   допуска; дела ОТМ без допуска к ним сюда не попадают. *@
-                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
-                    Все дела в пределах вашего допуска, включая дела других сотрудников (взаимный поиск ОН и ОУ). Материал
-                    найденного кандидата из чужого дела можно открыть на просмотр; карточка того дела не открывается.
-                </MudText>
-            }
-            @if (_scope == SearchScopeKind.SelectedCases)
-            {
-                <MudSelect T="int" MultiSelection="true" @bind-SelectedValues="_selectedCaseIds" Label="Дела" Variant="Variant.Outlined"
-                           Dense="true" Disabled="_busy" MultiSelectionTextFunc="@SelectedCasesSummary">
-                    @foreach (var c in _cases)
-                    {
-                        <MudSelectItem T="int" Value="@c.CaseId">
-                            № @c.Number · @c.Title@(c.IsClosed ? " (закрыто)" : string.Empty)
-                        </MudSelectItem>
-                    }
-                </MudSelect>
-            }
 
-            @* Закрытые дела — расширение области, и включает его человек (ТФ-ПЛ-05, ТБ-072). Своё текущее
-               дело искать можно всегда, даже закрытое, поэтому галочка нужна только для остальных. *@
-            @if (_scope != SearchScopeKind.CurrentCase)
-            {
-                <MudCheckBox T="bool" @bind-Value="_includeClosedCases" Dense="true" Disabled="_busy">
-                    искать и по закрытым делам
-                </MudCheckBox>
-                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
-                    По умолчанию оконченные дела в поиск не попадают. Включите, если проверяете, не проходил
-                    ли человек по прежним делам: включение попадёт в журнал вместе с областью поиска.
-                </MudText>
-            }
-        </MudItem>
-        <MudItem xs="12" sm="6">
-            <div class="d-flex gap-3 flex-wrap">
-                <MudNumericField T="int" @bind-Value="_topK" Label="Кандидатов (5..50)" Variant="Variant.Outlined" Min="5" Max="50"
-                                 Margin="Margin.Dense" Style="max-width:180px;" Disabled="_busy" />
-                @* Порог — ползунком в процентах шкалы (ТФ-ПЛ-08, ADR-0054): от нижней границы до 99 %; в расстояние
-                   переводит сервер той же шкалой и сам не пускает ниже границы. Предустановки — ТФ-ПЛ-06. *@
-                <div style="flex:1 1 260px;min-width:240px;">
-                    <MudText Typo="Typo.body2">Схожесть не ниже: <b>@_threshold %</b></MudText>
-                    <MudSlider T="int" Min="@MinThreshold" Max="@MediaSettings.MaxPercent" Step="1" @bind-Value="_threshold"
-                               Disabled="_busy" Color="Color.Primary" aria-label="Порог схожести, %" />
-                    <div class="d-flex gap-1 flex-wrap">
-                        <MudButton Size="Size.Small" Variant="@PresetVariant(MinThreshold)" Disabled="_busy"
-                                   OnClick="@(() => _threshold = MinThreshold)">низкий · @MinThreshold %</MudButton>
-                        <MudButton Size="Size.Small" Variant="@PresetVariant(WorkingThreshold)" Disabled="_busy"
-                                   OnClick="@(() => _threshold = WorkingThreshold)">средний · @WorkingThreshold %</MudButton>
-                        <MudButton Size="Size.Small" Variant="@PresetVariant(HighThreshold)" Disabled="_busy"
-                                   OnClick="@(() => _threshold = HighThreshold)">высокий · @HighThreshold %</MudButton>
+        @* Где искать (ТФ-ПЛ-05): варианты — столбиком, пояснение — к выбранному варианту, а не ко всем сразу. *@
+        <MudItem xs="12" md="5">
+            <MudPaper Outlined="true" Class="pa-3" Style="height:100%;">
+                @SectionTitle(Icons.Material.Outlined.TravelExplore, "Где искать")
+                <MudRadioGroup T="SearchScopeKind" @bind-Value="_scope">
+                    <div class="d-flex flex-column">
+                        <MudRadio T="SearchScopeKind" Value="SearchScopeKind.CurrentCase" Dense="true" Disabled="_busy">Текущее дело</MudRadio>
+                        <MudRadio T="SearchScopeKind" Value="SearchScopeKind.SelectedCases" Dense="true" Disabled="_busy">Выбранные дела</MudRadio>
+                        <MudRadio T="SearchScopeKind" Value="SearchScopeKind.AllAccessibleCases" Dense="true" Disabled="_busy">Все дела в пределах допуска</MudRadio>
                     </div>
-                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">@ThresholdHelp</MudText>
+                </MudRadioGroup>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">@ScopeHint</MudText>
+                @if (_scope == SearchScopeKind.SelectedCases)
+                {
+                    <MudSelect T="int" MultiSelection="true" @bind-SelectedValues="_selectedCaseIds" Label="Дела" Variant="Variant.Outlined"
+                               Dense="true" Disabled="_busy" MultiSelectionTextFunc="@SelectedCasesSummary" Class="mt-2">
+                        @foreach (var c in _cases)
+                        {
+                            <MudSelectItem T="int" Value="@c.CaseId">
+                                № @c.Number · @c.Title@(c.IsClosed ? " (закрыто)" : string.Empty)
+                            </MudSelectItem>
+                        }
+                    </MudSelect>
+                }
+
+                @* Закрытые дела — расширение области, и включает его человек (ТФ-ПЛ-05, ТБ-072). Своё текущее
+                   дело искать можно всегда, даже закрытое, поэтому галочка нужна только для остальных. *@
+                @if (_scope != SearchScopeKind.CurrentCase)
+                {
+                    <MudCheckBox T="bool" @bind-Value="_includeClosedCases" Dense="true" Disabled="_busy" Class="mt-1">
+                        Искать и по закрытым делам
+                    </MudCheckBox>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                        Например, чтобы проверить, не проходил ли человек по прежним делам. Включение попадёт в журнал.
+                    </MudText>
+                }
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="7">
+            @* Порог и выдача одним блоком: порог — ползунком в процентах шкалы (ТФ-ПЛ-08, ADR-0054) от нижней границы до
+               99 %, в расстояние переводит сервер той же шкалой и сам не пускает ниже границы; предустановки — ТФ-ПЛ-06;
+               длина кандидат-листа — ТН-008. Длинное пояснение про шкалу и границы — в подсказке, на виду только главное. *@
+            <MudPaper Outlined="true" Class="pa-3" Style="height:100%;">
+                <div class="d-flex align-start justify-space-between gap-2">
+                    <div>
+                        @SectionTitle(Icons.Material.Outlined.Tune, "Схожесть не ниже")
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block" Style="margin-top:-4px;">
+                            Кандидаты ниже порога не показываются
+                        </MudText>
+                    </div>
+                    <div class="d-flex align-center gap-1">
+                        <MudText Typo="Typo.h4" Color="Color.Primary" Style="font-weight:500;line-height:1;" aria-live="polite">@_threshold %</MudText>
+                        <MudTooltip Text="@ThresholdHelp" Arrow="true" Placement="Placement.Left">
+                            <MudIcon Icon="@Icons.Material.Outlined.Info" Size="Size.Small" Class="mud-text-secondary" />
+                        </MudTooltip>
+                    </div>
                 </div>
-            </div>
+                <MudSlider T="int" Min="@MinThreshold" Max="@MediaSettings.MaxPercent" Step="1" @bind-Value="_threshold"
+                           Disabled="_busy" Color="Color.Primary" Class="mt-3" aria-label="Порог схожести, %" />
+                <div class="d-flex justify-space-between">
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@MinThreshold % · нижняя граница</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@MediaSettings.MaxPercent %</MudText>
+                </div>
+                <MudDivider Class="my-3" />
+                <div class="d-flex align-center justify-space-between flex-wrap gap-3">
+                    <div>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-1">Предустановки</MudText>
+                        <MudToggleGroup T="int" Value="_threshold" ValueChanged="@(value => _threshold = value)" Color="Color.Primary"
+                                        Size="Size.Small" CheckMark="false" Disabled="_busy">
+                            @foreach (var preset in Presets)
+                            {
+                                <MudToggleItem T="int" Value="@preset.Percent" Text="@($"{preset.Label} · {preset.Percent} %")" />
+                            }
+                        </MudToggleGroup>
+                    </div>
+                    <MudNumericField T="int" @bind-Value="_topK" Label="Кандидатов в выдаче" Variant="Variant.Outlined" Min="5" Max="50"
+                                     Margin="Margin.Dense" Style="max-width:170px;" Disabled="_busy" HelperText="от 5 до 50" />
+                </div>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12">
+            <MudPaper Outlined="true" Class="pa-3">
+                <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+                    @SectionTitle(Icons.Material.Outlined.Face, "Проба")
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        Изображение с лицом до @MediaLabels.FormatSize(SearchByFaceValidator.MaxProbeBytes) · в базу шаблонов не попадает,
+                        копия — только в журнале поиска
+                    </MudText>
+                </div>
+                @if (_references.Count > 0 || _referencesMissing > 0)
+                {
+                    @* Пробы — эталоны фигуранта (ТФ-ПЕР-03, ADR-0046): поиск по всем сразу, кандидаты сводятся по лицу. Непригодный
+                       эталон (ТО-мат-07) показан, но в поиск не идёт; эталон вне допуска — только счётчиком (ТБ-020/021). *@
+                    <div class="d-flex align-center gap-4 flex-wrap">
+                        @foreach (var reference in _references)
+                        {
+                            var face = reference;
+                            <FaceCropTile Url="@(face.CropStoredFileName is { } crop ? MediaFileUrl.FaceCrop(face.AssetId, crop) : null)"
+                                          Size="96" Caption="@($"эталон — лицо № {face.Id} · качество {face.QualityScore:0.00}")"
+                                          Unusable="@(!face.QualityAcceptable)" UnusableReason="@face.QualityReason">
+                                <MudLink Href="@($"/media/assets/{face.AssetId}?face={face.Id}")" Typo="Typo.caption">открыть носитель</MudLink>
+                            </FaceCropTile>
+                        }
+                        <div>
+                            <MudText Typo="Typo.body1">Поиск по всем эталонам фигуранта: @UsableReferences.Count из @(_references.Count + _referencesMissing)</MudText>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                                Кандидаты сводятся по лицу: лучшее совпадение, эталон, по которому оно найдено, и у скольких эталонов схожесть
+                                в пределах порога. Сами эталоны в кандидаты не попадают.
+                            </MudText>
+                            @if (_referencesMissing > 0)
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block">Недоступно эталонов: @_referencesMissing (нет либо вне вашего допуска).</MudText>
+                            }
+                            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Close" OnClick="ClearProbe"
+                                       Disabled="_busy" Class="mt-1">Сбросить пробу</MudButton>
+                        </div>
+                    </div>
+                }
+                else if (_probeFace is { } probeFace)
+                {
+                    @* Проба — лицо уже проиндексированного носителя (ТФ-ПЛ-03): вектор берётся из базы, изображение не грузится. *@
+                    <div class="d-flex align-center gap-4 flex-wrap">
+                        <FaceCropTile Url="@(probeFace.CropStoredFileName is { } crop ? MediaFileUrl.FaceCrop(probeFace.AssetId, crop) : null)"
+                                      Size="128" Caption="@($"лицо № {probeFace.Id} носителя № {probeFace.AssetId} · качество {probeFace.QualityScore:0.00}")"
+                                      Unusable="@(!probeFace.QualityAcceptable)" UnusableReason="@probeFace.QualityReason">
+                            <MudLink Href="@($"/media/assets/{probeFace.AssetId}?face={probeFace.Id}")" Typo="Typo.caption">открыть носитель</MudLink>
+                        </FaceCropTile>
+                        <div>
+                            @if (!probeFace.QualityAcceptable)
+                            {
+                                @* ТО-мат-07: шаблон для непригодного лица не строился — искать по нему нечем; это НЕ отказ по допуску. *@
+                                <MudText Typo="Typo.body2" Color="Color.Warning">
+                                    Лицо непригодно для поиска (ТО-мат-07)@(string.IsNullOrWhiteSpace(probeFace.QualityReason) ? string.Empty : $": {probeFace.QualityReason}").
+                                </MudText>
+                            }
+                            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Close" OnClick="ClearProbe"
+                                       Disabled="_busy">Сбросить пробу</MudButton>
+                        </div>
+                    </div>
+                }
+                else if (_probeFaceId is { } missingFaceId)
+                {
+                    <div class="d-flex align-center gap-3 flex-wrap">
+                        <MudText Typo="Typo.body2" Color="Color.Warning">Лицо № @missingFaceId недоступно: его нет либо оно вне вашего допуска.</MudText>
+                        <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="ClearProbe" Disabled="_busy">Сбросить пробу</MudButton>
+                    </div>
+                }
+                else if (_probeBytes is { } bytes)
+                {
+                    @* Оператор обязан видеть, ПО КАКОМУ снимку идёт поиск (ТЭ-005/007): миниатюру делает сам браузер
+                       (RequestImageFileAsync), поиск при этом идёт по ИСХОДНОМУ файлу — уменьшенная копия только для показа. *@
+                    <div class="d-flex align-center gap-4 flex-wrap">
+                        @if (_probePreview is { } preview)
+                        {
+                            <MudPaper Outlined="true" Class="pa-1" Style="line-height:0;">
+                                <img src="@preview" alt="пробное изображение" title="@_probeFileName"
+                                     style="width:132px;height:132px;object-fit:contain;display:block;background:#0b1220;border-radius:2px;" />
+                            </MudPaper>
+                        }
+                        <div style="min-width:0;">
+                            <div class="d-flex align-center gap-2">
+                                <MudIcon Icon="@Icons.Material.Outlined.Image" Size="Size.Small" Class="mud-text-secondary" />
+                                <MudText Typo="Typo.body1" Style="word-break:break-all;">@_probeFileName</MudText>
+                            </div>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                                @MediaLabels.FormatSize(bytes.LongLength)@(_probePreview is not null ? " · показан уменьшенный вид, поиск — по исходному файлу без обработки" : string.Empty)
+                            </MudText>
+                            <div class="d-flex align-center gap-2 mt-2 flex-wrap">
+                                @ProbeUpload("Заменить…", Variant.Outlined)
+                                <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Close" OnClick="ClearProbe"
+                                           Disabled="_busy">Убрать</MudButton>
+                            </div>
+                            @if (_result is { DetectedFaces: > 1 })
+                            {
+                                @* Индекс — порядок выдачи детектора (после NMS — по убыванию уверенности), НЕ по размеру; «самое крупное» — только при пустом поле. *@
+                                <MudNumericField T="int?" @bind-Value="_probeFaceIndex" Label="Номер лица на пробе" Variant="Variant.Outlined" Min="0"
+                                                 Margin="Margin.Dense" Style="max-width:260px;" Disabled="_busy" Clearable="true" Class="mt-2"
+                                                 HelperText="номер лица в порядке выдачи детектора (0 — первое); пусто — самое крупное" />
+                            }
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    @* Пустая проба — заметная область выбора, а не одинокая кнопка. *@
+                    <div class="d-flex align-center gap-4 flex-wrap pa-4"
+                         style="border:1px dashed var(--mud-palette-lines-inputs);border-radius:var(--mud-default-borderradius);">
+                        <MudIcon Icon="@Icons.Material.Outlined.AddAPhoto" Size="Size.Large" Class="mud-text-secondary" />
+                        <div style="flex:1 1 240px;">
+                            <MudText Typo="Typo.body1">Выберите изображение с лицом</MudText>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                                JPG, PNG, BMP или WEBP. Либо откройте носитель дела и нажмите «Найти в других материалах» у нужного лица.
+                            </MudText>
+                        </div>
+                        @ProbeUpload("Выбрать изображение…", Variant.Filled)
+                    </div>
+                }
+            </MudPaper>
         </MudItem>
     </MudGrid>
 
-    <MudDivider Class="my-3" />
-    <MudText Typo="Typo.subtitle2" Class="mb-2">Проба</MudText>
-    <div class="d-flex align-center gap-4 flex-wrap">
-        @if (_references.Count > 0 || _referencesMissing > 0)
-        {
-            @* Пробы — эталоны фигуранта (ТФ-ПЕР-03, ADR-0046): поиск по всем сразу, кандидаты сводятся по лицу. Непригодный
-               эталон (ТО-мат-07) показан, но в поиск не идёт; эталон вне допуска — только счётчиком (ТБ-020/021). *@
-            @foreach (var reference in _references)
+    @* Строка действия: слева — что именно уйдёт в поиск (или чего не хватает), справа — кнопка. *@
+    <MudDivider Class="my-4" />
+    <div class="d-flex align-center justify-space-between flex-wrap gap-3">
+        <div class="d-flex align-center gap-2 flex-wrap">
+            @if (!CanSearch && !_busy)
             {
-                var face = reference;
-                <FaceCropTile Url="@(face.CropStoredFileName is { } crop ? MediaFileUrl.FaceCrop(face.AssetId, crop) : null)"
-                              Size="96" Caption="@($"эталон — лицо № {face.Id} · качество {face.QualityScore:0.00}")"
-                              Unusable="@(!face.QualityAcceptable)" UnusableReason="@face.QualityReason">
-                    <MudLink Href="@($"/media/assets/{face.AssetId}?face={face.Id}")" Typo="Typo.caption">открыть носитель</MudLink>
-                </FaceCropTile>
+                <MudIcon Icon="@Icons.Material.Outlined.Info" Size="Size.Small" Color="Color.Warning" />
+                <MudText Typo="Typo.body2" Color="Color.Warning">@SearchHint</MudText>
             }
-            <div>
-                <MudText Typo="Typo.body2">Поиск по всем эталонам фигуранта: @UsableReferences.Count из @(_references.Count + _referencesMissing)</MudText>
-                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
-                    Кандидаты сводятся по лицу: лучшее совпадение, эталон, по которому оно найдено, и у скольких эталонов схожесть
-                    в пределах порога. Сами эталоны в кандидаты не попадают.
-                </MudText>
-                @if (_referencesMissing > 0)
-                {
-                    <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block">Недоступно эталонов: @_referencesMissing (нет либо вне вашего допуска).</MudText>
-                }
-                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="ClearProbe" Disabled="_busy">Сбросить пробу</MudButton>
-            </div>
-        }
-        else if (_probeFace is { } probeFace)
-        {
-            @* Проба — лицо уже проиндексированного носителя (ТФ-ПЛ-03): вектор берётся из базы, изображение не грузится. *@
-            <FaceCropTile Url="@(probeFace.CropStoredFileName is { } crop ? MediaFileUrl.FaceCrop(probeFace.AssetId, crop) : null)"
-                          Size="128" Caption="@($"лицо № {probeFace.Id} носителя № {probeFace.AssetId} · качество {probeFace.QualityScore:0.00}")"
-                          Unusable="@(!probeFace.QualityAcceptable)" UnusableReason="@probeFace.QualityReason">
-                <MudLink Href="@($"/media/assets/{probeFace.AssetId}?face={probeFace.Id}")" Typo="Typo.caption">открыть носитель</MudLink>
-            </FaceCropTile>
-            @if (!probeFace.QualityAcceptable)
+            else
             {
-                @* ТО-мат-07: шаблон для непригодного лица не строился — искать по нему нечем; это НЕ отказ по допуску. *@
-                <MudText Typo="Typo.body2" Color="Color.Warning">
-                    Лицо непригодно для поиска (ТО-мат-07)@(string.IsNullOrWhiteSpace(probeFace.QualityReason) ? string.Empty : $": {probeFace.QualityReason}").
-                </MudText>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Icon="@Icons.Material.Outlined.TravelExplore">@ScopeSummary</MudChip>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Icon="@Icons.Material.Outlined.Tune">схожесть от @_threshold %</MudChip>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Icon="@Icons.Material.Outlined.FormatListNumbered">до @_topK кандидатов</MudChip>
             }
-            <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="ClearProbe" Disabled="_busy">Сбросить пробу</MudButton>
-        }
-        else if (_probeFaceId is { } missingFaceId)
-        {
-            <MudText Typo="Typo.body2" Color="Color.Warning">Лицо № @missingFaceId недоступно: его нет либо оно вне вашего допуска.</MudText>
-            <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="ClearProbe" Disabled="_busy">Сбросить пробу</MudButton>
-        }
-        else
-        {
-            <MudFileUpload T="IBrowserFile" FilesChanged="OnProbeSelectedAsync" Accept=".jpg,.jpeg,.png,.bmp,.webp" Disabled="_busy">
-                <CustomContent Context="upload">
-                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="_busy"
-                               StartIcon="@Icons.Material.Filled.AddAPhoto" OnClick="@(() => upload.OpenFilePickerAsync())">
-                        @(_probeBytes is null ? "Выбрать изображение…" : "Заменить изображение…")
-                    </MudButton>
-                </CustomContent>
-            </MudFileUpload>
-            @if (_probeBytes is { } bytes)
-            {
-                <div class="d-flex align-center gap-3 my-2">
-                    @* Оператор обязан видеть, ПО КАКОМУ снимку идёт поиск (ТЭ-005/007): миниатюру делает сам
-                       браузер (RequestImageFileAsync), поиск при этом идёт по ИСХОДНОМУ файлу — уменьшенная
-                       копия только для показа, её размеры подписаны рядом. *@
-                    @if (_probePreview is { } preview)
-                    {
-                        <MudPaper Outlined="true" Class="pa-1" Style="line-height:0;">
-                            <img src="@preview" alt="пробное изображение" title="@_probeFileName"
-                                 style="width:120px;height:120px;object-fit:contain;display:block;background:#0b1220;" />
-                        </MudPaper>
-                    }
-                    <div>
-                        <MudChip T="string" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Image" OnClose="ClearProbe" Disabled="_busy">
-                            @_probeFileName · @MediaLabels.FormatSize(bytes.LongLength)
-                        </MudChip>
-                        @if (_probePreview is not null)
-                        {
-                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
-                                показан уменьшенный вид; поиск идёт по исходному файлу без обработки (ТЭ-007)
-                            </MudText>
-                        }
-                    </div>
-                </div>
-            }
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                Изображение с лицом, не более @MediaLabels.FormatSize(SearchByFaceValidator.MaxProbeBytes). Проба в базу шаблонов не попадает;
-                копия хранится только в журнале поиска (ТБ-072/074).
-            </MudText>
-            @if (_result is { DetectedFaces: > 1 })
-            {
-                @* Индекс — порядок выдачи детектора (после NMS — по убыванию уверенности), НЕ по размеру; «самое крупное» — только при пустом поле. *@
-                <MudNumericField T="int?" @bind-Value="_probeFaceIndex" Label="Номер лица на пробе" Variant="Variant.Outlined" Min="0"
-                                 Margin="Margin.Dense" Style="max-width:260px;" Disabled="_busy" Clearable="true"
-                                 HelperText="номер лица в порядке выдачи детектора (0 — первое); пусто — самое крупное" />
-            }
-        }
-    </div>
-
-    <div class="d-flex align-center gap-3 mt-4 flex-wrap">
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Search"
-                   Disabled="@(!CanSearch)" OnClick="SearchAsync">@(_busy ? "Ищу…" : "Искать")</MudButton>
-        @if (!CanSearch && !_busy)
-        {
-            <MudText Typo="Typo.caption" Color="Color.Warning">
-                @SearchHint
-            </MudText>
-        }
+        </div>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large" StartIcon="@Icons.Material.Filled.Search"
+                   Disabled="@(!CanSearch)" OnClick="SearchAsync" Style="min-width:160px;">@(_busy ? "Ищу…" : "Искать")</MudButton>
     </div>
     @if (_busy)
     {
@@ -429,11 +479,56 @@
     private int MinThreshold => _settings?.MinThresholdPercent ?? MediaSettings.DefaultMinThresholdPercent;
     private int WorkingThreshold => _settings?.ThresholdPercent ?? MediaSettings.DefaultThresholdPercent;
     private int HighThreshold => MediaLabels.HighThresholdPreset(WorkingThreshold);
-    private Variant PresetVariant(int value) => _threshold == value ? Variant.Filled : Variant.Outlined;
+
+    // Предустановки ТФ-ПЛ-06 — значения ползунка; совпавшие значения (например, граница = рабочему) показываются один раз.
+    private IEnumerable<(string Label, int Percent)> Presets =>
+        new[] { ("Низкий", MinThreshold), ("Средний", WorkingThreshold), ("Высокий", HighThreshold) }.DistinctBy(p => p.Item2);
+
+    // Пояснение к выбранной области поиска (ТФ-ПЛ-05, ADR-0044) — одно, к выбранному варианту.
+    private string ScopeHint => _scope switch
+    {
+        SearchScopeKind.SelectedCases => "Только отмеченные дела из доступных вам.",
+        SearchScopeKind.AllAccessibleCases =>
+            "Все дела в пределах допуска, включая дела других сотрудников (взаимный поиск ОН и ОУ). "
+            + "Материал кандидата из чужого дела открывается только на просмотр.",
+        _ => "Только материалы выбранного дела.",
+    };
+
+    // Сводка области для строки действия: что именно уйдёт в поиск.
+    private string ScopeSummary => _scope switch
+    {
+        SearchScopeKind.SelectedCases => $"выбрано дел: {_selectedCaseIds.Count}{ClosedSuffix}",
+        SearchScopeKind.AllAccessibleCases => $"все дела в пределах допуска{ClosedSuffix}",
+        _ => "текущее дело",
+    };
+
+    private string ClosedSuffix => _includeClosedCases ? ", с закрытыми" : string.Empty;
+
+    // Заголовок карточки формы: значок и подпись.
+    private static RenderFragment SectionTitle(string icon, string title) => __builder =>
+    {
+        <div class="d-flex align-center gap-2 mb-1">
+            <MudIcon Icon="@icon" Size="Size.Small" Color="Color.Primary" />
+            <MudText Typo="Typo.subtitle2">@title</MudText>
+        </div>
+    };
+
+    // Выбор пробного изображения. Пустой SelectedTemplate: свой список выбранных файлов MudFileUpload не показывает —
+    // выбранная проба уже показана миниатюрой с именем и размером (иначе имя файла выводилось дважды).
+    private RenderFragment ProbeUpload(string text, Variant variant) => __builder =>
+    {
+        <MudFileUpload T="IBrowserFile" FilesChanged="OnProbeSelectedAsync" Accept=".jpg,.jpeg,.png,.bmp,.webp" Disabled="_busy">
+            <CustomContent Context="upload">
+                <MudButton Variant="@variant" Color="Color.Primary" Disabled="_busy"
+                           StartIcon="@Icons.Material.Filled.AddAPhoto" OnClick="@(() => upload.OpenFilePickerAsync())">@text</MudButton>
+            </CustomContent>
+            <SelectedTemplate Context="selected"></SelectedTemplate>
+        </MudFileUpload>
+    };
 
     private string ThresholdHelp =>
-        $"Кандидаты ниже порога не показываются. Рабочий порог {WorkingThreshold} % и нижнюю границу {MinThreshold} % задаёт "
-        + $"Администратор. Проценты — шкала балла модели ({SearchOptions.Scale.Describe()}), до калибровки на пилоте.";
+        $"Рабочий порог {WorkingThreshold} % и нижнюю границу {MinThreshold} % задаёт Администратор. Проценты — шкала балла "
+        + $"модели ({SearchOptions.Scale.Describe()}), до калибровки на пилоте; это вероятностная оценка, а не установление личности.";
     private FaceSearchResult? _result;
     private bool _busy;
     private string? _error;

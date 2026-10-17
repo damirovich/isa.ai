@@ -94,17 +94,18 @@ public sealed class FaceSearchReferencesPageTests : BunitContext, IAsyncLifetime
         Services.GetRequiredService<NavigationManager>().NavigateTo("/media/search?caseId=3&faceIds=5,7&authId=9&scope=all");
         Render<MudPopoverProvider>();
         var cut = Render<FaceSearch>();
-        cut.WaitForAssertion(() => cut.Markup.ShouldContain("80 %</b>"));
+        cut.WaitForAssertion(() => ThresholdValue(cut).ShouldBe("80 %"));
 
         var slider = cut.Find("input[type=range]");
         slider.GetAttribute("min").ShouldBe("72");
         slider.GetAttribute("max").ShouldBe("99");
-        cut.Markup.ShouldContain("низкий · 72 %");
-        cut.Markup.ShouldContain("средний · 80 %");
-        cut.Markup.ShouldContain("высокий · 90 %");
+        cut.FindAll(".mud-toggle-item").Select(t => t.TextContent.Trim()).ShouldBe(["Низкий · 72 %", "Средний · 80 %", "Высокий · 90 %"]);
         cut.Markup.ShouldContain("Кандидаты ниже порога не показываются");
+        cut.Markup.ShouldContain("72 % · нижняя граница");
+        cut.Markup.ShouldContain("Кандидатов в выдаче");
 
-        cut.FindAll("button").Single(b => b.TextContent.Contains("высокий", StringComparison.Ordinal)).Click();
+        cut.FindAll(".mud-toggle-item").Single(t => t.TextContent.Contains("Высокий", StringComparison.Ordinal)).Click();
+        cut.WaitForAssertion(() => ThresholdValue(cut).ShouldBe("90 %"));
         cut.FindAll("button").Single(b => b.TextContent.Contains("Искать", StringComparison.Ordinal)).Click();
 
         cut.WaitForAssertion(() => _mediator.Received(1).Send(
@@ -119,13 +120,77 @@ public sealed class FaceSearchReferencesPageTests : BunitContext, IAsyncLifetime
         Services.GetRequiredService<NavigationManager>().NavigateTo("/media/search?caseId=3&faceIds=5,7&authId=9&scope=all");
         Render<MudPopoverProvider>();
         var cut = Render<FaceSearch>();
-        cut.WaitForAssertion(() => cut.Markup.ShouldContain("85 %</b>"));
+        cut.WaitForAssertion(() => ThresholdValue(cut).ShouldBe("85 %"));
 
         cut.Find("input[type=range]").Input("50");
         cut.FindAll("button").Single(b => b.TextContent.Contains("Искать", StringComparison.Ordinal)).Click();
 
         cut.WaitForAssertion(() => _mediator.Received(1).Send(
             Arg.Is<SearchByFaceQuery>(q => q.MinSimilarityPercent == 70), Arg.Any<CancellationToken>()));
+    }
+
+    [Fact(DisplayName = "ТФ-ПЛ-06: совпавшие предустановки показываются один раз — граница равна рабочему порогу")]
+    public void Equal_presets_are_shown_once()
+    {
+        GivenSettings(threshold: 85, min: 85);
+        Services.GetRequiredService<NavigationManager>().NavigateTo("/media/search?caseId=3&faceIds=5,7&authId=9&scope=all");
+        Render<MudPopoverProvider>();
+        var cut = Render<FaceSearch>();
+        cut.WaitForAssertion(() => ThresholdValue(cut).ShouldBe("85 %"));
+
+        cut.FindAll(".mud-toggle-item").Select(t => t.TextContent.Trim()).ShouldBe(["Низкий · 85 %", "Высокий · 92 %"]);
+    }
+
+    [Fact(DisplayName = "Форма поиска: пустая проба — область выбора с кнопкой; без дела — подсказка вместо сводки, «Искать» недоступна")]
+    public void Empty_form_shows_probe_zone_and_hint()
+    {
+        GivenSettings(threshold: 85, min: 70);
+        Services.GetRequiredService<NavigationManager>().NavigateTo("/media/search");
+        Render<MudPopoverProvider>();
+        var cut = Render<FaceSearch>();
+        cut.WaitForAssertion(() => ThresholdValue(cut).ShouldBe("85 %"));
+
+        cut.Markup.ShouldContain("Выберите изображение с лицом");
+        cut.Markup.ShouldContain("«Найти в других материалах»");
+        cut.FindAll("button").ShouldContain(b => b.TextContent.Contains("Выбрать изображение", StringComparison.Ordinal));
+        cut.Markup.ShouldContain("Выберите дело.");
+        cut.Markup.ShouldNotContain("до 20 кандидатов");
+        cut.FindAll("button").Single(b => b.TextContent.Contains("Искать", StringComparison.Ordinal)).HasAttribute("disabled").ShouldBeTrue();
+        cut.Markup.ShouldContain("Только материалы выбранного дела.");
+    }
+
+    [Fact(DisplayName = "Форма поиска: всё задано — сводка области, порога и длины выдачи рядом с «Искать»; пояснение — к выбранной области")]
+    public void Ready_form_shows_summary()
+    {
+        GivenSettings(threshold: 85, min: 70);
+        Services.GetRequiredService<NavigationManager>().NavigateTo("/media/search?caseId=3&faceIds=5,7&authId=9&scope=all");
+        Render<MudPopoverProvider>();
+        var cut = Render<FaceSearch>();
+        cut.WaitForAssertion(() => cut.Markup.ShouldContain("все дела в пределах допуска"));
+
+        cut.Markup.ShouldContain("схожесть от 85 %");
+        cut.Markup.ShouldContain("до 20 кандидатов");
+        cut.Markup.ShouldContain("включая дела других сотрудников");
+        cut.FindAll("button").Single(b => b.TextContent.Contains("Искать", StringComparison.Ordinal)).HasAttribute("disabled").ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Проба-изображение: имя файла показано один раз — собственный список файлов MudFileUpload скрыт; есть «Заменить…» и «Убрать»")]
+    public void Selected_probe_file_name_is_shown_once()
+    {
+        GivenSettings(threshold: 85, min: 70);
+        Services.GetRequiredService<NavigationManager>().NavigateTo("/media/search");
+        Render<MudPopoverProvider>();
+        var cut = Render<FaceSearch>();
+        cut.WaitForAssertion(() => ThresholdValue(cut).ShouldBe("85 %"));
+
+        cut.FindComponent<Microsoft.AspNetCore.Components.Forms.InputFile>()
+            .UploadFiles(InputFileContent.CreateFromBinary([1, 2, 3, 4], "probe-photo.jpg", contentType: "image/jpeg"));
+
+        cut.WaitForAssertion(() => cut.Markup.ShouldContain("probe-photo.jpg"));
+        cut.Markup.Split(">probe-photo.jpg<").Length.ShouldBe(2); // имя — одним текстом в карточке пробы
+        cut.FindAll(".mud-chip").ShouldNotContain(c => c.TextContent.Contains("probe-photo.jpg", StringComparison.Ordinal));
+        cut.FindAll("button").ShouldContain(b => b.TextContent.Contains("Заменить", StringComparison.Ordinal));
+        cut.FindAll("button").ShouldContain(b => b.TextContent.Contains("Убрать", StringComparison.Ordinal));
     }
 
     [Fact(DisplayName = "ADR-0054: подпись порога выдачи — процентом шкалы; сессия без порога — «без порога»")]
@@ -137,6 +202,9 @@ public sealed class FaceSearchReferencesPageTests : BunitContext, IAsyncLifetime
         MediaLabels.HighThresholdPreset(85).ShouldBe(92);
         MediaLabels.HighThresholdPreset(99).ShouldBe(99);
     }
+
+    // Крупное значение порога над ползунком (объявляется вспомогательным технологиям при изменении).
+    private static string ThresholdValue(IRenderedComponent<FaceSearch> cut) => cut.Find("[aria-live=polite]").TextContent.Trim();
 
     private void GivenSettings(int threshold, int min) =>
         _mediator.Send(Arg.Any<GetMediaSettingsQuery>(), Arg.Any<CancellationToken>())
