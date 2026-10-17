@@ -5,7 +5,7 @@
 | **Документ** | ДОК-06 / ADR-0036 |
 | **Система** | ISC.AI — пакет «Медиа» (`Media.Domain`, `.Application`, `.Data`, `.UI`), профиль «Следствие» (`Investigation.Domain`, `.Data`) |
 | **Версия** | 0.1 |
-| **Статус** | **Принято** (реализуется 01.10.2026, ветка `feature/supervisor-queue`) |
+| **Статус** | **Принято** (реализуется 01.10.2026, ветка `feature/supervisor-queue`). Дополнено [ADR-0054](ADR-0054-rezhim-podtverzhdeniya-i-porog-u-operatora.md): в режиме одного оператора руководитель решает «неопределённо» оператора и может подтвердить |
 | **Связь с ТЗ** | ТФ-ВЕР-02, ТФ-ВЕР-03, ТФ-ПЕР-02, ТБ-012, ТБ-021, ТБ-072, ТБ-073, GATE-5 |
 | **Связанные ADR** | [ADR-0022](ADR-0022-sessii-poiska-i-pravilo-dvuh-lits-v-module.md) (правило двух лиц в модуле), [ADR-0032](ADR-0032-matrica-dostupa.md) (матрица доступа), [ADR-0034](ADR-0034-otzyv-poyavleniya.md) (отзыв появления), [ADR-0035](ADR-0035-avtopredlozhenie-figurantov.md) (автопредложение) |
 

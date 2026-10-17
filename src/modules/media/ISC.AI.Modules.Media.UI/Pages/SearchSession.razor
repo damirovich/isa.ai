@@ -2,9 +2,10 @@
 @* Поисковая сессия (ТФ-ПЛ-07): реквизиты поиска и кандидат-лист с решениями верификации. Это ПОЛНАЯ
    строка (для инициатора поиска и руководителя): кто, когда и с каким исходом решал. Очередь
    верификатора такой картины не видит — там слепая проекция (ТФ-ВЕР-02). Формулировки — ТЭ-005:
-   до двух решений только «кандидат». Просмотр аудируется сценарием (ТБ-030). *@
+   до решения человека только «кандидат». Просмотр аудируется сценарием (ТБ-030). *@
 @page "/media/sessions/{Id:int}"
 @rendermode InteractiveServer
+@inject ISC.AI.Modules.Media.Application.MediaSearchOptions SearchOptions
 @using ISC.AI.Modules.Media.Application.Features.Scope
 @using ISC.AI.Modules.Media.Application.Features.Search
 @using ISC.AI.Modules.Media.Domain.Model
@@ -68,7 +69,7 @@ else
                     </MudText>
                 }
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">Область: @session.Scope.Label() (@session.CaseIds.Count дел: @string.Join(", ", session.CaseIds))</MudText>
-                <MudText Typo="Typo.caption" Class="mud-text-secondary">Кандидатов запрошено: @session.TopK · выдано: @session.CandidateCount · @MediaLabels.SimilarityThreshold(session.MaxCosineDistance)</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Кандидатов запрошено: @session.TopK · выдано: @session.CandidateCount · @MediaLabels.SimilarityThreshold(SearchOptions.Scale, session.MaxCosineDistance)</MudText>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">Детектор @session.DetectorVersion · векторизатор @session.EmbedderVersion</MudText>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">SHA-256 пробы: <code>@session.ProbeSha256</code></MudText>
                 @if (session.RequestedByUserId is { } user)
@@ -80,7 +81,7 @@ else
                     @* ТФ-ПЕР-09: сессию создала система после индексации нового носителя; проба — эталон фигуранта дела. *@
                     <MudText Typo="Typo.caption" Color="Color.Secondary">
                         Предложено системой после индексации нового материала: проба — эталон фигуранта № @session.SuggestedPersonRef.
-                        Подтверждает только человек, двумя подписями (ТБ-073).
+                        Подтверждает только человек (ТБ-073).
                     </MudText>
                 }
             </div>
@@ -91,15 +92,15 @@ else
     @* ТЭ-006: предупреждение — постоянным текстом рядом с баллами, а не только во всплывающей подсказке чипа. *@
     <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="my-3">
         Балл схожести — вероятностная оценка модели, не установление личности (ТЭ-006). Статус «подтверждён» —
-        только после независимых решений двух сотрудников (ТБ-073).
+        только решением человека: одного оператора или двух сотрудников, по режиму разбора (ТБ-073, ТФ-ВЕР-07).
     </MudAlert>
     @* Отбор кандидат-листа (ТФ-ПЛ-02) — на странице: лист сессии уже загружен целиком и под решёткой. *@
     <div class="d-flex gap-3 align-end flex-wrap mb-2">
-        <MudSelect T="double?" @bind-Value="_minSimilarity" Label="Схожесть" Variant="Variant.Outlined" Margin="Margin.Dense"
+        <MudSelect T="int?" @bind-Value="_minSimilarity" Label="Схожесть" Variant="Variant.Outlined" Margin="Margin.Dense"
                    Clearable="true" Placeholder="Любая" Style="width:170px;">
             @foreach (var level in SimilarityLevels)
             {
-                <MudSelectItem T="double?" Value="@level">не ниже @(((level ?? 0) * 100).ToString("0")) %</MudSelectItem>
+                <MudSelectItem T="int?" Value="@level">не ниже @level %</MudSelectItem>
             }
         </MudSelect>
         <MudSelect T="CandidateStatus?" @bind-Value="_status" Label="Статус" Variant="Variant.Outlined" Margin="Margin.Dense"
@@ -191,14 +192,16 @@ else
 
     private SearchSessionDetails? _details;
 
-    private static readonly double?[] SimilarityLevels = [0.5, 0.6, 0.7, 0.8, 0.9];
-    private double? _minSimilarity;
+    // Отбор в процентах шкалы (ADR-0054) — тем же числом, что на чипе схожести.
+    private static readonly int?[] SimilarityLevels = [70, 75, 80, 85, 90, 95];
+    private int? _minSimilarity;
     private CandidateStatus? _status;
 
     // Отбор кандидат-листа: схожесть не ниже порога и статус; порядок — ранг сессии.
     private List<SearchCandidateRow> Shown => _details is null
         ? []
-        : [.. _details.Candidates.Where(c => (_minSimilarity is not { } min || c.Similarity >= min) && (_status is not { } st || c.Status == st))];
+        : [.. _details.Candidates.Where(c => (_minSimilarity is not { } min || SearchOptions.Scale.DisplayPercent(c.Similarity) >= min)
+            && (_status is not { } st || c.Status == st))];
     private FaceRow? _probeFace;
     private readonly Dictionary<int, FaceRow?> _referenceFaces = [];
     private string? _error;

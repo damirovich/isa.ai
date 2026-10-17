@@ -43,6 +43,7 @@ public sealed class VideoTimelineComponentTests : BunitContext, IAsyncLifetime
         _module.Setup<bool>("updateTimeline", _ => true).SetResult(true);
         Services.AddMudServices();
         Services.AddSingleton(_mediator);
+        Services.AddSingleton(new ISC.AI.Modules.Media.Application.MediaSearchOptions());
         SetRendererInfo(new RendererInfo("Server", true));
 
         _mediator.Send(Arg.Any<GetAssetSuggestionStatusQuery>(), Arg.Any<CancellationToken>())

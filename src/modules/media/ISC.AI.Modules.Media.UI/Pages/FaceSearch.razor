@@ -1,9 +1,9 @@
 @namespace ISC.AI.Modules.Media.UI
 @* Поиск по лицу (ТФ-ПЛ-01..06, ТБ-071): дело и ОСНОВАНИЕ обязательны — без основания поиск не запускается;
    область — текущее дело / выбранные / все доступные (ТФ-ПЛ-05); проба — изображение либо лицо носителя
-   (faceId из query, ТФ-ПЛ-03). Порог ослабить сверх предела эксплуатанта нельзя (ТН-008, ТФ-ПЛ-06).
-   Выдача — КАНДИДАТ-ЛИСТ (ТЭ-005): никаких «совпадений»; статус «подтверждён» — только после
-   независимых решений двух сотрудников (ТБ-073). Балл — с предупреждением (ТЭ-006). *@
+   (faceId из query, ТФ-ПЛ-03). Порог — ползунком в процентах от нижней границы Администратора до 99 %, по умолчанию
+   рабочий порог (ТФ-ПЛ-08, ADR-0054); границу проверяет сервер. Выдача — КАНДИДАТ-ЛИСТ (ТЭ-005): никаких
+   «совпадений»; статус «подтверждён» — только решением человека (ТБ-073). Балл — с предупреждением (ТЭ-006). *@
 @page "/media/search"
 @rendermode InteractiveServer
 @inject NavigationManager Navigation
@@ -11,6 +11,7 @@
 @using Microsoft.AspNetCore.Components.Forms
 @using ISC.AI.Modules.Media.Application.Features.Scope
 @using ISC.AI.Modules.Media.Application.Features.Search
+@using ISC.AI.Modules.Media.Application.Features.Settings
 @using ISC.AI.Modules.Media.Domain.Model
 @using ISC.AI.Modules.Media.Domain.Services
 
@@ -24,8 +25,8 @@
 </div>
 
 <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="my-3">
-    Результат — кандидат-лист. Статус «подтверждён» присваивается только после независимых решений
-    двух сотрудников (ТБ-073). Балл схожести — вероятностная оценка модели, не установление личности (ТЭ-006).
+    Результат — кандидат-лист. @MediaLabels.ConfirmationRule(_settings?.Mode)
+    Балл схожести — вероятностная оценка модели, не установление личности (ТЭ-006).
 </MudAlert>
 
 @if (_error is not null)
@@ -107,11 +108,22 @@
             <div class="d-flex gap-3 flex-wrap">
                 <MudNumericField T="int" @bind-Value="_topK" Label="Кандидатов (5..50)" Variant="Variant.Outlined" Min="5" Max="50"
                                  Margin="Margin.Dense" Style="max-width:180px;" Disabled="_busy" />
-                @* Порог — схожестью в процентах (ТФ-ПЛ-06): так его понимает оператор; в расстояние переводит MediaLabels. *@
-                <MudNumericField T="int?" @bind-Value="_minSimilarity" Label="Схожесть не ниже, %" Variant="Variant.Outlined"
-                                 Min="@MinAllowedSimilarity" Max="100" Step="5"
-                                 Margin="Margin.Dense" Style="max-width:220px;" Disabled="_busy" Clearable="true"
-                                 HelperText="@SimilarityHelp" />
+                @* Порог — ползунком в процентах шкалы (ТФ-ПЛ-08, ADR-0054): от нижней границы до 99 %; в расстояние
+                   переводит сервер той же шкалой и сам не пускает ниже границы. Предустановки — ТФ-ПЛ-06. *@
+                <div style="flex:1 1 260px;min-width:240px;">
+                    <MudText Typo="Typo.body2">Схожесть не ниже: <b>@_threshold %</b></MudText>
+                    <MudSlider T="int" Min="@MinThreshold" Max="@MediaSettings.MaxPercent" Step="1" @bind-Value="_threshold"
+                               Disabled="_busy" Color="Color.Primary" aria-label="Порог схожести, %" />
+                    <div class="d-flex gap-1 flex-wrap">
+                        <MudButton Size="Size.Small" Variant="@PresetVariant(MinThreshold)" Disabled="_busy"
+                                   OnClick="@(() => _threshold = MinThreshold)">низкий · @MinThreshold %</MudButton>
+                        <MudButton Size="Size.Small" Variant="@PresetVariant(WorkingThreshold)" Disabled="_busy"
+                                   OnClick="@(() => _threshold = WorkingThreshold)">средний · @WorkingThreshold %</MudButton>
+                        <MudButton Size="Size.Small" Variant="@PresetVariant(HighThreshold)" Disabled="_busy"
+                                   OnClick="@(() => _threshold = HighThreshold)">высокий · @HighThreshold %</MudButton>
+                    </div>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">@ThresholdHelp</MudText>
+                </div>
             </div>
         </MudItem>
     </MudGrid>
@@ -136,7 +148,7 @@
                 <MudText Typo="Typo.body2">Поиск по всем эталонам фигуранта: @UsableReferences.Count из @(_references.Count + _referencesMissing)</MudText>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
                     Кандидаты сводятся по лицу: лучшее совпадение, эталон, по которому оно найдено, и у скольких эталонов схожесть
-                    в пределах порога (не задан порог — рабочий порог системы). Сами эталоны в кандидаты не попадают.
+                    в пределах порога. Сами эталоны в кандидаты не попадают.
                 </MudText>
                 @if (_referencesMissing > 0)
                 {
@@ -243,7 +255,7 @@
                 сессия <MudLink Href="@($"/media/sessions/{result.SessionId}")" Typo="Typo.caption">№ @result.SessionId</MudLink>
                 · область: @_scope.Label() (@result.CaseIds.Count дел@(_includeClosedCases && _scope != SearchScopeKind.CurrentCase ? ", включая закрытые" : string.Empty))
                 · детектор @result.DetectorVersion · векторизатор @result.EmbedderVersion
-                · до @result.TopK кандидатов · @MediaLabels.SimilarityThreshold(result.MaxCosineDistance)
+                · до @result.TopK кандидатов · @MediaLabels.SimilarityThreshold(SearchOptions.Scale, result.MaxCosineDistance)
             </MudText>
         </div>
         @if (result.DetectedFaces > 1)
@@ -409,15 +421,19 @@
     private string? _probePreview;
     private int? _probeFaceIndex;
     private int _topK = 20;
-    // Порог схожести «не ниже, %»; пусто — без порога (у поиска по эталонам — рабочий порог системы, ADR-0046).
-    private int? _minSimilarity;
 
-    // Ниже предела эксплуатанта схожесть не опускается (порог расстояния не дальше MaxAllowedCosineDistance).
-    private int MinAllowedSimilarity => MediaLabels.MinSimilarityPercent(SearchOptions.MaxAllowedCosineDistance) ?? 0;
+    // Порог (ТФ-ПЛ-08, ADR-0054): настройки Администратора — границы ползунка; пока не прочитаны — умолчания поставки
+    // (сервер всё равно применит действующие и поднимет порог до границы).
+    private MediaSettingsView? _settings;
+    private int _threshold = MediaSettings.DefaultThresholdPercent;
+    private int MinThreshold => _settings?.MinThresholdPercent ?? MediaSettings.DefaultMinThresholdPercent;
+    private int WorkingThreshold => _settings?.ThresholdPercent ?? MediaSettings.DefaultThresholdPercent;
+    private int HighThreshold => MediaLabels.HighThresholdPreset(WorkingThreshold);
+    private Variant PresetVariant(int value) => _threshold == value ? Variant.Filled : Variant.Outlined;
 
-    private string SimilarityHelp =>
-        $"необязательно; не ниже {MinAllowedSimilarity} % — предел эксплуатанта; пусто — без порога "
-        + $"(поиск по всем эталонам — от {MediaLabels.MinSimilarityPercent(SearchOptions.EffectiveAutoSuggestMaxCosineDistance)} %)";
+    private string ThresholdHelp =>
+        $"Кандидаты ниже порога не показываются. Рабочий порог {WorkingThreshold} % и нижнюю границу {MinThreshold} % задаёт "
+        + $"Администратор. Проценты — шкала балла модели ({SearchOptions.Scale.Describe()}), до калибровки на пилоте.";
     private FaceSearchResult? _result;
     private bool _busy;
     private string? _error;
@@ -454,6 +470,14 @@
         // ТБ-030 «одно открытие — одна запись»: на предрендере (статический SSR до подключения circuit'а)
         // ничего не грузим — GetFaceQuery (проба ?faceId=) аудируется и попадал бы в журнал дважды.
         if (!RendererInfo.IsInteractive) { return; }
+
+        // Границы ползунка и режим подтверждения (ADR-0054): ползунок открывается на рабочем пороге.
+        var settings = await Dispatcher.Send(new GetMediaSettingsQuery());
+        if (settings is { Status: true, Data: { } view })
+        {
+            _settings = view;
+            _threshold = view.ThresholdPercent;
+        }
 
         var cases = await Dispatcher.Send(new ListAccessibleCasesQuery());
         if (cases is { Status: true, Data: { } list })
@@ -637,7 +661,7 @@
                 probeFaceId,
                 byImage ? _probeFaceIndex : null,
                 _topK,
-                MediaLabels.MaxCosineDistance(_minSimilarity),
+                Math.Max(_threshold, MinThreshold),
                 _includeClosedCases,
                 byReferences ? references : null));
 

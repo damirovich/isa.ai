@@ -86,7 +86,7 @@ public sealed record AppearanceRow(
     AppearanceStatus Status,
     DateTime ConfirmedAtUtc,
     int ExpertUserId,
-    int VerifierUserId,
+    int? VerifierUserId,
     DateTime? RevokedAtUtc = null,
     int? RevokedByUserId = null,
     string? RevokeReason = null,
@@ -111,7 +111,7 @@ public enum AppearanceRevokeResult
     /// <summary>Уже отозвано.</summary>
     AlreadyRevoked = 2,
 
-    /// <summary>Отзывающий сам подтверждал это появление (эксперт или верификатор) — нужен другой сотрудник.</summary>
+    /// <summary>Отзывающий сам подтверждал это появление (первая или вторая подпись) — нужен другой сотрудник.</summary>
     OwnDecision = 3,
 }
 
@@ -135,7 +135,7 @@ public sealed record AppearanceDraft(
     double Similarity,
     DateTime ConfirmedAtUtc,
     int ExpertUserId,
-    int VerifierUserId,
+    int? VerifierUserId,
     short Classification,
     int DivisionId);
 

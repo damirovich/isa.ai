@@ -782,6 +782,33 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                     b.ToTable("import_job", "media");
                 });
 
+            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.MediaSetting", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("key");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("updated_by_user_id");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("value");
+
+                    b.HasKey("Key")
+                        .HasName("pk_setting");
+
+                    b.ToTable("setting", "media");
+                });
+
             modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.SearchCandidate", b =>
                 {
                     b.Property<int>("Id")
@@ -1187,6 +1214,10 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                     b.Property<int>("CandidateId")
                         .HasColumnType("integer")
                         .HasColumnName("candidate_id");
+
+                    b.Property<int>("ConfirmationMode")
+                        .HasColumnType("integer")
+                        .HasColumnName("confirmation_mode");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")

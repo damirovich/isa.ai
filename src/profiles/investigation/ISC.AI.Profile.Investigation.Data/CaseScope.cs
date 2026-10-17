@@ -293,9 +293,10 @@ public sealed class CaseScope(
     {
         ArgumentNullException.ThrowIfNull(appearance);
 
-        // ТБ-073: два «подтверждён» РАЗНЫХ сотрудников. Само правило — TwoPersonRule модуля; здесь
-        // страховка на границе: самоподтверждение в «появление» не превращается ни при каких условиях.
-        if (appearance.ExpertUserId == appearance.VerifierUserId)
+        // ТБ-073: в режиме двух лиц — два «подтверждён» РАЗНЫХ сотрудников. Само правило (оба режима, ADR-0054) —
+        // TwoPersonRule модуля; здесь страховка на границе: появление с двумя подписями одного лица не создаётся
+        // ни при каких условиях. Одна подпись (режим одного оператора) — вторая подпись отсутствует, а не совпадает.
+        if (appearance.VerifierUserId is { } verifier && verifier == appearance.ExpertUserId)
         {
             throw new InvalidOperationException(
                 "Одно лицо не может быть экспертом и верификатором одного результата (ТБ-073).");

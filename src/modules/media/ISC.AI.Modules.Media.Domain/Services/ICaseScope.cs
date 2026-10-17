@@ -41,7 +41,7 @@ public sealed record CaseAuthorizationItem(int AuthorizationId, string Reference
 
 /// <summary>
 /// Подтверждённое появление фигуранта на носителе (ТФ-ПЕР-02) — для отметок на ленте видео (ADR-0038): кто и на каком
-/// лице подтверждён двумя сотрудниками (ТБ-073). Отозванные появления сюда не попадают.
+/// лице подтверждён решением человека (ТБ-073). Отозванные появления сюда не попадают.
 /// </summary>
 /// <param name="PersonId">Фигурант.</param>
 /// <param name="DisplayName">Подпись фигуранта.</param>
@@ -49,7 +49,15 @@ public sealed record CaseAuthorizationItem(int AuthorizationId, string Reference
 /// <param name="FrameTimestampMs">Момент кадра лица, мс (для поиска трека после переиндексации); у фото — <see langword="null"/>.</param>
 public sealed record AssetAppearanceItem(int PersonId, string DisplayName, int FaceId, long? FrameTimestampMs);
 
-/// <summary>Подтверждённый кандидат (два «подтверждён» разных субъектов, ТБ-073) — материал для «появления» фигуранта (ТФ-ПЕР-02).</summary>
+/// <summary>
+/// Подтверждённый кандидат (ТБ-073) — материал для «появления» фигуранта (ТФ-ПЕР-02): в режиме одного оператора — его
+/// «подтверждён», в режиме двух лиц — два «подтверждён» разных субъектов (ADR-0054).
+/// </summary>
+/// <remarks>
+/// <see cref="ExpertUserId"/> — первая (в режиме одного оператора — единственная) подпись: тот, кто подтвердил;
+/// <see cref="VerifierUserId"/> — вторая подпись в режиме двух лиц (верификатор или руководитель), в режиме одного
+/// оператора — <see langword="null"/>. Если вторая подпись есть, она всегда другого сотрудника.
+/// </remarks>
 public sealed record ConfirmedAppearance(
     int CaseId,
     int PersonRef,
@@ -63,7 +71,7 @@ public sealed record ConfirmedAppearance(
     short Classification,
     int DivisionId,
     int ExpertUserId,
-    int VerifierUserId,
+    int? VerifierUserId,
     DateTime ConfirmedAtUtc);
 
 /// <summary>

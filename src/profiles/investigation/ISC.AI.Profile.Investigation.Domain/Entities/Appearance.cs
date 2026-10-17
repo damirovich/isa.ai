@@ -47,11 +47,17 @@ public class Appearance : AuditableEntity, IClassified
     /// <summary>Когда подтверждено (UTC).</summary>
     public DateTime ConfirmedAtUtc { get; set; }
 
-    /// <summary>Эксперт (слабая ссылка на пользователя ядра).</summary>
+    /// <summary>
+    /// Первая подпись (слабая ссылка на пользователя ядра): эксперт, а в режиме одного оператора (ADR-0054) — тот, кто
+    /// подтвердил (оператор или руководитель по «неопределённому»).
+    /// </summary>
     public int ExpertUserId { get; set; }
 
-    /// <summary>Верификатор (слабая ссылка; всегда ≠ эксперт, ТБ-073).</summary>
-    public int VerifierUserId { get; set; }
+    /// <summary>
+    /// Вторая подпись в режиме двух лиц — верификатор или руководитель (слабая ссылка; всегда ≠ эксперт, ТБ-073);
+    /// в режиме одного оператора — <see langword="null"/>: подпись одна (ТФ-ВЕР-07, ADR-0054).
+    /// </summary>
+    public int? VerifierUserId { get; set; }
 
     /// <summary>Гриф. NOT NULL.</summary>
     public short Classification { get; set; }

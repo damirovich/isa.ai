@@ -48,6 +48,7 @@ public sealed class AccessMatrixTests
         [InvestigationPermissions.VerificationResolve] = [InvestigationRole.Head, InvestigationRole.Administrator],
         // Новое право (ADR-0034): прежде отзыва не было вовсе; по умолчанию — Руководитель, утверждающий результаты, и Администратор.
         [InvestigationPermissions.VerificationRevoke] = [InvestigationRole.Head, InvestigationRole.Administrator],
+        [InvestigationPermissions.MediaSettings] = [InvestigationRole.Administrator],
         [InvestigationPermissions.DocFlowView] = AllRoles,
         [InvestigationPermissions.DocFlowSettings] = [InvestigationRole.Administrator],
         // Новое право: прежде сервер снятие с контроля не проверял; по ТЗ СКИД §4.2 — только Руководитель.
@@ -87,11 +88,15 @@ public sealed class AccessMatrixTests
             .ShouldAllBe(key => InvestigationPermissions.Find(key) != null);
     }
 
-    [Fact(DisplayName = "Замкнутые строки: «Пользователи», «Матрица доступа», «Уничтожение дела» — только Администратор, с причиной в каждой ячейке")]
+    [Fact(DisplayName = "Замкнутые строки: «Пользователи», «Матрица доступа», «Уничтожение дела», «Настройки поиска и верификации» — только Администратор, с причиной в каждой ячейке")]
     public void Locked_rows_belong_to_administrator()
     {
         var locked = InvestigationPermissions.All.Where(p => p.AdministratorOnlyReason is not null).Select(p => p.Key).Order();
-        locked.ShouldBe(new[] { InvestigationPermissions.AdminMatrix, InvestigationPermissions.AdminUsers, InvestigationPermissions.CasesPurge }.Order());
+        locked.ShouldBe(new[]
+        {
+            InvestigationPermissions.AdminMatrix, InvestigationPermissions.AdminUsers, InvestigationPermissions.CasesPurge,
+            InvestigationPermissions.MediaSettings,
+        }.Order());
 
         foreach (var permission in InvestigationPermissions.All.Where(p => p.AdministratorOnlyReason is not null))
         {

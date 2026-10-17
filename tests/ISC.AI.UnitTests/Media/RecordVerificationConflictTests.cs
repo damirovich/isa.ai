@@ -40,7 +40,7 @@ public sealed class RecordVerificationConflictTests
         var caseScope = Substitute.For<ICaseScope>();
         var audit = Substitute.For<IAuditWriter>();
 
-        var response = await new RecordVerificationCommand.Handler(subjects, policy, accessProvider, store, caseScope, audit)
+        var response = await new RecordVerificationCommand.Handler(subjects, policy, accessProvider, store, caseScope, audit, MediaTestSettings.Store())
             .Handle(new RecordVerificationCommand(11, VerificationStage.Verifier, VerificationVerdict.Confirmed, "признаки"), CancellationToken.None);
 
         response.Status.ShouldBeFalse();

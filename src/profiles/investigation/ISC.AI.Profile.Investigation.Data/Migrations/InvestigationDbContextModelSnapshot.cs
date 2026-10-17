@@ -165,7 +165,7 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
 
-                    b.Property<int>("VerifierUserId")
+                    b.Property<int?>("VerifierUserId")
                         .HasColumnType("integer")
                         .HasColumnName("verifier_user_id");
 

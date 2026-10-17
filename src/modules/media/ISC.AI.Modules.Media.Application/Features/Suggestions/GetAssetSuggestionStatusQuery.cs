@@ -72,7 +72,8 @@ public sealed record GetAssetSuggestionStatusQuery(int AssetId) : IRequest<Respo
         ISuggestionRunStore runs,
         ISearchSessionStore sessions,
         IMediaAdministration administration,
-        MediaSearchOptions options)
+        MediaSearchOptions options,
+        IMediaSettingsStore settingsStore)
         : IRequestHandler<GetAssetSuggestionStatusQuery, ResponseDto<AssetSuggestionStatus>>
     {
         /// <inheritdoc />
@@ -105,8 +106,11 @@ public sealed record GetAssetSuggestionStatusQuery(int AssetId) : IRequest<Respo
                 && cases.Any(c => c.State is CaseSuggestionState.NotChecked or CaseSuggestionState.Outdated or CaseSuggestionState.Checked)
                 && await administration.CanUploadAsync(cancellationToken);
 
+            // Порог — тот же, с которым сверяет система: не мягче нижней границы Администратора (ADR-0054).
+            var settings = await settingsStore.GetAsync(cancellationToken);
             return ResponseDto<AssetSuggestionStatus>.Ok(new AssetSuggestionStatus(
-                options.AutoSuggestEnabled, canRequest, options.EffectiveAutoSuggestMaxCosineDistance, cases, suggestions));
+                options.AutoSuggestEnabled, canRequest, options.AutoSuggestMaxCosineDistanceWithin(settings.MinThresholdPercent),
+                cases, suggestions));
         }
 
         /// <summary>Состояние дела по правилу целей сверки в профиле: открыто, есть основание, есть эталоны; затем — давность сверки.</summary>

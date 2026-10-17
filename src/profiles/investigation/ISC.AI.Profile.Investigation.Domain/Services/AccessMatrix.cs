@@ -113,6 +113,9 @@ public static class InvestigationPermissions
     /// <summary>Отзыв ошибочного появления (ADR-0034).</summary>
     public const string VerificationRevoke = "verification.revoke";
 
+    /// <summary>Настройки поиска и верификации: режим подтверждения, рабочий порог и нижняя граница (ADR-0054).</summary>
+    public const string MediaSettings = "media.settings";
+
     /// <summary>Документы и отчёты документооборота.</summary>
     public const string DocFlowView = "docflow.view";
 
@@ -176,17 +179,22 @@ public static class InvestigationPermissions
             "Носитель и шаблоны лиц — без восстановления",
             Roles(InvestigationRole.Administrator, InvestigationRole.Head)),
         new(VerificationExpert, PermissionSection.Media, "Верификация — первая подпись",
-            "Эксперт привязывает найденное лицо к фигуранту",
+            "Привязать найденное лицо к фигуранту. В режиме одного оператора это решение окончательное",
             Roles(InvestigationRole.FaceExpert, InvestigationRole.Administrator)),
         new(VerificationVerifier, PermissionSection.Media, "Верификация — вторая подпись",
-            "Вслепую, другим сотрудником: один человек обе подписи не ставит",
+            "Только в режиме двух лиц: вслепую, другим сотрудником; один человек обе подписи не ставит",
             Roles(InvestigationRole.Verifier, InvestigationRole.Administrator)),
         new(VerificationResolve, PermissionSection.Media, "Верификация — решение при расхождении",
-            "Итог по кандидату, где эксперт и верификатор разошлись; подтвердить — только если один из них подтвердил",
+            "Итог по «неопределённому» кандидату, третьим лицом; в режиме двух лиц подтвердить — только если один из двоих подтвердил",
             Roles(InvestigationRole.Head, InvestigationRole.Administrator)),
         new(VerificationRevoke, PermissionSection.Media, "Отзыв ошибочного появления",
             "С причиной; отзывает не тот, кто подтверждал. Пересечения пересчитываются",
             Roles(InvestigationRole.Head, InvestigationRole.Administrator)),
+        new(MediaSettings, PermissionSection.Media, "Настройки поиска и верификации",
+            "Режим подтверждения (один оператор или два лица), рабочий порог схожести и нижняя граница",
+            Roles(InvestigationRole.Administrator),
+            AdministratorOnlyReason: "Закреплено за Администратором (ТФ-ВЕР-07, ТФ-ПЛ-08): режим подтверждения и границы порога — "
+                + "правила безопасности поиска по лицу, и роль, которая этим поиском пользуется, не должна менять их сама."),
 
         new(DocFlowView, PermissionSection.DocFlow, "Документы и отчёты",
             "Документы документооборота в пределах допуска",
@@ -232,6 +240,7 @@ public static class InvestigationPermissions
         new("media-search", "Поиск по лицу", [MediaSearch]),
         new("media-verification", "Верификация", [VerificationExpert, VerificationVerifier, VerificationResolve]),
         new("media-import", "Импорт архива", [MediaImport]),
+        new("media-settings", "Настройки поиска и верификации", [MediaSettings]),
         new("docflow-documents", "Документы", [DocFlowView]),
         new("docflow-reports", "Отчёты", [DocFlowView]),
         new("docflow-types", "Типы документов", [DocFlowSettings]),

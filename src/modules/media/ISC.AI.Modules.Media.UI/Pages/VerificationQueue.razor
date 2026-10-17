@@ -1,6 +1,7 @@
 @namespace ISC.AI.Modules.Media.UI
-@* Очередь двойной верификации (ТФ-ВЕР-01/02, ТБ-073): вкладки стадий эксперта, верификатора и руководителя
-   (итог по расхождению, ADR-0036; ему видны оба решения). Вкладки эксперта и верификатора — СЛЕПЫЕ проекции:
+@* Очередь верификации (ТФ-ВЕР-01/02/07, ТБ-073): вкладки стадий эксперта, верификатора и руководителя
+   (итог по расхождению или «неопределённо», ADR-0036; ему видны решения). В режиме одного оператора (ADR-0054) решение
+   на вкладке эксперта окончательное, на вкладке верификатора остаются только разборы, начатые вдвоём. Вкладки эксперта и верификатора — СЛЕПЫЕ проекции:
    без чужих решений и без привязанного фигуранта. Кнопки/вкладки по ролям
    не прячем — право проверяет обработчик, отказ показываем текстом (StatusMessage). Мини-пара
    «проба ↔ кандидат» в равном масштабе, балл — с предупреждением (ТЭ-006), формулировки — ТЭ-005.
@@ -8,7 +9,9 @@
    на страницу (ProbeFaceCache) — открытие не замедляется с ростом очереди. *@
 @page "/media/verification"
 @rendermode InteractiveServer
+@inject ISC.AI.Modules.Media.Application.MediaSearchOptions SearchOptions
 @using ISC.AI.Modules.Media.Application.Features.Scope
+@using ISC.AI.Modules.Media.Application.Features.Settings
 @using ISC.AI.Modules.Media.Application.Features.Verification
 @using ISC.AI.Modules.Media.Domain.Model
 @using ISC.AI.Modules.Media.Domain.Services
@@ -19,7 +22,9 @@
     <div>
         <MudText Typo="Typo.h5">Верификация кандидатов</MudText>
         <MudText Typo="Typo.body2" Class="mud-text-secondary">
-            Два независимых решения разных сотрудников; верификатор решения эксперта не видит; при расхождении итог выносит руководитель (ТБ-073, ТФ-ВЕР-02)
+            @(Single
+                ? "Режим одного оператора: решение на вкладке «Решение оператора» окончательное; «неопределённо» — к руководителю. Разборы, начатые вдвоём, доводятся вдвоём (ТБ-073, ТФ-ВЕР-07)"
+                : "Два независимых решения разных сотрудников; верификатор решения эксперта не видит; при расхождении итог выносит руководитель (ТБ-073, ТФ-ВЕР-02)")
         </MudText>
     </div>
     <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@IsLoading(ActiveStage)" OnClick="ReloadAsync">Обновить</MudButton>
@@ -28,17 +33,17 @@
 @* ТЭ-006: предупреждение — постоянным текстом над очередью, а не только во всплывающей подсказке чипа. *@
 <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="my-3">
     Балл схожести — вероятностная оценка модели, не установление личности (ТЭ-006). Решение — по морфологическим
-    признакам; статус «подтверждён» — только после независимых решений двух сотрудников (ТБ-073).
+    признакам. @MediaLabels.ConfirmationRule(_settings?.Mode)
 </MudAlert>
 
 @* Отбор очереди (ТФ-ПЛ-02): только сужает очередь на сервере; слепоту не трогает — отбирает по материалу, не по решениям. *@
 <MudPaper Outlined="true" Class="pa-3 mt-3">
     <div class="d-flex gap-3 align-end flex-wrap">
-        <MudSelect T="double?" Value="_minSimilarity" ValueChanged="OnMinSimilarityChangedAsync" Label="Схожесть"
+        <MudSelect T="int?" Value="_minSimilarity" ValueChanged="OnMinSimilarityChangedAsync" Label="Схожесть"
                    Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Placeholder="Любая" Style="width:170px;">
             @foreach (var level in SimilarityLevels)
             {
-                <MudSelectItem T="double?" Value="@level">не ниже @(((level ?? 0) * 100).ToString("0")) %</MudSelectItem>
+                <MudSelectItem T="int?" Value="@level">не ниже @level %</MudSelectItem>
             }
         </MudSelect>
         <MudSelect T="int?" Value="_caseId" ValueChanged="OnCaseChangedAsync" Label="Дело" Variant="Variant.Outlined"
@@ -78,7 +83,7 @@
 </MudPaper>
 
 <MudTabs Elevation="0" Border="true" Rounded="true" Class="mt-3" ActivePanelIndex="_activeTab" ActivePanelIndexChanged="OnTabChangedAsync">
-    <MudTabPanel Text="Эксперт" Icon="@Icons.Material.Filled.Person">
+    <MudTabPanel Text="@(Single ? "Решение оператора" : "Эксперт")" Icon="@Icons.Material.Filled.Person">
         @RenderQueue(VerificationStage.Expert)
     </MudTabPanel>
     <MudTabPanel Text="Верификатор" Icon="@Icons.Material.Filled.VerifiedUser">
@@ -129,10 +134,14 @@
         _ => VerificationStage.Expert,
     };
 
-    // --- Отбор (ТФ-ПЛ-02) ---
-    private static readonly double?[] SimilarityLevels = [0.5, 0.6, 0.7, 0.8, 0.9];
+    // Режим подтверждения (ADR-0054) — только для текстов: правило применяет сервер по режиму разбора кандидата.
+    private MediaSettingsView? _settings;
+    private bool Single => _settings?.Mode == ConfirmationMode.SingleOperator;
+
+    // --- Отбор (ТФ-ПЛ-02) --- в процентах шкалы (ADR-0054); на сервер уходит балл модели той же шкалы.
+    private static readonly int?[] SimilarityLevels = [70, 75, 80, 85, 90, 95];
     private IReadOnlyList<CaseScopeItem> _cases = [];
-    private double? _minSimilarity;
+    private int? _minSimilarity;
     private int? _caseId;
     private DateTime? _from;
     private DateTime? _to;
@@ -144,7 +153,7 @@
     // Даты — в местном времени сотрудника; «по» — включительно весь день.
     private VerificationQueueFilter? Filter => FilterActive
         ? new VerificationQueueFilter(
-            _minSimilarity,
+            _minSimilarity is { } percent ? SearchOptions.Scale.ToSimilarity(percent) : null,
             _caseId,
             _from?.Date.ToUniversalTime(),
             _to?.Date.AddDays(1).AddTicks(-1).ToUniversalTime(),
@@ -157,6 +166,11 @@
         // очередь не грузим — ListVerificationQueueQuery и GetFaceQuery пар аудируются и попадали бы в журнал дважды.
         if (!RendererInfo.IsInteractive) { return; }
 
+        if (await Dispatcher.Send(new GetMediaSettingsQuery()) is { Status: true, Data: { } settings })
+        {
+            _settings = settings;
+        }
+
         // Дела для отбора — те же, что область очереди (дела субъекта, ТБ-071).
         if (await Dispatcher.Send(new ListAccessibleCasesQuery()) is { Status: true, Data: { } cases })
         {
@@ -166,7 +180,7 @@
         await LoadAsync(ActiveStage);
     }
 
-    private Task OnMinSimilarityChangedAsync(double? value) { _minSimilarity = value; return ApplyFilterAsync(); }
+    private Task OnMinSimilarityChangedAsync(int? value) { _minSimilarity = value; return ApplyFilterAsync(); }
 
     private Task OnCaseChangedAsync(int? value) { _caseId = value; return ApplyFilterAsync(); }
 

@@ -184,7 +184,7 @@ public sealed class PersonSuggestionStatusTests
     }
 
     private GetAssetSuggestionStatusQuery.Handler StatusHandler(MediaSearchOptions? options = null) =>
-        new(_accessProvider, _caseScope, _runs, _sessions, _administration, options ?? new MediaSearchOptions());
+        new(_accessProvider, _caseScope, _runs, _sessions, _administration, options ?? new MediaSearchOptions(), MediaTestSettings.Store());
 
     private RequestPersonSuggestionCommand.Handler RequestHandler(MediaSearchOptions? options = null) =>
         new(_administration, _accessProvider, _catalog, _caseScope, _scheduler, options ?? new MediaSearchOptions());

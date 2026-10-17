@@ -6,10 +6,14 @@
    (ТФ-ВЕР-02): верификатор судит по изображениям, а не по выводу эксперта. После двух «подтверждён»
    разных сотрудников — не «установлен», а «следственная версия» (ТЭ-005, TwoPersonRule).
    Стадия РУКОВОДИТЕЛЯ (ТФ-ВЕР-02, ADR-0036) — итог по расхождению: видны оба решения с обоснованиями и привязанный
-   фигурант; выбор — только «подтверждён» (если кто-то из двоих подтвердил, ТБ-073) или «отклонён». *@
+   фигурант; выбор — только «подтверждён» (если кто-то из двоих подтвердил, ТБ-073) или «отклонён».
+   РЕЖИМ ОДНОГО ОПЕРАТОРА (ТФ-ВЕР-07, ADR-0054) — окно сличения [АИС табл. 2.3]: на стадии эксперта кнопки «Подтвердить
+   связь в досье», «Отклонить», «Неопределённо»; решение окончательное, «неопределённо» — руководителю, который в этом
+   режиме может и подтвердить. Режим здесь — только для текстов и кнопок: правило применяет сервер. *@
 @page "/media/verification/{CandidateId:int}"
 @rendermode InteractiveServer
 @using ISC.AI.Modules.Media.Application.Features.Scope
+@using ISC.AI.Modules.Media.Application.Features.Settings
 @using ISC.AI.Modules.Media.Application.Features.Verification
 @using ISC.AI.Modules.Media.Domain.Model
 @using ISC.AI.Modules.Media.Domain.Services
@@ -18,7 +22,7 @@
 
 <div class="d-flex align-center justify-space-between flex-wrap gap-2">
     <div>
-        <MudText Typo="Typo.h5">Кандидат № @CandidateId · стадия: @Stage.Label()</MudText>
+        <MudText Typo="Typo.h5">Кандидат № @CandidateId · @(SingleOperatorDecision ? "решение оператора" : $"стадия: {Stage.Label()}")</MudText>
         <MudText Typo="Typo.body2" Class="mud-text-secondary">
             Балл схожести — вероятностная оценка, не установление личности (ТЭ-006). Решение — по морфологическим признакам.
         </MudText>
@@ -123,11 +127,20 @@ else
     else
     {
         <MudPaper Outlined="true" Class="pa-4 my-4">
-            <MudText Typo="Typo.subtitle1" Class="mb-2">Решение стадии «@Stage.Label()»</MudText>
+            <MudText Typo="Typo.subtitle1" Class="mb-2">@(SingleOperatorDecision ? "Решение оператора" : $"Решение стадии «{Stage.Label()}»")</MudText>
+            @if (SingleOperatorDecision)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2">
+                    Режим одного оператора: ваше решение окончательное (ТФ-ВЕР-07). «Подтвердить» создаёт появление фигуранта
+                    со статусом «@TwoPersonRule.ConfirmedMarker»; «Неопределённо» — передаёт кандидата руководителю.
+                </MudText>
+            }
             @if (_formError is not null)
             {
                 <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_formError</MudAlert>
             }
+            @if (!SingleOperatorDecision)
+            {
             <MudRadioGroup T="VerificationVerdict?" @bind-Value="_verdict">
                 <MudRadio T="VerificationVerdict?" Value="VerificationVerdict.Confirmed" Color="Color.Success" Disabled="@SupervisorCannotConfirm">подтверждён</MudRadio>
                 <MudRadio T="VerificationVerdict?" Value="VerificationVerdict.Rejected" Color="Color.Error">отклонён</MudRadio>
@@ -137,6 +150,7 @@ else
                     <MudRadio T="VerificationVerdict?" Value="VerificationVerdict.Undetermined" Color="Color.Warning">неопределённо</MudRadio>
                 }
             </MudRadioGroup>
+            }
             @if (SupervisorCannotConfirm)
             {
                 <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block">
@@ -185,11 +199,35 @@ else
                 }
             }
             <div class="d-flex align-center gap-3 mt-3 flex-wrap">
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
-                           Disabled="@(!FormValid || _busy)" OnClick="SubmitAsync">@(_busy ? "Записываю…" : "Записать решение")</MudButton>
+                @if (SingleOperatorDecision)
+                {
+                    @* Окно сличения [АИС табл. 2.3]: решение — кнопкой; обоснование обязательно, фигурант — при подтверждении. *@
+                    <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.Link"
+                               Disabled="@(_busy || !CanSubmit(VerificationVerdict.Confirmed))"
+                               OnClick="@(() => DecideAsync(VerificationVerdict.Confirmed))">Подтвердить связь в досье</MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Error" StartIcon="@Icons.Material.Filled.Block"
+                               Disabled="@(_busy || !CanSubmit(VerificationVerdict.Rejected))"
+                               OnClick="@(() => DecideAsync(VerificationVerdict.Rejected))">Отклонить</MudButton>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.HelpOutline"
+                               Disabled="@(_busy || !CanSubmit(VerificationVerdict.Undetermined))"
+                               OnClick="@(() => DecideAsync(VerificationVerdict.Undetermined))">Неопределённо</MudButton>
+                }
+                else
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                               Disabled="@(!FormValid || _busy)" OnClick="SubmitAsync">@(_busy ? "Записываю…" : "Записать решение")</MudButton>
+                }
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">Решение необратимо и записывается в неизменяемый журнал (ТБ-072).</MudText>
             </div>
-            @if (!_busy && !PersonMissingForConfirm && FormHint is { } formHint)
+            @if (SingleOperatorDecision && !_busy && string.IsNullOrWhiteSpace(_rationale))
+            {
+                <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-1">Заполните обоснование</MudText>
+            }
+            else if (SingleOperatorDecision && !_busy && _personRef is null && _persons.Count > 0)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">Для подтверждения выберите фигуранта дела (ТФ-ВЕР-03).</MudText>
+            }
+            @if (!SingleOperatorDecision && !_busy && !PersonMissingForConfirm && FormHint is { } formHint)
             {
                 <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-1">@formHint</MudText>
             }
@@ -236,6 +274,27 @@ else
     private string? _error;
     private string? _formError;
 
+    // Действующий режим подтверждения (ADR-0054): им будет разобран кандидат без решений — значит, им решает эксперт.
+    private MediaSettingsView? _settings;
+
+    /// <summary>Окно сличения одного оператора: стадия эксперта при действующем режиме одного оператора (ТФ-ВЕР-07).</summary>
+    private bool SingleOperatorDecision =>
+        Stage == VerificationStage.Expert && _settings?.Mode == ConfirmationMode.SingleOperator;
+
+    /// <summary>Режим разбора кандидата у руководителя — по решению эксперта (правило модуля, ADR-0054).</summary>
+    private bool ReviewSingleOperator =>
+        _review?.Decisions.FirstOrDefault(d => d.Stage == VerificationStage.Expert)?.Mode == ConfirmationMode.SingleOperator;
+
+    /// <summary>Кнопка окна сличения доступна: обоснование есть; для «подтвердить» — ещё и фигурант (ТФ-ВЕР-03).</summary>
+    private bool CanSubmit(VerificationVerdict verdict) =>
+        !string.IsNullOrWhiteSpace(_rationale) && (verdict != VerificationVerdict.Confirmed || _personRef is not null);
+
+    private Task DecideAsync(VerificationVerdict verdict)
+    {
+        _verdict = verdict;
+        return SubmitAsync();
+    }
+
     /// <summary>ТФ-ВЕР-03: эксперт при «подтверждён» обязан указать фигуранта — проверяем на клиенте и объясняем причину.</summary>
     private bool PersonMissingForConfirm =>
         Stage is VerificationStage.Expert or VerificationStage.Supervisor
@@ -249,6 +308,7 @@ else
     private bool SupervisorCannotConfirm =>
         Stage == VerificationStage.Supervisor
         && _review is { } review
+        && !ReviewSingleOperator
         && !review.Decisions.Any(d => d.Stage != VerificationStage.Supervisor && d.Verdict == VerificationVerdict.Confirmed);
 
     private bool FormValid => FormHint is null && !PersonMissingForConfirm
@@ -279,6 +339,11 @@ else
         // ТБ-030 «одно открытие — одна запись»: на предрендере (статический SSR до подключения circuit'а)
         // пару не грузим — GetCandidatePairQuery аудируется и попадал бы в журнал дважды.
         if (!RendererInfo.IsInteractive) { return; }
+
+        if (await Dispatcher.Send(new GetMediaSettingsQuery()) is { Status: true, Data: { } settings })
+        {
+            _settings = settings;
+        }
 
         var response = await Dispatcher.Send(new GetCandidatePairQuery(CandidateId, Stage));
         if (response is not { Status: true, Data: { } item })

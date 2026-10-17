@@ -158,11 +158,14 @@ public sealed class PersonSuggesterTests
         _entries.ShouldBeEmpty();
     }
 
-    [Fact(DisplayName = "Настройки: порог предложений не мягче общего порога и не дальше предела; «false» выключает")]
+    [Fact(DisplayName = "Настройки: порог предложений не мягче нижней границы Администратора и не дальше предела; «false» выключает")]
     public void Options_threshold_and_switch()
     {
         new MediaSearchOptions().EffectiveAutoSuggestMaxCosineDistance.ShouldBe(MediaSearchOptions.DefaultAutoSuggestMaxCosineDistance);
-        new MediaSearchOptions(MaxCosineDistance: 0.3).EffectiveAutoSuggestMaxCosineDistance.ShouldBe(0.3);
+
+        // ADR-0054: граница 70 % (расстояние 0,637) мягче порога предложений 0,5 — действует 0,5; граница 90 % строже.
+        new MediaSearchOptions().AutoSuggestMaxCosineDistanceWithin(70).ShouldBe(0.5);
+        new MediaSearchOptions().AutoSuggestMaxCosineDistanceWithin(90).ShouldBe(1 - (0.363 + 20 * 0.637 / 30), 1e-9);
         new MediaSearchOptions(AutoSuggestMaxCosineDistance: 0.9, MaxAllowedCosineDistance: 0.6)
             .EffectiveAutoSuggestMaxCosineDistance.ShouldBe(0.6);
 
@@ -273,7 +276,7 @@ public sealed class PersonSuggesterTests
 
     private PersonSuggester Suggester(MediaSearchOptions? options = null) =>
         new(_caseScope, _catalog, _faceSearch, _sessions, _runs, _audit, _detector, _embedder, options ?? new MediaSearchOptions(),
-            NullLogger<PersonSuggester>.Instance);
+            MediaTestSettings.Store(), NullLogger<PersonSuggester>.Instance);
 
     private static FaceCandidate Candidate(int faceId, int assetId, double distance) =>
         new(faceId, assetId, null, null, distance, 2, 3, "sface-1");
