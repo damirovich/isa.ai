@@ -167,7 +167,7 @@ public sealed class CaseBriefTests
         rows[0][1].ShouldBe("рынок.mp4 (видео)");
         rows[0][2].ShouldBe("01:05–01:20");
         rows[0][3].ShouldStartWith("≈ ");
-        rows[0][4].ShouldBe("0,87");
+        rows[0][4].ShouldBe("93 %"); // балл 0,87 по шкале ADR-0054: 70 + (0,87 − 0,363) / 0,637 · 30 ≈ 93,9 → вниз
         rows[0][7].ShouldBe(TwoPersonRule.ConfirmedMarker);
         rows[1][7].ShouldStartWith("отозвано");
 

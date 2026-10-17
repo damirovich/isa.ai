@@ -19,20 +19,21 @@ namespace ISC.AI.Modules.Media.Application.Features.Verification;
 public sealed record SupervisorReview(int CandidateId, IReadOnlyList<VerificationDecision> Decisions, int? LinkedPersonRef);
 
 /// <summary>
-/// Решения сотрудников по кандидату — ТОЛЬКО для стадии руководителя (ТФ-ВЕР-02, ADR-0036) и ТОЛЬКО когда оба решения уже
-/// записаны. Отдельный запрос, а не поле общей проекции очереди: проекция для эксперта и верификатора остаётся
+/// Решения сотрудников по кандидату — ТОЛЬКО для стадии руководителя (ТФ-ВЕР-02, ADR-0036) и ТОЛЬКО когда разбор
+/// закончен: в режиме двух лиц — оба решения записаны, в режиме одного оператора (ADR-0054) — решение оператора. Отдельный запрос, а не поле общей проекции очереди: проекция для эксперта и верификатора остаётся
 /// структурно слепой (<see cref="VerificationQueueItem"/>).
 /// </summary>
 /// <remarks>
 /// ПОЧЕМУ «ОБА РЕШЕНИЯ УЖЕ ЕСТЬ»: у одного сотрудника может быть и право руководителя, и право верификатора (по
 /// умолчанию — Администратор). Если бы обзор отдавался раньше, он увидел бы решение эксперта, а затем вынес бы своё
-/// «слепое» — слепота второй проверки (ТФ-ВЕР-02) была бы обойдена. Отказ неотличим от «не найден» (ТБ-020/021).
+/// «слепое» — слепота второй проверки (ТФ-ВЕР-02) была бы обойдена. В режиме одного оператора второй проверки нет —
+/// обзор доступен после его решения. Отказ неотличим от «не найден» (ТБ-020/021).
 /// </remarks>
 /// <param name="CandidateId">Кандидат.</param>
 public sealed record GetSupervisorReviewQuery(int CandidateId) : IRequest<ResponseDto<SupervisorReview>>, IAuditableRequest
 {
     /// <summary>Единый ответ «нет или нельзя» (ТБ-020/021).</summary>
-    public const string NotFoundMessage = "Кандидат не найден или ещё не разобран экспертом и верификатором.";
+    public const string NotFoundMessage = "Кандидат не найден или его разбор ещё не закончен.";
 
     /// <inheritdoc />
     public AuditAction AuditAction => AuditAction.View;
@@ -64,12 +65,13 @@ public sealed record GetSupervisorReviewQuery(int CandidateId) : IRequest<Respon
                 return ResponseDto<SupervisorReview>.BadRequest(VerificationMessages.SupervisorDenied);
             }
 
-            // Fail-closed (ТБ-020/021): кандидат — под решёткой; без обоих решений обзора нет (см. remarks).
+            // Fail-closed (ТБ-020/021): кандидат — под решёткой; до конца разбора обзора нет (см. remarks).
             var access = await accessProvider.GetCurrentAsync(cancellationToken);
             var candidate = await store.GetCandidateAsync(query.CandidateId, access, cancellationToken);
             if (candidate is null
-                || !candidate.Decisions.Any(d => d.Stage == VerificationStage.Expert)
-                || !candidate.Decisions.Any(d => d.Stage == VerificationStage.Verifier))
+                || TwoPersonRule.ModeOf(candidate.Decisions) is not { } mode
+                || (mode != ConfirmationMode.SingleOperator
+                    && !candidate.Decisions.Any(d => d.Stage == VerificationStage.Verifier)))
             {
                 return ResponseDto<SupervisorReview>.NotFound(NotFoundMessage);
             }

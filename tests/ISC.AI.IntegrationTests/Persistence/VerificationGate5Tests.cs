@@ -11,6 +11,7 @@ using ISC.AI.Profile.Investigation.Data;
 using ISC.AI.Profile.Investigation.Domain.Enums;
 using ISC.AI.Profile.Investigation.Domain.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Shouldly;
 using Testcontainers.PostgreSql;
 
@@ -317,17 +318,96 @@ public sealed class VerificationGate5Tests : IAsyncLifetime
         }
     }
 
+    [Fact(DisplayName = "GATE-5, один оператор (ТФ-ВЕР-07): «подтверждён» эксперта — сразу «следственная версия», режим записан на решении, появление с одной подписью; вторая подпись отклоняется")]
+    public async Task Single_operator_confirms_with_one_signature()
+    {
+        var (sessionId, candidateId) = await CreateSessionAsync();
+
+        var decided = await DecideAsync(Expert, candidateId, VerificationStage.Expert, VerificationVerdict.Confirmed, _personId,
+            ConfirmationMode.SingleOperator);
+        decided.Status.ShouldBe(CandidateStatus.Confirmed);
+        decided.Decisions.ShouldHaveSingleItem().Mode.ShouldBe(ConfirmationMode.SingleOperator);
+        (await _sessions.ListQueueAsync(VerificationStage.Verifier, [_caseId], Access(Verifier))).ShouldBeEmpty();
+        (await _sessions.ListQueueAsync(VerificationStage.Supervisor, [_caseId], Access(Head))).ShouldBeEmpty();
+
+        // Вторая подпись в этом режиме не принимается правилом модуля (ТФ-ВЕР-07).
+        TwoPersonRule.CanDecide(decided.Decisions, VerificationStage.Verifier, Verifier, out var reason).ShouldBeFalse();
+        reason.ShouldNotBeNull().ShouldContain("одного оператора");
+
+        // Профиль принимает появление с одной подписью — вторая подпись отсутствует, а не совпадает с первой.
+        await RecordAppearanceAsync(sessionId, decided, Expert, verifierUserId: null);
+        await using var db = _investigation.CreateDbContext();
+        var appearance = await db.Appearances.AsNoTracking().SingleAsync(a => a.CandidateId == candidateId);
+        appearance.ExpertUserId.ShouldBe(Expert);
+        appearance.VerifierUserId.ShouldBeNull();
+        appearance.Status.ShouldBe(AppearanceStatus.InvestigativeLead);
+    }
+
+    [Fact(DisplayName = "GATE-5, один оператор: «неопределённо» — в очередь руководителя; оператор свою неопределённость не снимает, руководитель-третье лицо подтверждает")]
+    public async Task Single_operator_undetermined_goes_to_supervisor()
+    {
+        var (sessionId, candidateId) = await CreateSessionAsync();
+        (await DecideAsync(Expert, candidateId, VerificationStage.Expert, VerificationVerdict.Undetermined, _personId, ConfirmationMode.SingleOperator))
+            .Status.ShouldBe(CandidateStatus.Undetermined);
+        (await _sessions.ListQueueAsync(VerificationStage.Supervisor, [_caseId], Access(Head))).ShouldHaveSingleItem().Id.ShouldBe(candidateId);
+
+        var pending = (await _sessions.GetCandidateAsync(candidateId, Access(Head))).ShouldNotBeNull();
+        TwoPersonRule.CanDecide(pending.Decisions, VerificationStage.Supervisor, Expert, out _).ShouldBeFalse();
+
+        var resolved = await DecideAsync(Head, candidateId, VerificationStage.Supervisor, VerificationVerdict.Confirmed);
+        resolved.Status.ShouldBe(CandidateStatus.Confirmed);
+        resolved.Decisions.ShouldAllBe(d => d.Mode == ConfirmationMode.SingleOperator);
+        await RecordAppearanceAsync(sessionId, resolved, Head, verifierUserId: null);
+        (await CountAppearancesAsync(candidateId)).ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "GATE-5, смена режима: настройка сохраняется, но ни один статус не меняется; начатый вдвоём разбор доводится вдвоём, новый — по новому режиму")]
+    public async Task Mode_switch_changes_no_status()
+    {
+        var settings = new MediaSettingsStore(_media, new MediaSettingsCache(), new ConfigurationBuilder().Build());
+        (await settings.SaveAsync(ConfirmationMode.TwoPerson, 85, 70, changedByUserId: 1)).ShouldBeNull();
+
+        // Разбор начат вдвоём: эксперт решил по режиму, действовавшему в тот момент.
+        var (_, started) = await CreateSessionAsync();
+        await DecideAsync(Expert, started, VerificationStage.Expert, VerificationVerdict.Confirmed, _personId,
+            (await settings.GetAsync()).Mode);
+        var (_, untouched) = await CreateSessionAsync();
+
+        // Администратор включает одного оператора: решения и статусы в базе не трогаются.
+        (await settings.SaveAsync(ConfirmationMode.SingleOperator, 85, 70, changedByUserId: 1)).ShouldBeNull();
+        (await settings.GetAsync()).Mode.ShouldBe(ConfirmationMode.SingleOperator);
+        (await _sessions.GetCandidateAsync(started, Access(Investigator))).ShouldNotBeNull().Status.ShouldBe(CandidateStatus.PendingVerifier);
+        (await _sessions.GetCandidateAsync(untouched, Access(Investigator))).ShouldNotBeNull().Status.ShouldBe(CandidateStatus.Candidate);
+
+        // Начатый — вдвоём: верификатор нужен и принимается; без второго «подтверждён» статуса нет.
+        (await DecideAsync(Verifier, started, VerificationStage.Verifier, VerificationVerdict.Confirmed))
+            .Status.ShouldBe(CandidateStatus.Confirmed);
+
+        // Новый — по новому режиму: одного решения достаточно.
+        (await DecideAsync(Expert, untouched, VerificationStage.Expert, VerificationVerdict.Rejected, mode: (await settings.GetAsync()).Mode))
+            .Status.ShouldBe(CandidateStatus.Rejected);
+
+        await using var db = _media.CreateDbContext();
+        (await db.VerificationDecisions.AsNoTracking().Where(d => d.CandidateId == started).Select(d => d.ConfirmationMode).ToListAsync())
+            .ShouldAllBe(m => m == ConfirmationMode.TwoPerson);
+        (await db.VerificationDecisions.AsNoTracking().SingleAsync(d => d.CandidateId == untouched))
+            .ConfirmationMode.ShouldBe(ConfirmationMode.SingleOperator);
+    }
+
     // ---- обвязка ----
 
     private static AccessContext Access(int userId) => InvestigationTestKit.Access(userId, CaseClassification, CaseDivision);
 
     /// <summary>
-    /// Решение стадии в том порядке, в каком его проводит обработчик: роль по политике профиля → правило двух
-    /// лиц по уже записанным решениям → статус по правилу → атомарная запись в хранилище. Возвращает кандидата
+    /// Решение стадии в том порядке, в каком его проводит обработчик: роль по политике профиля → правило подтверждения
+    /// по уже записанным решениям → статус по правилу → атомарная запись в хранилище. Возвращает кандидата
     /// после записи. Появление создаётся отдельно (<see cref="RecordAppearanceAsync"/>) — как и в обработчике.
+    /// Режим разбора (ADR-0054): у решения эксперта — переданный (по умолчанию «два лица», как до появления режима),
+    /// у остальных стадий — режим эксперта.
     /// </summary>
     private async Task<SearchCandidateRow> DecideAsync(
-        int userId, int candidateId, VerificationStage stage, VerificationVerdict verdict, int? personRef = null)
+        int userId, int candidateId, VerificationStage stage, VerificationVerdict verdict, int? personRef = null,
+        ConfirmationMode mode = ConfirmationMode.TwoPerson)
     {
         (await _policy.CanActAsync(stage, userId)).ShouldBeTrue($"роль пользователя {userId} не даёт права на стадию {stage}");
 
@@ -340,14 +420,15 @@ public sealed class VerificationGate5Tests : IAsyncLifetime
             (await _scope.ListPersonsAsync(candidate.CaseId, Access(userId))).ShouldContain(p => p.PersonId == requested);
         }
 
-        var decision = new VerificationDecision(userId, stage, verdict, Rationale, DateTime.UtcNow);
+        var reviewMode = stage == VerificationStage.Expert ? mode : TwoPersonRule.ModeOf(candidate.Decisions) ?? ConfirmationMode.TwoPerson;
+        var decision = new VerificationDecision(userId, stage, verdict, Rationale, DateTime.UtcNow, reviewMode);
         var decisions = new List<VerificationDecision>(candidate.Decisions) { decision };
         await _sessions.RecordDecisionAsync(candidateId, decision, TwoPersonRule.Resolve(decisions), personRef);
 
         return (await _sessions.GetCandidateAsync(candidateId, Access(userId))).ShouldNotBeNull();
     }
 
-    private Task RecordAppearanceAsync(int sessionId, SearchCandidateRow candidate, int expertUserId, int verifierUserId) =>
+    private Task RecordAppearanceAsync(int sessionId, SearchCandidateRow candidate, int expertUserId, int? verifierUserId) =>
         _scope.RecordAppearanceAsync(new ConfirmedAppearance(
             candidate.CaseId, candidate.PersonRef ?? _personId, sessionId, candidate.Id, candidate.FaceId, candidate.AssetId,
             candidate.FrameIndex, candidate.FrameTimestampMs, candidate.Similarity,

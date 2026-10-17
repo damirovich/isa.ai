@@ -64,13 +64,24 @@ public sealed class MediaAdministration(IUserRoleStore roles, ISubjectProvider s
     /// </remarks>
     public Task<bool> UserCanImportArchiveAsync(int userId, CancellationToken cancellationToken = default) =>
         PermissionRule.UserHasAsync(roles, userId, InvestigationPermissions.MediaImport, cancellationToken);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Право матрицы «Настройки поиска и верификации» (ADR-0054), закреплённое за Администратором: режим подтверждения
+    /// и нижняя граница порога ослабляют или усиливают правило ТБ-073 и порог ТФ-ПЛ-08 — менять их сам себе сотрудник,
+    /// который ищет и подтверждает, не должен. Без режима первичной настройки (fail-closed, ТБ-012).
+    /// </remarks>
+    public Task<bool> CanManageSettingsAsync(CancellationToken cancellationToken = default) =>
+        PermissionRule.CallerHasAsync(roles, subjectProvider, InvestigationPermissions.MediaSettings, cancellationToken);
 }
 
 /// <summary>
 /// Реализация порта пакета «Медиа» <see cref="IVerificationPolicy"/>: кто вправе выступать на стадии
 /// верификации — по правам матрицы доступа (ADR-0032) «Верификация — первая подпись» и «вторая подпись». По
 /// умолчанию стадия эксперта — «Эксперт по лицам», стадия верификатора — «Верификатор»; обе стадии доступны и
-/// Администратору (решение заказчика 2026-09-18, см. <see cref="MediaAdministration"/>).
+/// Администратору (решение заказчика 2026-09-18, см. <see cref="MediaAdministration"/>). В режиме одного оператора
+/// (ADR-0054) окончательное решение — стадия эксперта, то есть право «Верификация — первая подпись»; Администратор может
+/// открыть его и роли «Верификатор» в матрице.
 /// </summary>
 /// <remarks>
 /// ТБ-073 НЕ ослаблено: само правило двух лиц — в модуле (<see cref="TwoPersonRule"/>), профиль его не

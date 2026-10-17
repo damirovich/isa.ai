@@ -63,7 +63,7 @@ public static class MediaModule
 
     /// <summary>
     /// Ключи конфигурации, которые читает пакет: строка подключения и модели — обязательны; параметры
-    /// поиска (ТН-008, ТФ-ПЛ-06), раскадровки (ТО-мат-06), треков лиц (ADR-0037), автопредложения (ADR-0035) и копии
+    /// поиска (ТН-008, ТФ-ПЛ-06), шкала процентов и запасные значения настроек Администратора (ADR-0054), раскадровки (ТО-мат-06), треков лиц (ADR-0037), автопредложения (ADR-0035) и копии
     /// пробы в аудите (ТБ-072) — с умолчаниями.
     /// Секция <c>Speech</c> (ADR-0026) — из единого списка интеграции (<see cref="SpeechConfigurationKeys.All"/>):
     /// процесс-распознаватель, пути и пины SHA-256 модели, словаря и детектора речи, параметры.
@@ -81,8 +81,11 @@ public static class MediaModule
         MediaSearchOptions.CandidateListSizeKey,
         MediaSearchOptions.MinCandidateListSizeKey,
         MediaSearchOptions.MaxCandidateListSizeKey,
-        MediaSearchOptions.MaxCosineDistanceKey,
         MediaSearchOptions.MaxAllowedCosineDistanceKey,
+        MediaSearchOptions.SimilarityScaleKey,
+        MediaSettings.ModeConfigKey,
+        MediaSettings.ThresholdConfigKey,
+        MediaSettings.MinThresholdConfigKey,
         MediaSearchOptions.SampleFpsKey,
         MediaSearchOptions.ProbeCopyMaxBytesKey,
         MediaSearchOptions.AutoSuggestEnabledKey,
@@ -116,6 +119,10 @@ public static class MediaModule
         // Импорт архива с описью (ТФ-МЕД-06, ADR-0041); страница задания (/media/import/{id}) — без пункта меню.
         new ModuleDescriptor("media-import", "/media/import", "Импорт архива",
             Icons.Material.Filled.DriveFolderUpload, typeof(MediaImport), ReadPolicy, MenuGroup),
+
+        // Режим подтверждения и порог схожести (ТФ-ВЕР-07, ТФ-ПЛ-08, ADR-0054): меняет Администратор, право — у профиля.
+        new ModuleDescriptor("media-settings", "/media/settings", "Настройки поиска и верификации",
+            Icons.Material.Filled.Tune, typeof(MediaSettingsPage), ReadPolicy, MenuGroup),
     ];
 
     /// <summary>Виджеты оболочки — пакету не нужны (очередь верификации — пунктом меню).</summary>

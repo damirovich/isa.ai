@@ -1,6 +1,7 @@
 using System.Globalization;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.DocFlow.Domain.Services;
+using ISC.AI.Modules.Media.Application;
 using ISC.AI.Modules.Media.Domain.Model;
 using ISC.AI.Modules.Media.Domain.Services;
 using ISC.AI.Profile.Investigation.Domain.Enums;
@@ -56,9 +57,14 @@ public sealed class BriefCollector(
     IUserAccountStore accounts,
     IReferenceStore references,
     IDivisionAdminStore divisions,
-    TimeProvider time)
+    TimeProvider time,
+    MediaSearchOptions? searchOptions = null)
 {
     private static readonly CultureInfo Ru = CultureInfo.GetCultureInfo("ru-RU");
+
+    // Шкала процентов схожести пакета «Медиа» (ADR-0054): справка показывает тот же процент, что экраны. Контейнер
+    // всегда даёт настройки поиска; без них (сборка вручную) — шкала по умолчанию.
+    private readonly SimilarityScale _scale = searchOptions?.Scale ?? SimilarityScale.Default;
 
     /// <summary>
     /// Справка по делу за период (ТФ-ОТЧ-02); <see langword="null"/> — дело не найдено или недоступно. Период по
@@ -477,9 +483,10 @@ public sealed class BriefCollector(
                 asset is null ? "носитель недоступен" : asset.OriginalFileName + " (" + MediaKindLabel(asset) + ")",
                 Moment(appearance.FrameTimestampMs, span),
                 RecordedMoment(asset, appearance.FrameTimestampMs),
-                appearance.Similarity.ToString("0.00", Ru),
+                _scale.DisplayPercent(appearance.Similarity).ToString(Ru) + " %",
                 Name(names, appearance.ExpertUserId) ?? string.Empty,
-                Name(names, appearance.VerifierUserId) ?? string.Empty,
+                // Режим одного оператора (ADR-0054): вторая подпись отсутствует, а не неизвестна.
+                appearance.VerifierUserId is null ? "— (один оператор)" : Name(names, appearance.VerifierUserId) ?? string.Empty,
                 appearance.IsRevoked
                     ? "отозвано" + (appearance.RevokedAtUtc is { } revoked ? " " + Date(LocalDate(revoked)) : string.Empty)
                     : TwoPersonRule.ConfirmedMarker,

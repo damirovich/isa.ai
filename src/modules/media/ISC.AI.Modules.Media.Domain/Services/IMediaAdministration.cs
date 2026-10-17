@@ -26,4 +26,10 @@ public interface IMediaAdministration
     /// <param name="userId">Пользователь, запустивший задание.</param>
     /// <param name="cancellationToken">Отмена.</param>
     Task<bool> UserCanImportArchiveAsync(int userId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Текущий субъект вправе менять настройки поиска и верификации (ADR-0054): режим подтверждения, рабочий порог и
+    /// нижнюю границу порога. Это правила безопасности поиска по лицу — по ТЗ их задаёт Администратор (ТФ-ВЕР-07, ТФ-ПЛ-08).
+    /// </summary>
+    Task<bool> CanManageSettingsAsync(CancellationToken cancellationToken = default);
 }

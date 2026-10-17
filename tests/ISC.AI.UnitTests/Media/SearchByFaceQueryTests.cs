@@ -41,6 +41,7 @@ public sealed class SearchByFaceQueryTests
     private readonly IFileStorage _files = Substitute.For<IFileStorage>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private MediaSearchOptions _options = new();
+    private IMediaSettingsStore _settings = MediaTestSettings.Store();
 
     public SearchByFaceQueryTests()
     {
@@ -136,14 +137,57 @@ public sealed class SearchByFaceQueryTests
             Arg.Any<CancellationToken>());
     }
 
-    [Fact(DisplayName = "Порог не ослабляется сверх предела эксплуатанта (ТФ-ПЛ-06); ужесточить — можно")]
+    [Fact(DisplayName = "Порог не ослабляется сверх предела эксплуатанта (ТФ-ПЛ-06) при любой границе Администратора")]
     public async Task Threshold_is_capped_by_max_allowed()
     {
-        await HandleAsync(new SearchByFaceQuery(3, 9, ProbeImage: Probe, MaxCosineDistance: 0.95));
-        await _faceSearch.Received(1).SearchAsync(Arg.Is<FaceSearchQuery>(q => q.MaxCosineDistance == 0.8), Arg.Any<AccessContext>(), Arg.Any<CancellationToken>());
+        // Граница 40 % — расстояние ≈ 0,793 по шкале; предел эксплуатанта 0,6 строже — действует он.
+        _options = new MediaSearchOptions(MaxAllowedCosineDistance: 0.6);
+        _settings = MediaTestSettings.Store(thresholdPercent: 40, minThresholdPercent: 40);
 
-        var response = await HandleAsync(new SearchByFaceQuery(3, 9, ProbeImage: Probe, MaxCosineDistance: 0.3));
-        response.Data!.MaxCosineDistance.ShouldBe(0.3);
+        await HandleAsync(new SearchByFaceQuery(3, 9, ProbeImage: Probe, MinSimilarityPercent: 40));
+
+        await _faceSearch.Received(1).SearchAsync(Arg.Is<FaceSearchQuery>(q => q.MaxCosineDistance == 0.6), Arg.Any<AccessContext>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "ТФ-ПЛ-08: без порога оператора — рабочий порог Администратора; порог в процентах — в журнале поиска")]
+    public async Task Working_threshold_applies_by_default_and_is_audited()
+    {
+        var response = await HandleAsync(new SearchByFaceQuery(3, 9, ProbeImage: Probe));
+
+        var expected = new MediaSearchOptions().MaxCosineDistanceFor(85);
+        await _faceSearch.Received(1).SearchAsync(
+            Arg.Is<FaceSearchQuery>(q => q.MaxCosineDistance.HasValue && Math.Abs(q.MaxCosineDistance.Value - expected) < 1e-12),
+            Arg.Any<AccessContext>(), Arg.Any<CancellationToken>());
+        response.Data!.MaxCosineDistance.ShouldBe(expected);
+        await _audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.Action == AuditAction.Search && e.PayloadSensitive!.Contains("порог=85 % (рабочий)")
+                && e.PayloadSensitive.Contains("нижняя граница=70 %")),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "ТФ-ПЛ-08: порог ниже нижней границы сервер поднимает до границы и пишет запрошенный в журнал")]
+    public async Task Threshold_below_bound_is_raised_on_server()
+    {
+        var response = await HandleAsync(new SearchByFaceQuery(3, 9, ProbeImage: Probe, MinSimilarityPercent: 50));
+
+        response.Data!.MaxCosineDistance.ShouldBe(new MediaSearchOptions().MaxCosineDistanceFor(70));
+        await _audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.Action == AuditAction.Search
+                && e.PayloadSensitive!.Contains("порог=70 % (запрошено 50 %, поднято до нижней границы)")),
+            Arg.Any<CancellationToken>());
+
+        // Выше границы — как задал оператор.
+        (await HandleAsync(new SearchByFaceQuery(3, 9, ProbeImage: Probe, MinSimilarityPercent: 92))).Data!.MaxCosineDistance
+            .ShouldBe(new MediaSearchOptions().MaxCosineDistanceFor(92));
+    }
+
+    [Fact(DisplayName = "Валидатор: порог оператора — от 1 до 100 %")]
+    public void Validator_checks_threshold_percent()
+    {
+        var validator = new SearchByFaceValidator();
+        validator.Validate(new SearchByFaceQuery(3, 9, ProbeImage: Probe, MinSimilarityPercent: 85)).IsValid.ShouldBeTrue();
+        validator.Validate(new SearchByFaceQuery(3, 9, ProbeImage: Probe, MinSimilarityPercent: 0)).IsValid.ShouldBeFalse();
+        validator.Validate(new SearchByFaceQuery(3, 9, ProbeImage: Probe, MinSimilarityPercent: 101)).IsValid.ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Ширина кандидат-листа зажимается в 5..50 (ТН-008); умолчание — 20")]
@@ -415,7 +459,7 @@ public sealed class SearchByFaceQueryTests
     {
         var handler = new SearchByFaceQuery.Handler(
             _administration, _accessProvider, _caseScope, _catalog, _detector, _quality, _embedder, _imageTools,
-            _faceSearch, _sessions, _files, _audit, _options, NullLogger<SearchByFaceQuery.Handler>.Instance);
+            _faceSearch, _sessions, _files, _audit, _options, _settings, NullLogger<SearchByFaceQuery.Handler>.Instance);
         return await handler.Handle(query, CancellationToken.None);
     }
 }

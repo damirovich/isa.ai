@@ -17,7 +17,7 @@ public class VerificationDecisionEntity : BaseEntity
     /// <summary>Пользователь, принявший решение.</summary>
     public int SubjectId { get; set; }
 
-    /// <summary>Стадия (эксперт / верификатор).</summary>
+    /// <summary>Стадия (эксперт / верификатор / руководитель).</summary>
     public VerificationStage Stage { get; set; }
 
     /// <summary>Исход.</summary>
@@ -28,4 +28,10 @@ public class VerificationDecisionEntity : BaseEntity
 
     /// <summary>Когда принято (UTC).</summary>
     public DateTime DecidedAtUtc { get; set; }
+
+    /// <summary>
+    /// Режим разбора, в котором принято решение (ADR-0054): решение эксперта — по действующей настройке, верификатора и
+    /// руководителя — режим эксперта. Решения до появления режима — «два лица» (значение колонки по умолчанию в миграции).
+    /// </summary>
+    public ConfirmationMode ConfirmationMode { get; set; } = ConfirmationMode.TwoPerson;
 }

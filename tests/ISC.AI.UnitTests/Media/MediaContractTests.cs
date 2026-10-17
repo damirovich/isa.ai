@@ -99,7 +99,11 @@ public sealed class MediaContractTests
         MediaModule.ConfigurationKeys.ShouldContain("Media:Search:CandidateListSize");
         MediaModule.ConfigurationKeys.ShouldContain("Media:Search:MinCandidateListSize");
         MediaModule.ConfigurationKeys.ShouldContain("Media:Search:MaxCandidateListSize");
-        MediaModule.ConfigurationKeys.ShouldContain("Media:Search:MaxCosineDistance");
+        MediaModule.ConfigurationKeys.ShouldNotContain("Media:Search:MaxCosineDistance"); // заменён настройками Администратора (ADR-0054)
+        MediaModule.ConfigurationKeys.ShouldContain("Media:Search:SimilarityScale");
+        MediaModule.ConfigurationKeys.ShouldContain("Media:Verification:Mode");
+        MediaModule.ConfigurationKeys.ShouldContain("Media:Search:ThresholdPercent");
+        MediaModule.ConfigurationKeys.ShouldContain("Media:Search:MinThresholdPercent");
         MediaModule.ConfigurationKeys.ShouldContain("Media:Search:MaxAllowedCosineDistance");
         MediaModule.ConfigurationKeys.ShouldContain("Media:Video:SampleFps");
         MediaModule.ConfigurationKeys.ShouldContain("Media:Search:ProbeCopyMaxBytes");
@@ -135,31 +139,42 @@ public sealed class MediaContractTests
         MediaModule.RequiredServices.ShouldNotContain(typeof(IAudioTranscriber));
     }
 
-    [Fact(DisplayName = "Настройки поиска: умолчания ТН-008 (20, 5..50), настроенный порог не дальше предела, зажим границ")]
+    [Fact(DisplayName = "Настройки поиска: умолчания ТН-008 (20, 5..50), шкала по порогу модели, порог в процентах не дальше предела")]
     public void Search_options_defaults_and_clamping()
     {
         var defaults = MediaSearchOptions.Read(Configuration());
         defaults.CandidateListSize.ShouldBe(20);
         defaults.MinCandidateListSize.ShouldBe(5);
         defaults.MaxCandidateListSize.ShouldBe(50);
-        defaults.MaxCosineDistance.ShouldBeNull();
         defaults.MaxAllowedCosineDistance.ShouldBe(0.8);
-        defaults.EffectiveMaxCosineDistance(null).ShouldBeNull();
+        defaults.Scale.Points.ShouldBe([(0.363, 70.0)]);
+
+        // ADR-0054: 85 % = балл 0,363 + 15/30 · 0,637; 70 % = порог модели.
+        defaults.MaxCosineDistanceFor(85).ShouldBe(1 - (0.363 + 0.637 / 2), 1e-9);
+        defaults.MaxCosineDistanceFor(70).ShouldBe(1 - 0.363, 1e-9);
 
         var tuned = MediaSearchOptions.Read(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Media:Search:CandidateListSize"] = "100",
             ["Media:Search:MinCandidateListSize"] = "10",
             ["Media:Search:MaxCandidateListSize"] = "30",
-            ["Media:Search:MaxCosineDistance"] = "0.9",
             ["Media:Search:MaxAllowedCosineDistance"] = "0.7",
+            ["Media:Search:SimilarityScale"] = "0.5:50",
         }).Build());
         tuned.CandidateListSize.ShouldBe(30);
-        tuned.MaxCosineDistance.ShouldBe(0.7);
         tuned.ClampTopK(1).ShouldBe(10);
         tuned.ClampTopK(null).ShouldBe(30);
-        tuned.EffectiveMaxCosineDistance(0.95).ShouldBe(0.7);
-        tuned.EffectiveMaxCosineDistance(0.3).ShouldBe(0.3);
+
+        // Предел эксплуатанта действует при любой шкале: 20 % по шкале «0,5 = 50 %» — расстояние 0,8, но не дальше 0,7.
+        tuned.MaxCosineDistanceFor(20).ShouldBe(0.7);
+        tuned.MaxCosineDistanceFor(75).ShouldBe(0.25, 1e-9);
+    }
+
+    [Fact(DisplayName = "Битая шкала схожести останавливает запуск, а не подменяется молча (ADR-0054)")]
+    public void Broken_similarity_scale_fails_start()
+    {
+        Should.Throw<FormatException>(() => MediaSearchOptions.Read(new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { ["Media:Search:SimilarityScale"] = "0.7:50; 0.3:70" }).Build()));
     }
 
     [Fact(DisplayName = "Раздача файлов: описание файла — режимный ресурс, floor ядра применим к нему напрямую")]

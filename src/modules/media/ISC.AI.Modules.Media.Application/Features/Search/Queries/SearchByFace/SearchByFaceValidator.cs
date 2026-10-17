@@ -16,7 +16,8 @@ public sealed class SearchByFaceValidator : AbstractValidator<SearchByFaceQuery>
         RuleFor(q => q.AuthorizationId).GreaterThan(0).WithMessage("Поиск возможен только по основанию дела (ТБ-071).");
         RuleFor(q => q.Scope).IsInEnum();
         RuleFor(q => q.TopK).InclusiveBetween(1, 500).When(q => q.TopK is not null);
-        RuleFor(q => q.MaxCosineDistance).InclusiveBetween(0.0, 2.0).When(q => q.MaxCosineDistance is not null);
+        RuleFor(q => q.MinSimilarityPercent).InclusiveBetween(1, 100).When(q => q.MinSimilarityPercent is not null)
+            .WithMessage("Порог схожести — от 1 до 100 %.");
 
         // Ровно одна проба: изображение, лицо уже проиндексированного носителя (ТФ-ПЛ-03) ЛИБО эталоны фигуранта (ADR-0046).
         RuleFor(q => q)

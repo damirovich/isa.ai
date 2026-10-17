@@ -13,18 +13,22 @@ using Mediator;
 namespace ISC.AI.Modules.Media.Application.Features.Verification;
 
 /// <summary>
-/// Записать решение стадии верификации по кандидату (ТФ-ВЕР-01..03, ТБ-073, GATE-5). Статус кандидата
-/// считается ТОЛЬКО правилом двух лиц (<see cref="TwoPersonRule"/>) по решениям людей; никакого
-/// автоматического решения нет. Два «подтверждён» РАЗНЫХ сотрудников → «следственная версия — требует
-/// процессуальной проверки» и появление фигуранта в деле (ТФ-ПЕР-02). При расхождении («неопределённо») итог
-/// выносит руководитель — третье лицо (ТФ-ВЕР-02, ADR-0036).
+/// Записать решение стадии верификации по кандидату (ТФ-ВЕР-01..03, ТФ-ВЕР-07, ТБ-073, GATE-5). Статус кандидата
+/// считается ТОЛЬКО правилом подтверждения (<see cref="TwoPersonRule"/>) по решениям людей; никакого
+/// автоматического решения нет. В режиме одного оператора (по умолчанию, ADR-0054) «подтверждён» оператора, в режиме
+/// двух лиц — два «подтверждён» РАЗНЫХ сотрудников дают «следственную версию — требует процессуальной проверки» и
+/// появление фигуранта в деле (ТФ-ПЕР-02). «Неопределённо» оператора или расхождение двоих — итог выносит руководитель,
+/// третье лицо (ТФ-ВЕР-02, ADR-0036).
 /// </summary>
 /// <remarks>
 /// НЕ <see cref="IAuditableRequest"/>: запись ТБ-072 требует ОБОИХ субъектов при подтверждении и отдельной
 /// фиксации ОТКЛОНЁННЫХ попыток (самоподтверждение, повтор стадии, чужая роль, обход слепоты) — пишется
 /// вручную. Привязка к фигуранту — на стадии эксперта и у руководителя: верификатор слеп (ТФ-ВЕР-02).
-/// «Подтверждён» руководителя даёт статус только вместе с положительным решением эксперта или верификатора
-/// (<see cref="TwoPersonRule.CanSupervisorDecide"/>); в появлении первая подпись — это решение, вторая — руководитель.
+/// В режиме двух лиц «подтверждён» руководителя даёт статус только вместе с положительным решением эксперта или
+/// верификатора (<see cref="TwoPersonRule.CanSupervisorDecide"/>); в появлении первая подпись — это решение, вторая —
+/// руководитель. РЕЖИМ РАЗБОРА (ADR-0054): решение эксперта записывается с режимом, действующим сейчас (настройка
+/// Администратора), решения верификатора и руководителя — с режимом эксперта; так смена настройки не пересчитывает
+/// решённое и не меняет правил начатого разбора. В режиме одного оператора у появления одна подпись — того, кто подтвердил.
 /// </remarks>
 public sealed record RecordVerificationCommand(
     int CandidateId,
@@ -41,7 +45,8 @@ public sealed record RecordVerificationCommand(
         IAccessContextProvider accessProvider,
         ISearchSessionStore store,
         ICaseScope caseScope,
-        IAuditWriter auditWriter)
+        IAuditWriter auditWriter,
+        IMediaSettingsStore settingsStore)
         : IRequestHandler<RecordVerificationCommand, ResponseDto<CandidateStatus>>
     {
         /// <inheritdoc />
@@ -127,7 +132,13 @@ public sealed record RecordVerificationCommand(
                 }
             }
 
-            var decision = new VerificationDecision(subjectId, command.Stage, command.Verdict, command.Rationale, DateTime.UtcNow);
+            // ТФ-ВЕР-07: режим разбора задаёт первое решение (эксперта) по действующей настройке; дальше — режим эксперта.
+            // Без решения эксперта другие стадии сюда не доходят (CanDecide), запасное «два лица» — наиболее строгое.
+            var mode = command.Stage == VerificationStage.Expert
+                ? (await settingsStore.GetAsync(cancellationToken)).Mode
+                : TwoPersonRule.ModeOf(candidate.Decisions) ?? ConfirmationMode.TwoPerson;
+            var decision = new VerificationDecision(
+                subjectId, command.Stage, command.Verdict, command.Rationale, DateTime.UtcNow, mode);
             var decisions = new List<VerificationDecision>(candidate.Decisions) { decision };
             var newStatus = TwoPersonRule.Resolve(decisions);
 
@@ -147,10 +158,14 @@ public sealed record RecordVerificationCommand(
             var expert = decisions.LastOrDefault(d => d.Stage == VerificationStage.Expert);
             var verifier = decisions.LastOrDefault(d => d.Stage == VerificationStage.Verifier);
 
-            // Первая подпись под «подтверждён»: эксперт, а при решении руководителя — тот из двоих, кто подтвердил.
-            var firstSignature = command.Stage == VerificationStage.Supervisor
-                ? TwoPersonRule.PositiveBy(expert, verifier, subjectId)
+            // Подписи под «подтверждён». Один оператор (ТФ-ВЕР-07): одна — того, кто подтвердил (оператор либо руководитель
+            // по «неопределённому»). Два лица: первая — эксперт, а при решении руководителя — тот из двоих, кто подтвердил;
+            // вторая — текущий субъект (верификатор или руководитель).
+            var single = mode == ConfirmationMode.SingleOperator;
+            var firstSignature = single ? decision
+                : command.Stage == VerificationStage.Supervisor ? TwoPersonRule.PositiveBy(expert, verifier, subjectId)
                 : expert;
+            int? secondSignature = single ? null : subjectId;
             await auditWriter.WriteAsync(
                 new AuditEntry(
                     AuditAction.Modify,
@@ -158,7 +173,7 @@ public sealed record RecordVerificationCommand(
                     subjectId,
                     ObjectRef: $"media:candidate:{candidate.Id}:decision:{command.Stage}",
                     DivisionId: candidate.DivisionId,
-                    PayloadSensitive: BuildPayload(command, subjectId, newStatus, expert, verifier, firstSignature)),
+                    PayloadSensitive: BuildPayload(command, subjectId, newStatus, mode, expert, verifier, firstSignature)),
                 cancellationToken);
 
             // ТФ-ВЕР-03 → ТФ-ПЕР-02: подтверждённый кандидат становится «появлением» фигуранта в деле.
@@ -169,7 +184,7 @@ public sealed record RecordVerificationCommand(
                         candidate.CaseId, person, candidate.SessionId, candidate.Id, candidate.FaceId, candidate.AssetId,
                         candidate.FrameIndex, candidate.FrameTimestampMs, candidate.Similarity,
                         candidate.Classification, candidate.DivisionId,
-                        ExpertUserId: firstSignature.SubjectId, VerifierUserId: subjectId, ConfirmedAtUtc: decision.DecidedAtUtc),
+                        ExpertUserId: firstSignature.SubjectId, VerifierUserId: secondSignature, ConfirmedAtUtc: decision.DecidedAtUtc),
                     cancellationToken);
             }
 
@@ -177,10 +192,12 @@ public sealed record RecordVerificationCommand(
         }
 
         private static string BuildPayload(
-            RecordVerificationCommand command, int subjectId, CandidateStatus newStatus,
+            RecordVerificationCommand command, int subjectId, CandidateStatus newStatus, ConfirmationMode mode,
             VerificationDecision? expert, VerificationDecision? verifier, VerificationDecision? firstSignature)
         {
-            var text = $"стадия={command.Stage}; вердикт={command.Verdict}; статус={newStatus}; обоснование={command.Rationale}";
+            var single = mode == ConfirmationMode.SingleOperator;
+            var text = $"стадия={command.Stage}; вердикт={command.Verdict}; статус={newStatus}; "
+                + $"режим={(single ? "один оператор" : "два лица")}; обоснование={command.Rationale}";
             if ((command.Stage is VerificationStage.Expert or VerificationStage.Supervisor) && command.PersonRef is { } personRef)
             {
                 text += $"; фигурант={personRef}";
@@ -189,16 +206,18 @@ public sealed record RecordVerificationCommand(
             if (command.Stage == VerificationStage.Supervisor)
             {
                 // ТФ-ВЕР-02: итог по расхождению — с обоими прежними решениями, чтобы журнал показывал, что было решено.
-                text += $"; решение руководителя={subjectId}; эксперт={expert?.SubjectId}:{expert?.Verdict}; "
-                    + $"верификатор={verifier?.SubjectId}:{verifier?.Verdict}";
+                text += $"; решение руководителя={subjectId}; эксперт={expert?.SubjectId}:{expert?.Verdict}"
+                    + (verifier is null ? string.Empty : $"; верификатор={verifier.SubjectId}:{verifier.Verdict}");
             }
 
             if (newStatus == CandidateStatus.Confirmed && firstSignature is not null)
             {
-                // ТБ-072: оба субъекта; ТБ-073: маркировка — версия, а не «установлен».
-                text += command.Stage == VerificationStage.Supervisor
-                    ? $"; подписи: {firstSignature.SubjectId} и руководитель {subjectId}; {TwoPersonRule.ConfirmedMarker}"
-                    : $"; эксперт={firstSignature.SubjectId}; верификатор={subjectId}; {TwoPersonRule.ConfirmedMarker}";
+                // ТБ-072: все подписавшие; ТБ-073: маркировка — версия, а не «установлен».
+                text += single
+                    ? $"; подтвердил={firstSignature.SubjectId}; {TwoPersonRule.ConfirmedMarker}"
+                    : command.Stage == VerificationStage.Supervisor
+                        ? $"; подписи: {firstSignature.SubjectId} и руководитель {subjectId}; {TwoPersonRule.ConfirmedMarker}"
+                        : $"; эксперт={firstSignature.SubjectId}; верификатор={subjectId}; {TwoPersonRule.ConfirmedMarker}";
             }
 
             return text;

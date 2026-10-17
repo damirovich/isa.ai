@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using ISC.AI.Modules.Media.Domain.Model;
+using ISC.AI.Modules.Media.Domain.Services;
 using MudBlazor;
 
 namespace ISC.AI.Modules.Media.UI;
@@ -79,12 +80,15 @@ public static class MediaLabels
     public static bool IsInProgress(this TranscriptStatus status) =>
         status is TranscriptStatus.Pending or TranscriptStatus.Processing;
 
-    /// <summary>Подпись статуса кандидата (ТБ-073, ТЭ-005): «подтверждён» — только после двух решений.</summary>
+    /// <summary>
+    /// Подпись статуса кандидата (ТБ-073, ТЭ-005): «подтверждён» — только решением человека, в режиме двух лиц — после двух
+    /// решений (ADR-0054). Сколько подписей у конкретного кандидата, видно в его решениях, а не в статусе.
+    /// </summary>
     public static string Label(this CandidateStatus status) => status switch
     {
-        CandidateStatus.Candidate => "кандидат — ждёт эксперта",
+        CandidateStatus.Candidate => "кандидат — ждёт решения",
         CandidateStatus.PendingVerifier => "ждёт верификатора",
-        CandidateStatus.Confirmed => "подтверждён двумя сотрудниками",
+        CandidateStatus.Confirmed => "подтверждён (следственная версия)",
         CandidateStatus.Rejected => "отклонён",
         CandidateStatus.Undetermined => "неопределённо — к руководителю",
         _ => status.ToString(),
@@ -99,6 +103,27 @@ public static class MediaLabels
         CandidateStatus.Rejected => Color.Dark,
         CandidateStatus.Undetermined => Color.Warning,
         _ => Color.Default,
+    };
+
+    /// <summary>Подпись режима подтверждения (ТФ-ВЕР-07, ADR-0054).</summary>
+    public static string Label(this ConfirmationMode mode) => mode switch
+    {
+        ConfirmationMode.SingleOperator => "один оператор",
+        ConfirmationMode.TwoPerson => "два лица",
+        _ => mode.ToString(),
+    };
+
+    /// <summary>
+    /// Правило подтверждения словами для пояснений на страницах (ТБ-073): по действующему режиму; режим неизвестен
+    /// (настройки не прочитаны) — общая формулировка без обещания числа подписей.
+    /// </summary>
+    public static string ConfirmationRule(ConfirmationMode? mode) => mode switch
+    {
+        ConfirmationMode.SingleOperator =>
+            "Статус «подтверждён» присваивается только решением сотрудника с правом верификации — один оператор (ТБ-073, ТФ-ВЕР-07).",
+        ConfirmationMode.TwoPerson =>
+            "Статус «подтверждён» присваивается только после независимых решений двух сотрудников (ТБ-073).",
+        _ => "Статус «подтверждён» присваивается только решением человека (ТБ-073).",
     };
 
     /// <summary>Подпись исхода решения сотрудника.</summary>
@@ -252,21 +277,23 @@ public static class MediaLabels
         _ => $"{bytes} Б",
     };
 
-    // --- Порог поиска по лицу (ТФ-ПЛ-06): оператор видит и задаёт СХОЖЕСТЬ в процентах, система хранит и применяет
-    // косинусное РАССТОЯНИЕ (1 − схожесть) — так считает индекс лиц (ADR-0019). Перевод — только здесь, в одну сторону
-    // и обратно, чтобы поле, выдача и страница сессии говорили одно и то же.
+    // --- Порог поиска по лицу (ТФ-ПЛ-06/08): оператор видит и задаёт СХОЖЕСТЬ в процентах, система хранит и применяет
+    // косинусное РАССТОЯНИЕ — так считает индекс лиц (ADR-0019). Перевод — только шкалой SimilarityScale (ADR-0054), одной
+    // для поля, выдачи, отборов и карточек.
 
-    /// <summary>Порог расстояния по схожести «не ниже, %»; пусто — без порога.</summary>
-    public static double? MaxCosineDistance(int? minSimilarityPercent) =>
-        minSimilarityPercent is { } percent ? Math.Clamp(100 - percent, 0, 100) / 100.0 : null;
-
-    /// <summary>Схожесть «не ниже, %» по порогу расстояния (округлённо); пусто — без порога.</summary>
-    public static int? MinSimilarityPercent(double? maxCosineDistance) =>
-        maxCosineDistance is { } distance ? (int)Math.Round((1 - distance) * 100, MidpointRounding.AwayFromZero) : null;
-
-    /// <summary>Подпись порога для выдачи и сессии: «схожесть от 50 %» либо «без порога».</summary>
-    public static string SimilarityThreshold(double? maxCosineDistance) =>
-        MinSimilarityPercent(maxCosineDistance) is { } percent
-            ? string.Create(CultureInfo.InvariantCulture, $"схожесть от {percent} %")
+    /// <summary>Подпись порога для выдачи и сессии: «схожесть от 85 %» либо «без порога» (сессии до ADR-0054).</summary>
+    public static string SimilarityThreshold(SimilarityScale scale, double? maxCosineDistance)
+    {
+        ArgumentNullException.ThrowIfNull(scale);
+        return maxCosineDistance is { } distance
+            ? string.Create(CultureInfo.InvariantCulture, $"схожесть от {scale.ThresholdPercent(distance)} %")
             : "без порога";
+    }
+
+    /// <summary>
+    /// Предустановка «высокий» для ползунка порога (ТФ-ПЛ-06): середина между рабочим порогом и 99 %. «Низкий» — нижняя
+    /// граница, «средний» — рабочий порог Администратора.
+    /// </summary>
+    public static int HighThresholdPreset(int workingPercent) =>
+        Math.Min(MediaSettings.MaxPercent, (workingPercent + MediaSettings.MaxPercent + 1) / 2);
 }

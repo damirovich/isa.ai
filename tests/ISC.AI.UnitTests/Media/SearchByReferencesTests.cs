@@ -94,11 +94,12 @@ public sealed class SearchByReferencesTests
         candidates[1].ProbeMatchCount.ShouldBe(1);
         candidates.ShouldNotContain(c => c.FaceId == 6); // сам эталон — не кандидат
 
-        // Ширина каждого запроса — с запасом на исключаемые эталоны; порог не задан — рабочий порог системы 0,5.
+        // Ширина каждого запроса — с запасом на исключаемые эталоны; порог не задан — рабочий порог Администратора (ADR-0054).
+        var working = new MediaSearchOptions().MaxCosineDistanceFor(MediaSettings.DefaultThresholdPercent);
         await _faceSearch.Received(3).SearchAsync(
-            Arg.Is<FaceSearchQuery>(q => q.TopK == new MediaSearchOptions().ClampTopK(null) + 3 && q.MaxCosineDistance == 0.5),
+            Arg.Is<FaceSearchQuery>(q => q.TopK == new MediaSearchOptions().ClampTopK(null) + 3 && q.MaxCosineDistance == working),
             Arg.Any<AccessContext>(), Arg.Any<CancellationToken>());
-        response.Data!.MaxCosineDistance.ShouldBe(0.5);
+        response.Data!.MaxCosineDistance.ShouldBe(working);
 
         var combined = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
             string.Join(";", new[] { TemplateA, TemplateB, TemplateC }.Select(Sha)))));
@@ -257,6 +258,7 @@ public sealed class SearchByReferencesTests
     private async Task<ResponseDto<FaceSearchResult>> HandleAsync(SearchByFaceQuery query) =>
         await new SearchByFaceQuery.Handler(
                 _administration, _accessProvider, _caseScope, _catalog, _detector, _quality, _embedder, _imageTools,
-                _faceSearch, _sessions, _files, _audit, new MediaSearchOptions(), NullLogger<SearchByFaceQuery.Handler>.Instance)
+                _faceSearch, _sessions, _files, _audit, new MediaSearchOptions(), MediaTestSettings.Store(),
+                NullLogger<SearchByFaceQuery.Handler>.Instance)
             .Handle(query, CancellationToken.None);
 }

@@ -305,6 +305,7 @@ public sealed class SearchSessionStore(
             Verdict = decision.Verdict,
             Rationale = decision.Rationale,
             DecidedAtUtc = AsUtc(decision.DecidedAtUtc),
+            ConfirmationMode = decision.Mode,
         });
         try
         {
@@ -449,7 +450,7 @@ public sealed class SearchSessionStore(
             r.Id, r.SessionId, r.CaseId, r.Rank, r.FaceId, r.AssetId, r.FrameIndex, r.FrameTimestampMs, r.CosineDistance,
             r.CropStoredFileName, r.ModelVersion, r.Classification, r.DivisionId, r.Status, r.PersonRef,
             byCandidate[r.Id]
-                .Select(d => new VerificationDecision(d.SubjectId, d.Stage, d.Verdict, d.Rationale, d.DecidedAtUtc))
+                .Select(d => new VerificationDecision(d.SubjectId, d.Stage, d.Verdict, d.Rationale, d.DecidedAtUtc, d.ConfirmationMode))
                 .ToList(),
             r.QualityScore,
             r.Origin,

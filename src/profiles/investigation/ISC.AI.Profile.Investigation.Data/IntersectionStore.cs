@@ -257,7 +257,7 @@ public sealed class IntersectionStore(
 
         if (ownAppearances.Count > 0)
         {
-            const string OwnFace = "лицо объекта (подтверждено двумя сотрудниками)";
+            const string OwnFace = "лицо объекта (подтверждено верификацией)";
             ownValues.TryAdd((IntersectionKind.Face, FaceOnMaterialKey), OwnFace);
             ownValues.TryAdd((IntersectionKind.Face, FaceSharedKey), OwnFace);
         }

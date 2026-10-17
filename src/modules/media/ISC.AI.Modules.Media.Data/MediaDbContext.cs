@@ -61,6 +61,9 @@ public class MediaDbContext(DbContextOptions<MediaDbContext> options) : AuditedD
     /// <summary>Мостик расшифровка ↔ документ корпуса ядра (ADR-0051).</summary>
     public DbSet<TranscriptIndexLink> TranscriptIndexLinks { get; set; } = null!;
 
+    /// <summary>Настройки поиска и верификации, которые ведёт Администратор (ADR-0054).</summary>
+    public DbSet<MediaSetting> Settings { get; set; } = null!;
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

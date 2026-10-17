@@ -7,6 +7,7 @@ using Bunit;
 using ISC.AI.Abstractions.Application;
 using ISC.AI.Modules.Media.Application.Features.Scope;
 using ISC.AI.Modules.Media.Application.Features.Search;
+using ISC.AI.Modules.Media.Application.Features.Settings;
 using ISC.AI.Modules.Media.Domain.Model;
 using ISC.AI.Modules.Media.Domain.Services;
 using ISC.AI.Modules.Media.UI;
@@ -86,39 +87,61 @@ public sealed class FaceSearchReferencesPageTests : BunitContext, IAsyncLifetime
         cut.Markup.ShouldContain("эталон № 7 · совпало эталонов: 2 из 2");
     }
 
-    [Fact(DisplayName = "ТФ-ПЛ-06: порог задаётся схожестью в процентах — «60» уходит в поиск расстоянием 0,4; в выдаче — «схожесть от … %»")]
-    public void Similarity_percent_becomes_distance()
+    [Fact(DisplayName = "ТФ-ПЛ-08: ползунок порога — от нижней границы, открыт на рабочем пороге; предустановка уходит в поиск процентом")]
+    public void Threshold_slider_starts_at_working_threshold_and_sends_percent()
     {
+        GivenSettings(threshold: 80, min: 72);
         Services.GetRequiredService<NavigationManager>().NavigateTo("/media/search?caseId=3&faceIds=5,7&authId=9&scope=all");
         Render<MudPopoverProvider>();
         var cut = Render<FaceSearch>();
-        cut.WaitForAssertion(() => cut.Markup.ShouldContain("Схожесть не ниже, %"));
-        cut.Markup.ShouldContain("не ниже 20 % — предел эксплуатанта");
-        cut.Markup.ShouldNotContain("Порог расстояния");
+        cut.WaitForAssertion(() => cut.Markup.ShouldContain("80 %</b>"));
 
-        var field = cut.FindAll(".mud-input-control")
-            .Single(e => e.TextContent.Contains("Схожесть не ниже, %", StringComparison.Ordinal))
-            .QuerySelector("input")!;
-        field.Change("60");
+        var slider = cut.Find("input[type=range]");
+        slider.GetAttribute("min").ShouldBe("72");
+        slider.GetAttribute("max").ShouldBe("99");
+        cut.Markup.ShouldContain("низкий · 72 %");
+        cut.Markup.ShouldContain("средний · 80 %");
+        cut.Markup.ShouldContain("высокий · 90 %");
+        cut.Markup.ShouldContain("Кандидаты ниже порога не показываются");
+
+        cut.FindAll("button").Single(b => b.TextContent.Contains("высокий", StringComparison.Ordinal)).Click();
         cut.FindAll("button").Single(b => b.TextContent.Contains("Искать", StringComparison.Ordinal)).Click();
 
         cut.WaitForAssertion(() => _mediator.Received(1).Send(
-            Arg.Is<SearchByFaceQuery>(q => q.MaxCosineDistance.HasValue && Math.Abs(q.MaxCosineDistance.Value - 0.4) < 1e-9),
-            Arg.Any<CancellationToken>()));
+            Arg.Is<SearchByFaceQuery>(q => q.MinSimilarityPercent == 90), Arg.Any<CancellationToken>()));
         cut.Markup.ShouldContain("без порога"); // ответ подменён без порога — подпись выдачи берёт его из результата
     }
 
-    [Fact(DisplayName = "ТФ-ПЛ-06: перевод «схожесть, %» ↔ «расстояние» в обе стороны; пусто — без порога")]
-    public void Similarity_conversions()
+    [Fact(DisplayName = "ТФ-ПЛ-08: ниже нижней границы страница порог не отправляет — даже если ползунок сдвинули мимо его пределов")]
+    public void Threshold_below_bound_is_not_sent()
     {
-        MediaLabels.MaxCosineDistance(60).ShouldBe(0.4);
-        MediaLabels.MaxCosineDistance(100).ShouldBe(0);
-        MediaLabels.MaxCosineDistance(null).ShouldBeNull();
-        MediaLabels.MinSimilarityPercent(0.7).ShouldBe(30);
-        MediaLabels.MinSimilarityPercent(0.5).ShouldBe(50);
-        MediaLabels.SimilarityThreshold(0.5).ShouldBe("схожесть от 50 %");
-        MediaLabels.SimilarityThreshold(null).ShouldBe("без порога");
+        GivenSettings(threshold: 85, min: 70);
+        Services.GetRequiredService<NavigationManager>().NavigateTo("/media/search?caseId=3&faceIds=5,7&authId=9&scope=all");
+        Render<MudPopoverProvider>();
+        var cut = Render<FaceSearch>();
+        cut.WaitForAssertion(() => cut.Markup.ShouldContain("85 %</b>"));
+
+        cut.Find("input[type=range]").Input("50");
+        cut.FindAll("button").Single(b => b.TextContent.Contains("Искать", StringComparison.Ordinal)).Click();
+
+        cut.WaitForAssertion(() => _mediator.Received(1).Send(
+            Arg.Is<SearchByFaceQuery>(q => q.MinSimilarityPercent == 70), Arg.Any<CancellationToken>()));
     }
+
+    [Fact(DisplayName = "ADR-0054: подпись порога выдачи — процентом шкалы; сессия без порога — «без порога»")]
+    public void Similarity_threshold_label_uses_scale()
+    {
+        MediaLabels.SimilarityThreshold(SimilarityScale.Default, SimilarityScale.Default.MaxCosineDistance(85)).ShouldBe("схожесть от 85 %");
+        MediaLabels.SimilarityThreshold(SimilarityScale.Default, 0.5).ShouldBe("схожесть от 76 %"); // прежний порог предложений
+        MediaLabels.SimilarityThreshold(SimilarityScale.Default, null).ShouldBe("без порога");
+        MediaLabels.HighThresholdPreset(85).ShouldBe(92);
+        MediaLabels.HighThresholdPreset(99).ShouldBe(99);
+    }
+
+    private void GivenSettings(int threshold, int min) =>
+        _mediator.Send(Arg.Any<GetMediaSettingsQuery>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<ResponseDto<MediaSettingsView>>(ResponseDto<MediaSettingsView>.Ok(new MediaSettingsView(
+                ConfirmationMode.SingleOperator, threshold, min, null, null, CanManage: false, "балл 0,363 = 70 %"))));
 
     private void Face(int id, bool acceptable) =>
         _mediator.Send(Arg.Is<GetFaceQuery>(q => q.FaceId == id), Arg.Any<CancellationToken>())

@@ -1,0 +1,155 @@
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using FluentValidation;
+using ISC.AI.Abstractions.Application;
+using ISC.AI.Abstractions.Audit;
+using ISC.AI.Abstractions.Security;
+using ISC.AI.Modules.Media.Domain.Model;
+using ISC.AI.Modules.Media.Domain.Services;
+using Mediator;
+
+namespace ISC.AI.Modules.Media.Application.Features.Settings;
+
+/// <summary>
+/// Настройки поиска и верификации для экранов (ADR-0054): ползунок порога у оператора, тексты режима в очереди и окне
+/// сличения, экран Администратора.
+/// </summary>
+/// <param name="Mode">Действующий режим подтверждения.</param>
+/// <param name="ThresholdPercent">Рабочий порог, %.</param>
+/// <param name="MinThresholdPercent">Нижняя граница порога, %.</param>
+/// <param name="UpdatedAtUtc">Когда меняли последний раз; <see langword="null"/> — не меняли.</param>
+/// <param name="UpdatedByUserId">Кто менял последним.</param>
+/// <param name="CanManage">Текущий субъект вправе менять настройки (экран Администратора).</param>
+/// <param name="ScaleDescription">Шкала процентов словами: «балл 0,363 = 70 %».</param>
+public sealed record MediaSettingsView(
+    ConfirmationMode Mode,
+    int ThresholdPercent,
+    int MinThresholdPercent,
+    DateTime? UpdatedAtUtc,
+    int? UpdatedByUserId,
+    bool CanManage,
+    string ScaleDescription);
+
+/// <summary>
+/// Прочитать настройки поиска и верификации (ADR-0054). Значения не секретны — их видит каждый вошедший: оператору
+/// нужны границы ползунка, эксперту — режим, в котором он решает. Без субъекта — отказ (fail-closed).
+/// </summary>
+public sealed record GetMediaSettingsQuery : IRequest<ResponseDto<MediaSettingsView>>
+{
+    /// <inheritdoc cref="GetMediaSettingsQuery" />
+    public sealed class Handler(
+        IMediaSettingsStore store, IMediaAdministration administration, ISubjectProvider subjectProvider, MediaSearchOptions options)
+        : IRequestHandler<GetMediaSettingsQuery, ResponseDto<MediaSettingsView>>
+    {
+        /// <inheritdoc />
+        public async ValueTask<ResponseDto<MediaSettingsView>> Handle(GetMediaSettingsQuery query, CancellationToken cancellationToken)
+        {
+            if (await subjectProvider.GetCurrentUserIdAsync(cancellationToken) is null)
+            {
+                return ResponseDto<MediaSettingsView>.BadRequest("Субъект не установлен.");
+            }
+
+            var settings = await store.GetAsync(cancellationToken);
+            var canManage = await administration.CanManageSettingsAsync(cancellationToken);
+            return ResponseDto<MediaSettingsView>.Ok(new MediaSettingsView(
+                settings.Mode, settings.ThresholdPercent, settings.MinThresholdPercent,
+                settings.UpdatedAtUtc, settings.UpdatedByUserId, canManage, options.Scale.Describe()));
+        }
+    }
+}
+
+/// <summary>
+/// Изменить настройки поиска и верификации (ТФ-ВЕР-07, ТФ-ПЛ-08, ТФ-АДМ-03, ADR-0054): режим подтверждения, рабочий
+/// порог и нижнюю границу. Только с правом настроек (у «Следствия» — закреплено за Администратором).
+/// </summary>
+/// <remarks>
+/// НЕ <see cref="IAuditableRequest"/>: ТФ-АДМ-03 требует аудита ИЗМЕНЕНИЙ — запись с прежними и новыми значениями
+/// сквозное поведение не составит; отказ без права тоже пишется (попытка ослабить правило подтверждения — событие
+/// безопасности, ТБ-073). Смена режима ничего не пересчитывает: решённые кандидаты остаются как были, начатые разборы
+/// доводятся по правилам своего режима (режим хранится на решении).
+/// </remarks>
+/// <param name="Mode">Режим подтверждения.</param>
+/// <param name="ThresholdPercent">Рабочий порог, % (40–99).</param>
+/// <param name="MinThresholdPercent">Нижняя граница, % (40–99, не выше рабочего).</param>
+public sealed record SetMediaSettingsCommand(ConfirmationMode Mode, int ThresholdPercent, int MinThresholdPercent)
+    : IRequest<ResponseDto<MediaSettings>>
+{
+    /// <summary>Отказ без права настроек.</summary>
+    public const string DeniedMessage = "Настройки поиска и верификации меняет Администратор (право «Настройки поиска и верификации»).";
+
+    /// <inheritdoc cref="SetMediaSettingsCommand" />
+    public sealed class Handler(
+        IMediaSettingsStore store,
+        IMediaAdministration administration,
+        ISubjectProvider subjectProvider,
+        IAuditWriter auditWriter)
+        : IRequestHandler<SetMediaSettingsCommand, ResponseDto<MediaSettings>>
+    {
+        /// <inheritdoc />
+        public async ValueTask<ResponseDto<MediaSettings>> Handle(SetMediaSettingsCommand command, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(command);
+
+            var subjectId = await subjectProvider.GetCurrentUserIdAsync(cancellationToken);
+            if (subjectId is null)
+            {
+                return ResponseDto<MediaSettings>.BadRequest("Субъект не установлен.");
+            }
+
+            // Право — через нейтральный порт: роли ведёт профиль (ADR-0017); отказ — событие журнала.
+            if (!await administration.CanManageSettingsAsync(cancellationToken))
+            {
+                await WriteAsync(subjectId, $"изменение отклонено: нет права; запрошено: {Describe(command)}", cancellationToken);
+                return ResponseDto<MediaSettings>.BadRequest(DeniedMessage);
+            }
+
+            var previous = await store.GetAsync(cancellationToken);
+            if (await store.SaveAsync(command.Mode, command.ThresholdPercent, command.MinThresholdPercent, subjectId, cancellationToken)
+                is { } error)
+            {
+                return ResponseDto<MediaSettings>.BadRequest(error);
+            }
+
+            var current = await store.GetAsync(cancellationToken);
+            await WriteAsync(subjectId, Changes(previous, current), cancellationToken);
+            return ResponseDto<MediaSettings>.Ok(current, "Настройки сохранены и действуют со следующего поиска и решения.");
+        }
+
+        private static string Describe(SetMediaSettingsCommand command) =>
+            $"режим подтверждения: {ModeLabel(command.Mode)}; рабочий порог: {command.ThresholdPercent} %; "
+            + $"нижняя граница: {command.MinThresholdPercent} %";
+
+        // ТФ-АДМ-03: «было → стало» по каждой настройке, чтобы журнал показывал, что именно поменяли.
+        private static string Changes(MediaSettings before, MediaSettings after) =>
+            $"режим подтверждения: {ModeLabel(before.Mode)} → {ModeLabel(after.Mode)}; "
+            + $"рабочий порог: {before.ThresholdPercent} → {after.ThresholdPercent} %; "
+            + $"нижняя граница: {before.MinThresholdPercent} → {after.MinThresholdPercent} %";
+
+        private static string ModeLabel(ConfirmationMode mode) =>
+            mode == ConfirmationMode.TwoPerson ? "два лица" : "один оператор";
+
+        private Task WriteAsync(int? subjectId, string payload, CancellationToken cancellationToken) =>
+            auditWriter.WriteAsync(
+                new AuditEntry(
+                    AuditAction.Modify,
+                    Classification: 0,
+                    subjectId,
+                    ObjectRef: "media:settings",
+                    PayloadSensitive: payload),
+                cancellationToken);
+    }
+}
+
+/// <summary>Правила команды настроек: режим известен, пороги 40–99 %, рабочий не ниже границы (тексты — из домена).</summary>
+public sealed class SetMediaSettingsValidator : AbstractValidator<SetMediaSettingsCommand>
+{
+    /// <inheritdoc cref="SetMediaSettingsValidator" />
+    public SetMediaSettingsValidator()
+    {
+        RuleFor(c => c)
+            .Must(c => MediaSettings.Validate(c.Mode, c.ThresholdPercent, c.MinThresholdPercent) is null)
+            .WithMessage(c => MediaSettings.Validate(c.Mode, c.ThresholdPercent, c.MinThresholdPercent) ?? string.Empty)
+            .WithName("Settings");
+    }
+}

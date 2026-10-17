@@ -225,6 +225,6 @@ public sealed class SupervisorResolutionTests
         _store.GetCandidateAsync(11, Arg.Any<AccessContext>(), Arg.Any<CancellationToken>()).Returns(Candidate(personRef, decisions));
 
     private async Task<ResponseDto<CandidateStatus>> HandleAsync(RecordVerificationCommand command) =>
-        await new RecordVerificationCommand.Handler(_subjects, _policy, _accessProvider, _store, _caseScope, _audit)
+        await new RecordVerificationCommand.Handler(_subjects, _policy, _accessProvider, _store, _caseScope, _audit, MediaTestSettings.Store())
             .Handle(command, CancellationToken.None);
 }

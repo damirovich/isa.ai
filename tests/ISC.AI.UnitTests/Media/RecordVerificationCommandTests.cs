@@ -188,7 +188,7 @@ public sealed class RecordVerificationCommandTests
 
     private async Task<ResponseDto<CandidateStatus>> HandleAsync(RecordVerificationCommand command)
     {
-        var handler = new RecordVerificationCommand.Handler(_subjects, _policy, _accessProvider, _store, _caseScope, _audit);
+        var handler = new RecordVerificationCommand.Handler(_subjects, _policy, _accessProvider, _store, _caseScope, _audit, MediaTestSettings.Store());
         return await handler.Handle(command, CancellationToken.None);
     }
 }

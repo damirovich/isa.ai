@@ -30,8 +30,11 @@ namespace ISC.AI.Modules.Media.Application.Features.Search;
 /// НЕ <see cref="IAuditableRequest"/>: состав записи ТБ-072 (субъект, дело, основание, хеш и копия пробы,
 /// область, версии моделей, параметры, полный кандидат-лист) сквозное поведение дать не может — запись
 /// пишется здесь вручную и ПОЛНОСТЬЮ, в т.ч. для отклонённых и упавших попыток. Вектор пробы в базу
-/// не пишется (ТБ-074): сессия хранит только хеш; сама проба в базу шаблонов не попадает. Порог и ширину
-/// выдачи оператор задаёт в границах эксплуатанта (ТН-008, ТФ-ПЛ-06). Тексты — только «кандидат» (ТЭ-005).
+/// не пишется (ТБ-074): сессия хранит только хеш; сама проба в базу шаблонов не попадает. Ширину выдачи оператор
+/// задаёт в границах эксплуатанта (ТН-008), порог — в процентах не ниже нижней границы Администратора (ТФ-ПЛ-08,
+/// ADR-0054): без порога поиска нет. Тексты — только «кандидат» (ТЭ-005). <c>MinSimilarityPercent</c> — порог
+/// «схожесть не ниже, %» с ползунка оператора; не задан — рабочий порог Администратора, ниже нижней границы —
+/// поднимается до неё на сервере.
 /// </remarks>
 public sealed record SearchByFaceQuery(
     int CaseId,
@@ -42,7 +45,7 @@ public sealed record SearchByFaceQuery(
     int? ProbeFaceId = null,
     int? ProbeFaceIndex = null,
     int? TopK = null,
-    double? MaxCosineDistance = null,
+    int? MinSimilarityPercent = null,
     bool IncludeClosedCases = false,
     IReadOnlyList<int>? ProbeFaceIds = null)
     : IRequest<ResponseDto<FaceSearchResult>>
@@ -65,6 +68,7 @@ public sealed record SearchByFaceQuery(
         IFileStorage fileStorage,
         IAuditWriter auditWriter,
         MediaSearchOptions options,
+        IMediaSettingsStore settingsStore,
         ILogger<Handler> logger)
         : IRequestHandler<SearchByFaceQuery, ResponseDto<FaceSearchResult>>
     {
@@ -146,17 +150,14 @@ public sealed record SearchByFaceQuery(
 
             try
             {
-                // (е) Параметры в границах эксплуатанта: ТН-008 (ширина) и ТФ-ПЛ-06 (порог не ослабляется сверх предела).
+                // (е) Параметры в границах: ТН-008 (ширина) и ТФ-ПЛ-08 (порог). Порог — всегда: не задан — рабочий порог
+                // Администратора, ниже нижней границы — граница (проверка на сервере, не только ползунком); перевод в
+                // расстояние — шкалой и не дальше предела эксплуатанта (ADR-0054).
                 var topK = options.ClampTopK(query.TopK);
-                var maxDistance = options.EffectiveMaxCosineDistance(query.MaxCosineDistance);
-
-                // ADR-0046 п. 2: у поиска по эталонам порог обязателен — по нему считается согласие эталонов. Без
-                // порога оператора и конфигурации — рабочий порог системы (тот же, что у предложений, ADR-0035, до
-                // калибровки ТО-мат-08); он записывается в сессию и виден оператору.
-                if (query.ProbeFaceIds is not null)
-                {
-                    maxDistance ??= options.EffectiveAutoSuggestMaxCosineDistance;
-                }
+                var settings = await settingsStore.GetAsync(cancellationToken);
+                var threshold = new SearchThreshold(
+                    query.MinSimilarityPercent, settings.EffectivePercent(query.MinSimilarityPercent), settings.MinThresholdPercent);
+                double? maxDistance = options.MaxCosineDistanceFor(threshold.Percent);
 
                 // (ж) Поиск: решётка — на стороне БД (ТБ-020/021), область — поверх неё, не вместо. По эталонам — по
                 // каждому, со сводкой кандидатов по лицу (ADR-0046).
@@ -195,7 +196,7 @@ public sealed record SearchByFaceQuery(
                         access.NumericSubjectId,
                         ObjectRef: $"media:search:{sessionId};case:{caseItem.CaseId};auth:{authorization.AuthorizationId}",
                         DivisionId: caseItem.DivisionId,
-                        PayloadSensitive: BuildAuditPayload(query, authorization, caseIds, probes, skipped, topK, maxDistance, candidates)),
+                        PayloadSensitive: BuildAuditPayload(query, authorization, caseIds, probes, skipped, topK, threshold, maxDistance, candidates)),
                     cancellationToken);
 
                 // (к) Кандидаты — как записаны (с идентификаторами для верификации).
@@ -562,6 +563,7 @@ public sealed record SearchByFaceQuery(
             IReadOnlyList<ProbeResolution> probes,
             IReadOnlyList<string> skipped,
             int topK,
+            SearchThreshold threshold,
             double? maxDistance,
             IReadOnlyList<FaceCandidate> candidates)
         {
@@ -609,6 +611,12 @@ public sealed record SearchByFaceQuery(
             sb.Append("модели: детектор ").Append(detector.ModelVersion)
               .Append("; векторизатор ").AppendLine(embedder.ModelVersion);
             sb.Append("параметры: topK=").Append(topK.ToString(inv))
+              // ТФ-ПЛ-08, ТБ-072: порог в процентах шкалы, запрошенный — если его подняли до нижней границы.
+              .Append("; порог=").Append(threshold.Percent.ToString(inv)).Append(" %")
+              .Append(threshold.Raised ? $" (запрошено {threshold.Requested!.Value.ToString(inv)} %, поднято до нижней границы)" : string.Empty)
+              .Append(threshold.Requested is null ? " (рабочий)" : string.Empty)
+              .Append("; нижняя граница=").Append(threshold.MinPercent.ToString(inv)).Append(" %")
+              .Append("; шкала: ").Append(options.Scale.Describe())
               .Append("; порог(cos-dist)=").Append(maxDistance?.ToString("F4", inv) ?? "нет")
               .Append("; ef_search=").AppendLine(options.HnswEfSearch.ToString(inv));
 
@@ -648,6 +656,13 @@ public sealed record SearchByFaceQuery(
                     DivisionId: caseItem.DivisionId,
                     PayloadSensitive: $"поиск не выполнен: {error}; область: {query.Scope}"),
                 cancellationToken);
+
+        /// <summary>Порог поиска (ТФ-ПЛ-08): запрошенный оператором (может не быть), действующий и нижняя граница — для журнала.</summary>
+        private sealed record SearchThreshold(int? Requested, int Percent, int MinPercent)
+        {
+            /// <summary>Запрошенный порог ниже границы — сервер поднял его до границы.</summary>
+            public bool Raised => Requested is { } requested && requested < Percent;
+        }
 
         /// <summary>Разрешённая проба: вектор (только в памяти, ТБ-074), хеш, вырезка, число лиц, описание для аудита.</summary>
         private sealed record ProbeResolution(

@@ -40,6 +40,7 @@ public sealed class PersonSuggestionPanelTests : BunitContext, IAsyncLifetime
         JSInterop.Mode = JSRuntimeMode.Loose;
         Services.AddMudServices();
         Services.AddSingleton(_mediator);
+        Services.AddSingleton(new ISC.AI.Modules.Media.Application.MediaSearchOptions());
         SetRendererInfo(new RendererInfo("Server", true));
     }
 
@@ -62,7 +63,7 @@ public sealed class PersonSuggestionPanelTests : BunitContext, IAsyncLifetime
         cut.Markup.ShouldContain("у фигурантов нет эталонов");
         cut.Markup.ShouldContain("Добавьте эталон в карточке фигуранта");
         cut.Markup.ShouldContain("нет действующего основания поиска");
-        cut.Markup.ShouldContain("совпадения от 50 %");
+        cut.Markup.ShouldContain("совпадения от 76 %"); // порог 0,5 по шкале ADR-0054
         cut.FindAll("button").Any(b => b.TextContent.Contains("Сверить сейчас", StringComparison.Ordinal)).ShouldBeFalse();
     }
 
@@ -78,7 +79,7 @@ public sealed class PersonSuggestionPanelTests : BunitContext, IAsyncLifetime
         cut.Markup.ShouldContain("Предложено системой: 1");
         cut.Markup.ShouldContain("Лицо № 74</b> похоже на эталон фигуранта");
         cut.Markup.ShouldNotContain("(дело В-3/26)"); // одно дело — номер в строке не повторяется
-        cut.Markup.ShouldContain("схожесть 65%");
+        cut.Markup.ShouldContain("схожесть 83%"); // балл 0,65 по шкале ADR-0054
         cut.Markup.ShouldContain(CandidateStatus.Candidate.Label());
         cut.Markup.ShouldContain("Предложено кандидатов: 1.");
         cut.FindAll("a").Single(a => a.GetAttribute("href")!.StartsWith("/media/verification/945", StringComparison.Ordinal)).TextContent.ShouldContain("К решению эксперта");

@@ -62,6 +62,10 @@ public static class MediaPersistenceServiceCollectionExtensions
         services.AddScoped<ISearchSessionStore, SearchSessionStore>();
         services.AddScoped<ISuggestionRunStore, SuggestionRunStore>();
 
+        // Настройки поиска и верификации (ADR-0054): кеш один на процесс, хранилище — на операцию.
+        services.AddSingleton<MediaSettingsCache>();
+        services.AddScoped<IMediaSettingsStore, MediaSettingsStore>();
+
         // Задания пакетного импорта архива (ADR-0041): переживают перезапуск, строки — под решёткой смотрящего.
         services.AddScoped<IMediaImportStore, MediaImportStore>();
 

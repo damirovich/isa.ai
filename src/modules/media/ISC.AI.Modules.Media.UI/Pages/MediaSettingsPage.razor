@@ -1,0 +1,167 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Настройки поиска и верификации (ТФ-ВЕР-07, ТФ-ПЛ-08, ТФ-АДМ-03, ADR-0054): режим подтверждения (один оператор / два
+   лица), рабочий порог схожести и нижняя граница порога. Меняет Администратор (право проверяет сервер; без права экран
+   показывает значения только для чтения). Проверка 40–99 % и «рабочий не ниже границы» — на сервере; форма лишь
+   подсказывает. Каждое изменение — в журнале с прежними и новыми значениями. *@
+@page "/media/settings"
+@rendermode InteractiveServer
+@using ISC.AI.Modules.Media.Application.Features.Settings
+@using ISC.AI.Modules.Media.Domain.Model
+@using ISC.AI.Modules.Media.Domain.Services
+
+<PageTitle>Настройки поиска и верификации</PageTitle>
+
+<MudText Typo="Typo.h5">Настройки поиска и верификации</MudText>
+<MudText Typo="Typo.body2" Class="mud-text-secondary">
+    Режим подтверждения совпадений по лицу и порог схожести · изменяет Администратор
+</MudText>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@if (_saved is not null)
+{
+    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="my-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _saved = null)">@_saved</MudAlert>
+}
+
+@if (_view is null)
+{
+    @if (_error is null)
+    {
+        <MudProgressLinear Indeterminate="true" Class="my-4" />
+    }
+}
+else
+{
+    var view = _view;
+    @if (!view.CanManage)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="my-3">
+            Значения показаны для сведения: менять их может только Администратор (право «Настройки поиска и верификации»).
+        </MudAlert>
+    }
+
+    <MudPaper Outlined="true" Class="pa-4 my-4" Style="max-width:720px;">
+        <MudText Typo="Typo.subtitle1" Class="mb-1">Подтверждение совпадения по лицу</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">
+            Кто присваивает кандидату статус «подтверждён» (ТБ-073). Автоматического подтверждения нет ни в одном режиме.
+        </MudText>
+        <MudRadioGroup T="ConfirmationMode" @bind-Value="_mode" Disabled="@(!view.CanManage || _busy)">
+            <MudRadio T="ConfirmationMode" Value="ConfirmationMode.SingleOperator" Color="Color.Primary">
+                Один оператор — решение сотрудника с правом «Верификация — первая подпись» окончательное
+            </MudRadio>
+            <MudRadio T="ConfirmationMode" Value="ConfirmationMode.TwoPerson" Color="Color.Primary">
+                Два лица — эксперт и слепой верификатор, при расхождении итог выносит руководитель
+            </MudRadio>
+        </MudRadioGroup>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+            Смена режима не меняет уже вынесенных решений. Разборы, начатые вдвоём, доводятся вдвоём; новый режим действует
+            для кандидатов, по которым ещё нет ни одного решения. «Неопределённо» в любом режиме решает руководитель — другой
+            сотрудник.
+        </MudText>
+    </MudPaper>
+
+    <MudPaper Outlined="true" Class="pa-4 my-4" Style="max-width:720px;">
+        <MudText Typo="Typo.subtitle1" Class="mb-1">Порог схожести</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">
+            С рабочим порогом открывается поиск по лицу; ниже нижней границы оператор порог не опустит. Кандидаты ниже порога
+            не показываются.
+        </MudText>
+        <div class="d-flex gap-3 flex-wrap">
+            <MudNumericField T="int" @bind-Value="_threshold" Label="Рабочий порог, %" Variant="Variant.Outlined"
+                             Min="@MediaSettings.MinPercent" Max="@MediaSettings.MaxPercent" Style="max-width:200px;"
+                             Disabled="@(!view.CanManage || _busy)" HelperText="@($"от {MediaSettings.MinPercent} до {MediaSettings.MaxPercent}")" />
+            <MudNumericField T="int" @bind-Value="_minThreshold" Label="Нижняя граница, %" Variant="Variant.Outlined"
+                             Min="@MediaSettings.MinPercent" Max="@MediaSettings.MaxPercent" Style="max-width:200px;"
+                             Disabled="@(!view.CanManage || _busy)" HelperText="не выше рабочего порога" />
+        </div>
+        @if (ValidationError is { } validation)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-2">@validation</MudText>
+        }
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+            Проценты — шкала балла модели (@view.ScaleDescription), до калибровки на пилоте. Это вероятностная оценка, а не
+            установление личности (ТЭ-006).
+        </MudText>
+    </MudPaper>
+
+    <div class="d-flex align-center justify-space-between flex-wrap gap-2" style="max-width:720px;">
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+            @(view.UpdatedAtUtc is { } at
+                ? $"Последнее изменение: {at.ToLocalTime():dd.MM.yyyy HH:mm}, пользователь № {view.UpdatedByUserId}"
+                : "Не менялись: действуют значения поставки (один оператор, 85 % и 70 %) или конфигурации.")
+        </MudText>
+        @if (view.CanManage)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                       OnClick="SaveAsync" Disabled="@(_busy || ValidationError is not null || !Changed)">
+                @(_busy ? "Сохраняем…" : "Сохранить")
+            </MudButton>
+        }
+    </div>
+}
+
+@code {
+    private MediaSettingsView? _view;
+    private ConfirmationMode _mode = MediaSettings.DefaultMode;
+    private int _threshold = MediaSettings.DefaultThresholdPercent;
+    private int _minThreshold = MediaSettings.DefaultMinThresholdPercent;
+    private bool _busy;
+    private string? _error;
+    private string? _saved;
+
+    // Подсказка формы — тем же правилом, что проверяет сервер (MediaSettings.Validate).
+    private string? ValidationError => MediaSettings.Validate(_mode, _threshold, _minThreshold);
+
+    private bool Changed => _view is { } view
+        && (view.Mode != _mode || view.ThresholdPercent != _threshold || view.MinThresholdPercent != _minThreshold);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!RendererInfo.IsInteractive) { return; }
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var response = await Dispatcher.Send(new GetMediaSettingsQuery());
+        if (response is { Status: true, Data: { } view })
+        {
+            _view = view;
+            (_mode, _threshold, _minThreshold) = (view.Mode, view.ThresholdPercent, view.MinThresholdPercent);
+        }
+        else
+        {
+            _error = response.StatusMessage;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        _error = null;
+        _saved = null;
+        try
+        {
+            var response = await Dispatcher.Send(new SetMediaSettingsCommand(_mode, _threshold, _minThreshold));
+            if (response is { Status: true })
+            {
+                _saved = response.StatusMessage;
+                await LoadAsync();
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

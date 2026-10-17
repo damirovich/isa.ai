@@ -52,10 +52,15 @@ public sealed partial class PersonSuggester(
     IFaceDetector detector,
     IFaceEmbedder embedder,
     MediaSearchOptions options,
+    IMediaSettingsStore settingsStore,
     ILogger<PersonSuggester> logger) : IPersonSuggester
 {
     /// <summary>Субъект контекста доступа системы — нечисловой: в журнал субъектом не пишется.</summary>
     public const string SystemSubject = "system:person-suggestion";
+
+    /// <summary>Порог сверки: из конфигурации предложений, но не мягче нижней границы Администратора (ADR-0054).</summary>
+    private async Task<double> ThresholdAsync(CancellationToken cancellationToken) =>
+        options.AutoSuggestMaxCosineDistanceWithin((await settingsStore.GetAsync(cancellationToken)).MinThresholdPercent);
 
     /// <inheritdoc />
     public async Task<PersonSuggestionResult> SuggestAsync(
@@ -72,7 +77,7 @@ public sealed partial class PersonSuggester(
             return PersonSuggestionResult.None;
         }
 
-        var threshold = options.EffectiveAutoSuggestMaxCosineDistance;
+        var threshold = await ThresholdAsync(cancellationToken);
         var total = Tally.Zero;
 
         foreach (var target in targets)
@@ -91,6 +96,7 @@ public sealed partial class PersonSuggester(
                     PayloadSensitive: Invariant(
                         $"автоматическое предложение связей (ТФ-ПЕР-09): повод: {TriggerLabel(trigger)}; основание: {target.AuthorizationRef}; ")
                         + Invariant($"эталонов фигурантов: {target.References.Count}; предложений: {tally.Sessions}; кандидатов: {tally.Candidates}; ")
+                        + Invariant($"порог={options.Scale.ThresholdPercent(threshold)} %; ")
                         + "порог(cos-dist)=" + threshold.ToString("F4", CultureInfo.InvariantCulture)),
                 cancellationToken);
         }
@@ -120,7 +126,7 @@ public sealed partial class PersonSuggester(
         }
 
         var access = SystemAccess(target);
-        var threshold = options.EffectiveAutoSuggestMaxCosineDistance;
+        var threshold = await ThresholdAsync(cancellationToken);
         var assetIds = await caseScope.GetAssetIdsAsync([caseId], cancellationToken);
         var total = Tally.Zero;
         var assets = 0;
@@ -258,7 +264,7 @@ public sealed partial class PersonSuggester(
             + Invariant($"кандидаты ({candidates.Count}): ")
             + string.Join("; ", candidates.Select((c, i) =>
                 Invariant($"{i + 1}:{c.FaceId}:{c.AssetId}:{(c.FrameIndex is { } f ? f.ToString(inv) : "-")}:") + c.Similarity.ToString("F4", inv)))
-            + "; подтверждение — только людьми, двумя подписями (ТБ-073)";
+            + "; подтверждение — только решением человека (ТБ-073)";
     }
 
     private static string Invariant(FormattableString value) => FormattableString.Invariant(value);

@@ -349,7 +349,7 @@ public sealed class BriefCollectorTests : IAsyncLifetime
             "видео.mp4 (видео)",
             "00:00–00:01",
             "≈ " + VideoRecordedAt.LocalDateTime.ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture),
-            "0,87",
+            "93 %", // балл 0,87 по шкале ADR-0054
             ExpertName,
             VerifierName,
             TwoPersonRule.ConfirmedMarker));

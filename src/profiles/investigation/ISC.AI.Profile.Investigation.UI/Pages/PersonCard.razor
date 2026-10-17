@@ -13,6 +13,7 @@
 @using ISC.AI.Modules.Media.Domain.Services
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
+@inject ISC.AI.Modules.Media.Application.MediaSearchOptions SearchOptions
 
 @* Карточка фигуранта (ТФ-ПЕР-01/02): реквизиты, подтверждённые появления и эталоны. Появление —
    ВСЕГДА «следственная версия» (ТФ-ВЕР-03): система не утверждает тождество личности, а балл схожести
@@ -403,7 +404,8 @@ else
                         }
                     </MudTd>
                     <MudTd DataLabel="Эксперт">@UserName(context.ExpertUserId)</MudTd>
-                    <MudTd DataLabel="Верификатор">@UserName(context.VerifierUserId)</MudTd>
+                    @* Режим одного оператора (ADR-0054): подпись одна — второй подписи нет, а не «неизвестна». *@
+                    <MudTd DataLabel="Верификатор">@(context.VerifierUserId is null ? "— (один оператор)" : UserName(context.VerifierUserId))</MudTd>
                     <MudTd DataLabel="Подтверждено">@context.ConfirmedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudTd>
                     <MudTd DataLabel="Сессия"><MudLink Href="@($"/media/sessions/{context.SearchSessionId}")">№ @context.SearchSessionId</MudLink></MudTd>
                     <MudTd>
@@ -512,7 +514,9 @@ else
         @if (_revokeTarget is { } target)
         {
             <MudText Typo="Typo.body2" Class="mb-2">
-                Носитель № @target.MediaAssetId · лицо № @target.MediaFaceId · подтвердили @UserName(target.ExpertUserId) и @UserName(target.VerifierUserId).
+                Носитель № @target.MediaAssetId · лицо № @target.MediaFaceId · @(target.VerifierUserId is null
+                    ? $"подтвердил {UserName(target.ExpertUserId)} (один оператор)."
+                    : $"подтвердили {UserName(target.ExpertUserId)} и {UserName(target.VerifierUserId)}.")
             </MudText>
         }
         <MudTextField T="string" @bind-Value="_revokeReason" Label="Причина отзыва *" Variant="Variant.Outlined" Lines="3"
@@ -1358,12 +1362,10 @@ else
         return string.IsNullOrWhiteSpace(account.DisplayName) ? account.UserName : account.DisplayName;
     }
 
-    // Балл схожести — в процентах, с зажимом в 0..100: показ вероятностный (ТЭ-006), не «совпало/нет».
-    private static string Percent(double similarity)
-    {
-        var percent = Math.Clamp(similarity * 100, 0, 100);
-        return percent.ToString("0", CultureInfo.InvariantCulture) + " %";
-    }
+    // Балл схожести — в процентах шкалы пакета «Медиа» (ADR-0054), тем же числом, что на чипе схожести и в пороге поиска:
+    // показ вероятностный (ТЭ-006), не «совпало/нет».
+    private string Percent(double similarity) =>
+        SearchOptions.Scale.DisplayPercent(similarity).ToString(CultureInfo.InvariantCulture) + " %";
 
     private static string Clock(long milliseconds) =>
         TimeSpan.FromMilliseconds(milliseconds).ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture);

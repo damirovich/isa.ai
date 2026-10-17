@@ -1,19 +1,20 @@
 using System;
 using System.Globalization;
+using ISC.AI.Modules.Media.Domain.Model;
 using Microsoft.Extensions.Configuration;
 
 namespace ISC.AI.Modules.Media.Application;
 
 /// <summary>
 /// Настройки поиска по лицу и раскадровки пакета «Медиа» (ТН-008, ТО-мат-05/06, ТФ-ПЛ-06). Читаются из
-/// конфигурации один раз (singleton); значения по умолчанию безопасны: кандидат-лист 20 (5..50), порог
-/// расстояния не задан (только ранжирование), а ОСЛАБИТЬ порог пользователь может не дальше
-/// <see cref="MaxAllowedCosineDistance"/> — это предел эксплуатанта, не оператора.
+/// конфигурации один раз (singleton); значения по умолчанию безопасны: кандидат-лист 20 (5..50), а ОСЛАБИТЬ порог
+/// пользователь может не дальше <see cref="MaxAllowedCosineDistance"/> — это предел эксплуатанта, не оператора.
+/// Рабочий порог и нижнюю границу в процентах задаёт Администратор на экране настроек (ТФ-ПЛ-08, ADR-0054,
+/// <c>IMediaSettingsStore</c>); проценты переводятся в расстояние шкалой <see cref="Scale"/>.
 /// </summary>
 /// <param name="CandidateListSize">Ширина кандидат-листа по умолчанию (ТН-008: 20).</param>
 /// <param name="MinCandidateListSize">Нижняя граница ширины, настраиваемой оператором (ТН-008: 5).</param>
 /// <param name="MaxCandidateListSize">Верхняя граница ширины (ТН-008: 50).</param>
-/// <param name="MaxCosineDistance">Порог отсечения по косинусному расстоянию по умолчанию; <see langword="null"/> — без порога.</param>
 /// <param name="MaxAllowedCosineDistance">Предел, дальше которого оператор порог ослабить не может (ТФ-ПЛ-06).</param>
 /// <param name="ProbeCopyMaxBytes">До какого размера копия пробного изображения кладётся в аудит (ТБ-072).</param>
 /// <param name="SampleFps">Частота выборки кадров видео при индексации (ТО-мат-06).</param>
@@ -27,7 +28,6 @@ public sealed record MediaSearchOptions(
     int CandidateListSize = MediaSearchOptions.DefaultCandidateListSize,
     int MinCandidateListSize = MediaSearchOptions.DefaultMinCandidateListSize,
     int MaxCandidateListSize = MediaSearchOptions.DefaultMaxCandidateListSize,
-    double? MaxCosineDistance = null,
     double MaxAllowedCosineDistance = MediaSearchOptions.DefaultMaxAllowedCosineDistance,
     long ProbeCopyMaxBytes = MediaSearchOptions.DefaultProbeCopyMaxBytes,
     double SampleFps = MediaSearchOptions.DefaultSampleFps,
@@ -65,8 +65,16 @@ public sealed record MediaSearchOptions(
     /// <summary>Ключ конфигурации: максимальная ширина кандидат-листа.</summary>
     public const string MaxCandidateListSizeKey = "Media:Search:MaxCandidateListSize";
 
-    /// <summary>Ключ конфигурации: порог косинусного расстояния по умолчанию (пусто — без порога).</summary>
-    public const string MaxCosineDistanceKey = "Media:Search:MaxCosineDistance";
+    /// <summary>
+    /// Ключ конфигурации: опорные точки шкалы «балл:процент» через «;» (ADR-0054); пусто — <see cref="SimilarityScale.DefaultPoints"/>.
+    /// </summary>
+    public const string SimilarityScaleKey = "Media:Search:SimilarityScale";
+
+    /// <summary>
+    /// Шкала «балл модели ↔ проценты» (ТФ-ПЛ-08, ADR-0054) — одна для порога оператора, выдачи, отборов и карточек.
+    /// По умолчанию — порог модели 0,363 = 70 %.
+    /// </summary>
+    public SimilarityScale Scale { get; init; } = SimilarityScale.Default;
 
     /// <summary>Ключ конфигурации: предельно допустимый порог косинусного расстояния.</summary>
     public const string MaxAllowedCosineDistanceKey = "Media:Search:MaxAllowedCosineDistance";
@@ -122,7 +130,8 @@ public sealed record MediaSearchOptions(
     /// <summary>
     /// Читает настройки из конфигурации; отсутствующие/мусорные значения заменяются умолчаниями, а
     /// границы кандидат-листа приводятся к согласованному виду (<c>1 ≤ Min ≤ Default ≤ Max</c>).
-    /// Настроенный порог по умолчанию не может быть дальше предела — иначе предел был бы фикцией.
+    /// Исключение — шкала схожести: битая шкала бросает <see cref="FormatException"/> и останавливает запуск, потому что
+    /// молча подставленная шкала исказила бы порог поиска (ADR-0054).
     /// </summary>
     public static MediaSearchOptions Read(IConfiguration configuration)
     {
@@ -133,11 +142,7 @@ public sealed record MediaSearchOptions(
         var size = Math.Clamp(ReadInt(configuration, CandidateListSizeKey, DefaultCandidateListSize), min, max);
 
         var maxAllowed = ReadDouble(configuration, MaxAllowedCosineDistanceKey) ?? DefaultMaxAllowedCosineDistance;
-        var threshold = ReadDouble(configuration, MaxCosineDistanceKey);
-        if (threshold is { } configured)
-        {
-            threshold = Math.Min(configured, maxAllowed);
-        }
+        var scale = SimilarityScale.Parse(configuration[SimilarityScaleKey]);
 
         var fps = ReadDouble(configuration, SampleFpsKey);
 
@@ -153,7 +158,6 @@ public sealed record MediaSearchOptions(
             CandidateListSize: size,
             MinCandidateListSize: min,
             MaxCandidateListSize: max,
-            MaxCosineDistance: threshold,
             MaxAllowedCosineDistance: maxAllowed,
             ProbeCopyMaxBytes: ReadLong(configuration, ProbeCopyMaxBytesKey, DefaultProbeCopyMaxBytes),
             SampleFps: fps is { } f && f > 0 ? f : DefaultSampleFps,
@@ -162,30 +166,35 @@ public sealed record MediaSearchOptions(
             AutoSuggestMaxCosineDistance: suggestThreshold,
             AutoSuggestCandidatesPerReference: perReference,
             TrackMinSimilarity: Math.Clamp(ReadDouble(configuration, TrackMinSimilarityKey) ?? DefaultTrackMinSimilarity, 0, 1),
-            TrackMaxGapSeconds: ReadDouble(configuration, TrackMaxGapSecondsKey) is { } gap && gap > 0 ? gap : DefaultTrackMaxGapSeconds);
+            TrackMaxGapSeconds: ReadDouble(configuration, TrackMaxGapSecondsKey) is { } gap && gap > 0 ? gap : DefaultTrackMaxGapSeconds)
+        {
+            Scale = scale,
+        };
     }
 
     /// <summary>
-    /// Порог предложений системы (ТФ-ПЕР-09): настроенный для предложений, но не мягче общего порога поиска, если
-    /// тот строже, и не дальше предела эксплуатанта.
+    /// Порог предложений системы (ТФ-ПЕР-09) из конфигурации: не дальше предела эксплуатанта. Нижнюю границу
+    /// Администратора (ADR-0054) поверх него накладывает сам сверщик — она живёт в базе, а не в конфигурации.
     /// </summary>
     public double EffectiveAutoSuggestMaxCosineDistance =>
-        Math.Min(Math.Min(AutoSuggestMaxCosineDistance, MaxCosineDistance ?? double.MaxValue), MaxAllowedCosineDistance);
+        Math.Min(AutoSuggestMaxCosineDistance, MaxAllowedCosineDistance);
+
+    /// <summary>
+    /// Порог предложений системы с учётом нижней границы Администратора (ADR-0054): система не предлагает того, что
+    /// оператору показать запрещено, — порог не мягче границы, даже если в конфигурации он мягче.
+    /// </summary>
+    public double AutoSuggestMaxCosineDistanceWithin(int minThresholdPercent) =>
+        Math.Min(EffectiveAutoSuggestMaxCosineDistance, MaxCosineDistanceFor(minThresholdPercent));
 
     /// <summary>Ширина кандидат-листа для запроса: запрошенная либо умолчание, зажатая в <c>[Min, Max]</c> (ТН-008).</summary>
     public int ClampTopK(int? requested) =>
         Math.Clamp(requested ?? CandidateListSize, MinCandidateListSize, MaxCandidateListSize);
 
     /// <summary>
-    /// Действующий порог расстояния (ТФ-ПЛ-06): запрошенный, иначе настроенный; в любом случае НЕ дальше
-    /// <see cref="MaxAllowedCosineDistance"/> — оператор порог ужесточить может, ослабить сверх предела — нет.
-    /// <see langword="null"/> — только когда ни оператор, ни конфигурация порога не задают.
+    /// Порог расстояния индекса лиц для порога «схожесть не ниже, %» (ТФ-ПЛ-06/08): по шкале <see cref="Scale"/>, но НЕ
+    /// дальше <see cref="MaxAllowedCosineDistance"/> — предел эксплуатанта действует при любой шкале и любых процентах.
     /// </summary>
-    public double? EffectiveMaxCosineDistance(double? requested)
-    {
-        var value = requested ?? MaxCosineDistance;
-        return value is { } v ? Math.Min(v, MaxAllowedCosineDistance) : null;
-    }
+    public double MaxCosineDistanceFor(int percent) => Math.Min(Scale.MaxCosineDistance(percent), MaxAllowedCosineDistance);
 
     private static int ReadInt(IConfiguration configuration, string key, int fallback) =>
         int.TryParse(configuration[key], NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) && value > 0

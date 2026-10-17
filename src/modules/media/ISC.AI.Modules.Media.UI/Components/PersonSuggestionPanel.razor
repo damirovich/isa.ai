@@ -1,11 +1,12 @@
 @namespace ISC.AI.Modules.Media.UI
 @* Блок «Сверка с фигурантами дела» карточки носителя (ТФ-ПЕР-09, ADR-0035): что система предложила по этому
-   носителю и где кандидат сейчас в двойной верификации, а если не предлагала — почему (дело закрыто, нет
+   носителю и где кандидат сейчас в верификации, а если не предлагала — почему (дело закрыто, нет
    основания, нет эталонов, ещё не сверялось). «Сверить сейчас» ставит сверку в фоновую очередь — для материалов,
    загруженных раньше эталона или основания. Предложенного фигуранта блок НЕ называет: верификатор не должен узнать
    предложение системы из карточки носителя в обход слепой проекции (ТФ-ВЕР-02); эксперт видит его, открыв кандидата.
    Доступ проверяет сервер: только дела носителя, доступные сотруднику, и строки под решёткой (ТБ-020/021/071). *@
 @implements IAsyncDisposable
+@inject ISC.AI.Modules.Media.Application.MediaSearchOptions SearchOptions
 @using System.Globalization
 @using ISC.AI.Modules.Media.Application.Features.Suggestions
 @using ISC.AI.Modules.Media.Domain.Model
@@ -248,8 +249,8 @@
         }
     }
 
-    private static int SimilarityFloor(AssetSuggestionStatus status) =>
-        (int)Math.Round(Math.Clamp(1 - status.MaxCosineDistance, 0, 1) * 100);
+    // Порог сверки в процентах той же шкалы, что чип схожести и порог поиска (ADR-0054).
+    private int SimilarityFloor(AssetSuggestionStatus status) => SearchOptions.Scale.ThresholdPercent(status.MaxCosineDistance);
 
     private static string CaseNumber(AssetSuggestionStatus status, int caseId) =>
         status.Cases.FirstOrDefault(c => c.CaseId == caseId)?.CaseNumber ?? caseId.ToString(CultureInfo.InvariantCulture);
