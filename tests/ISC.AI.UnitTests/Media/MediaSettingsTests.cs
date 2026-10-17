@@ -33,21 +33,22 @@ public sealed class MediaSettingsTests
             new MediaSettings(ConfirmationMode.TwoPerson, 80, 75));
     }
 
-    [Fact(DisplayName = "Умолчания поставки: один оператор, рабочий порог 85 %, нижняя граница 70 % [АИС В-05]")]
+    [Fact(DisplayName = "Умолчания поставки (решение Заказчика 17.10.2026): один оператор, рабочий порог 70 %, нижней границы нет (1 %)")]
     public void Defaults_follow_customer_decision()
     {
         MediaSettings.Defaults.Mode.ShouldBe(ConfirmationMode.SingleOperator);
-        MediaSettings.Defaults.ThresholdPercent.ShouldBe(85);
-        MediaSettings.Defaults.MinThresholdPercent.ShouldBe(70);
+        MediaSettings.Defaults.ThresholdPercent.ShouldBe(70);
+        MediaSettings.Defaults.MinThresholdPercent.ShouldBe(1);
+        MediaSettings.Defaults.EffectivePercent(30).ShouldBe(30); // оператор ищет по любому выбранному порогу
     }
 
-    [Theory(DisplayName = "Проверка значений: каждый порог 40–99 %, рабочий не ниже границы; иначе — отказ с пояснением")]
+    [Theory(DisplayName = "Проверка значений: каждый порог 1–99 %, рабочий не ниже границы; иначе — отказ с пояснением")]
+    [InlineData(70, 1, true)]
     [InlineData(85, 70, true)]
-    [InlineData(40, 40, true)]
+    [InlineData(1, 1, true)]
     [InlineData(99, 99, true)]
-    [InlineData(39, 39, false)]
+    [InlineData(0, 0, false)]
     [InlineData(100, 70, false)]
-    [InlineData(85, 30, false)]
     [InlineData(70, 85, false)]
     public void Validate_ranges(int threshold, int min, bool valid)
     {
@@ -96,12 +97,12 @@ public sealed class MediaSettingsTests
     [Fact(DisplayName = "Значение вне пределов отклоняет хранилище — отказ с его пояснением, журнал изменений не пишется")]
     public async Task Store_validation_error_is_returned()
     {
-        _store.SaveAsync(ConfirmationMode.SingleOperator, 100, 70, 7, Arg.Any<CancellationToken>()).Returns("Порог схожести задаётся от 40 до 99 %.");
+        _store.SaveAsync(ConfirmationMode.SingleOperator, 100, 70, 7, Arg.Any<CancellationToken>()).Returns("Порог схожести задаётся от 1 до 99 %.");
 
         var response = await SetAsync(new SetMediaSettingsCommand(ConfirmationMode.SingleOperator, 100, 70));
 
         response.StatusCode.ShouldBe(ResponseStatusCode.BadRequest);
-        response.StatusMessage.ShouldContain("от 40 до 99 %");
+        response.StatusMessage.ShouldContain("от 1 до 99 %");
         await _audit.DidNotReceiveWithAnyArgs().WriteAsync(default!, default);
     }
 
@@ -116,7 +117,7 @@ public sealed class MediaSettingsTests
         response.Data!.Mode.ShouldBe(ConfirmationMode.TwoPerson);
         await _audit.Received(1).WriteAsync(
             Arg.Is<AuditEntry>(e => e.Action == AuditAction.Modify && e.ObjectRef == "media:settings"
-                && e.PayloadSensitive == "режим подтверждения: один оператор → два лица; рабочий порог: 85 → 80 %; нижняя граница: 70 → 75 %"),
+                && e.PayloadSensitive == "режим подтверждения: один оператор → два лица; рабочий порог: 70 → 80 %; нижняя граница: 1 → 75 %"),
             Arg.Any<CancellationToken>());
     }
 
@@ -127,8 +128,8 @@ public sealed class MediaSettingsTests
 
         var view = (await handler.Handle(new GetMediaSettingsQuery(), CancellationToken.None)).Data!;
         view.Mode.ShouldBe(ConfirmationMode.SingleOperator);
-        view.ThresholdPercent.ShouldBe(85);
-        view.MinThresholdPercent.ShouldBe(70);
+        view.ThresholdPercent.ShouldBe(70);
+        view.MinThresholdPercent.ShouldBe(1);
         view.CanManage.ShouldBeTrue();
         view.ScaleDescription.ShouldBe("балл 0,363 = 70 %");
 

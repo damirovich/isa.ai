@@ -146,7 +146,7 @@ public sealed class MediaContractTests
         defaults.CandidateListSize.ShouldBe(20);
         defaults.MinCandidateListSize.ShouldBe(5);
         defaults.MaxCandidateListSize.ShouldBe(50);
-        defaults.MaxAllowedCosineDistance.ShouldBe(0.8);
+        defaults.MaxAllowedCosineDistance.ShouldBe(1.0); // вся шкала 1–100 % доступна оператору (ADR-0054 v0.2)
         defaults.Scale.Points.ShouldBe([(0.363, 70.0)]);
 
         // ADR-0054: 85 % = балл 0,363 + 15/30 · 0,637; 70 % = порог модели.

@@ -290,10 +290,17 @@ public static class MediaLabels
             : "без порога";
     }
 
+    /// <summary>Шаг предустановок ползунка порога от рабочего порога (ТФ-ПЛ-06): «низкий» — на 15 % ниже, «высокий» — выше.</summary>
+    public const int ThresholdPresetStep = 15;
+
     /// <summary>
-    /// Предустановка «высокий» для ползунка порога (ТФ-ПЛ-06): середина между рабочим порогом и 99 %. «Низкий» — нижняя
-    /// граница, «средний» — рабочий порог Администратора.
+    /// Предустановка «высокий» для ползунка порога (ТФ-ПЛ-06): рабочий порог + 15 %, не выше 99 %. «Средний» — рабочий
+    /// порог Администратора.
     /// </summary>
     public static int HighThresholdPreset(int workingPercent) =>
-        Math.Min(MediaSettings.MaxPercent, (workingPercent + MediaSettings.MaxPercent + 1) / 2);
+        Math.Min(MediaSettings.MaxPercent, workingPercent + ThresholdPresetStep);
+
+    /// <summary>Предустановка «низкий» (ТФ-ПЛ-06): рабочий порог − 15 %, но не ниже нижней границы Администратора и 1 %.</summary>
+    public static int LowThresholdPreset(int workingPercent, int minThresholdPercent) =>
+        Math.Max(Math.Max(minThresholdPercent, MediaSettings.MinPercent), workingPercent - ThresholdPresetStep);
 }

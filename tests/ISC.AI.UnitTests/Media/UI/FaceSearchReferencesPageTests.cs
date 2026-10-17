@@ -87,6 +87,31 @@ public sealed class FaceSearchReferencesPageTests : BunitContext, IAsyncLifetime
         cut.Markup.ShouldContain("эталон № 7 · совпало эталонов: 2 из 2");
     }
 
+    [Fact(DisplayName = "Решение Заказчика 17.10.2026: по умолчанию вся шкала 1–100 % доступна, ползунок открыт на 70 %; выбранные 35 % уходят в поиск")]
+    public void Default_slider_covers_whole_scale()
+    {
+        GivenSettings(threshold: 70, min: 1);
+        Services.GetRequiredService<NavigationManager>().NavigateTo("/media/search?caseId=3&faceIds=5,7&authId=9&scope=all");
+        Render<MudPopoverProvider>();
+        var cut = Render<FaceSearch>();
+        cut.WaitForAssertion(() => ThresholdValue(cut).ShouldBe("70 %"));
+
+        var slider = cut.Find("input[type=range]");
+        slider.GetAttribute("min").ShouldBe("1");
+        slider.GetAttribute("max").ShouldBe("100");
+        slider.GetAttribute("value").ShouldBe("70");
+        cut.Markup.ShouldNotContain("ниже границы");
+        cut.Markup.ShouldContain(">1 %<");
+        cut.FindAll(".mud-toggle-item").Select(t => t.TextContent.Trim()).ShouldBe(["Низкий · 55 %", "Средний · 70 %", "Высокий · 85 %"]);
+
+        slider.Input("35");
+        cut.WaitForAssertion(() => ThresholdValue(cut).ShouldBe("35 %"));
+        cut.FindAll("button").Single(b => b.TextContent.Contains("Искать", StringComparison.Ordinal)).Click();
+
+        cut.WaitForAssertion(() => _mediator.Received(1).Send(
+            Arg.Is<SearchByFaceQuery>(q => q.MinSimilarityPercent == 35), Arg.Any<CancellationToken>()));
+    }
+
     [Fact(DisplayName = "ТФ-ПЛ-08: ползунок порога — от нижней границы, открыт на рабочем пороге; предустановка уходит в поиск процентом")]
     public void Threshold_slider_starts_at_working_threshold_and_sends_percent()
     {
@@ -98,22 +123,24 @@ public sealed class FaceSearchReferencesPageTests : BunitContext, IAsyncLifetime
 
         var slider = cut.Find("input[type=range]");
         slider.GetAttribute("min").ShouldBe("72");
-        slider.GetAttribute("max").ShouldBe("99");
-        cut.FindAll(".mud-toggle-item").Select(t => t.TextContent.Trim()).ShouldBe(["Низкий · 72 %", "Средний · 80 %", "Высокий · 90 %"]);
+        slider.GetAttribute("max").ShouldBe("100");
+        slider.GetAttribute("value").ShouldBe("80");
+        slider.GetAttribute("autocomplete").ShouldBe("off");
+        cut.FindAll(".mud-toggle-item").Select(t => t.TextContent.Trim()).ShouldBe(["Низкий · 72 %", "Средний · 80 %", "Высокий · 95 %"]);
         cut.Markup.ShouldContain("Кандидаты ниже порога не показываются");
-        cut.Markup.ShouldContain("72 % · нижняя граница");
+        cut.Markup.ShouldContain("72 % · граница");
         cut.Markup.ShouldContain("Кандидатов в выдаче");
 
         cut.FindAll(".mud-toggle-item").Single(t => t.TextContent.Contains("Высокий", StringComparison.Ordinal)).Click();
-        cut.WaitForAssertion(() => ThresholdValue(cut).ShouldBe("90 %"));
+        cut.WaitForAssertion(() => ThresholdValue(cut).ShouldBe("95 %"));
         cut.FindAll("button").Single(b => b.TextContent.Contains("Искать", StringComparison.Ordinal)).Click();
 
         cut.WaitForAssertion(() => _mediator.Received(1).Send(
-            Arg.Is<SearchByFaceQuery>(q => q.MinSimilarityPercent == 90), Arg.Any<CancellationToken>()));
+            Arg.Is<SearchByFaceQuery>(q => q.MinSimilarityPercent == 95), Arg.Any<CancellationToken>()));
         cut.Markup.ShouldContain("без порога"); // ответ подменён без порога — подпись выдачи берёт его из результата
     }
 
-    [Fact(DisplayName = "ТФ-ПЛ-08: ниже нижней границы страница порог не отправляет — даже если ползунок сдвинули мимо его пределов")]
+    [Fact(DisplayName = "ТФ-ПЛ-08: если Администратор поднял нижнюю границу, ниже неё страница порог не отправляет — даже если ползунок сдвинули мимо его пределов")]
     public void Threshold_below_bound_is_not_sent()
     {
         GivenSettings(threshold: 85, min: 70);
@@ -129,6 +156,41 @@ public sealed class FaceSearchReferencesPageTests : BunitContext, IAsyncLifetime
             Arg.Is<SearchByFaceQuery>(q => q.MinSimilarityPercent == 70), Arg.Any<CancellationToken>()));
     }
 
+    [Fact(DisplayName = "Шкала порога 1–100 %: если Администратор поднял границу, отрезок ниже неё затенён и без ползунка, доля ширины — по границе")]
+    public void Threshold_scale_is_full_with_forbidden_part()
+    {
+        GivenSettings(threshold: 85, min: 70);
+        Services.GetRequiredService<NavigationManager>().NavigateTo("/media/search");
+        Render<MudPopoverProvider>();
+        var cut = Render<FaceSearch>();
+        cut.WaitForAssertion(() => ThresholdValue(cut).ShouldBe("85 %"));
+
+        cut.Markup.ShouldContain(">1 %<");
+        cut.Markup.ShouldContain(">100 %<");
+        cut.Markup.ShouldContain("ниже границы");
+        cut.Markup.ShouldContain("title=\"ниже нижней границы 70 % — недоступно\"");
+        cut.Markup.ShouldContain("flex:0 1 69.7%"); // (70 − 1) / (100 − 1)
+        cut.FindAll("input[type=range]").ShouldHaveSingleItem().GetAttribute("min").ShouldBe("70");
+    }
+
+    [Fact(DisplayName = "Ползунок появляется после чтения настроек — до этого полоса загрузки, а не ползунок с чужими границами")]
+    public void Slider_waits_for_settings()
+    {
+        var pending = new TaskCompletionSource<ResponseDto<MediaSettingsView>>();
+        _mediator.Send(Arg.Any<GetMediaSettingsQuery>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<ResponseDto<MediaSettingsView>>(pending.Task));
+        Services.GetRequiredService<NavigationManager>().NavigateTo("/media/search");
+        Render<MudPopoverProvider>();
+        var cut = Render<FaceSearch>();
+
+        cut.FindAll("input[type=range]").ShouldBeEmpty();
+
+        cut.InvokeAsync(() => pending.SetResult(ResponseDto<MediaSettingsView>.Ok(new MediaSettingsView(
+            ConfirmationMode.SingleOperator, 90, 80, null, null, false, "балл 0,363 = 70 %"))));
+        cut.WaitForAssertion(() => cut.FindAll("input[type=range]").ShouldHaveSingleItem().GetAttribute("value").ShouldBe("90"));
+        cut.Find("input[type=range]").GetAttribute("min").ShouldBe("80");
+    }
+
     [Fact(DisplayName = "ТФ-ПЛ-06: совпавшие предустановки показываются один раз — граница равна рабочему порогу")]
     public void Equal_presets_are_shown_once()
     {
@@ -138,7 +200,7 @@ public sealed class FaceSearchReferencesPageTests : BunitContext, IAsyncLifetime
         var cut = Render<FaceSearch>();
         cut.WaitForAssertion(() => ThresholdValue(cut).ShouldBe("85 %"));
 
-        cut.FindAll(".mud-toggle-item").Select(t => t.TextContent.Trim()).ShouldBe(["Низкий · 85 %", "Высокий · 92 %"]);
+        cut.FindAll(".mud-toggle-item").Select(t => t.TextContent.Trim()).ShouldBe(["Низкий · 85 %", "Высокий · 99 %"]);
     }
 
     [Fact(DisplayName = "Форма поиска: пустая проба — область выбора с кнопкой; без дела — подсказка вместо сводки, «Искать» недоступна")]
@@ -199,8 +261,11 @@ public sealed class FaceSearchReferencesPageTests : BunitContext, IAsyncLifetime
         MediaLabels.SimilarityThreshold(SimilarityScale.Default, SimilarityScale.Default.MaxCosineDistance(85)).ShouldBe("схожесть от 85 %");
         MediaLabels.SimilarityThreshold(SimilarityScale.Default, 0.5).ShouldBe("схожесть от 76 %"); // прежний порог предложений
         MediaLabels.SimilarityThreshold(SimilarityScale.Default, null).ShouldBe("без порога");
-        MediaLabels.HighThresholdPreset(85).ShouldBe(92);
-        MediaLabels.HighThresholdPreset(99).ShouldBe(99);
+        MediaLabels.HighThresholdPreset(70).ShouldBe(85);
+        MediaLabels.HighThresholdPreset(90).ShouldBe(99);
+        MediaLabels.LowThresholdPreset(70, 1).ShouldBe(55);
+        MediaLabels.LowThresholdPreset(70, 60).ShouldBe(60);
+        MediaLabels.LowThresholdPreset(10, 1).ShouldBe(1);
     }
 
     // Крупное значение порога над ползунком (объявляется вспомогательным технологиям при изменении).

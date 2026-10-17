@@ -11,7 +11,10 @@ namespace ISC.AI.Modules.Media.Domain.Services;
 /// </summary>
 /// <param name="Mode">Действующий режим подтверждения — им разбирается кандидат, по которому ещё нет решений.</param>
 /// <param name="ThresholdPercent">Рабочий порог: с ним открывается поиск по лицу.</param>
-/// <param name="MinThresholdPercent">Нижняя граница: ниже неё оператор порог не опустит (проверка на сервере).</param>
+/// <param name="MinThresholdPercent">
+/// Нижняя граница: ниже неё оператор порог не опустит (проверка на сервере). По умолчанию 1 % — ограничения нет: оператор
+/// ищет на всей шкале (решение Заказчика от 17.10.2026); Администратор может её поднять.
+/// </param>
 /// <param name="UpdatedAtUtc">Когда настройки меняли последний раз; <see langword="null"/> — не меняли, действуют умолчания.</param>
 /// <param name="UpdatedByUserId">Кто менял последним (слабая ссылка на <c>core.app_user</c>).</param>
 public sealed record MediaSettings(
@@ -21,20 +24,23 @@ public sealed record MediaSettings(
     DateTime? UpdatedAtUtc = null,
     int? UpdatedByUserId = null)
 {
-    /// <summary>Наименьший допустимый порог [АИС табл. 7.1 № 8].</summary>
-    public const int MinPercent = 40;
+    /// <summary>
+    /// Наименьший допустимый порог — 1 %: решение Заказчика от 17.10.2026 «оператор выбирает любой порог и ищет по нему»
+    /// заменило пределы 40–99 % [АИС табл. 7.1 № 8] (ADR-0054 v0.2).
+    /// </summary>
+    public const int MinPercent = 1;
 
-    /// <summary>Наибольший допустимый порог [АИС табл. 7.1 № 8].</summary>
+    /// <summary>Наибольший допустимый порог настроек Администратора (100 % — только полное совпадение шаблонов).</summary>
     public const int MaxPercent = 99;
 
     /// <summary>Режим по умолчанию — один оператор (решение Заказчика от 17.10.2026).</summary>
     public const ConfirmationMode DefaultMode = ConfirmationMode.SingleOperator;
 
-    /// <summary>Рабочий порог по умолчанию [АИС В-05].</summary>
-    public const int DefaultThresholdPercent = 85;
+    /// <summary>Рабочий порог по умолчанию — 70 % (порог модели по шкале; решение Заказчика от 17.10.2026).</summary>
+    public const int DefaultThresholdPercent = 70;
 
-    /// <summary>Нижняя граница по умолчанию [АИС В-05].</summary>
-    public const int DefaultMinThresholdPercent = 70;
+    /// <summary>Нижняя граница по умолчанию — 1 %, то есть без ограничения (решение Заказчика от 17.10.2026).</summary>
+    public const int DefaultMinThresholdPercent = MinPercent;
 
     /// <summary>Ключ режима в таблице <c>media.setting</c>.</summary>
     public const string ModeKey = "verification.mode";
@@ -54,7 +60,7 @@ public sealed record MediaSettings(
     /// <summary>Запасной ключ конфигурации нижней границы.</summary>
     public const string MinThresholdConfigKey = "Media:Search:MinThresholdPercent";
 
-    /// <summary>Умолчания поставки: один оператор, 85 % и 70 %.</summary>
+    /// <summary>Умолчания поставки: один оператор, рабочий порог 70 %, без нижней границы.</summary>
     public static MediaSettings Defaults { get; } = new(DefaultMode, DefaultThresholdPercent, DefaultMinThresholdPercent);
 
     /// <summary>
@@ -64,7 +70,7 @@ public sealed record MediaSettings(
     public int EffectivePercent(int? requested) => Math.Max(requested ?? ThresholdPercent, MinThresholdPercent);
 
     /// <summary>
-    /// Проверка значений Администратора: каждый порог от 40 до 99 %, рабочий не ниже границы. Нарушение — текст отказа,
+    /// Проверка значений Администратора: каждый порог от 1 до 99 %, рабочий не ниже границы. Нарушение — текст отказа,
     /// иначе <see langword="null"/>.
     /// </summary>
     public static string? Validate(ConfirmationMode mode, int thresholdPercent, int minThresholdPercent)

@@ -125,12 +125,40 @@
                         </MudTooltip>
                     </div>
                 </div>
-                <MudSlider T="int" Min="@MinThreshold" Max="@MediaSettings.MaxPercent" Step="1" @bind-Value="_threshold"
-                           Disabled="_busy" Color="Color.Primary" Class="mt-3" aria-label="Порог схожести, %" />
-                <div class="d-flex justify-space-between">
-                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@MinThreshold % · нижняя граница</MudText>
-                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@MediaSettings.MaxPercent %</MudText>
-                </div>
+                @* Шкала — вся, 1–100 %, и вся доступна оператору (решение Заказчика от 17.10.2026): какой порог выбран, по
+                   такому и ищем. Только если Администратор поднял нижнюю границу (по умолчанию её нет), часть ниже неё —
+                   затенённый отрезок без ползунка (ТФ-ПЛ-08), сервер проверяет то же; ползунок тогда — от границы до 100 % и
+                   занимает свою долю ширины. Ползунок появляется только после чтения настроек: в заранее отрисованной
+                   разметке его нет, и браузеру нечего подставлять из прошлого посещения. *@
+                @if (_settingsReady)
+                {
+                    <div class="d-flex align-end mt-3" style="gap:0;">
+                        @if (HasBound)
+                        {
+                        <div style="@($"flex:0 1 {ForbiddenShare}%;min-width:0;")" title="@($"ниже нижней границы {MinThreshold} % — недоступно")">
+                            <div style="height:24px;display:flex;align-items:center;">
+                                <div style="width:100%;border-top:2px dashed var(--mud-palette-lines-inputs);opacity:.7;"></div>
+                            </div>
+                            <div class="d-flex justify-space-between gap-1">
+                                <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-disabled);">@SliderMin %</MudText>
+                                <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-disabled);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">ниже границы</MudText>
+                            </div>
+                        </div>
+                        }
+                        <div style="flex:1 1 0;min-width:72px;">
+                            <MudSlider T="int" Min="@MinThreshold" Max="@SliderMax" Step="1" Value="_threshold" ValueChanged="SetThreshold"
+                                       Disabled="_busy" Color="Color.Primary" aria-label="Порог схожести, %" autocomplete="off" />
+                            <div class="d-flex justify-space-between gap-1">
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">@(HasBound ? $"{MinThreshold} % · граница" : $"{SliderMin} %")</MudText>
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">@SliderMax %</MudText>
+                            </div>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-5" />
+                }
                 <MudDivider Class="my-3" />
                 <div class="d-flex align-center justify-space-between flex-wrap gap-3">
                     <div>
@@ -480,9 +508,28 @@
     private int WorkingThreshold => _settings?.ThresholdPercent ?? MediaSettings.DefaultThresholdPercent;
     private int HighThreshold => MediaLabels.HighThresholdPreset(WorkingThreshold);
 
-    // Предустановки ТФ-ПЛ-06 — значения ползунка; совпавшие значения (например, граница = рабочему) показываются один раз.
+    // Шкала ползунка — вся, от 1 до 100 % (решение заказчика 17.10.2026); доступная часть — от нижней границы.
+    private const int SliderMin = 1;
+    private const int SliderMax = 100;
+
+    // Настройки прочитаны (успешно или нет) — можно показывать ползунок с окончательными границами.
+    private bool _settingsReady;
+
+    // Доля ширины затенённого отрезка 1…граница на общей шкале 1–100 %.
+    private string ForbiddenShare => (100.0 * (MinThreshold - SliderMin) / (SliderMax - SliderMin))
+        .ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+
+    // Значение ползунка — в пределах [граница, 100]; ниже границы не опускается и на клиенте (сервер проверяет то же).
+    private void SetThreshold(int value) => _threshold = Math.Clamp(value, MinThreshold, SliderMax);
+
+    // Предустановки ТФ-ПЛ-06 — значения ползунка вокруг рабочего порога; совпавшие значения показываются один раз.
     private IEnumerable<(string Label, int Percent)> Presets =>
-        new[] { ("Низкий", MinThreshold), ("Средний", WorkingThreshold), ("Высокий", HighThreshold) }.DistinctBy(p => p.Item2);
+        new[] { ("Низкий", LowThreshold), ("Средний", WorkingThreshold), ("Высокий", HighThreshold) }.DistinctBy(p => p.Item2);
+
+    private int LowThreshold => MediaLabels.LowThresholdPreset(WorkingThreshold, MinThreshold);
+
+    // Администратор поднял нижнюю границу выше начала шкалы — часть шкалы ниже неё недоступна оператору.
+    private bool HasBound => MinThreshold > SliderMin;
 
     // Пояснение к выбранной области поиска (ТФ-ПЛ-05, ADR-0044) — одно, к выбранному варианту.
     private string ScopeHint => _scope switch
@@ -527,8 +574,9 @@
     };
 
     private string ThresholdHelp =>
-        $"Рабочий порог {WorkingThreshold} % и нижнюю границу {MinThreshold} % задаёт Администратор. Проценты — шкала балла "
-        + $"модели ({SearchOptions.Scale.Describe()}), до калибровки на пилоте; это вероятностная оценка, а не установление личности.";
+        $"Порог по умолчанию {WorkingThreshold} % задаёт Администратор{(HasBound ? $", ниже {MinThreshold} % опустить нельзя" : "; выбрать можно любой от 1 до 100 %")}. "
+        + $"Проценты — шкала балла модели ({SearchOptions.Scale.Describe()}), до калибровки на пилоте; это вероятностная оценка, "
+        + "а не установление личности.";
     private FaceSearchResult? _result;
     private bool _busy;
     private string? _error;
@@ -573,6 +621,8 @@
             _settings = view;
             _threshold = view.ThresholdPercent;
         }
+
+        _settingsReady = true;
 
         var cases = await Dispatcher.Send(new ListAccessibleCasesQuery());
         if (cases is { Status: true, Data: { } list })
