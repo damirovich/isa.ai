@@ -73,3 +73,35 @@ public class PersonVehicle : AuditableEntity, IClassified
     /// <summary>Подразделение (с фигуранта). NOT NULL.</summary>
     public int DivisionId { get; set; }
 }
+
+/// <summary>
+/// Номер телефона фигуранта (<c>investigation.person_phone</c>, ТФ-ПЕР-12, ADR-0055): у объекта и у связи (связь —
+/// тоже фигурант). Гриф и подразделение — фигуранта (ТБ-070). Номер хранится как введён и нормализованным (только
+/// цифры, местный — с кодом 996, ТО-мат-11) — по нему ищутся пересечения (ТФ-ПЕР-07) и номер в едином поиске.
+/// </summary>
+public class PersonPhone : AuditableEntity, IClassified
+{
+    /// <summary>Фигурант (FK внутри схемы; удаление фигуранта уносит номер).</summary>
+    public int PersonId { get; set; }
+
+    /// <summary>Навигация к фигуранту.</summary>
+    public Person? Person { get; set; }
+
+    /// <summary>Вид номера.</summary>
+    public PhoneKind Kind { get; set; }
+
+    /// <summary>Номер как введён.</summary>
+    public required string Number { get; set; }
+
+    /// <summary>Нормализованный номер — только цифры (ТО-мат-11).</summary>
+    public required string NumberNormalized { get; set; }
+
+    /// <summary>Примечание (чей номер, период, откуда известен).</summary>
+    public string? Notes { get; set; }
+
+    /// <summary>Гриф (с фигуранта). NOT NULL.</summary>
+    public short Classification { get; set; }
+
+    /// <summary>Подразделение (с фигуранта). NOT NULL.</summary>
+    public int DivisionId { get; set; }
+}

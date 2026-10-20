@@ -38,6 +38,11 @@ public class PersonConfiguration : IEntityTypeConfiguration<Person>
         builder.Property(e => e.Residence).HasMaxLength(1000);
         builder.Property(e => e.Alias).HasMaxLength(200);
 
+        // Дополнения анкеты (ТФ-ПЕР-13, ADR-0055): гражданство — текстом (страна из справочника или своё значение),
+        // ориентировка — текстовый блок.
+        builder.Property(e => e.Citizenship).HasMaxLength(200);
+        builder.Property(e => e.Orientation).HasMaxLength(4000);
+
         // Нормализованные реквизиты для пересечений (ТО-мат-11, ТФ-ПЕР-07): индексы — под поиск совпадений
         // по всем делам ОН+ОУ на следующем шаге; решётка применяется к строкам поверх индекса.
         builder.Property(e => e.NameNormalized).HasMaxLength(500);

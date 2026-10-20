@@ -311,6 +311,7 @@ public sealed class BriefCollectorTests : IAsyncLifetime
             "Фигурант",
             "Адреса",
             "Транспорт",
+            "Телефоны",
             "Дело фигуранта",
             "Подтверждённые появления",
             "История верификаций",
@@ -328,6 +329,7 @@ public sealed class BriefCollectorTests : IAsyncLifetime
         ]);
         Lines(Section(brief, "Адреса")).ShouldBe(["Проживание | г. Бишкек, ул. Ленина, 15 | со слов соседей"]);
         Lines(Section(brief, "Транспорт")).ShouldBe([Plate + " | Toyota | Camry | белый | "]);
+        Lines(Section(brief, "Телефоны")).ShouldBe(["Мобильный | 0555 123 456 | личный"]); // ADR-0055
         FactLines(Section(brief, "Дело фигуранта")).ShouldBe(
         [
             "Номер: " + CaseNumberA,
@@ -551,6 +553,8 @@ public sealed class BriefCollectorTests : IAsyncLifetime
         var (vehicleResult, vehicleP) = await requisites.SaveVehicleAsync(
             personP, null, new PersonVehicleDraft(Plate, "Toyota", "Camry", "белый", null), admin);
         vehicleResult.ShouldBe(PersonWriteResult.Ok);
+        (await requisites.SavePhoneAsync(personP, null, new PersonPhoneDraft(PhoneKind.Mobile, "0555 123 456", "личный"), admin))
+            .Result.ShouldBe(PersonWriteResult.Ok);
 
         // Дело Б: тот же госномер у его фигуранта — пересечение (ТБ-084).
         var personR = await CreatePersonAsync(persons, new PersonDraft(caseB, "Петренко Роман", false, null, null), admin);

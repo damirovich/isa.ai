@@ -75,4 +75,27 @@ public sealed class RequisiteNormalizerTests
         RequisiteNormalizer.Address("пр. Чуй 10").ShouldNotBe(RequisiteNormalizer.Address("ул. Чуй 10"));
         RequisiteNormalizer.Address("   ").ShouldBeNull();
     }
+
+    [Theory(DisplayName = "ADR-0055: телефон — только цифры; местный номер с нулём или без кода дополняется 996; «00» международного выхода снимается")]
+    [InlineData("+996 555 12-34-56")]
+    [InlineData("996555123456")]
+    [InlineData("0555 123 456")]
+    [InlineData("(0555) 12-34-56")]
+    [InlineData("555 123 456")]
+    [InlineData("00996 555 123 456")]
+    public void Phone_variants_share_one_key(string phone) =>
+        RequisiteNormalizer.Phone(phone).ShouldBe("996555123456");
+
+    [Fact(DisplayName = "ADR-0055: иностранный номер — цифрами как есть; короткий внутренний — как есть; без цифр — null")]
+    public void Phone_keeps_foreign_and_short_numbers()
+    {
+        RequisiteNormalizer.Phone("+7 912 345-67-89").ShouldBe("79123456789");
+        RequisiteNormalizer.Phone("8 (912) 345-67-89").ShouldBe("89123456789"); // не «10 цифр с 0» — местным не считается
+        RequisiteNormalizer.Phone("12-34").ShouldBe("1234");
+        RequisiteNormalizer.Phone("+996 555 123 456").ShouldNotBe(RequisiteNormalizer.Phone("+996 555 123 457"));
+        RequisiteNormalizer.Phone(null).ShouldBeNull();
+        RequisiteNormalizer.Phone("   ").ShouldBeNull();
+        RequisiteNormalizer.Phone("нет номера").ShouldBeNull();
+        RequisiteNormalizer.Phone("+ ( ) -").ShouldBeNull();
+    }
 }

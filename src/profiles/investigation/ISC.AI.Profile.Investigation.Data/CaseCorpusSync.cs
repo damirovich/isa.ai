@@ -155,6 +155,11 @@ public sealed class CaseCorpusSync(
             .GroupBy(v => v.Person!.CaseId)
             .Select(g => new { CaseId = g.Key, Count = g.Count(), Last = g.Max(v => v.UpdatedAt ?? v.CreatedAt) })
             .ToDictionaryAsync(g => g.CaseId, cancellationToken);
+        var phones = await db.PersonPhones.AsNoTracking()
+            .Where(t => part.Contains(t.Person!.CaseId))
+            .GroupBy(t => t.Person!.CaseId)
+            .Select(g => new { CaseId = g.Key, Count = g.Count(), Last = g.Max(t => t.UpdatedAt ?? t.CreatedAt) })
+            .ToDictionaryAsync(g => g.CaseId, cancellationToken);
         var reports = await db.CaseReports.AsNoTracking()
             .Where(r => part.Contains(r.CaseId) && r.IsActive)
             .Select(r => new { r.Id, r.CaseId, r.Kind, r.ReportDate, r.PersonId, r.CurrentRevision, r.Classification, r.DivisionId })
@@ -166,9 +171,14 @@ public sealed class CaseCorpusSync(
             var p = persons.GetValueOrDefault(head.Head.CaseId);
             var a = addresses.GetValueOrDefault(head.Head.CaseId);
             var v = vehicles.GetValueOrDefault(head.Head.CaseId);
+            var t = phones.GetValueOrDefault(head.Head.CaseId);
+
+            // Номера телефонов (ADR-0055) входят в отметку только когда они есть: у дел без номеров отметка прежняя, и
+            // появление номеров не пересобирает все карточки разом.
             var version = string.Create(
                 CultureInfo.InvariantCulture,
-                $"c{head.Stamp.Ticks}|p{p?.Count ?? 0}:{p?.Last.Ticks ?? 0}|a{a?.Count ?? 0}:{a?.Last.Ticks ?? 0}|v{v?.Count ?? 0}:{v?.Last.Ticks ?? 0}");
+                $"c{head.Stamp.Ticks}|p{p?.Count ?? 0}:{p?.Last.Ticks ?? 0}|a{a?.Count ?? 0}:{a?.Last.Ticks ?? 0}|v{v?.Count ?? 0}:{v?.Last.Ticks ?? 0}")
+                + (t is null ? string.Empty : string.Create(CultureInfo.InvariantCulture, $"|t{t.Count}:{t.Last.Ticks}"));
             if (Find(entries, CaseCorpusKind.CaseCard, head.Head.CaseId)?.SourceVersion == version)
             {
                 continue;
@@ -236,7 +246,7 @@ public sealed class CaseCorpusSync(
             .Select(p => new
             {
                 p.Id, p.DisplayName, p.Alias, p.Role, p.RoleInCase, p.Sex, p.BirthDate, p.BirthYear,
-                p.BirthPlace, p.WorkPlace, p.Residence, p.Notes,
+                p.BirthPlace, p.WorkPlace, p.Residence, p.Notes, p.Citizenship, p.Orientation,
             })
             .ToListAsync(cancellationToken);
         var ids = persons.Select(p => p.Id).ToArray();
@@ -252,6 +262,12 @@ public sealed class CaseCorpusSync(
                 .Select(v => new { v.PersonId, v.Make, v.Model, v.Color, v.PlateNumber })
                 .ToListAsync(cancellationToken))
             .ToLookup(v => v.PersonId);
+        var phones = (await db.PersonPhones.AsNoTracking()
+                .Where(t => ids.Contains(t.PersonId))
+                .OrderBy(t => t.Kind).ThenBy(t => t.Id)
+                .Select(t => new { t.PersonId, t.Kind, t.Number })
+                .ToListAsync(cancellationToken))
+            .ToLookup(t => t.PersonId);
 
         return persons
             .Select(p => new CaseCardPerson(
@@ -262,7 +278,10 @@ public sealed class CaseCorpusSync(
                         + (string.IsNullOrWhiteSpace(v.PlateNumber) ? string.Empty : ", госномер " + v.PlateNumber))
                     .Select(s => s.Trim(' ', ','))
                     .Where(s => s.Length > 0)
-                    .ToList()))
+                    .ToList(),
+                p.Citizenship,
+                p.Orientation,
+                phones[p.Id].Select(t => (t.Kind, t.Number)).ToList()))
             .ToList();
     }
 

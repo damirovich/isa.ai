@@ -42,6 +42,7 @@ public sealed record DocumentSearchHit(int DocumentId, int CaseId, string? RegNu
 /// <param name="Persons">Фигуранты.</param>
 /// <param name="Vehicles">Автотранспорт.</param>
 /// <param name="Addresses">Адреса.</param>
+/// <param name="Phones">Номера телефонов фигурантов и связей (ADR-0055).</param>
 /// <param name="Reports">Сводки и справки.</param>
 /// <param name="Transcripts">Фрагменты расшифровок.</param>
 /// <param name="Documents">Документы дел.</param>
@@ -53,6 +54,7 @@ public sealed record UnifiedSearchResult(
     IReadOnlyList<PersonRow> Persons,
     IReadOnlyList<VehicleSearchRow> Vehicles,
     IReadOnlyList<AddressSearchRow> Addresses,
+    IReadOnlyList<PhoneSearchRow> Phones,
     IReadOnlyList<CaseReportRow> Reports,
     IReadOnlyList<TranscriptSearchHit> Transcripts,
     IReadOnlyList<DocumentSearchHit> Documents,
@@ -61,12 +63,13 @@ public sealed record UnifiedSearchResult(
 {
     /// <summary>Всего строк выдачи по всем видам.</summary>
     public int TotalCount =>
-        Cases.Count + Persons.Count + Vehicles.Count + Addresses.Count + Reports.Count + Transcripts.Count + Documents.Count;
+        Cases.Count + Persons.Count + Vehicles.Count + Addresses.Count + Phones.Count + Reports.Count + Transcripts.Count
+        + Documents.Count;
 }
 
 /// <summary>
 /// Единый поиск по материалам дел (ТФ-ПСК-01, ADR-0048): одна строка — дела, фигуранты, автотранспорт, адреса,
-/// сводки и справки, расшифровки и документы дел, в пределах дел субъекта.
+/// номера телефонов (ADR-0055), сводки и справки, расшифровки и документы дел, в пределах дел субъекта.
 /// </summary>
 /// <remarks>
 /// <para>РЕЖИМ (ТБ-020/021, ТБ-071): область — дела, доступные субъекту по полной решётке и роли (тот же список, что
@@ -177,6 +180,9 @@ public sealed record UnifiedSearchQuery(string Text, SearchKinds Kinds = SearchK
             var foundAddresses = Wants(SearchKinds.Addresses)
                 ? Cap(SearchKinds.Addresses, await requisites.SearchAddressesAsync(terms, caseIds, Limit + 1, access, cancellationToken))
                 : [];
+            var foundPhones = Wants(SearchKinds.Phones)
+                ? Cap(SearchKinds.Phones, await requisites.SearchPhonesAsync(terms, caseIds, Limit + 1, access, cancellationToken))
+                : [];
             var foundReports = Wants(SearchKinds.Reports)
                 ? Cap(SearchKinds.Reports, await reports.SearchAsync(terms, caseIds, Limit + 1, access, cancellationToken))
                 : [];
@@ -188,7 +194,7 @@ public sealed record UnifiedSearchQuery(string Text, SearchKinds Kinds = SearchK
                 : [];
 
             var result = new UnifiedSearchResult(
-                terms.Raw, foundCases, foundPersons, foundVehicles, foundAddresses, foundReports, foundTranscripts, foundDocuments,
+                terms.Raw, foundCases, foundPersons, foundVehicles, foundAddresses, foundPhones, foundReports, foundTranscripts, foundDocuments,
                 numbers, truncated);
 
             // История — сотрудника, который искал; гриф строки — его текущий допуск (ADR-0049).

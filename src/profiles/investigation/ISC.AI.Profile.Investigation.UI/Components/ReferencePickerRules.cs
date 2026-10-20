@@ -25,6 +25,19 @@ public static class ReferencePickerRules
     /// <summary>Предел размера загружаемого эталона: фото 3×4 или скан — единицы мегабайт; предпросмотр держится в памяти.</summary>
     public const long MaxUploadBytes = 20L * 1024 * 1024;
 
+    /// <summary>Короткая сторона фото, меньше которой — предупреждение [АИС табл. 7.1 № 2] (ТФ-ПЕР-13, ADR-0055).</summary>
+    public const int MinPhotoShortSide = 300;
+
+    /// <summary>Длинная сторона фото, меньше которой — предупреждение [АИС табл. 7.1 № 2].</summary>
+    public const int MinPhotoLongSide = 400;
+
+    /// <summary>
+    /// Фото меньше 300×400 (ТФ-ПЕР-13, ADR-0055): сравниваются стороны, а не ширина и высота, — так правило не зависит
+    /// от поворота снимка в EXIF. Такое фото принимается, но с предупреждением: распознавание по нему может быть хуже.
+    /// </summary>
+    public static bool IsSmallPhoto(int width, int height) =>
+        Math.Min(width, height) < MinPhotoShortSide || Math.Max(width, height) < MinPhotoLongSide;
+
     /// <summary>
     /// Носители дела, из которых можно взять эталон: фото и видео (аудиозапись лица не несёт, ADR-0026); фото —
     /// первыми, внутри — новые первыми.

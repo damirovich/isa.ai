@@ -110,6 +110,17 @@ public static class ReferenceLookup
             .OrderBy(i => i.SortOrder)
             .ThenBy(i => i.Name, StringComparer.CurrentCulture);
 
+    /// <summary>
+    /// Подсказки гражданства (ТФ-ПЕР-13, ADR-0055): действующие страны справочника, отобранные по введённой части
+    /// названия (без учёта регистра); пусто — все. Гражданство — текст: страна из списка или своё значение.
+    /// </summary>
+    public static IEnumerable<string> Countries(IEnumerable<ReferenceItemRow> items, string? typed) =>
+        items.Where(i => i.Kind == ReferenceKind.Country && i.IsActive
+                && (string.IsNullOrWhiteSpace(typed) || i.Name.Contains(typed.Trim(), StringComparison.CurrentCultureIgnoreCase)))
+            .OrderBy(i => i.SortOrder)
+            .ThenBy(i => i.Name, StringComparer.CurrentCulture)
+            .Select(i => i.Name);
+
     /// <summary>Наименование записи; для неизвестной — «№ id», для пустой ссылки — «—».</summary>
     public static string Name(IEnumerable<ReferenceItemRow> items, int? id) => id is not { } value
         ? "—"

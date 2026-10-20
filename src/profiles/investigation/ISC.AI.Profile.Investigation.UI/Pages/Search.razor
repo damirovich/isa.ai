@@ -19,13 +19,13 @@
    «История» — список с повтором, закреплением, удалением и очисткой. История хранится на сервере и видна только самому
    сотруднику в пределах его допуска; удаление из неё журнал аудита не меняет. *@
 
-<PageHeader Title="Поиск" Subtitle="Дела, фигуранты, госномера, адреса, сводки, расшифровки и документы — в пределах ваших дел"
+<PageHeader Title="Поиск" Subtitle="Дела, фигуранты, госномера, адреса, телефоны, сводки, расшифровки и документы — в пределах ваших дел"
             Icon="@Icons.Material.Filled.ManageSearch" />
 
 <MudPaper Outlined="true" Class="pa-3 my-4">
     <div class="d-flex gap-3 align-center flex-wrap">
         <MudTextField T="string" @bind-Value="_input" Label="Что ищем" Variant="Variant.Outlined" Immediate="true"
-                      Placeholder="ФИО, псевдоним, госномер, адрес, № дела или задания, дата рождения, слово из сводки или записи"
+                      Placeholder="ФИО, псевдоним, госномер, адрес, телефон, № дела или задания, дата рождения, слово из сводки или записи"
                       Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Clearable="true"
                       OnKeyDown="OnKeyDownAsync" Class="flex-grow-1" Style="min-width:300px;" />
         <MudSelect T="CaseDirection?" @bind-Value="_direction" Label="Отдел" Variant="Variant.Outlined" Clearable="true" Dense="true"
@@ -162,13 +162,14 @@ else if (_result is { } result)
     {
         <SearchSection Title="Фигуранты" Count="result.Persons.Count" Truncated="@result.Truncated.HasFlag(SearchKinds.Persons)">
             <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
-                <thead><tr><th>ФИО</th><th>Псевдоним</th><th>Роль</th><th>Рождение</th><th>Дело</th></tr></thead>
+                <thead><tr><th>ФИО</th><th>Псевдоним</th><th>Гражданство</th><th>Роль</th><th>Рождение</th><th>Дело</th></tr></thead>
                 <tbody>
                     @foreach (var row in result.Persons)
                     {
                         <tr>
                             <td><a href="@($"/persons/{row.Id}")">@Highlight(row.DisplayName, query)</a></td>
                             <td>@Highlight(row.Questionnaire?.Alias, query)</td>
+                            <td>@Highlight(row.Questionnaire?.Citizenship, query)</td>
                             <td>@row.Role.Label()</td>
                             <td>@BirthLabel(row.Questionnaire)</td>
                             <td>@CaseLink(row.CaseId, result)</td>
@@ -210,6 +211,28 @@ else if (_result is { } result)
                         <tr>
                             <td>@Highlight(row.Text, query)</td>
                             <td>@(row.Kind?.Label() ?? "место жительства (анкета)")</td>
+                            <td><a href="@($"/persons/{row.PersonId}")">@row.PersonName</a></td>
+                            <td>@CaseLink(row.CaseId, result)</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </SearchSection>
+    }
+
+    @* Номера телефонов (ADR-0055): совпадение — по цифрам с кодом 996, поэтому номер показан как записан у фигуранта. *@
+    @if (Searched(SearchKinds.Phones) && result.Phones.Count > 0)
+    {
+        <SearchSection Title="Телефоны" Count="result.Phones.Count" Truncated="@result.Truncated.HasFlag(SearchKinds.Phones)">
+            <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
+                <thead><tr><th>Номер</th><th>Вид</th><th>Примечание</th><th>Фигурант</th><th>Дело</th></tr></thead>
+                <tbody>
+                    @foreach (var row in result.Phones)
+                    {
+                        <tr>
+                            <td style="font-family:monospace;">@row.Phone.Number</td>
+                            <td>@row.Phone.Kind.Label()</td>
+                            <td>@(row.Phone.Notes ?? "—")</td>
                             <td><a href="@($"/persons/{row.PersonId}")">@row.PersonName</a></td>
                             <td>@CaseLink(row.CaseId, result)</td>
                         </tr>
@@ -287,6 +310,7 @@ else if (!_busy)
 {
     <MudText Typo="Typo.body2" Class="mud-text-secondary">
         Госномер ищется при любом написании («01 KG 123 ABC», «01kg123abc»), адрес — с «ул.» и без, ФИО и псевдоним — с «ё» и «е»;
+        телефон — по цифрам, с «+996», с нулём или без («0555 123 456» = «+996 555 123 456»), можно часть номера от 5 цифр;
         дата рождения — в виде «дд.мм.гггг» или годом. Каждый поиск записывается в журнал.
     </MudText>
 }

@@ -17,6 +17,7 @@
 .rgraph-node--case { border-left-color: var(--mud-palette-info); }
 .rgraph-node--vehicle { border-left-color: var(--mud-palette-secondary); }
 .rgraph-node--address { border-left-color: var(--mud-palette-success); }
+.rgraph-node--phone { border-left-color: var(--mud-palette-tertiary); }
 
 /* Чужое дело — пунктир: видно только как в пересечениях (ТБ-084), не раскрывается. */
 .rgraph-node--foreign {

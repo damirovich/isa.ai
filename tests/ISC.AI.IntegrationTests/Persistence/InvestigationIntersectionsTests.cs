@@ -556,6 +556,65 @@ public sealed class InvestigationIntersectionsTests : IAsyncLifetime
             kit.Persons, kit.Requisites, kit.Cases, kit.Intersections, new ReferenceStore(kit.Factory), provider);
     }
 
+    [Fact(DisplayName = "ADR-0055: пересечение по телефону — разные написания одного номера сходятся; своё дело, выше допуска и чужое подразделение — нет; узел номера в графе и владельцы номера — под решёткой")]
+    public async Task Phone_intersections_respect_lattice()
+    {
+        var kit = await ArrangeAsync();
+        var scene = await SeedAsync(kit);
+        var owner = InvestigationTestKit.Access(Owner, 9, 5);
+        var colleague = InvestigationTestKit.Access(Colleague, 9, 5, 6);
+
+        await SavePhoneAsync(kit, owner, scene.Target, "0555 123 456");
+        var sameCase = await CreatePersonAsync(kit, owner, scene.OwnCase, "Сосед", null);
+        await SavePhoneAsync(kit, owner, sameCase, "+996555123456"); // своё дело — не пересечение
+        var caller = await CreatePersonAsync(kit, colleague, scene.ColleagueCase, "Абонент", null);
+        await SavePhoneAsync(kit, colleague, caller, "+996 (555) 12-34-56");
+        await SavePhoneAsync(kit, colleague, caller, "0555 999 999"); // иной номер — не совпадает
+        foreach (var hidden in new[] { scene.SecretCase, scene.OtherDivisionCase })
+        {
+            await SavePhoneAsync(kit, colleague, await CreatePersonAsync(kit, colleague, hidden, "Скрытый абонент", null), "555 123 456");
+        }
+
+        var investigator = InvestigationTestKit.Access(Owner, 3, 5);
+        var phone = (await kit.Intersections.FindForPersonAsync(scene.Target, investigator)).ShouldNotBeNull()
+            .Where(r => r.Kind == IntersectionKind.Phone).ShouldHaveSingleItem();
+        phone.Key.ShouldBe("996555123456");
+        phone.OwnValue.ShouldBe("0555 123 456");
+        phone.OtherValue.ShouldBe("+996 (555) 12-34-56");
+        phone.OtherCaseId.ShouldBe(scene.ColleagueCase);
+        phone.CanOpenCase.ShouldBeFalse();
+
+        // Решение по пересечению — как у остальных видов; по скрытому делу — «не найден» (не оракул).
+        (await kit.Intersections.ReviewAsync(scene.Target, IntersectionKind.Phone, "996555123456", scene.ColleagueCase,
+            IntersectionDecision.Confirmed, investigator)).ShouldBe(PersonWriteResult.Ok);
+        (await kit.Intersections.ReviewAsync(scene.Target, IntersectionKind.Phone, "996555123456", scene.SecretCase,
+            IntersectionDecision.Confirmed, investigator)).ShouldBe(PersonWriteResult.NotFound);
+        (await kit.Intersections.FindForPersonAsync(scene.Target, investigator)).ShouldNotBeNull()
+            .Single(r => r.Kind == IntersectionKind.Phone).Decision.ShouldBe(IntersectionDecision.Confirmed);
+
+        // С широким допуском проявляются скрытые дела — значит, скрывал именно floor (GATE-7).
+        (await kit.Intersections.FindForPersonAsync(scene.Target, InvestigationTestKit.Access(Head, 4, 5, 6))).ShouldNotBeNull()
+            .Where(r => r.Kind == IntersectionKind.Phone).Select(r => r.OtherCaseId).Order()
+            .ShouldBe(new[] { scene.ColleagueCase, scene.SecretCase, scene.OtherDivisionCase }.Order());
+
+        // Владельцы номера: следователю — своё дело; руководителю — и дело коллеги; скрытые — никому в пределах допуска 3.
+        (await kit.Persons.ListByPhoneAsync("996555123456", investigator)).Select(p => p.Id).ShouldBe([scene.Target, sameCase], ignoreOrder: true);
+        (await kit.Persons.ListByPhoneAsync("996555123456", InvestigationTestKit.Access(Head, 3, 5))).Select(p => p.Id)
+            .ShouldBe([scene.Target, sameCase, caller], ignoreOrder: true);
+        (await kit.Persons.ListByPhoneAsync("99655512345", investigator)).ShouldBeEmpty(); // только точное совпадение
+
+        // Граф: один узел номера у объекта; пересечение — ребром от узла номера к «чужому делу».
+        var graph = (await RelationGraph(kit, investigator).Handle(
+            new GetRelationGraphQuery(RelationNodeKind.Person, scene.Target, Depth: 1), CancellationToken.None)).Data.ShouldNotBeNull();
+        var phoneNode = graph.Nodes.Where(n => n.Kind == RelationNodeKind.Phone).ShouldHaveSingleItem();
+        phoneNode.Key.ShouldBe(RelationNodeKeys.Phone("996555123456"));
+        graph.Edges.ShouldContain(e => e.FromKey == phoneNode.Key && e.ToKey == RelationNodeKeys.ForeignCase(scene.ColleagueCase));
+    }
+
+    private static async Task SavePhoneAsync(Kit kit, AccessContext access, int personId, string number) =>
+        (await kit.Requisites.SavePhoneAsync(personId, null, new PersonPhoneDraft(PhoneKind.Mobile, number, null), access))
+            .Result.ShouldBe(PersonWriteResult.Ok);
+
     private static async Task<int> CreatePersonAsync(Kit kit, ISC.AI.Abstractions.Security.AccessContext access, int caseId, string name, PersonQuestionnaire? questionnaire)
     {
         var (result, id) = await kit.Persons.CreateAsync(

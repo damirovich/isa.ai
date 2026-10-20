@@ -62,3 +62,41 @@ public class PersonVehicleConfiguration : IEntityTypeConfiguration<PersonVehicle
         builder.HasIndex(e => e.PlateNormalized);
     }
 }
+
+/// <summary>Конфигурация номеров телефонов фигурантов (<c>investigation.person_phone</c>, ТФ-ПЕР-12, ADR-0055).</summary>
+public class PersonPhoneConfiguration : IEntityTypeConfiguration<PersonPhone>
+{
+    /// <summary>Наибольшая длина номера как введён (с пробелами, скобками и «+»).</summary>
+    public const int MaxNumberLength = 50;
+
+    /// <summary>Наибольшая длина нормализованного номера — только цифры.</summary>
+    public const int MaxNormalizedLength = 32;
+
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<PersonPhone> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        // Номер без цифр не описывает ничего: нормализованный ключ обязан быть непустым (ТО-мат-11).
+        builder.ToTable("person_phone", InvestigationDbContext.Schema, table => table.HasCheckConstraint(
+            "ck_person_phone_normalized_digits",
+            "number_normalized <> '' AND number_normalized ~ '^[0-9]+$'"));
+        builder.HasKey(e => e.Id);
+
+        builder.Property(e => e.Kind).IsRequired();
+        builder.Property(e => e.Number).HasMaxLength(MaxNumberLength).IsRequired();
+        builder.Property(e => e.NumberNormalized).HasMaxLength(MaxNormalizedLength).IsRequired();
+        builder.Property(e => e.Notes).HasMaxLength(500);
+
+        // Режимные поля — с фигуранта (ТБ-070), NOT NULL.
+        builder.Property(e => e.Classification).IsRequired();
+        builder.Property(e => e.DivisionId).IsRequired();
+
+        // FK внутри схемы: удаление фигуранта уносит его номера.
+        builder.HasOne(e => e.Person).WithMany()
+               .HasForeignKey(e => e.PersonId).OnDelete(DeleteBehavior.Cascade);
+
+        // Пересечения по номеру (ТФ-ПЕР-07/12) — точное совпадение нормализованного номера.
+        builder.HasIndex(e => e.NumberNormalized);
+    }
+}

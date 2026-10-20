@@ -416,6 +416,33 @@ public sealed class PersonStore(
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ИНВАРИАНТ — как у <see cref="ListByPlateAsync"/> (ТБ-020/021, ADR-0045 п. 10, ADR-0055): фигурант — по полной
+    /// решётке и роли, строка номера — под floor'ом строки; совпадение в невидимом деле не раскрывается.
+    /// </remarks>
+    public async Task<IReadOnlyList<PersonRow>> ListByPhoneAsync(
+        string phoneNormalized, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        if (string.IsNullOrWhiteSpace(phoneNormalized))
+        {
+            return [];
+        }
+
+        var role = await ResolveRoleAsync(access, cancellationToken);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Подзапрос по строкам — без AsNoTracking: режим отслеживания задаётся только на корне (см. PersonAccess).
+        var phones = db.PersonPhones
+            .Where(BaselineAccess.Filter<PersonPhone>(access))
+            .Where(policy.BuildFilter<PersonPhone>(access))
+            .Where(p => p.NumberNormalized == phoneNormalized);
+
+        return await ProjectRows(AccessiblePersons(db, access, role).Where(p => phones.Any(ph => ph.PersonId == p.Id)), db)
+            .ToListAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
     /// <remarks>Правило видимости — как у <see cref="ListByPlateAsync"/>; место жительства — поле самого фигуранта.</remarks>
     public async Task<IReadOnlyList<PersonAddressMatch>> ListByAddressAsync(
         string addressNormalized, AccessContext access, CancellationToken cancellationToken = default)
@@ -547,7 +574,7 @@ public sealed class PersonStore(
 
     /// <inheritdoc />
     /// <remarks>
-    /// Совпадение по имени и псевдониму — как у <see cref="SearchAsync"/> (ILIKE по тексту с «ё» → «е»); дата
+    /// Совпадение по имени, псевдониму и гражданству (ADR-0055) — как у <see cref="SearchAsync"/> (ILIKE по тексту с «ё» → «е»); дата
     /// рождения — точная, год — по году рождения анкеты либо году полной даты. Область — пересечение решётки
     /// фигуранта (<see cref="PersonAccess"/>) и дел области поиска: фигурант дела вне области не выдаётся, даже если
     /// доступен.
@@ -574,6 +601,7 @@ public sealed class PersonStore(
             .Where(p => ids.Contains(p.CaseId))
             .Where(p => EF.Functions.ILike(p.DisplayName.Replace("ё", "е").Replace("Ё", "Е"), pattern, "\\")
                 || (p.Alias != null && EF.Functions.ILike(p.Alias.Replace("ё", "е").Replace("Ё", "Е"), pattern, "\\"))
+                || (p.Citizenship != null && EF.Functions.ILike(p.Citizenship.Replace("ё", "е").Replace("Ё", "Е"), pattern, "\\"))
                 || (date != null && p.BirthDate == date)
                 || (year != null && (p.BirthYear == year || (p.BirthDate != null && p.BirthDate.Value.Year == year))))
             .OrderBy(p => p.DisplayName)
@@ -690,7 +718,8 @@ public sealed class PersonStore(
                 db.ReferencePhotos.Count(r => r.PersonId == p.Id),
                 db.Appearances.Count(a => a.PersonId == p.Id && a.Status != AppearanceStatus.Revoked),
                 p.Role,
-                new PersonQuestionnaire(p.BirthDate, p.BirthYear, p.BirthPlace, p.WorkPlace, p.Residence, p.Sex, p.Alias),
+                new PersonQuestionnaire(p.BirthDate, p.BirthYear, p.BirthPlace, p.WorkPlace, p.Residence, p.Sex, p.Alias,
+                    p.Citizenship, p.Orientation),
                 p.LinkedToPersonId,
                 p.LinkTypeId));
 
@@ -759,6 +788,8 @@ public sealed class PersonStore(
         entity.Residence = Clean(q.Residence);
         entity.Sex = q.Sex;
         entity.Alias = Clean(q.Alias);
+        entity.Citizenship = Clean(q.Citizenship);
+        entity.Orientation = Clean(q.Orientation);
         entity.ResidenceNormalized = RequisiteNormalizer.Address(entity.Residence);
     }
 

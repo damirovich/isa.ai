@@ -2,7 +2,9 @@
 @* Справочники профиля (ТФ-АДМ-07): подразделения-инициаторы заданий (ГУ), звания, должности, типы связей,
    категории материалов. Ведёт Администратор (режим первичной настройки — любой вошедший); право проверяет
    обработчик, отказ показывается. Запись не удаляется, а выключается: на неё ссылаются задания, и выключенная
-   запись остаётся читаемой в старых делах. Вид записи задаётся вкладкой при создании и не меняется. *@
+   запись остаётся читаемой в старых делах. Вид записи задаётся вкладкой при создании и не меняется.
+   Список вкладки — постранично (как реестр дел): справочник грузится целиком одним запросом, страница режется здесь;
+   смена вкладки, поиска или отбора возвращает на первую страницу. *@
 @page "/admin/references"
 @rendermode InteractiveServer
 @inject IDialogService DialogService
@@ -28,22 +30,26 @@
 <div class="d-flex gap-3 align-center flex-wrap mb-3">
     <MudTextField T="string" @bind-Value="_search" Placeholder="Найти по наименованию или коду" Variant="Variant.Outlined"
                   Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
-                  Immediate="true" DebounceInterval="250" Clearable="true" Style="min-width:280px;" Class="flex-grow-1" />
-    <MudSwitch T="bool" @bind-Value="_showInactive" Color="Color.Primary" Label="Показывать выключенные" />
+                  Immediate="true" DebounceInterval="250" Clearable="true" Style="min-width:280px;" Class="flex-grow-1"
+                  @bind-Value:after="ResetPage" />
+    <MudSwitch T="bool" @bind-Value="_showInactive" @bind-Value:after="ResetPage" Color="Color.Primary" Label="Показывать выключенные" />
 </div>
 
-<MudTabs Elevation="0" Border="true" Rounded="true" @bind-ActivePanelIndex="_activeTab">
+<MudTabs Elevation="0" Border="true" Rounded="true" @bind-ActivePanelIndex="_activeTab" @bind-ActivePanelIndex:after="ResetPage">
     @foreach (var kind in Kinds)
     {
+        var filtered = ItemsOf(kind);
+        var pageCount = PageCount(filtered.Count);
+        var currentPage = Math.Clamp(_page, 1, pageCount);
         <MudTabPanel Text="@kind.Label()" BadgeData="@_items.Count(i => i.Kind == kind && i.IsActive)" BadgeColor="Color.Default">
-            <MudTable T="ReferenceItemRow" Items="ItemsOf(kind)" Hover="true" Dense="true" Outlined="true" Loading="_busy" Class="mt-3"
+            <MudTable T="ReferenceItemRow" Items="@(filtered.Skip((currentPage - 1) * _pageSize).Take(_pageSize))" Hover="true" Dense="true" Outlined="true" Loading="_busy" Class="mt-3"
                       RowClassFunc="@((item, _) => item.IsActive ? string.Empty : "mud-text-secondary")">
                 <HeaderContent>
                     <MudTh>Наименование</MudTh>
                     <MudTh>Код</MudTh>
                     <MudTh Style="text-align:right;">Порядок</MudTh>
                     <MudTh>Состояние</MudTh>
-                    <MudTh Style="width:220px;">Действия</MudTh>
+                    <MudTh Style="width:1%;white-space:nowrap;">Действия</MudTh>
                 </HeaderContent>
                 <RowTemplate>
                     <MudTd DataLabel="Наименование">@context.Name</MudTd>
@@ -54,11 +60,14 @@
                             @(context.IsActive ? "действует" : "выключено")
                         </MudChip>
                     </MudTd>
-                    <MudTd DataLabel="Действия">
-                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="_busy"
-                                   OnClick="@(() => OpenEdit(context))">Изменить</MudButton>
-                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="@(context.IsActive ? Color.Error : Color.Success)" Disabled="_busy"
-                                   OnClick="@(() => SetActiveAsync(context, !context.IsActive))">@(context.IsActive ? "Выключить…" : "Включить")</MudButton>
+                    <MudTd DataLabel="Действия" Style="white-space:nowrap;">
+                        @* Обе кнопки в одну строку: иначе вторая переносится и строка таблицы вырастает вдвое. *@
+                        <div class="d-flex flex-nowrap align-center gap-2">
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="_busy"
+                                       OnClick="@(() => OpenEdit(context))">Изменить</MudButton>
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Color="@(context.IsActive ? Color.Error : Color.Success)" Disabled="_busy"
+                                       OnClick="@(() => SetActiveAsync(context, !context.IsActive))">@(context.IsActive ? "Выключить…" : "Включить")</MudButton>
+                        </div>
                     </MudTd>
                 </RowTemplate>
                 <NoRecordsContent>
@@ -67,10 +76,26 @@
                     </MudText>
                 </NoRecordsContent>
             </MudTable>
-            <div class="d-flex justify-space-between flex-wrap gap-2 px-1 pt-2">
-                <MudText Typo="Typo.caption">Записей: @_items.Count(i => i.Kind == kind), действующих: @_items.Count(i => i.Kind == kind && i.IsActive)</MudText>
-                <MudText Typo="Typo.caption" Class="mud-text-secondary">Выключенная запись остаётся в старых делах, но не предлагается в новых.</MudText>
+            <div class="d-flex align-center justify-space-between flex-wrap gap-2 px-1 pt-2">
+                <MudText Typo="Typo.caption">
+                    Записей: @_items.Count(i => i.Kind == kind), действующих: @_items.Count(i => i.Kind == kind && i.IsActive)@(filtered.Count > 0 ? $" · страница {currentPage} из {pageCount}" : string.Empty)
+                </MudText>
+                @if (filtered.Count > 0)
+                {
+                    <div class="d-flex align-center gap-3 flex-wrap">
+                        <MudSelect T="int" Value="_pageSize" ValueChanged="SetPageSize" Label="На странице" Variant="Variant.Outlined"
+                                   Dense="true" Margin="Margin.Dense" Style="width:130px;">
+                            @foreach (var size in PageSizes)
+                            {
+                                <MudSelectItem T="int" Value="@size">@size</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudPagination Count="@pageCount" Selected="@currentPage" SelectedChanged="@(selected => _page = selected)"
+                                       Color="Color.Primary" Size="Size.Small" />
+                    </div>
+                }
             </div>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block px-1 pt-1">Выключенная запись остаётся в старых делах, но не предлагается в новых.</MudText>
         </MudTabPanel>
     }
 </MudTabs>
@@ -115,10 +140,18 @@
 
     private static readonly ReferenceKind[] Kinds = Enum.GetValues<ReferenceKind>();
 
+    /// <summary>Записей на странице по умолчанию — как в реестре дел.</summary>
+    public const int DefaultPageSize = 10;
+
+    /// <summary>Выбор числа записей на странице.</summary>
+    public static IReadOnlyList<int> PageSizes { get; } = [10, 25, 50];
+
     private readonly List<ReferenceItemRow> _items = [];
     private string? _search;
     private bool _showInactive = true;
     private int _activeTab;
+    private int _page = 1;
+    private int _pageSize = DefaultPageSize;
     private bool _busy = true; // «загрузка…» до первой интерактивной загрузки (предрендер данных не грузит)
     private string? _error;
 
@@ -132,10 +165,23 @@
 
     private ReferenceKind ActiveKind => Kinds[Math.Clamp(_activeTab, 0, Kinds.Length - 1)];
 
-    private IEnumerable<ReferenceItemRow> ItemsOf(ReferenceKind kind) =>
+    private List<ReferenceItemRow> ItemsOf(ReferenceKind kind) =>
         _items.Where(i => i.Kind == kind && (_showInactive || i.IsActive) && Matches(i))
             .OrderBy(i => i.SortOrder)
-            .ThenBy(i => i.Name, StringComparer.CurrentCulture);
+            .ThenBy(i => i.Name, StringComparer.CurrentCulture)
+            .ToList();
+
+    // Номер страницы вне диапазона (после выключения записи при скрытых выключенных, после правки) прижимается к
+    // последней странице при показе — пустой страницы не бывает.
+    private int PageCount(int count) => Math.Max(1, (count + _pageSize - 1) / _pageSize);
+
+    private void ResetPage() => _page = 1;
+
+    private void SetPageSize(int size)
+    {
+        _pageSize = size;
+        _page = 1;
+    }
 
     private bool Matches(ReferenceItemRow item) =>
         string.IsNullOrWhiteSpace(_search)

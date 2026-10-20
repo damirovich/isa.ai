@@ -174,4 +174,34 @@ public sealed class TaskScenarioTests
         ReferenceLookup.Name(items, 99).ShouldBe("№ 99");
         ReferenceLookup.Name(items, null).ShouldBe("—");
     }
+
+    [Fact(DisplayName = "ADR-0055: форма анкеты переносит гражданство и ориентировку; пустые — null, пробелы по краям снимаются")]
+    public void Questionnaire_form_keeps_citizenship_and_orientation()
+    {
+        var questionnaire = new PersonQuestionnaire(Alias: "Шторм", Citizenship: "Казахстан", Orientation: "Рост 180, носит очки");
+
+        PersonQuestionnaireForm.From(questionnaire).ToQuestionnaire().ShouldBe(questionnaire);
+        new PersonQuestionnaireForm { Citizenship = "  Кыргызстан ", Orientation = "   " }.ToQuestionnaire()
+            .ShouldBe(new PersonQuestionnaire(Citizenship: "Кыргызстан"));
+    }
+
+    [Fact(DisplayName = "ADR-0055: подсказки гражданства — действующие страны по порядку справочника; отбор по части названия без регистра")]
+    public void Country_suggestions_filter_active_countries()
+    {
+        ReferenceItemRow[] items =
+        [
+            new(1, ReferenceKind.Country, "Казахстан", null, 2, true),
+            new(2, ReferenceKind.Country, "Кыргызстан", null, 1, true),
+            new(3, ReferenceKind.Country, "Узбекистан", null, 3, true),
+            new(4, ReferenceKind.Country, "Старая страна", null, 4, false),
+            new(5, ReferenceKind.Rank, "Кызыл", null, 0, true),
+        ];
+
+        ReferenceLookup.Countries(items, null).ShouldBe(["Кыргызстан", "Казахстан", "Узбекистан"]);
+        ReferenceLookup.Countries(items, "  ").ShouldBe(["Кыргызстан", "Казахстан", "Узбекистан"]);
+        ReferenceLookup.Countries(items, "ЗАХ").ShouldBe(["Казахстан"]);
+        ReferenceLookup.Countries(items, " стан ").ShouldBe(["Кыргызстан", "Казахстан", "Узбекистан"]);
+        ReferenceLookup.Countries(items, "старая").ShouldBeEmpty();
+        ReferenceLookup.Countries(items, "Кыз").ShouldBeEmpty();
+    }
 }

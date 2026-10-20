@@ -31,6 +31,12 @@ public sealed class PersonQuestionnaireForm
     /// <summary>Псевдоним (оперативная кличка).</summary>
     public string? Alias { get; set; }
 
+    /// <summary>Гражданство — страна из справочника или своё значение (ТФ-ПЕР-13, ADR-0055).</summary>
+    public string? Citizenship { get; set; }
+
+    /// <summary>Ориентировка (сведения) об объекте — текстовый блок анкеты (ТФ-ПЕР-13).</summary>
+    public string? Orientation { get; set; }
+
     /// <summary>Модель по анкете фигуранта (пустая — для нового).</summary>
     public static PersonQuestionnaireForm From(PersonQuestionnaire? questionnaire)
     {
@@ -44,6 +50,8 @@ public sealed class PersonQuestionnaireForm
             Residence = q.Residence,
             Sex = q.Sex,
             Alias = q.Alias,
+            Citizenship = q.Citizenship,
+            Orientation = q.Orientation,
         };
     }
 
@@ -58,7 +66,9 @@ public sealed class PersonQuestionnaireForm
             Clean(WorkPlace),
             Clean(Residence),
             Sex,
-            Clean(Alias));
+            Clean(Alias),
+            Clean(Citizenship),
+            Clean(Orientation));
     }
 
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

@@ -61,13 +61,13 @@ public enum AccessField
     /// <summary>Цель мероприятия.</summary>
     Purpose = 18,
 
-    /// <summary>Сведения об объекте.</summary>
+    /// <summary>Сведения об объекте — в ориентировку анкеты (ADR-0055).</summary>
     ObjectInfo = 19,
 
     /// <summary>Результат мероприятия.</summary>
     Result = 20,
 
-    /// <summary>Гражданство объекта (в анкете поля нет — в примечание объекта).</summary>
+    /// <summary>Гражданство объекта — в поле гражданства анкеты (ADR-0055).</summary>
     Citizenship = 21,
 
     /// <summary>Код записи связи.</summary>
@@ -79,7 +79,7 @@ public enum AccessField
     /// <summary>Связь объекта (вид связи: брат, знакомый…).</summary>
     LinkType = 103,
 
-    /// <summary>Сведения об объекте связи.</summary>
+    /// <summary>Сведения об объекте связи — в ориентировку анкеты связи (ADR-0055).</summary>
     LinkInfo = 104,
 
     /// <summary>ФИО связи (если в базе есть).</summary>

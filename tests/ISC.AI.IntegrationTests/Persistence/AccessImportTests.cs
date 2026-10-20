@@ -214,7 +214,8 @@ public sealed class AccessImportTests : IAsyncLifetime
         questionnaire.BirthYear.ShouldBe(1980);
         questionnaire.Sex.ShouldBe(PersonSex.Male);
         questionnaire.Alias.ShouldBe("Шторм");
-        target.Notes.ShouldNotBeNull().ShouldContain("Сведения об объекте: работает таксистом");
+        questionnaire.Orientation.ShouldBe("работает таксистом"); // ADR-0055: «Сведения об объекте» — в ориентировку анкеты
+        (target.Notes ?? string.Empty).ShouldNotContain("Сведения об объекте:");
         var link = persons.Single(p => p.Role == PersonRole.Link);
         link.IsUnidentified.ShouldBeTrue();
         link.LinkedToPersonId.ShouldBe(target.Id);
@@ -307,11 +308,13 @@ public sealed class AccessImportTests : IAsyncLifetime
         target.Questionnaire.ShouldNotBeNull().Residence.ShouldBe("г. Город, ул. Первая, 1");
         target.Questionnaire.Sex.ShouldBe(PersonSex.Male);
         var second = (await kit.Persons.ListByCaseAsync(page.Rows.Single(r => r.Number == "ACCESS-2").Id, access)).Single();
-        second.Notes.ShouldNotBeNull().ShouldContain("Гражданство: Кыргызстан");
+        second.Questionnaire.ShouldNotBeNull().Citizenship.ShouldBe("Кыргызстан"); // ADR-0055: в поле анкеты, не в примечание
+        (second.Notes ?? string.Empty).ShouldNotContain("Гражданство:");
 
         var link = (await kit.Persons.ListByCaseAsync(withInitiator.Id, access)).Single(p => p.Role == PersonRole.Link);
         link.IsUnidentified.ShouldBeTrue();
         link.Questionnaire.ShouldNotBeNull().Alias.ShouldBe("Лис");
+        link.Questionnaire.Orientation.ShouldBe("встречается с объектом"); // ADR-0055
         var linkRequisites = (await kit.Requisites.GetAsync(link.Id, access)).ShouldNotBeNull();
         linkRequisites.Vehicles.ShouldHaveSingleItem().PlateNumber.ShouldBe("01KG123ABC");
         linkRequisites.Addresses.Select(a => a.Text).ShouldBe(["ул. А, 1", "ул. Б, 2"], ignoreOrder: true);

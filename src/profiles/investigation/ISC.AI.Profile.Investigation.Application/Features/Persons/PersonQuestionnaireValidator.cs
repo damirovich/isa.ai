@@ -22,6 +22,12 @@ public sealed class PersonQuestionnaireValidator : AbstractValidator<PersonQuest
     /// <summary>Предел длины псевдонима.</summary>
     public const int MaxAliasLength = 200;
 
+    /// <summary>Предел длины гражданства (ТФ-ПЕР-13, ADR-0055).</summary>
+    public const int MaxCitizenshipLength = 200;
+
+    /// <summary>Предел длины ориентировки (сведений) об объекте (ТФ-ПЕР-13).</summary>
+    public const int MaxOrientationLength = 4000;
+
     /// <summary>Год и дата — не раньше 1900 и не в будущем; при обоих заданных год равен году даты; пол из перечня.</summary>
     public PersonQuestionnaireValidator()
     {
@@ -40,5 +46,7 @@ public sealed class PersonQuestionnaireValidator : AbstractValidator<PersonQuest
         RuleFor(q => q.WorkPlace).MaximumLength(MaxPlaceLength);
         RuleFor(q => q.Residence).MaximumLength(MaxResidenceLength);
         RuleFor(q => q.Alias).MaximumLength(MaxAliasLength);
+        RuleFor(q => q.Citizenship).MaximumLength(MaxCitizenshipLength);
+        RuleFor(q => q.Orientation).MaximumLength(MaxOrientationLength);
     }
 }

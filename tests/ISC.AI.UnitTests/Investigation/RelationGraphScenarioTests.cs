@@ -70,7 +70,7 @@ public sealed class RelationGraphScenarioTests
             _persons.GetAsync(person.Id, Access, Arg.Any<CancellationToken>()).Returns(person);
             _persons.ListCoAppearancesAsync(person.Id, Access, Arg.Any<CancellationToken>()).Returns([]);
             _intersections.FindForPersonAsync(person.Id, Access, Arg.Any<CancellationToken>()).Returns([]);
-            _requisites.GetAsync(person.Id, Access, Arg.Any<CancellationToken>()).Returns(new PersonRequisites([], []));
+            _requisites.GetAsync(person.Id, Access, Arg.Any<CancellationToken>()).Returns(new PersonRequisites([], [], []));
         }
 
         _persons.ListByCaseAsync(CaseId, Access, Arg.Any<CancellationToken>()).Returns([_target, _brother, _other]);
@@ -85,9 +85,10 @@ public sealed class RelationGraphScenarioTests
                 new PersonAddressRow(1, TargetId, AddressKind.Residence, Residence, null),
                 new PersonAddressRow(2, TargetId, AddressKind.Work, "ул. Токтогула 5", null),
             ],
-            [new PersonVehicleRow(1, TargetId, Plate, "Toyota", "Camry", "белый", null)]));
+            [new PersonVehicleRow(1, TargetId, Plate, "Toyota", "Camry", "белый", null)],
+            []));
         _requisites.GetAsync(BrotherId, Access, Arg.Any<CancellationToken>()).Returns(new PersonRequisites(
-            [], [new PersonVehicleRow(2, BrotherId, "01kg123abc", "Toyota", null, null, null)]));
+            [], [new PersonVehicleRow(2, BrotherId, "01kg123abc", "Toyota", null, null, null)], []));
 
         _intersections.FindForPersonAsync(TargetId, Access, Arg.Any<CancellationToken>()).Returns(
         [
@@ -197,7 +198,7 @@ public sealed class RelationGraphScenarioTests
         var vehicles = Enumerable.Range(1, GetRelationGraphQuery.MaxNodes + 1)
             .Select(i => new PersonVehicleRow(100 + i, OtherId, $"01KG{i:000}XYZ", null, null, null, null))
             .ToList();
-        _requisites.GetAsync(OtherId, Access, Arg.Any<CancellationToken>()).Returns(new PersonRequisites([], vehicles));
+        _requisites.GetAsync(OtherId, Access, Arg.Any<CancellationToken>()).Returns(new PersonRequisites([], vehicles, []));
 
         var graph = (await Handle(new GetRelationGraphQuery(RelationNodeKind.Case, CaseId, Depth: 2))).Data.ShouldNotBeNull();
 
@@ -353,6 +354,42 @@ public sealed class RelationGraphScenarioTests
         validator.Validate(new GetRelationGraphQuery(RelationNodeKind.Person, 1, 0)).IsValid.ShouldBeFalse();
         validator.Validate(new GetRelationGraphQuery(RelationNodeKind.Person, 1, 9)).IsValid.ShouldBeFalse();
         validator.Validate(new GetRelationGraphQuery(RelationNodeKind.Person, 0)).IsValid.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "ADR-0055: телефон — узел на нормализованный номер у фигуранта, пересечение по номеру — от узла номера; раскрытие — фигуранты с этим номером")]
+    public async Task Phone_node_intersection_and_expansion()
+    {
+        const string Number = "0555 123 456";
+        var phoneKey = RequisiteNormalizer.Phone(Number)!;
+        _requisites.GetAsync(TargetId, Access, Arg.Any<CancellationToken>()).Returns(new PersonRequisites(
+            [], [],
+            [
+                new PersonPhoneRow(1, TargetId, PhoneKind.Mobile, Number, null),
+                new PersonPhoneRow(2, TargetId, PhoneKind.Work, "+996 555 123 456", null), // тот же номер иначе — один узел
+            ]));
+        _intersections.FindForPersonAsync(TargetId, Access, Arg.Any<CancellationToken>())
+            .Returns([Match(IntersectionKind.Phone, phoneKey, otherCaseId: 24, canOpen: false)]);
+        _persons.ListByPhoneAsync(phoneKey, Access, Arg.Any<CancellationToken>()).Returns([_target, _brother]);
+
+        var graph = (await Handle(new GetRelationGraphQuery(RelationNodeKind.Person, TargetId, Depth: 1))).Data.ShouldNotBeNull();
+
+        var phone = Node(graph, RelationNodeKeys.Phone(phoneKey));
+        phone.Kind.ShouldBe(RelationNodeKind.Phone);
+        phone.EntityId.ShouldBe(TargetId);
+        phone.Title.ShouldBe(Number);
+        phone.Expandable.ShouldBeTrue();
+        Edge(graph, RelationNodeKeys.Person(TargetId), phone.Key).Label.ShouldBe("телефон · мобильный");
+        Edge(graph, phone.Key, RelationNodeKeys.ForeignCase(24)).Label.ShouldBe("пересечение: телефон");
+
+        // Раскрытие узла номера — через фигуранта, у которого он есть (ADR-0045 п. 10).
+        var expanded = (await Handle(new GetRelationGraphQuery(RelationNodeKind.Phone, TargetId, Depth: 1, phone.Key))).Data.ShouldNotBeNull();
+        expanded.Nodes.ShouldContain(n => n.Key == RelationNodeKeys.Person(BrotherId));
+        (await Handle(new GetRelationGraphQuery(RelationNodeKind.Phone, BrotherId, Depth: 1, phone.Key))).StatusCode
+            .ShouldBe(ResponseStatusCode.NotFound); // у брата такого номера нет — ключ ничего не разрешает
+
+        new GetRelationGraphQuery(RelationNodeKind.Phone, TargetId, 1, phone.Key).AuditSummary
+            .ShouldBe($"investigation:graph:phone:person:{TargetId}:view;depth=1"); // без номера (ТБ-032)
+        new GetRelationGraphValidator().Validate(new GetRelationGraphQuery(RelationNodeKind.Phone, TargetId, 1, null)).IsValid.ShouldBeFalse();
     }
 
     private async Task<ResponseDto<RelationGraph>> Handle(GetRelationGraphQuery query) =>

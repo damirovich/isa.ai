@@ -14,6 +14,8 @@ namespace ISC.AI.Profile.Investigation.Domain.Services;
 /// <param name="Residence">Место жительства.</param>
 /// <param name="Sex">Пол.</param>
 /// <param name="Alias">Псевдоним (оперативная кличка).</param>
+/// <param name="Citizenship">Гражданство — страна из справочника или своё значение (ТФ-ПЕР-13, ADR-0055).</param>
+/// <param name="Orientation">Ориентировка (сведения) об объекте — текстовый блок анкеты (ТФ-ПЕР-13).</param>
 public sealed record PersonQuestionnaire(
     DateOnly? BirthDate = null,
     int? BirthYear = null,
@@ -21,7 +23,9 @@ public sealed record PersonQuestionnaire(
     string? WorkPlace = null,
     string? Residence = null,
     PersonSex? Sex = null,
-    string? Alias = null)
+    string? Alias = null,
+    string? Citizenship = null,
+    string? Orientation = null)
 {
     /// <summary>Пустая анкета.</summary>
     public static PersonQuestionnaire Empty { get; } = new();
@@ -231,6 +235,14 @@ public interface IPersonStore
     /// </summary>
     Task<IReadOnlyList<PersonRow>> ListByPlateAsync(
         string plateNormalized, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Доступные субъекту фигуранты, у которых есть номер телефона с этим нормализованным значением (ТО-мат-11) —
+    /// раскрытие узла телефона в графе связей (ADR-0045 п. 10, ADR-0055). Правило видимости — как у
+    /// <see cref="ListByPlateAsync"/>: фигурант — по полной решётке и роли, строка номера — под floor'ом строки.
+    /// </summary>
+    Task<IReadOnlyList<PersonRow>> ListByPhoneAsync(
+        string phoneNormalized, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Доступные субъекту фигуранты с этим нормализованным адресом — в строке адресов (под floor'ом строки) или

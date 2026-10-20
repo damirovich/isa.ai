@@ -22,7 +22,7 @@ public sealed record SearchPageState(string? Text = null, SearchKinds Kinds = Se
     /// <summary>Виды выдачи по порядку разделов страницы.</summary>
     public static IReadOnlyList<SearchKinds> AllKinds { get; } =
     [
-        SearchKinds.Cases, SearchKinds.Persons, SearchKinds.Vehicles, SearchKinds.Addresses,
+        SearchKinds.Cases, SearchKinds.Persons, SearchKinds.Vehicles, SearchKinds.Addresses, SearchKinds.Phones,
         SearchKinds.Reports, SearchKinds.Transcripts, SearchKinds.Documents,
     ];
 
@@ -77,6 +77,7 @@ public sealed record SearchPageState(string? Text = null, SearchKinds Kinds = Se
         SearchKinds.Persons => "Фигуранты",
         SearchKinds.Vehicles => "Автотранспорт",
         SearchKinds.Addresses => "Адреса",
+        SearchKinds.Phones => "Телефоны",
         SearchKinds.Reports => "Сводки и справки",
         SearchKinds.Transcripts => "Расшифровки",
         SearchKinds.Documents => "Документы дел",

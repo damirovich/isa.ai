@@ -723,7 +723,10 @@ public sealed class AccessImporter(
         var (result, personId) = await persons.CreateAsync(
             new PersonDraft(
                 caseId, link.Name, link.Name is null, null, link.Notes, PersonRole.Link,
-                link.Alias is null ? null : new PersonQuestionnaire(Alias: link.Alias), objectId, linkTypeId),
+                link.Alias is null && link.Orientation is null
+                    ? null
+                    : new PersonQuestionnaire(Alias: link.Alias, Orientation: link.Orientation),
+                objectId, linkTypeId),
             run.Access,
             cancellationToken);
         if (result != PersonWriteResult.Ok)

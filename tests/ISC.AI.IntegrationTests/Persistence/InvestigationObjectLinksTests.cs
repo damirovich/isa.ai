@@ -203,6 +203,103 @@ public sealed class InvestigationObjectLinksTests : IAsyncLifetime
         }
     }
 
+    [Fact(DisplayName = "ADR-0055: телефоны — запись, правка, удаление с нормализованным номером и грифом фигуранта; чужой субъект, чужая строка и допуск ниже грифа неотличимы от отсутствия")]
+    public async Task Phones_round_trip_under_lattice()
+    {
+        var kit = await ArrangeAsync();
+        var owner = InvestigationTestKit.Access(10, 9, 5);
+        var stranger = InvestigationTestKit.Access(11, 9, 5);
+        var caseA = (await kit.Cases.CreateAsync(InvestigationTestKit.Draft("A-1", 5, 3, 10), owner)).CaseId;
+        var person = (await kit.Persons.CreateAsync(new PersonDraft(caseA, "Иванов", false, null, null, PersonRole.Target), owner)).PersonId;
+        var other = (await kit.Persons.CreateAsync(new PersonDraft(caseA, "Петров", false, null, null, PersonRole.Link), owner)).PersonId;
+
+        var phone = await kit.Requisites.SavePhoneAsync(person, null, new PersonPhoneDraft(PhoneKind.Mobile, " 0555 12-34-56 ", "личный"), owner);
+        phone.Result.ShouldBe(PersonWriteResult.Ok);
+        (await kit.Requisites.SavePhoneAsync(other, null, new PersonPhoneDraft(PhoneKind.Home, "+996 555 123 456", null), owner))
+            .Result.ShouldBe(PersonWriteResult.Ok);
+
+        var row = (await kit.Requisites.GetAsync(person, owner)).ShouldNotBeNull().Phones.ShouldHaveSingleItem();
+        row.Number.ShouldBe("0555 12-34-56");
+        row.Kind.ShouldBe(PhoneKind.Mobile);
+        row.Notes.ShouldBe("личный");
+        await using (var db = kit.Factory.CreateDbContext())
+        {
+            var stored = await db.PersonPhones.AsNoTracking().SingleAsync(p => p.Id == phone.PhoneId);
+            stored.NumberNormalized.ShouldBe("996555123456");
+            stored.Classification.ShouldBe<short>(3);
+            stored.DivisionId.ShouldBe(5);
+        }
+
+        // Номер без цифр хранилище не принимает (до записи в БД); правка пересчитывает ключ; правка «через чужого фигуранта» — NotFound.
+        await Should.ThrowAsync<ArgumentException>(() =>
+            kit.Requisites.SavePhoneAsync(person, null, new PersonPhoneDraft(PhoneKind.Mobile, "+ ( ) -", null), owner));
+        (await kit.Requisites.SavePhoneAsync(person, phone.PhoneId, new PersonPhoneDraft(PhoneKind.Work, "0312 55 66 77", null), owner))
+            .Result.ShouldBe(PersonWriteResult.Ok);
+        (await kit.Requisites.SavePhoneAsync(other, phone.PhoneId, new PersonPhoneDraft(PhoneKind.Work, "1", null), owner))
+            .Result.ShouldBe(PersonWriteResult.NotFound);
+        await using (var db = kit.Factory.CreateDbContext())
+        {
+            var stored = await db.PersonPhones.AsNoTracking().SingleAsync(p => p.Id == phone.PhoneId);
+            stored.NumberNormalized.ShouldBe("996312556677");
+            stored.Kind.ShouldBe(PhoneKind.Work);
+            stored.Notes.ShouldBeNull();
+        }
+
+        // Владельцы номера — по точному ключу и под решёткой.
+        (await kit.Persons.ListByPhoneAsync("996555123456", owner)).ShouldHaveSingleItem().Id.ShouldBe(other);
+        (await kit.Persons.ListByPhoneAsync("996555123456", stranger)).ShouldBeEmpty();
+
+        // Чужой следователь: не видит, не пишет, не удаляет; допуск ниже грифа — тоже не видно (floor ядра).
+        (await kit.Requisites.GetAsync(person, stranger)).ShouldBeNull();
+        (await kit.Requisites.SavePhoneAsync(person, null, new PersonPhoneDraft(PhoneKind.Mobile, "112", null), stranger))
+            .Result.ShouldBe(PersonWriteResult.NotFound);
+        (await kit.Requisites.DeletePhoneAsync(phone.PhoneId, stranger)).ShouldBe(PersonWriteResult.NotFound);
+        (await kit.Requisites.GetAsync(person, InvestigationTestKit.Access(10, 2, 5))).ShouldBeNull();
+
+        (await kit.Requisites.DeletePhoneAsync(phone.PhoneId, owner)).ShouldBe(PersonWriteResult.Ok);
+        (await kit.Requisites.GetAsync(person, owner)).ShouldNotBeNull().Phones.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "ADR-0055: нормализованный номер не из цифр или пустой — не записать и в обход хранилища; уничтожение дела уносит телефоны")]
+    public async Task Phone_constraints_and_purge()
+    {
+        var kit = await ArrangeAsync();
+        var owner = InvestigationTestKit.Access(10, 9, 5);
+        var caseA = (await kit.Cases.CreateAsync(InvestigationTestKit.Draft("A-1", 5, 2, 10), owner)).CaseId;
+        var target = (await kit.Persons.CreateAsync(new PersonDraft(caseA, "Иванов", false, null, null, PersonRole.Target), owner)).PersonId;
+        (await kit.Requisites.SavePhoneAsync(target, null, new PersonPhoneDraft(PhoneKind.Mobile, "0555 123 456", null), owner))
+            .Result.ShouldBe(PersonWriteResult.Ok);
+
+        await using (var db = kit.Factory.CreateDbContext())
+        {
+            var plus = async () => await db.Database.ExecuteSqlAsync(
+                $"UPDATE investigation.person_phone SET number_normalized = '+996555123456' WHERE person_id = {target}");
+            await plus.ShouldThrowAsync<DbException>();
+            var empty = async () => await db.Database.ExecuteSqlAsync(
+                $"UPDATE investigation.person_phone SET number_normalized = '' WHERE person_id = {target}");
+            await empty.ShouldThrowAsync<DbException>();
+        }
+
+        (await kit.Cases.PurgeAsync(caseA, owner)).ShouldBe(CaseWriteResult.Ok);
+        await using (var db = kit.Factory.CreateDbContext())
+        {
+            (await db.PersonPhones.CountAsync()).ShouldBe(0);
+        }
+    }
+
+    [Fact(DisplayName = "ADR-0055: миграция заводит справочник стран — «Кыргызстан» первым, все действующие")]
+    public async Task Migration_seeds_countries()
+    {
+        var kit = await ArrangeAsync();
+
+        var countries = await kit.References.ListAsync(ReferenceKind.Country);
+
+        countries.Count.ShouldBeGreaterThan(10);
+        countries.ShouldAllBe(c => c.Kind == ReferenceKind.Country && c.IsActive);
+        countries.OrderBy(c => c.SortOrder).First().Name.ShouldBe("Кыргызстан");
+        countries.Select(c => c.Name).ShouldBeUnique();
+    }
+
     [Fact(DisplayName = "Обслуживание при старте: пустые ключи ФИО и места жительства прежних фигурантов дозаполняются тем же кодом; повторный запуск ничего не меняет")]
     public async Task Startup_backfill_fills_missing_keys_once()
     {

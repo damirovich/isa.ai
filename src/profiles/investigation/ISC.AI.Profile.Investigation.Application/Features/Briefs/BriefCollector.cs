@@ -386,8 +386,10 @@ public sealed class BriefCollector(
         Add(facts, "Пол", q.Sex?.Label());
         Add(facts, "Дата рождения", q.BirthDate is { } birth ? Date(birth) : q.BirthYear?.ToString(CultureInfo.InvariantCulture));
         Add(facts, "Место рождения", q.BirthPlace);
+        Add(facts, "Гражданство", q.Citizenship);
         Add(facts, "Место работы", q.WorkPlace);
         Add(facts, "Место жительства", q.Residence);
+        Add(facts, "Ориентировка", q.Orientation);
         Add(facts, "Примечания", person.Notes);
         return new BriefSection("Фигурант", facts);
     }
@@ -395,7 +397,7 @@ public sealed class BriefCollector(
     private async Task<IReadOnlyList<BriefSection>> RequisiteSectionsAsync(
         int personId, AccessContext access, Grade grade, CancellationToken cancellationToken)
     {
-        var found = await requisites.GetAsync(personId, access, cancellationToken) ?? new PersonRequisites([], []);
+        var found = await requisites.GetAsync(personId, access, cancellationToken) ?? new PersonRequisites([], [], []);
         foreach (var address in found.Addresses)
         {
             grade.Add(address.Classification);
@@ -404,6 +406,12 @@ public sealed class BriefCollector(
         foreach (var vehicle in found.Vehicles)
         {
             grade.Add(vehicle.Classification);
+        }
+
+        // Номера телефонов (ADR-0055) — их гриф тоже поднимает гриф справки (ТБ-033).
+        foreach (var phone in found.Phones)
+        {
+            grade.Add(phone.Classification);
         }
 
         return
@@ -424,6 +432,13 @@ public sealed class BriefCollector(
                         .Select(v => (IReadOnlyList<string>)[v.PlateNumber ?? string.Empty, v.Make ?? string.Empty, v.Model ?? string.Empty, v.Color ?? string.Empty, v.Notes ?? string.Empty])
                         .ToList(),
                     found.Vehicles.Count)),
+            new BriefSection(
+                "Телефоны",
+                [],
+                new BriefTable(
+                    ["Вид", "Номер", "Примечание"],
+                    found.Phones.Take(BriefLimits.MaxRows).Select(p => (IReadOnlyList<string>)[p.Kind.Label(), p.Number, p.Notes ?? string.Empty]).ToList(),
+                    found.Phones.Count)),
         ];
     }
 

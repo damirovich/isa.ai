@@ -106,6 +106,31 @@ public sealed class SearchPageTests : BunitContext, IAsyncLifetime
         _queries[1].Kinds.ShouldBe(SearchKinds.All);
     }
 
+    [Fact(DisplayName = "ADR-0055: телефоны — свой раздел (номер как записан, вид, фигурант, дело); у фигурантов — столбец «Гражданство»")]
+    public void Phones_section_and_citizenship_column()
+    {
+        Respond(Result() with
+        {
+            Persons = [new PersonRow(7, 1, "Иванов Пётр", false, null, null, null, 1, 5, 0, 0, PersonRole.Target,
+                new PersonQuestionnaire(Citizenship: "Казахстан"))],
+            Phones = [new PhoneSearchRow(7, 1, "Иванов Пётр", new PersonPhoneRow(3, 7, PhoneKind.Mobile, "+996 555 123 456", "личный"))],
+            Transcripts = [],
+        });
+        Render<MudPopoverProvider>();
+        Services.GetRequiredService<NavigationManager>().NavigateTo("/search?q=0555 123 456");
+
+        var cut = Render<Search>();
+
+        cut.WaitForAssertion(() => cut.Markup.ShouldContain("+996 555 123 456"));
+        var phones = cut.FindAll("table").Single(t => t.TextContent.Contains("+996 555 123 456", StringComparison.Ordinal));
+        phones.QuerySelectorAll("th").Select(th => th.TextContent).ShouldBe(["Номер", "Вид", "Примечание", "Фигурант", "Дело"]);
+        phones.TextContent.ShouldContain("Мобильный");
+        phones.TextContent.ShouldContain("личный");
+        phones.QuerySelector("a[href='/persons/7']").ShouldNotBeNull();
+        var persons = cut.FindAll("table").Single(t => t.TextContent.Contains("Казахстан", StringComparison.Ordinal));
+        persons.QuerySelectorAll("th").Select(th => th.TextContent).ShouldContain("Гражданство");
+    }
+
     [Fact(DisplayName = "Найдено больше предела — «показаны первые»; ничего не найдено — так и сказано, без утверждения, что материалов нет")]
     public void Truncated_and_empty_results_are_explained()
     {
@@ -115,7 +140,7 @@ public sealed class SearchPageTests : BunitContext, IAsyncLifetime
         var cut = Render<Search>();
         cut.WaitForAssertion(() => cut.Markup.ShouldContain("показаны первые"));
 
-        Respond(new UnifiedSearchResult("Жок", [], [], [], [], [], [], [], new Dictionary<int, string>(), SearchKinds.None));
+        Respond(new UnifiedSearchResult("Жок", [], [], [], [], [], [], [], [], new Dictionary<int, string>(), SearchKinds.None));
         Services.GetRequiredService<NavigationManager>().NavigateTo("/search?q=Жок");
         var empty = Render<Search>();
         empty.WaitForAssertion(() => empty.Markup.ShouldContain("ничего не найдено — в пределах ваших дел и допуска"));
@@ -207,6 +232,7 @@ public sealed class SearchPageTests : BunitContext, IAsyncLifetime
         "Иванов",
         [],
         [new PersonRow(7, 1, "Иванов Пётр", false, null, null, null, 1, 5, 0, 0, PersonRole.Target)],
+        [],
         [],
         [],
         [],
