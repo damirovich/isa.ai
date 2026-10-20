@@ -121,6 +121,35 @@ public sealed class UnifiedSearchTests
         result.TotalCount.ShouldBe(UnifiedSearchQuery.Limit);
     }
 
+    [Theory(DisplayName = "ADR-0055: запрос, похожий на номер, — нормализованный номер (цифры, 996); дата, год, текст и короткие числа номером не считаются")]
+    [InlineData("+996 555 12-34-56", "996555123456")]
+    [InlineData("0555 123 456", "996555123456")]
+    [InlineData("(0555) 123-456", "996555123456")]
+    [InlineData("123456", "123456")]
+    [InlineData("12.03.1985", null)]
+    [InlineData("1985", null)]
+    [InlineData("1234", null)]
+    [InlineData("Иванов 555123", null)]
+    public void Phone_terms_are_normalized(string raw, string? expected) =>
+        SearchTerms.Parse(raw).Phone.ShouldBe(expected);
+
+    [Fact(DisplayName = "ADR-0055: телефоны — свой вид выдачи: ищутся по разобранному номеру, входят в общее число и в предел")]
+    public async Task Phones_are_searched_as_own_kind()
+    {
+        _requisites.SearchPhonesAsync(Arg.Any<SearchTerms>(), Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<int>(), Access, Arg.Any<CancellationToken>())
+            .Returns([new PhoneSearchRow(7, 1, "Иванов", new PersonPhoneRow(3, 7, PhoneKind.Mobile, "+996 555 123 456", null))]);
+
+        var result = (await HandleAsync(new UnifiedSearchQuery("0555 123 456", SearchKinds.Phones))).Data.ShouldNotBeNull();
+
+        result.Phones.ShouldHaveSingleItem().Phone.Number.ShouldBe("+996 555 123 456");
+        result.TotalCount.ShouldBe(1);
+        await _requisites.Received(1).SearchPhonesAsync(
+            Arg.Is<SearchTerms>(t => t.Phone == "996555123456"), Arg.Any<IReadOnlyCollection<int>>(), UnifiedSearchQuery.Limit + 1,
+            Access, Arg.Any<CancellationToken>());
+        await _persons.DidNotReceiveWithAnyArgs().SearchInCasesAsync(default!, default!, default, default!, default);
+        SearchKinds.All.HasFlag(SearchKinds.Phones).ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Выбранные виды: ищется только выбранное — остальные хранилища и порты пакетов не вызываются")]
     public async Task Only_selected_kinds_are_searched()
     {
@@ -129,6 +158,7 @@ public sealed class UnifiedSearchTests
         await _persons.ReceivedWithAnyArgs(1).SearchInCasesAsync(default!, default!, default, default!, default);
         await _requisites.DidNotReceiveWithAnyArgs().SearchVehiclesAsync(default!, default!, default, default!, default);
         await _requisites.DidNotReceiveWithAnyArgs().SearchAddressesAsync(default!, default!, default, default!, default);
+        await _requisites.DidNotReceiveWithAnyArgs().SearchPhonesAsync(default!, default!, default, default!, default);
         await _reports.DidNotReceiveWithAnyArgs().SearchAsync(default!, default!, default, default!, default);
         await _media.DidNotReceiveWithAnyArgs().SearchTranscriptsAsync(default!, default!, default, default!, default);
         await _caseDocuments.DidNotReceiveWithAnyArgs().ListLinksAsync(default!, default!, default);

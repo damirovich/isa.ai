@@ -144,10 +144,19 @@ else
                     @QuestionnaireField("Пол", Q.Sex?.Label() ?? "—")
                     @QuestionnaireField("Дата рождения", QuestionnaireLabels.BirthWithAge(Q, DateOnly.FromDateTime(DateTime.Today)))
                     @QuestionnaireField("Место рождения", QuestionnaireLabels.OrDash(Q.BirthPlace))
+                    @QuestionnaireField("Гражданство", QuestionnaireLabels.OrDash(Q.Citizenship))
                     @QuestionnaireField("Место работы", QuestionnaireLabels.OrDash(Q.WorkPlace))
                     @QuestionnaireField("Место жительства", QuestionnaireLabels.OrDash(Q.Residence))
                     @QuestionnaireField("Эталонов / появлений", $"{_person.ReferencePhotoCount} / {_person.AppearanceCount}")
                 </div>
+                @* Ориентировка (сведения) об объекте — отдельный текстовый блок анкеты (ТФ-ПЕР-13, ADR-0055). *@
+                @if (!string.IsNullOrWhiteSpace(Q.Orientation))
+                {
+                    <div class="mt-5">
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">Ориентировка</MudText>
+                        <MudText Typo="Typo.body1" Style="white-space:pre-wrap;">@Q.Orientation</MudText>
+                    </div>
+                }
                 @if (!string.IsNullOrWhiteSpace(_person.Notes))
                 {
                     <div class="mt-5">
@@ -272,9 +281,10 @@ else
         </div>
     </MudTabPanel>
 
-    @* --- Адреса и автотранспорт (ТФ-ПЕР-06): по нормализованным значениям ищутся пересечения (ТФ-ПЕР-07) --- *@
-    <MudTabPanel Text="Адреса и транспорт" Icon="@Icons.Material.Filled.DirectionsCar"
-                 BadgeData="@(_addresses.Count + _vehicles.Count)" BadgeColor="Color.Default">
+    @* --- Адреса, автотранспорт и телефоны (ТФ-ПЕР-06, ТФ-ПЕР-12): по нормализованным значениям ищутся пересечения
+       (ТФ-ПЕР-07) --- *@
+    <MudTabPanel Text="Адреса, транспорт, телефоны" Icon="@Icons.Material.Filled.DirectionsCar"
+                 BadgeData="@(_addresses.Count + _vehicles.Count + _phones.Count)" BadgeColor="Color.Default">
         <div class="pt-3">
             @if (_requisitesError is not null)
             {
@@ -334,6 +344,34 @@ else
                 </RowTemplate>
                 <NoRecordsContent>
                     <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Автотранспорта нет.</MudText>
+                </NoRecordsContent>
+            </MudTable>
+
+            @* Номера телефонов (ТФ-ПЕР-12, ADR-0055): исходная запись — как ввели; совпадения ищутся по цифрам с кодом 996. *@
+            <div class="d-flex align-center justify-space-between mb-2 mt-4">
+                <MudText Typo="Typo.subtitle2">Телефоны</MudText>
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.AddIcCall"
+                           OnClick="@(() => OpenPhone(null))" Disabled="_busy">Добавить телефон</MudButton>
+            </div>
+            <MudTable T="PersonPhoneRow" Items="_phones" Hover="true" Dense="true" Outlined="true" Loading="_busy">
+                <HeaderContent>
+                    <MudTh>Вид</MudTh>
+                    <MudTh>Номер</MudTh>
+                    <MudTh>Примечание</MudTh>
+                    <MudTh Style="width:200px;">Действия</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Вид">@context.Kind.Label()</MudTd>
+                    <MudTd DataLabel="Номер">@context.Number</MudTd>
+                    <MudTd DataLabel="Примечание">@(context.Notes ?? "—")</MudTd>
+                    <MudTd DataLabel="Действия">
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="_busy" OnClick="@(() => OpenPhone(context))">Изменить</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" Disabled="_busy"
+                                   OnClick="@(() => DeletePhoneAsync(context))">Удалить</MudButton>
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Телефонов нет.</MudText>
                 </NoRecordsContent>
             </MudTable>
         </div>
@@ -570,7 +608,7 @@ else
                               @bind-LinkedToPersonId="_editLinkedTo" @bind-LinkTypeId="_editLinkType"
                               InitialLinkTypeId="_person?.LinkTypeId" />
         }
-        <PersonQuestionnaireFields Model="_editQuestionnaire" />
+        <PersonQuestionnaireFields Model="_editQuestionnaire" References="_references" />
         <MudGrid Spacing="2" Class="mt-1">
             <MudItem xs="12">
                 <MudTextField @bind-Value="_editNotes" Label="Примечания" Variant="Variant.Outlined" Lines="3" MaxLength="4000" />
@@ -668,7 +706,7 @@ else
             </MudItem>
         </MudGrid>
         <MudText Typo="Typo.caption" Class="mud-text-secondary">
-            Анкету, адреса, транспорт и эталоны связи заполните в её карточке после добавления.
+            Анкету, адреса, транспорт, телефоны и эталоны связи заполните в её карточке после добавления.
         </MudText>
     </DialogContent>
     <DialogActions>
@@ -717,6 +755,45 @@ else
         }
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_busy || string.IsNullOrWhiteSpace(_addressText))"
                    OnClick="SaveAddressAsync">Сохранить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* --- Номер телефона (SavePersonPhoneCommand, ADR-0055): номер с цифрами обязателен --- *@
+<MudDialog @bind-Visible="_phoneOpen" Options="FormDialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">@(_phoneId is null ? "Новый номер телефона" : "Изменить номер телефона")</MudText></TitleContent>
+    <DialogContent>
+        @if (_phoneError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_phoneError</MudAlert>
+        }
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="4">
+                <MudSelect T="PhoneKind" @bind-Value="_phoneKind" Label="Вид" Variant="Variant.Outlined" Dense="true">
+                    @foreach (var kind in Enum.GetValues<PhoneKind>())
+                    {
+                        <MudSelectItem T="PhoneKind" Value="@kind">@kind.Label()</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="8">
+                <MudTextField @bind-Value="_phoneNumber" Label="Номер *" Variant="Variant.Outlined" Immediate="true"
+                              MaxLength="@SavePersonPhoneValidator.MaxNumberLength"
+                              HelperText="Например: +996 555 123 456 или 0555 123 456 — при поиске совпадений это один номер" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_phoneNotes" Label="Примечание" Variant="Variant.Outlined"
+                              MaxLength="@SavePersonPhoneValidator.MaxNotesLength" HelperText="чей номер, откуда известен, период" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _phoneOpen = false)">Отмена</MudButton>
+        @if (!_busy && !PhoneHasDigits)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">Укажите номер с цифрами</MudText>
+        }
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_busy || !PhoneHasDigits)"
+                   OnClick="SavePhoneAsync">Сохранить</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -894,6 +971,18 @@ else
     private string? _addressText;
     private string? _addressNotes;
 
+    // --- Телефоны (ADR-0055) ---
+    private readonly List<PersonPhoneRow> _phones = [];
+    private bool _phoneOpen;
+    private string? _phoneError;
+    private int? _phoneId;
+    private PhoneKind _phoneKind = PhoneKind.Mobile;
+    private string? _phoneNumber;
+    private string? _phoneNotes;
+
+    // Кнопка «Сохранить» — только для номера, который нормализуется (есть цифры); сервер проверяет то же.
+    private bool PhoneHasDigits => RequisiteNormalizer.Phone(_phoneNumber) is not null;
+
     // --- Автотранспорт ---
     private bool _vehicleOpen;
     private string? _vehicleError;
@@ -1004,10 +1093,12 @@ else
         var requisites = await Dispatcher.Send(new GetPersonRequisitesQuery(Id));
         _addresses.Clear();
         _vehicles.Clear();
+        _phones.Clear();
         if (requisites is { Status: true, Data: { } r })
         {
             _addresses.AddRange(r.Addresses);
             _vehicles.AddRange(r.Vehicles);
+            _phones.AddRange(r.Phones);
         }
         else
         {
@@ -1138,6 +1229,64 @@ else
         try
         {
             var response = await Dispatcher.Send(new DeletePersonAddressCommand(row.Id));
+            if (!response.Status)
+            {
+                _requisitesError = response.StatusMessage;
+                return;
+            }
+
+            await LoadRequisitesAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    // --- Телефоны ---
+    private void OpenPhone(PersonPhoneRow? row)
+    {
+        _phoneError = null;
+        _phoneId = row?.Id;
+        _phoneKind = row?.Kind ?? PhoneKind.Mobile;
+        _phoneNumber = row?.Number;
+        _phoneNotes = row?.Notes;
+        _phoneOpen = true;
+    }
+
+    private async Task SavePhoneAsync()
+    {
+        if (_phoneNumber is not { } number || !PhoneHasDigits)
+        {
+            return;
+        }
+
+        _busy = true;
+        _phoneError = null;
+        try
+        {
+            var response = await Dispatcher.Send(new SavePersonPhoneCommand(Id, _phoneId, _phoneKind, number, _phoneNotes));
+            if (!response.Status)
+            {
+                _phoneError = response.StatusMessage;
+                return;
+            }
+
+            _phoneOpen = false;
+            await LoadRequisitesAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DeletePhoneAsync(PersonPhoneRow row)
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new DeletePersonPhoneCommand(row.Id));
             if (!response.Status)
             {
                 _requisitesError = response.StatusMessage;

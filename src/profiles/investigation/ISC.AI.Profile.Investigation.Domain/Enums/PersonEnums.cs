@@ -48,6 +48,9 @@ public enum ReferenceKind
 
     /// <summary>Категории материалов (для отчётов и обмена между офисами).</summary>
     MaterialCategory = 5,
+
+    /// <summary>Страны — подсказки для гражданства в анкете (ТФ-ПЕР-13, ADR-0055); своё значение тоже допустимо.</summary>
+    Country = 6,
 }
 
 /// <summary>Вид адреса фигуранта (ТФ-ПЕР-06: «адреса проживания/пребывания»).</summary>
@@ -66,6 +69,22 @@ public enum AddressKind
     Other = 4,
 }
 
+/// <summary>Вид номера телефона фигуранта (ТФ-ПЕР-12, ADR-0055).</summary>
+public enum PhoneKind
+{
+    /// <summary>Мобильный.</summary>
+    Mobile = 1,
+
+    /// <summary>Домашний.</summary>
+    Home = 2,
+
+    /// <summary>Рабочий.</summary>
+    Work = 3,
+
+    /// <summary>Иной.</summary>
+    Other = 4,
+}
+
 /// <summary>Русские подписи перечислений фигурантов и справочников.</summary>
 public static class PersonLabels
 {
@@ -76,6 +95,16 @@ public static class PersonLabels
         AddressKind.Stay => "Пребывание",
         AddressKind.Work => "Работа",
         AddressKind.Other => "Иной",
+        _ => kind.ToString(),
+    };
+
+    /// <summary>Подпись вида номера телефона.</summary>
+    public static string Label(this PhoneKind kind) => kind switch
+    {
+        PhoneKind.Mobile => "Мобильный",
+        PhoneKind.Home => "Домашний",
+        PhoneKind.Work => "Рабочий",
+        PhoneKind.Other => "Иной",
         _ => kind.ToString(),
     };
 
@@ -104,6 +133,7 @@ public static class PersonLabels
         ReferenceKind.Position => "Должности",
         ReferenceKind.LinkType => "Типы связей",
         ReferenceKind.MaterialCategory => "Категории материалов",
+        ReferenceKind.Country => "Страны",
         _ => kind.ToString(),
     };
 }

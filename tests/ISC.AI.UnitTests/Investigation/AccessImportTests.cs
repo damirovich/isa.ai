@@ -497,7 +497,7 @@ public sealed class AccessImportTests
         plan.Problems.Single(p => p.Table == RealTasks).Message.ShouldContain("«1/ (запись 3)»");
     }
 
-    [Fact(DisplayName = "ADR-0043 v0.3: перенос реальной базы — № дела с пометкой при повторе, гражданство в примечании, реквизиты инициатора из таблицы, связь с кличкой, автомобилем, адресами и фото")]
+    [Fact(DisplayName = "ADR-0043 v0.3, ADR-0055: перенос реальной базы — № дела с пометкой при повторе, гражданство и сведения об объекте связи в анкете, реквизиты инициатора из таблицы, связь с кличкой, автомобилем, адресами и фото")]
     public async Task Run_real_department_base()
     {
         UseRealReferences();
@@ -528,12 +528,16 @@ public sealed class AccessImportTests
         first.Questionnaire.ShouldNotBeNull().Residence.ShouldBe("г. Город, ул. Первая, 1");
         first.Questionnaire.Sex.ShouldBe(PersonSex.Male);
         first.Questionnaire.BirthYear.ShouldBe(1985);
-        _personDrafts.Single(p => p.DisplayName == "Второв Второй").Notes.ShouldNotBeNull().ShouldContain("Гражданство: Кыргызстан");
+        // ADR-0055: гражданство — в поле анкеты, а не в примечание.
+        var second = _personDrafts.Single(p => p.DisplayName == "Второв Второй");
+        second.Questionnaire.ShouldNotBeNull().Citizenship.ShouldBe("Кыргызстан");
+        (second.Notes ?? string.Empty).ShouldNotContain("Гражданство:");
 
         var link = _personDrafts.Single(p => p.Role == PersonRole.Link);
         link.IsUnidentified.ShouldBeTrue();
         link.Questionnaire.ShouldNotBeNull().Alias.ShouldBe("Лис");
-        link.Notes.ShouldNotBeNull().ShouldContain("Сведения об объекте связи: встречается с объектом");
+        link.Questionnaire.Orientation.ShouldBe("встречается с объектом"); // «сведения об объекте связи» — в ориентировку
+        (link.Notes ?? string.Empty).ShouldNotContain("Сведения об объекте связи:");
 
         // Приём фото здесь подменён (дело «недоступно») — видно, что фото объекта и фото связи дошли до приёма и
         // отказ не молчаливый.

@@ -9,6 +9,7 @@
 @using ISC.AI.Modules.Media.Domain.Model
 @using ISC.AI.Modules.Media.Domain.Services
 @using Microsoft.AspNetCore.Components.Forms
+@inject IImageTools ImageTools
 
 <MudTabs @bind-ActivePanelIndex="_tab" Outlined="true" Elevation="0" PanelClass="pa-3" Class="mb-3">
     <MudTabPanel Text="Из материалов дела" Icon="@Icons.Material.Filled.PhotoLibrary">
@@ -95,7 +96,16 @@
                     }
                 </div>
                 <div style="min-width:260px;flex:1;">
-                    <MudText Typo="Typo.body2" Class="mb-2">@_file.Name</MudText>
+                    <MudText Typo="Typo.body2" Class="mb-2">@_file.Name@(_photoSize is { } size ? $" · {size.Width}×{size.Height}" : string.Empty)</MudText>
+                    @if (_photoSize is { } small && ReferencePickerRules.IsSmallPhoto(small.Width, small.Height))
+                    {
+                        @* [АИС табл. 7.1 № 2] (ТФ-ПЕР-13, ADR-0055): малое фото принимается, но человек должен знать о риске. *@
+                        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-2">
+                            Фото меньше @ReferencePickerRules.MinPhotoShortSide×@ReferencePickerRules.MinPhotoLongSide пикселей
+                            (@small.Width×@small.Height). Оно будет принято, но распознавание по нему может быть хуже — по
+                            возможности загрузите снимок крупнее.
+                        </MudAlert>
+                    }
                     <div class="d-flex gap-2 flex-wrap">
                         <div style="width:190px;">
                             <MudDatePicker @bind-Date="_capturedDate" Label="Дата съёмки *" Variant="Variant.Outlined" Margin="Margin.Dense"
@@ -225,6 +235,9 @@ else if (_asset is { } current)
     private IBrowserFile? _file;
     private byte[]? _fileBytes;
     private string? _filePreview;
+
+    // Размер выбранного фото (по заголовку файла); не прочитан — предупреждения о малом фото нет, решает конвейер.
+    private ImageSize? _photoSize;
     private DateTime? _capturedDate;
     private TimeSpan? _capturedTime;
     private bool _dateFromMetadata;
@@ -316,6 +329,7 @@ else if (_asset is { } current)
         _file = null;
         _fileBytes = null;
         _filePreview = null;
+        _photoSize = null;
         _capturedDate = null;
         _capturedTime = null;
         _dateFromMetadata = false;
@@ -342,6 +356,16 @@ else if (_asset is { } current)
         }
 
         _file = file;
+        try
+        {
+            _photoSize = ImageTools.ReadSize(_fileBytes);
+        }
+        catch (InvalidOperationException)
+        {
+            // Формат не распознан по заголовку — размер неизвестен; пригодность лица проверит конвейер (ТО-мат-07).
+            _photoSize = null;
+        }
+
         var contentType = ContentTypeOf(file);
         if (_fileBytes.Length <= MaxPreviewBytes)
         {

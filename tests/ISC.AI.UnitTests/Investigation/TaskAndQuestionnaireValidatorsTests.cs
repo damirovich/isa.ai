@@ -97,6 +97,20 @@ public sealed class TaskAndQuestionnaireValidatorsTests
             .IsValid.ShouldBeFalse();
     }
 
+    [Fact(DisplayName = "ADR-0055: гражданство и ориентировка — необязательны, своё значение допустимо; длиннее предела — отказ")]
+    public void Questionnaire_citizenship_and_orientation_limits()
+    {
+        _questionnaire.Validate(new PersonQuestionnaire(Citizenship: "Кыргызстан", Orientation: "Ездит на белой Toyota Camry"))
+            .IsValid.ShouldBeTrue();
+        _questionnaire.Validate(new PersonQuestionnaire(Citizenship: "лицо без гражданства")).IsValid.ShouldBeTrue();
+        _questionnaire.Validate(new PersonQuestionnaire(Citizenship: new string('к', PersonQuestionnaireValidator.MaxCitizenshipLength)))
+            .IsValid.ShouldBeTrue();
+        _questionnaire.Validate(new PersonQuestionnaire(Citizenship: new string('к', PersonQuestionnaireValidator.MaxCitizenshipLength + 1)))
+            .IsValid.ShouldBeFalse();
+        _questionnaire.Validate(new PersonQuestionnaire(Orientation: new string('о', PersonQuestionnaireValidator.MaxOrientationLength + 1)))
+            .IsValid.ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Фигурант: неизвестная роль и неправдоподобная анкета отклоняются валидатором команды")]
     public void Person_command_checks_role_and_questionnaire()
     {

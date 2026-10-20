@@ -46,6 +46,46 @@ public static class RequisiteNormalizer
     };
 
     /// <summary>
+    /// Номер телефона (ТФ-ПЕР-12, ADR-0055): только цифры; «00» в начале (международный выход) отбрасывается; местный
+    /// номер — с кодом страны 996: 10 цифр с ведущим 0 («0555 123 456») и 9 цифр («555 123 456») → «996555123456».
+    /// Остальное — как есть (иностранный номер с кодом страны). «+996 555 12-34-56» и «0555123456» — один ключ. Без
+    /// цифр — <see langword="null"/>.
+    /// </summary>
+    public static string? Phone(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var builder = new StringBuilder(value.Length);
+        foreach (var c in value.Normalize(NormalizationForm.FormKC))
+        {
+            if (c is >= '0' and <= '9')
+            {
+                builder.Append(c);
+            }
+        }
+
+        var digits = builder.ToString();
+        if (digits.StartsWith("00", StringComparison.Ordinal))
+        {
+            digits = digits[2..];
+        }
+
+        return digits.Length switch
+        {
+            0 => null,
+            10 when digits[0] == '0' => LocalCountryCode + digits[1..],
+            9 => LocalCountryCode + digits,
+            _ => digits,
+        };
+    }
+
+    // Код страны для местных номеров (Кыргызстан): местный номер без кода — 9 цифр, с ведущим нулём — 10.
+    private const string LocalCountryCode = "996";
+
+    /// <summary>
     /// Госномер: только буквы и цифры (пробелы, дефисы, точки выбрасываются), верхний регистр, кириллические
     /// омоглифы → латиница. «01 kg 123 авс» и «01KG123ABC» дают один ключ. Пусто — <see langword="null"/>.
     /// </summary>

@@ -891,6 +891,11 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("case_id");
 
+                    b.Property<string>("Citizenship")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("citizenship");
+
                     b.Property<short>("Classification")
                         .HasColumnType("smallint")
                         .HasColumnName("classification");
@@ -930,6 +935,11 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("character varying(4000)")
                         .HasColumnName("notes");
+
+                    b.Property<string>("Orientation")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("orientation");
 
                     b.Property<string>("Residence")
                         .HasMaxLength(1000)
@@ -1058,6 +1068,71 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                         .HasDatabaseName("ix_person_address_text_normalized");
 
                     b.ToTable("person_address", "investigation");
+                });
+
+            modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.PersonPhone", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<short>("Classification")
+                        .HasColumnType("smallint")
+                        .HasColumnName("classification");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("DivisionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("division_id");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("notes");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("number");
+
+                    b.Property<string>("NumberNormalized")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("number_normalized");
+
+                    b.Property<int>("PersonId")
+                        .HasColumnType("integer")
+                        .HasColumnName("person_id");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_person_phone");
+
+                    b.HasIndex("NumberNormalized")
+                        .HasDatabaseName("ix_person_phone_number_normalized");
+
+                    b.HasIndex("PersonId")
+                        .HasDatabaseName("ix_person_phone_person_id");
+
+                    b.ToTable("person_phone", "investigation", t =>
+                        {
+                            t.HasCheckConstraint("ck_person_phone_normalized_digits", "number_normalized <> '' AND number_normalized ~ '^[0-9]+$'");
+                        });
                 });
 
             modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.PersonVehicle", b =>
@@ -1650,6 +1725,18 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_person_address_persons_person_id");
+
+                    b.Navigation("Person");
+                });
+
+            modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.PersonPhone", b =>
+                {
+                    b.HasOne("ISC.AI.Profile.Investigation.Domain.Entities.Person", "Person")
+                        .WithMany()
+                        .HasForeignKey("PersonId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_person_phone_person_person_id");
 
                     b.Navigation("Person");
                 });

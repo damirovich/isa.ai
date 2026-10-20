@@ -237,6 +237,9 @@ internal sealed class AccessLinkData
     /// <summary>Кличка объекта связи — в анкету связи.</summary>
     public string? Alias { get; init; }
 
+    /// <summary>«Сведения об объекте связи» — в ориентировку анкеты связи (ADR-0055).</summary>
+    public string? Orientation { get; init; }
+
     public string? Notes { get; init; }
 
     public string? CarMake { get; init; }
@@ -550,12 +553,8 @@ internal sealed class AccessSnapshot
             personNotes.Add($"Пол в базе: «{sexText}»");
         }
 
-        // Гражданства в анкете нет — оно в примечании объекта (решение заказчика 16.10.2026).
-        if (Text(AccessField.Citizenship) is { } citizenship)
-        {
-            personNotes.Add("Гражданство: " + citizenship);
-        }
-
+        // Гражданство и «сведения об объекте» — в поля анкеты (ТФ-ПЕР-13, ADR-0055), а не в примечание, как было до
+        // появления этих полей; не влезло — обрезанное в поле, полностью — в примечание.
         var questionnaire = new PersonQuestionnaire(
             birthDate,
             birthYear,
@@ -563,11 +562,9 @@ internal sealed class AccessSnapshot
             AccessValues.FitField(Text(AccessField.WorkPlace), PersonQuestionnaireValidator.MaxPlaceLength, "Место работы", personOverflow),
             AccessValues.FitField(Text(AccessField.Residence), PersonQuestionnaireValidator.MaxResidenceLength, "Место жительства", personOverflow),
             sex,
-            AccessValues.FitField(Text(AccessField.Alias), PersonQuestionnaireValidator.MaxAliasLength, "Кличка", personOverflow));
-        if (Text(AccessField.ObjectInfo) is { } objectInfo)
-        {
-            personNotes.Insert(0, "Сведения об объекте: " + objectInfo);
-        }
+            AccessValues.FitField(Text(AccessField.Alias), PersonQuestionnaireValidator.MaxAliasLength, "Кличка", personOverflow),
+            AccessValues.FitField(Text(AccessField.Citizenship), PersonQuestionnaireValidator.MaxCitizenshipLength, "Гражданство", personOverflow),
+            AccessValues.FitField(Text(AccessField.ObjectInfo), PersonQuestionnaireValidator.MaxOrientationLength, "Сведения об объекте", personOverflow));
 
         // Задание: пустые обязательные реквизиты — пометкой, а не выдумкой (ADR-0043 п. 5). Даты нет (в реальной базе
         // отдела такого столбца нет вовсе) — дело открывается датой переноса, и это сказано в примечании.
@@ -721,10 +718,9 @@ internal sealed class AccessSnapshot
             linkType = AccessValues.Fit(linkType, 300);
         }
 
-        if (Text(AccessField.LinkInfo) is { } info)
-        {
-            notes.Insert(0, "Сведения об объекте связи: " + info);
-        }
+        // «Сведения об объекте связи» — в ориентировку анкеты связи (ADR-0055); не влезло — полностью в примечание.
+        var orientation = AccessValues.FitField(
+            Text(AccessField.LinkInfo), PersonQuestionnaireValidator.MaxOrientationLength, "Сведения об объекте связи", notes);
 
         // Автомобиль: госномер или марка обязательны; номер без букв и цифр или длиннее поля — в примечание.
         var plate = Text(AccessField.CarPlate);
@@ -763,6 +759,7 @@ internal sealed class AccessSnapshot
             LinkType = linkType,
             Name = name,
             Alias = alias,
+            Orientation = orientation,
             Notes = AccessValues.JoinNotes(notes, 4000, "примечание связи", warnings),
             CarMake = make,
             CarPlate = plate,
@@ -772,7 +769,7 @@ internal sealed class AccessSnapshot
             HasPhoto = hasPhoto,
         };
 
-        var noDetails = link.Name is null && link.Alias is null && link.LinkType is null && link.Notes is null
+        var noDetails = link.Name is null && link.Alias is null && link.Orientation is null && link.LinkType is null && link.Notes is null
             && link.CarPlate is null && link.CarMake is null && link.Addresses.Count == 0;
         if (link.TaskRef is null)
         {

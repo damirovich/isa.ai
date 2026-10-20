@@ -17,12 +17,15 @@ public enum IntersectionKind
     /// лице, что подтверждено у фигуранта другого дела (ТФ-ПЕР-07, ADR-0029 п. 3а).
     /// </summary>
     Face = 4,
+
+    /// <summary>Номер телефона — точное совпадение нормализованного номера (ТФ-ПЕР-12, ADR-0055).</summary>
+    Phone = 5,
 }
 
 /// <summary>Решение человека по пересечению (ТФ-ПЕР-07): система связей между делами сама не создаёт.</summary>
 public enum IntersectionDecision
 {
-    /// <summary>Пересечение подтверждено: это тот же автомобиль, адрес или человек.</summary>
+    /// <summary>Пересечение подтверждено: это тот же автомобиль, адрес, номер или человек.</summary>
     Confirmed = 1,
 
     /// <summary>Пересечение отклонено: совпадение случайное.</summary>
@@ -39,6 +42,7 @@ public static class IntersectionLabels
         IntersectionKind.Address => "Адрес",
         IntersectionKind.PersonName => "ФИО и дата рождения",
         IntersectionKind.Face => "Лицо",
+        IntersectionKind.Phone => "Телефон",
         _ => kind.ToString(),
     };
 

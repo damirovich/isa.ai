@@ -7,11 +7,11 @@ using Microsoft.EntityFrameworkCore;
 namespace ISC.AI.Profile.Investigation.Data;
 
 /// <summary>
-/// Адреса и автотранспорт фигурантов поверх <c>investigation.person_address</c> / <c>person_vehicle</c>
-/// (ТФ-ПЕР-06). Каждая операция начинается с видимости фигуранта (<see cref="PersonAccess"/>): недоступный
+/// Адреса, автотранспорт и телефоны фигурантов поверх <c>investigation.person_address</c> / <c>person_vehicle</c> /
+/// <c>person_phone</c> (ТФ-ПЕР-06, ТФ-ПЕР-12, ADR-0055). Каждая операция начинается с видимости фигуранта (<see cref="PersonAccess"/>): недоступный
 /// фигурант, как и чужой адрес, неотличим от отсутствующего (ТБ-021). Строки читаются ещё и под собственным
-/// floor'ом (у них свои режимные поля, ТБ-070). Нормализованный адрес и госномер (ТО-мат-11) вычисляются здесь,
-/// при каждой записи, — вызывающий их не передаёт.
+/// floor'ом (у них свои режимные поля, ТБ-070). Нормализованный адрес, госномер и номер телефона (ТО-мат-11)
+/// вычисляются здесь, при каждой записи, — вызывающий их не передаёт.
 /// </summary>
 public sealed class PersonRequisiteStore(
     IDbContextFactory<InvestigationDbContext> contextFactory,
@@ -49,7 +49,16 @@ public sealed class PersonRequisiteStore(
             .Select(v => new PersonVehicleRow(v.Id, v.PersonId, v.PlateNumber, v.Make, v.Model, v.Color, v.Notes, v.Classification))
             .ToListAsync(cancellationToken);
 
-        return new PersonRequisites(addresses, vehicles);
+        var phones = await db.PersonPhones.AsNoTracking()
+            .Where(BaselineAccess.Filter<PersonPhone>(access))
+            .Where(policy.BuildFilter<PersonPhone>(access))
+            .Where(p => p.PersonId == personId)
+            .OrderBy(p => p.Kind)
+            .ThenBy(p => p.Id)
+            .Select(p => new PersonPhoneRow(p.Id, p.PersonId, p.Kind, p.Number, p.Notes, p.Classification))
+            .ToListAsync(cancellationToken);
+
+        return new PersonRequisites(addresses, vehicles, phones);
     }
 
     /// <inheritdoc />
@@ -205,6 +214,89 @@ public sealed class PersonRequisiteStore(
         return PersonWriteResult.Ok;
     }
 
+    /// <inheritdoc />
+    public async Task<(PersonWriteResult Result, int PhoneId)> SavePhoneAsync(
+        int personId, int? phoneId, PersonPhoneDraft draft, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        ArgumentNullException.ThrowIfNull(access);
+
+        // Номер без цифр не нормализуется — по такому не найти ни пересечения, ни совпадения в поиске (ТО-мат-11).
+        var number = Clean(draft.Number);
+        var normalized = RequisiteNormalizer.Phone(number);
+        if (number is null || normalized is null)
+        {
+            throw new ArgumentException("Номер телефона должен содержать цифры.", nameof(draft));
+        }
+
+        var role = await ResolveRoleAsync(access, cancellationToken);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var person = await PersonAccess.Accessible(db, access, policy, role)
+            .Where(p => p.Id == personId)
+            .Select(p => new { p.Id, p.Classification, p.DivisionId })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (person is null)
+        {
+            return (PersonWriteResult.NotFound, 0);
+        }
+
+        PersonPhone phone;
+        if (phoneId is { } id)
+        {
+            // Только строка ЭТОГО фигуранта: чужой номер неотличим от отсутствующего (ТБ-021).
+            var existing = await db.PersonPhones.FirstOrDefaultAsync(p => p.Id == id && p.PersonId == person.Id, cancellationToken);
+            if (existing is null)
+            {
+                return (PersonWriteResult.NotFound, 0);
+            }
+
+            phone = existing;
+        }
+        else
+        {
+            // Гриф и подразделение — фигуранта (ТБ-070): номер виден ровно тогда, когда виден фигурант.
+            phone = new PersonPhone
+            {
+                PersonId = person.Id,
+                Number = number,
+                NumberNormalized = normalized,
+                Classification = person.Classification,
+                DivisionId = person.DivisionId,
+            };
+            db.PersonPhones.Add(phone);
+        }
+
+        phone.Kind = draft.Kind;
+        phone.Number = number;
+        phone.NumberNormalized = normalized;
+        phone.Notes = Clean(draft.Notes);
+
+        await db.SaveChangesAsync(cancellationToken);
+        return (PersonWriteResult.Ok, phone.Id);
+    }
+
+    /// <inheritdoc />
+    public async Task<PersonWriteResult> DeletePhoneAsync(int phoneId, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+
+        var role = await ResolveRoleAsync(access, cancellationToken);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var visible = PersonAccess.Accessible(db, access, policy, role);
+        var phone = await db.PersonPhones
+            .FirstOrDefaultAsync(p => p.Id == phoneId && visible.Any(v => v.Id == p.PersonId), cancellationToken);
+        if (phone is null)
+        {
+            return PersonWriteResult.NotFound;
+        }
+
+        db.PersonPhones.Remove(phone);
+        await db.SaveChangesAsync(cancellationToken);
+        return PersonWriteResult.Ok;
+    }
+
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     // Роль для правила видимости дел: без права «Дашборд и реестр дел» (матрица доступа, ADR-0032) — null, и
@@ -296,6 +388,43 @@ public sealed class PersonRequisiteStore(
             .ToListAsync(cancellationToken);
 
         return fromAddresses.Concat(fromQuestionnaires).Take(limit).ToList();
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Номер сравнивается по НОРМАЛИЗОВАННОМУ значению (только цифры, местный — с 996, ТО-мат-11) подстрокой: полный
+    /// номер в любой записи и его часть находятся одинаково. Строка номера — под своим floor'ом и политикой, фигурант —
+    /// по общему правилу <see cref="PersonAccess"/> и в делах области поиска (ADR-0055).
+    /// </remarks>
+    public async Task<IReadOnlyList<PhoneSearchRow>> SearchPhonesAsync(
+        SearchTerms terms, IReadOnlyCollection<int> caseIds, int limit, AccessContext access, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(terms);
+        ArgumentNullException.ThrowIfNull(caseIds);
+        ArgumentNullException.ThrowIfNull(access);
+        if (terms.Phone is not { } phone || caseIds.Count == 0 || limit <= 0)
+        {
+            return [];
+        }
+
+        var role = await ResolveRoleAsync(access, cancellationToken);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var ids = caseIds.ToArray();
+        var persons = PersonAccess.Accessible(db, access, policy, role).Where(p => ids.Contains(p.CaseId));
+        var pattern = "%" + PersonStore.EscapeLike(phone) + "%";
+        return await db.PersonPhones.AsNoTracking()
+            .Where(BaselineAccess.Filter<PersonPhone>(access))
+            .Where(policy.BuildFilter<PersonPhone>(access))
+            .Where(p => EF.Functions.Like(p.NumberNormalized, pattern, "\\"))
+            .Join(persons, ph => ph.PersonId, p => p.Id, (ph, p) => new { Phone = ph, p.CaseId, p.DisplayName })
+            .OrderBy(x => x.Phone.NumberNormalized)
+            .ThenBy(x => x.Phone.Id)
+            .Take(limit)
+            .Select(x => new PhoneSearchRow(
+                x.Phone.PersonId, x.CaseId, x.DisplayName,
+                new PersonPhoneRow(x.Phone.Id, x.Phone.PersonId, x.Phone.Kind, x.Phone.Number, x.Phone.Notes, x.Phone.Classification)))
+            .ToListAsync(cancellationToken);
     }
 
     private Task<InvestigationRole?> ResolveRoleAsync(AccessContext access, CancellationToken cancellationToken) =>

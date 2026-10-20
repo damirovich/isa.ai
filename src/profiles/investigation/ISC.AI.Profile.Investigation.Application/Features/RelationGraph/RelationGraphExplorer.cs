@@ -87,6 +87,19 @@ internal sealed class RelationGraphExplorer(
                     : null;
             }
 
+            case RelationNodeKind.Phone when RelationNodeKeys.ValueOf(kind, key) is { } phone:
+            {
+                // Номер должен действительно принадлежать названному доступному фигуранту (ADR-0045 п. 10).
+                if (await persons.GetAsync(id, access, cancellationToken) is not { } owner
+                    || await requisites.GetAsync(id, access, cancellationToken) is not { } own)
+                {
+                    return null;
+                }
+
+                var phoneRow = own.Phones.FirstOrDefault(p => RequisiteNormalizer.Phone(p.Number) == phone);
+                return phoneRow is null ? null : PhoneNode(phoneRow, phone, owner, 0, null);
+            }
+
             default:
                 return null; // чужое дело, реквизит без ключа — не раскрываются (ADR-0045 п. 3)
         }
@@ -263,12 +276,15 @@ internal sealed class RelationGraphExplorer(
             case RelationNodeKind.Address when node.Expandable && RelationNodeKeys.ValueOf(node.Kind, node.Key) is { } address:
                 return await AddressNeighborsAsync(address, node.Key, level);
 
+            case RelationNodeKind.Phone when node.Expandable && RelationNodeKeys.ValueOf(node.Kind, node.Key) is { } phone:
+                return await PhoneNeighborsAsync(phone, node.Key, level);
+
             default:
                 return ([], []);
         }
     }
 
-    // Фигурант → дело, связи из того же дела (в обе стороны), автотранспорт, адреса, пересечения, совместные появления.
+    // Фигурант → дело, связи из того же дела (в обе стороны), автотранспорт, адреса, телефоны, пересечения, совместные появления.
     private async Task<(List<RelationNode> Nodes, List<RelationEdge> Edges)> PersonNeighborsAsync(PersonRow row, string key, int level)
     {
         var nodes = new List<RelationNode>();
@@ -314,6 +330,21 @@ internal sealed class RelationGraphExplorer(
                 ownAddressKeys.Add(addressNode.Key);
                 edges.Add(new RelationEdge(key, addressNode.Key, RelationEdgeKind.Requisite, address.Kind.Label().ToLowerInvariant()));
             }
+
+            // Номера телефонов (ADR-0055): один узел на номер; одинаковые номера одного фигуранта — одно ребро.
+            var ownPhoneKeys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var phone in own.Phones)
+            {
+                if (RequisiteNormalizer.Phone(phone.Number) is not { } normalized
+                    || !ownPhoneKeys.Add(RelationNodeKeys.Phone(normalized)))
+                {
+                    continue;
+                }
+
+                var phoneNode = PhoneNode(phone, normalized, row, level, key);
+                nodes.Add(phoneNode);
+                edges.Add(new RelationEdge(key, phoneNode.Key, RelationEdgeKind.Requisite, "телефон · " + phone.Kind.Label().ToLowerInvariant()));
+            }
         }
 
         // Место жительства из анкеты — тот же узел адреса, что и строка адреса с тем же ключом (как в пересечениях,
@@ -345,6 +376,7 @@ internal sealed class RelationGraphExplorer(
             {
                 IntersectionKind.Vehicle => RelationNodeKeys.Vehicle(match.Key),
                 IntersectionKind.Address => RelationNodeKeys.Address(match.Key),
+                IntersectionKind.Phone => RelationNodeKeys.Phone(match.Key),
                 _ => key,
             };
             if (!string.Equals(from, key, StringComparison.Ordinal) && !nodes.Any(n => string.Equals(n.Key, from, StringComparison.Ordinal)))
@@ -412,6 +444,21 @@ internal sealed class RelationGraphExplorer(
         return (nodes, edges);
     }
 
+    // Телефон → доступные фигуранты с тем же нормализованным номером (ADR-0045 п. 10, ADR-0055); чужие дела — пересечением.
+    private async Task<(List<RelationNode> Nodes, List<RelationEdge> Edges)> PhoneNeighborsAsync(string phone, string key, int level)
+    {
+        var nodes = new List<RelationNode>();
+        var edges = new List<RelationEdge>();
+        foreach (var owner in await persons.ListByPhoneAsync(phone, access, cancellationToken))
+        {
+            var personNode = await PersonNodeAsync(owner, level, key);
+            nodes.Add(personNode);
+            edges.Add(new RelationEdge(personNode.Key, key, RelationEdgeKind.Requisite, "телефон"));
+        }
+
+        return (nodes, edges);
+    }
+
     private const string ResidenceLabel = "жительство (анкета)";
 
     private static RelationNode CaseNode(CaseDetails details, int level, string? parentKey) =>
@@ -444,6 +491,11 @@ internal sealed class RelationGraphExplorer(
             Expandable = false,
         };
     }
+
+    // Телефон: узел на нормализованный номер (раскрывается); подпись — номер как введён у этого фигуранта.
+    private static RelationNode PhoneNode(PersonPhoneRow phone, string normalized, PersonRow owner, int level, string? parentKey) =>
+        new(RelationNodeKeys.Phone(normalized), RelationNodeKind.Phone, owner.Id, phone.Number.Trim(), phone.Kind.Label(), level, parentKey,
+            Expanded: false, Classification: owner.Classification);
 
     private static RelationNode AddressNode(string text, string? normalized, int addressId, PersonRow owner, int level, string? parentKey) =>
         normalized is { Length: > 0 }
@@ -483,6 +535,7 @@ internal sealed class RelationGraphExplorer(
             IntersectionKind.Address => "адрес",
             IntersectionKind.PersonName => "ФИО и дата рождения",
             IntersectionKind.Face => "лицо",
+            IntersectionKind.Phone => "телефон",
             _ => match.Kind.ToString(),
         };
         return match.Decision == IntersectionDecision.Confirmed

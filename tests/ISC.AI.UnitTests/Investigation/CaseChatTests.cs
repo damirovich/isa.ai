@@ -116,6 +116,16 @@ public sealed class CaseChatTests
         card.ShouldContain("адрес (пребывание) — г. Бишкек, ул. Токтогула, 1");
         card.ShouldContain("транспорт — Toyota Camry белый, госномер 01KG123ABC.");
 
+        // ADR-0055: гражданство — после места рождения, телефоны — после транспорта, ориентировка — перед примечанием.
+        var withPhones = CaseCorpusText.Card(
+            new CaseCardHead(CaseId, "12-2026/045", "Наблюдение", CaseKind.CriminalCase, CaseStatus.InProgress, new DateOnly(2026, 9, 1), null, null, null),
+            [
+                new CaseCardPerson("Петров Пётр", null, PersonRole.Link, null, null, null, null, "г. Ош", null, null, "знакомый", [], [],
+                    Citizenship: "Казахстан", Orientation: "ездит на такси", Phones: [(PhoneKind.Mobile, "+996 555 123 456")]),
+            ]);
+        withPhones.ShouldContain("место рождения — г. Ош; гражданство — Казахстан");
+        withPhones.ShouldContain("телефон (мобильный) — +996 555 123 456; ориентировка — ездит на такси; примечание — знакомый.");
+
         var summary = CaseCorpusText.Report(55, "12-2026/045", CaseReportKind.SummaryOn, new DateOnly(2026, 10, 12), "Иванов И.И.", 2,
             new CaseReportContent(Events: [new SummaryEvent("14:30", "ул. Ленина, 15", "вышел из дома", null, "Toyota Camry 01KG123ABC")], Conclusion: "Наблюдение продолжить"));
         summary.ShouldStartWith("Сводка ОН от 12.10.2026 по делу № 12-2026/045 (документ № 55, редакция 2), объект: Иванов И.И..");

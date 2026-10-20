@@ -10,7 +10,7 @@ namespace ISC.AI.Profile.Investigation.Data;
 
 /// <summary>
 /// Пересечения между делами (ТФ-ПЕР-07, ТБ-084, ADR-0029) поверх нормализованных реквизитов (ТО-мат-11):
-/// госномер, адрес (строки адресов и место жительства из анкеты), ФИО + дата рождения. Совпадения считаются
+/// госномер, адрес (строки адресов и место жительства из анкеты), ФИО + дата рождения, номер телефона (ADR-0055). Совпадения считаются
 /// при каждом чтении точным сравнением ключей по индексам; хранится только решение человека
 /// (<c>investigation.intersection_review</c>).
 /// </summary>
@@ -133,12 +133,23 @@ public sealed class IntersectionStore(
             ownAddresses.Add(new { Key = own.ResidenceNormalized, Value = own.Residence ?? own.ResidenceNormalized });
         }
 
+        // Номера телефонов (ТФ-ПЕР-12, ADR-0055) — строки номеров фигуранта, тоже под floor'ом строки.
+        var ownPhones = await db.PersonPhones.AsNoTracking()
+            .Where(BaselineAccess.Filter<PersonPhone>(access))
+            .Where(policy.BuildFilter<PersonPhone>(access))
+            .Where(p => p.PersonId == own.Id)
+            .OrderBy(p => p.Id)
+            .Select(p => new { Key = p.NumberNormalized, Value = p.Number })
+            .ToListAsync(cancellationToken);
+
         var ownValues = new Dictionary<(IntersectionKind, string), string>();
         foreach (var plate in ownPlates) { ownValues.TryAdd((IntersectionKind.Vehicle, plate.Key), plate.Value); }
         foreach (var address in ownAddresses) { ownValues.TryAdd((IntersectionKind.Address, address.Key), address.Value); }
+        foreach (var phone in ownPhones) { ownValues.TryAdd((IntersectionKind.Phone, phone.Key), phone.Value); }
 
         var plateKeys = ownPlates.Select(p => p.Key).Distinct().ToList();
         var addressKeys = ownAddresses.Select(a => a.Key).Distinct().ToList();
+        var phoneKeys = ownPhones.Select(p => p.Key).Distinct().ToList();
 
         // «Чужая» сторона: floor ядра + политика профиля на КАЖДОЙ строке цепочки (дело → фигурант → реквизит),
         // без сужения по роли (ТБ-084). Своё дело исключено: совпадение внутри дела — не пересечение.
@@ -174,6 +185,16 @@ public sealed class IntersectionStore(
             .Select(p => new { Key = p.ResidenceNormalized!, Value = p.Residence, p.CaseId })
             .ToListAsync(cancellationToken);
         matches.AddRange(residenceMatches.Select(m => new Match(IntersectionKind.Address, m.Key, m.Value ?? m.Key, m.CaseId)));
+
+        // Номер телефона (ADR-0055) — точное совпадение нормализованного номера у фигуранта другого дела. Запрос
+        // выполняется всегда, и при пустом списке своих номеров: состав запросов не зависит от данных (ТБ-021).
+        var phoneMatches = await db.PersonPhones.AsNoTracking()
+            .Where(BaselineAccess.Filter<PersonPhone>(access))
+            .Where(policy.BuildFilter<PersonPhone>(access))
+            .Where(p => phoneKeys.Contains(p.NumberNormalized))
+            .Join(otherPersons, ph => ph.PersonId, p => p.Id, (ph, p) => new { Key = ph.NumberNormalized, Value = ph.Number, p.CaseId })
+            .ToListAsync(cancellationToken);
+        matches.AddRange(phoneMatches.Select(m => new Match(IntersectionKind.Phone, m.Key, m.Value, m.CaseId)));
 
         // ФИО + дата рождения — только когда у своей стороны заданы оба (ADR-0029 п. 3): совпадение по одному
         // ФИО или по году рождения слишком часто случайно. Запрос выполняется всегда (с заведомо ложным условием

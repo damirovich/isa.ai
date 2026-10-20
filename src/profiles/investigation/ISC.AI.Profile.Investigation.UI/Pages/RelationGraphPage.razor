@@ -139,6 +139,7 @@
         (RelationNodeKind.ForeignCase, "Чужие дела", Icons.Material.Filled.FolderShared, Color.Warning),
         (RelationNodeKind.Vehicle, "Автотранспорт", Icons.Material.Filled.DirectionsCar, Color.Secondary),
         (RelationNodeKind.Address, "Адреса", Icons.Material.Filled.Place, Color.Success),
+        (RelationNodeKind.Phone, "Телефоны", Icons.Material.Filled.Phone, Color.Tertiary),
     ];
 
     /// <summary>Центр — фигурант (маршрут <c>/persons/{id}/graph</c>).</summary>
@@ -434,8 +435,8 @@
         await InvokeAsync(StateHasChanged);
 
         // Сервер заново читает узел под решёткой (ADR-0045 п. 3, 10): ключ узла с холста ничего не разрешает — у
-        // автотранспорта и адреса он лишь называет реквизит, который сервер ищет у названного фигуранта.
-        var key = node.Node.Kind is RelationNodeKind.Vehicle or RelationNodeKind.Address ? node.Node.Key : null;
+        // автотранспорта, адреса и телефона он лишь называет реквизит, который сервер ищет у названного фигуранта.
+        var key = node.Node.Kind is RelationNodeKind.Vehicle or RelationNodeKind.Address or RelationNodeKind.Phone ? node.Node.Key : null;
         var response = await Dispatcher.Send(new GetRelationGraphQuery(node.Node.Kind, entityId, Depth: 1, key));
         node.Loading = false;
 

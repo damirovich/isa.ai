@@ -81,6 +81,9 @@ public sealed record CaseCardHead(
 /// <param name="Notes">Примечания.</param>
 /// <param name="Addresses">Адреса: вид и текст.</param>
 /// <param name="Vehicles">Транспорт текстом (марка, модель, цвет, госномер).</param>
+/// <param name="Citizenship">Гражданство (ADR-0055).</param>
+/// <param name="Orientation">Ориентировка (сведения) об объекте (ADR-0055).</param>
+/// <param name="Phones">Номера телефонов: вид и номер как введён (ADR-0055).</param>
 public sealed record CaseCardPerson(
     string Name,
     string? Alias,
@@ -94,7 +97,10 @@ public sealed record CaseCardPerson(
     string? Residence,
     string? Notes,
     IReadOnlyList<(AddressKind Kind, string Text)> Addresses,
-    IReadOnlyList<string> Vehicles);
+    IReadOnlyList<string> Vehicles,
+    string? Citizenship = null,
+    string? Orientation = null,
+    IReadOnlyList<(PhoneKind Kind, string Number)>? Phones = null);
 
 /// <summary>Тексты материалов дела для корпуса (ADR-0051): что и в каком виде читает модель.</summary>
 /// <remarks>
@@ -164,6 +170,7 @@ public static class CaseCorpusText
             }
 
             AppendPart(text, "место рождения", person.BirthPlace);
+            AppendPart(text, "гражданство", person.Citizenship);
             AppendPart(text, "место работы", person.WorkPlace);
             AppendPart(text, "место жительства", person.Residence);
             foreach (var (kind, address) in person.Addresses)
@@ -176,6 +183,12 @@ public static class CaseCorpusText
                 AppendPart(text, "транспорт", vehicle);
             }
 
+            foreach (var (kind, number) in person.Phones ?? [])
+            {
+                AppendPart(text, "телефон (" + kind.Label().ToLowerInvariant() + ")", number);
+            }
+
+            AppendPart(text, "ориентировка", person.Orientation);
             AppendPart(text, "примечание", person.Notes);
             text.Append('.');
         }

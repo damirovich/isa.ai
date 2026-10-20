@@ -29,6 +29,12 @@ public enum RelationNodeKind
     /// (ADR-0045 п. 10). Без нормализованного значения — узел на строку, не раскрывается.
     /// </summary>
     Address = 5,
+
+    /// <summary>
+    /// Номер телефона (ADR-0055): один узел на нормализованный номер (ТО-мат-11); раскрывается в доступных фигурантов с
+    /// этим номером (ADR-0045 п. 10). Номер без цифр не сохраняется, поэтому узла на строку нет.
+    /// </summary>
+    Phone = 6,
 }
 
 /// <summary>Вид ребра графа связей.</summary>
@@ -40,7 +46,7 @@ public enum RelationEdgeKind
     /// <summary>Связь фигуранта из того же дела (ТФ-ПЕР-06): от связи к тому, чьей связью она является.</summary>
     PersonLink = 2,
 
-    /// <summary>Реквизит фигуранта: автотранспорт или адрес (ТФ-ПЕР-06).</summary>
+    /// <summary>Реквизит фигуранта: автотранспорт, адрес или номер телефона (ТФ-ПЕР-06, ТФ-ПЕР-12).</summary>
     Requisite = 3,
 
     /// <summary>Пересечение с другим делом (ТФ-ПЕР-07): от совпавшего реквизита (или фигуранта) к делу.</summary>
@@ -113,6 +119,7 @@ public static class RelationNodeKeys
 {
     private const string VehiclePrefix = "vehicle:";
     private const string AddressPrefix = "address:";
+    private const string PhonePrefix = "phone:";
 
     /// <summary>Фигурант.</summary>
     public static string Person(int personId) => $"person:{personId}";
@@ -135,9 +142,13 @@ public static class RelationNodeKeys
     /// <summary>Адрес, у которого нормализованного значения нет, — отдельный узел на строку.</summary>
     public static string AddressRow(int addressId) => $"address-row:{addressId}";
 
-    /// <summary>Вид узла раскрывается (фигурант, доступное дело, автотранспорт, адрес).</summary>
+    /// <summary>Номер телефона по нормализованному значению (ADR-0055).</summary>
+    public static string Phone(string phoneNormalized) => PhonePrefix + phoneNormalized;
+
+    /// <summary>Вид узла раскрывается (фигурант, доступное дело, автотранспорт, адрес, телефон).</summary>
     public static bool IsExpandable(RelationNodeKind kind) =>
-        kind is RelationNodeKind.Person or RelationNodeKind.Case or RelationNodeKind.Vehicle or RelationNodeKind.Address;
+        kind is RelationNodeKind.Person or RelationNodeKind.Case or RelationNodeKind.Vehicle or RelationNodeKind.Address
+            or RelationNodeKind.Phone;
 
     /// <summary>
     /// Нормализованное значение из ключа узла автотранспорта или адреса; ключ другого вида (в том числе узла на
@@ -149,6 +160,7 @@ public static class RelationNodeKeys
         {
             RelationNodeKind.Vehicle => VehiclePrefix,
             RelationNodeKind.Address => AddressPrefix,
+            RelationNodeKind.Phone => PhonePrefix,
             _ => null,
         };
         return prefix is not null && key is { Length: > 0 } && key.StartsWith(prefix, StringComparison.Ordinal) && key.Length > prefix.Length
@@ -163,6 +175,7 @@ public static class RelationNodeKeys
         RelationNodeKind.Case => "case",
         RelationNodeKind.Vehicle => "vehicle",
         RelationNodeKind.Address => "address",
+        RelationNodeKind.Phone => "phone",
         RelationNodeKind.ForeignCase => "foreign-case",
         _ => "other",
     };

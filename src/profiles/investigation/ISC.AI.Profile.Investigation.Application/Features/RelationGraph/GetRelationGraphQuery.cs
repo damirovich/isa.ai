@@ -58,10 +58,10 @@ public sealed record GetRelationGraphQuery(
 
     /// <inheritdoc />
     /// <remarks>
-    /// Только вид, идентификатор и глубина — без ФИО, госномеров и адресов (ТБ-032); у автотранспорта и адреса —
-    /// фигурант, через которого раскрыт реквизит, а не его значение.
+    /// Только вид, идентификатор и глубина — без ФИО, госномеров, адресов и номеров телефонов (ТБ-032); у автотранспорта,
+    /// адреса и телефона — фигурант, через которого раскрыт реквизит, а не его значение.
     /// </remarks>
-    public string? AuditSummary => CenterKind is RelationNodeKind.Vehicle or RelationNodeKind.Address
+    public string? AuditSummary => CenterKind is RelationNodeKind.Vehicle or RelationNodeKind.Address or RelationNodeKind.Phone
         ? string.Create(CultureInfo.InvariantCulture,
             $"investigation:graph:{RelationNodeKeys.AuditName(CenterKind)}:person:{CenterId}:view;depth={Depth}")
         : string.Create(CultureInfo.InvariantCulture,
@@ -110,14 +110,14 @@ public sealed class GetRelationGraphValidator : AbstractValidator<GetRelationGra
     {
         RuleFor(q => q.CenterKind)
             .Must(RelationNodeKeys.IsExpandable)
-            .WithMessage("Граф строится от фигуранта, дела, автотранспорта или адреса.");
+            .WithMessage("Граф строится от фигуранта, дела, автотранспорта, адреса или телефона.");
         RuleFor(q => q.CenterId).GreaterThan(0);
         RuleFor(q => q.Depth).InclusiveBetween(GetRelationGraphQuery.MinDepth, GetRelationGraphQuery.MaxDepth);
         RuleFor(q => q.CenterKey)
-            .Must((query, key) => query.CenterKind is RelationNodeKind.Vehicle or RelationNodeKind.Address
+            .Must((query, key) => query.CenterKind is RelationNodeKind.Vehicle or RelationNodeKind.Address or RelationNodeKind.Phone
                 ? RelationNodeKeys.ValueOf(query.CenterKind, key) is not null && key!.Length <= GetRelationGraphQuery.MaxKeyLength
                 : key is null)
-            .WithMessage("Ключ узла указывается только для автотранспорта и адреса.");
+            .WithMessage("Ключ узла указывается только для автотранспорта, адреса и телефона.");
     }
 }
 

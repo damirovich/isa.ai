@@ -154,11 +154,13 @@ public sealed class CaseBriefTests
         brief.Subtitle.ShouldBe("Дело № 12-2026/045 «Наблюдение»");
         brief.Sections.Select(s => s.Title).ShouldBe(
         [
-            "Фигурант", "Адреса", "Транспорт", "Дело фигуранта", "Подтверждённые появления", "История верификаций",
+            "Фигурант", "Адреса", "Транспорт", "Телефоны", "Дело фигуранта", "Подтверждённые появления", "История верификаций",
             "Поиски по эталонам фигуранта", "Связи", "Пересечения с другими делами",
         ]);
         Fact(Section(brief, "Фигурант"), "Псевдоним").ShouldBe("Ваня");
         Section(brief, "Транспорт").Table.ShouldNotBeNull().Rows.ShouldHaveSingleItem()[0].ShouldBe("01KG123ABC");
+        Section(brief, "Телефоны").Table.ShouldNotBeNull().Rows.ShouldHaveSingleItem()
+            .ShouldBe(["Мобильный", "+996 555 123 456", "личный"]); // ADR-0055
 
         var appearances = Section(brief, "Подтверждённые появления");
         Fact(appearances, "Подтверждённых появлений").ShouldBe("1");
@@ -642,7 +644,8 @@ public sealed class CaseBriefTests
             Persons.ListCoAppearancesAsync(PersonId, Access, Arg.Any<CancellationToken>()).Returns([new CoAppearanceRow(unknown, 3)]);
             Requisites.GetAsync(PersonId, Access, Arg.Any<CancellationToken>()).Returns(new PersonRequisites(
                 [new PersonAddressRow(1, PersonId, AddressKind.Residence, "г. Бишкек, ул. Ленина, 15", null, 1)],
-                [new PersonVehicleRow(1, PersonId, "01KG123ABC", "Toyota", "Camry", "белый", null, 2)]));
+                [new PersonVehicleRow(1, PersonId, "01KG123ABC", "Toyota", "Camry", "белый", null, 2)],
+                [new PersonPhoneRow(1, PersonId, PhoneKind.Mobile, "+996 555 123 456", "личный", 1)]));
             Intersections.FindForPersonAsync(PersonId, Access, Arg.Any<CancellationToken>()).Returns([Intersection(classification: 1)]);
 
             Catalog.ListAsync(Arg.Any<IReadOnlyCollection<int>>(), Access, Arg.Any<CancellationToken>())

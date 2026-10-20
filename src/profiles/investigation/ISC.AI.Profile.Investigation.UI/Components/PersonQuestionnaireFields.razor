@@ -1,11 +1,13 @@
 @namespace ISC.AI.Profile.Investigation.UI
 @using ISC.AI.Profile.Investigation.Application.Features.Persons
 @using ISC.AI.Profile.Investigation.Domain.Enums
+@using ISC.AI.Profile.Investigation.Domain.Services
 
 @* Поля анкеты объекта (ТФ-ПЕР-05) — общие для заведения фигуранта (CaseCard) и правки (PersonCard). Все
    поля необязательны. Дата рождения или только год: при выбранной дате поле года недоступно и равно её
    году. Пределы длин — константы PersonQuestionnaireValidator (единственный источник). Фотография объекта —
-   эталонное изображение (вкладка «Эталоны» карточки фигуранта, ТБ-077), а не поле анкеты. *@
+   эталонное изображение (вкладка «Эталоны» карточки фигуранта, ТБ-077), а не поле анкеты. Гражданство — страна
+   из справочника «Страны» или своё значение, ориентировка — текстовый блок (ТФ-ПЕР-13, ADR-0055). *@
 
 <MudText Typo="Typo.subtitle2" Class="mt-2 mb-1">Анкета</MudText>
 <MudGrid Spacing="2">
@@ -41,6 +43,12 @@
                       MaxLength="@PersonQuestionnaireValidator.MaxPlaceLength" />
     </MudItem>
     <MudItem xs="12" sm="6">
+        <MudAutocomplete T="string" @bind-Value="Model.Citizenship" Label="Гражданство" Variant="Variant.Outlined"
+                         SearchFunc="SearchCountriesAsync" CoerceValue="true" Clearable="true" MinCharacters="0"
+                         MaxLength="@PersonQuestionnaireValidator.MaxCitizenshipLength"
+                         HelperText="выберите из списка или введите своё" />
+    </MudItem>
+    <MudItem xs="12" sm="6">
         <MudTextField @bind-Value="Model.WorkPlace" Label="Место работы" Variant="Variant.Outlined"
                       MaxLength="@PersonQuestionnaireValidator.MaxPlaceLength" />
     </MudItem>
@@ -48,11 +56,22 @@
         <MudTextField @bind-Value="Model.Residence" Label="Место жительства" Variant="Variant.Outlined"
                       MaxLength="@PersonQuestionnaireValidator.MaxResidenceLength" />
     </MudItem>
+    <MudItem xs="12">
+        <MudTextField @bind-Value="Model.Orientation" Label="Ориентировка (сведения об объекте)" Variant="Variant.Outlined"
+                      Lines="4" MaxLength="@PersonQuestionnaireValidator.MaxOrientationLength"
+                      HelperText="приметы, образ жизни, связи, где бывает — свободным текстом" />
+    </MudItem>
 </MudGrid>
 
 @code {
     /// <summary>Модель анкеты (изменяется на месте).</summary>
     [Parameter, EditorRequired] public PersonQuestionnaireForm Model { get; set; } = null!;
+
+    /// <summary>Записи справочников профиля — для подсказок гражданства (вид «Страны»); пусто — подсказок нет.</summary>
+    [Parameter] public IReadOnlyList<ReferenceItemRow> References { get; set; } = [];
+
+    private Task<IEnumerable<string>> SearchCountriesAsync(string? value, CancellationToken cancellationToken) =>
+        Task.FromResult(ReferenceLookup.Countries(References, value));
 
     // Год всегда соответствует выбранной дате: форма не даёт ввести противоречивую пару.
     private void SyncYear()

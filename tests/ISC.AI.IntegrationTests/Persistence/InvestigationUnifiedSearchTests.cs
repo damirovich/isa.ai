@@ -106,4 +106,51 @@ public sealed class InvestigationUnifiedSearchTests : IAsyncLifetime
         owners.ShouldBe(new System.Collections.Generic.Dictionary<int, int> { [500] = caseA, [501] = caseB }, ignoreOrder: true);
         (await cases.MapMediaAssetsAsync([500], [caseB]))[500].ShouldBe(caseB);
     }
+
+    [Fact(DisplayName = "ADR-0055: телефон — в любом написании и частью от 5 цифр, только в своих делах; гражданство и ориентировка анкеты — сохраняются, гражданство ищется")]
+    public async Task Phones_and_citizenship_are_searched_within_scope()
+    {
+        var factory = new InvestigationContextFactory(_postgres.GetConnectionString());
+        var core = new CoreContextFactory(_postgres.GetConnectionString());
+        await InvestigationTestKit.MigrateAsync(factory);
+        await InvestigationTestKit.AssignRolesAsync(factory, (10, InvestigationRole.Investigator), (11, InvestigationRole.Investigator));
+        var cases = InvestigationTestKit.CreateCaseStore(factory, core);
+        var persons = InvestigationTestKit.CreatePersonStore(factory, core);
+        var requisites = new PersonRequisiteStore(factory, new InvestigationAccessPolicy(factory), new UserRoleStore(core, factory));
+
+        var mine = InvestigationTestKit.Access(10, 9, 5);
+        var other = InvestigationTestKit.Access(11, 9, 5);
+        var caseA = (await cases.CreateAsync(InvestigationTestKit.Draft("А-1", 5, 1, 10), mine)).CaseId;
+        var caseC = (await cases.CreateAsync(InvestigationTestKit.Draft("В-3", 5, 1, 11), other)).CaseId;
+        int[] all = [caseA, caseC];
+
+        var petr = (await persons.CreateAsync(new PersonDraft(caseA, "Иванов Пётр", false, null, null, PersonRole.Target,
+            new PersonQuestionnaire(Citizenship: "Казахстан", Orientation: "Ездит на белой Camry")), mine)).PersonId;
+        var semen = (await persons.CreateAsync(new PersonDraft(caseC, "Иванов Семён", false, null, null, PersonRole.Target,
+            new PersonQuestionnaire(Citizenship: "Казахстан")), other)).PersonId;
+        (await requisites.SavePhoneAsync(petr, null, new PersonPhoneDraft(PhoneKind.Mobile, "+996 555 12-34-56", null), mine))
+            .Result.ShouldBe(PersonWriteResult.Ok);
+        (await requisites.SavePhoneAsync(semen, null, new PersonPhoneDraft(PhoneKind.Mobile, "0555 123 456", null), other))
+            .Result.ShouldBe(PersonWriteResult.Ok);
+
+        // Анкета: новые поля пишутся и читаются как введены.
+        var stored = (await persons.GetAsync(petr, mine)).ShouldNotBeNull().Questionnaire.ShouldNotBeNull();
+        stored.Citizenship.ShouldBe("Казахстан");
+        stored.Orientation.ShouldBe("Ездит на белой Camry");
+
+        // Телефон: с нулём, с кодом, частью; чужой фигурант с тем же номером — нет, хоть его дело и передано в области.
+        foreach (var query in new[] { "0555 123 456", "+996 (555) 123-456", "123456", "12-34-56" })
+        {
+            var found = await requisites.SearchPhonesAsync(SearchTerms.Parse(query), all, 10, mine);
+            found.Select(p => (p.PersonId, p.CaseId, p.Phone.Number)).ShouldBe([(petr, caseA, "+996 555 12-34-56")], query);
+        }
+
+        (await requisites.SearchPhonesAsync(SearchTerms.Parse("0555 999 999"), all, 10, mine)).ShouldBeEmpty();
+        (await requisites.SearchPhonesAsync(SearchTerms.Parse("Иванов"), all, 10, mine)).ShouldBeEmpty(); // не номер — номера не ищутся
+        (await requisites.SearchPhonesAsync(SearchTerms.Parse("_5%"), all, 10, mine)).ShouldBeEmpty();
+        (await requisites.SearchPhonesAsync(SearchTerms.Parse("0555 123 456"), all, 10, other)).Select(p => p.PersonId).ShouldBe([semen]);
+
+        // Гражданство — часть текста поиска по фигурантам; чужое дело — нет.
+        (await persons.SearchInCasesAsync(SearchTerms.Parse("казах"), all, 10, mine)).Select(p => p.Id).ShouldBe([petr]);
+    }
 }

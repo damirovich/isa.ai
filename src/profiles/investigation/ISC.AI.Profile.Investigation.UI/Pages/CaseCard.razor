@@ -555,7 +555,7 @@ else
             <PersonLinkFields Persons="_persons" References="_references"
                               @bind-LinkedToPersonId="_personLinkedTo" @bind-LinkTypeId="_personLinkType" />
         }
-        <PersonQuestionnaireFields Model="_personQuestionnaire" />
+        <PersonQuestionnaireFields Model="_personQuestionnaire" References="_references" />
         <MudGrid Spacing="2" Class="mt-1">
             <MudItem xs="12">
                 <MudTextField @bind-Value="_personNotes" Label="Примечания" Variant="Variant.Outlined" Lines="3" MaxLength="4000" />

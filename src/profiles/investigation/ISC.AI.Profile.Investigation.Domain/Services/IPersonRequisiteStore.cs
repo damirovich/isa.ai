@@ -24,10 +24,21 @@ public sealed record PersonAddressRow(int Id, int PersonId, AddressKind Kind, st
 public sealed record PersonVehicleRow(
     int Id, int PersonId, string? PlateNumber, string? Make, string? Model, string? Color, string? Notes, short Classification = 0);
 
-/// <summary>Адреса и транспорт фигуранта.</summary>
+/// <summary>Номер телефона фигуранта для карточки (ТФ-ПЕР-12, ADR-0055).</summary>
+/// <param name="Id">Идентификатор.</param>
+/// <param name="PersonId">Фигурант.</param>
+/// <param name="Kind">Вид номера.</param>
+/// <param name="Number">Номер как введён.</param>
+/// <param name="Notes">Примечание.</param>
+/// <param name="Classification">Гриф строки — для грифа справки (ТБ-033, ADR-0053); на экран не выводится.</param>
+public sealed record PersonPhoneRow(int Id, int PersonId, PhoneKind Kind, string Number, string? Notes, short Classification = 0);
+
+/// <summary>Адреса, транспорт и телефоны фигуранта.</summary>
 /// <param name="Addresses">Адреса.</param>
 /// <param name="Vehicles">Автотранспорт.</param>
-public sealed record PersonRequisites(IReadOnlyList<PersonAddressRow> Addresses, IReadOnlyList<PersonVehicleRow> Vehicles);
+/// <param name="Phones">Номера телефонов (ADR-0055).</param>
+public sealed record PersonRequisites(
+    IReadOnlyList<PersonAddressRow> Addresses, IReadOnlyList<PersonVehicleRow> Vehicles, IReadOnlyList<PersonPhoneRow> Phones);
 
 /// <summary>Черновик адреса.</summary>
 /// <param name="Kind">Вид адреса.</param>
@@ -43,15 +54,21 @@ public sealed record PersonAddressDraft(AddressKind Kind, string Text, string? N
 /// <param name="Notes">Примечание.</param>
 public sealed record PersonVehicleDraft(string? PlateNumber, string? Make, string? Model, string? Color, string? Notes);
 
+/// <summary>Черновик номера телефона: номер обязателен и должен содержать цифры.</summary>
+/// <param name="Kind">Вид номера.</param>
+/// <param name="Number">Номер как введён.</param>
+/// <param name="Notes">Примечание.</param>
+public sealed record PersonPhoneDraft(PhoneKind Kind, string Number, string? Notes);
+
 /// <summary>
-/// Адреса и автотранспорт фигурантов (ТФ-ПЕР-06). Каждая операция — под решёткой фигуранта (floor ядра,
+/// Адреса, автотранспорт и телефоны фигурантов (ТФ-ПЕР-06, ТФ-ПЕР-12). Каждая операция — под решёткой фигуранта (floor ядра,
 /// политика профиля и роль/владение через дело, ТБ-020/021): недоступный фигурант неотличим от
 /// отсутствующего. Гриф и подразделение строки копируются с фигуранта (ТБ-070); нормализованное значение
 /// (ТО-мат-11) хранилище вычисляет само.
 /// </summary>
 public interface IPersonRequisiteStore
 {
-    /// <summary>Адреса и транспорт фигуранта; <see langword="null"/> — фигурант недоступен.</summary>
+    /// <summary>Адреса, транспорт и телефоны фигуранта; <see langword="null"/> — фигурант недоступен.</summary>
     Task<PersonRequisites?> GetAsync(int personId, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>Добавить (<paramref name="addressId"/> = <see langword="null"/>) или изменить адрес фигуранта.</summary>
@@ -67,6 +84,16 @@ public interface IPersonRequisiteStore
 
     /// <summary>Удалить автотранспорт (ошибку ввода); запись об удалении — в журнале аудита.</summary>
     Task<PersonWriteResult> DeleteVehicleAsync(int vehicleId, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Добавить (<paramref name="phoneId"/> = <see langword="null"/>) или изменить номер телефона фигуранта (ADR-0055).
+    /// Номер без цифр — <see cref="ArgumentException"/> (валидатор команды не пропускает такой номер раньше).
+    /// </summary>
+    Task<(PersonWriteResult Result, int PhoneId)> SavePhoneAsync(
+        int personId, int? phoneId, PersonPhoneDraft draft, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>Удалить номер телефона (ошибку ввода); запись об удалении — в журнале аудита.</summary>
+    Task<PersonWriteResult> DeletePhoneAsync(int phoneId, AccessContext access, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Единый поиск (ТФ-ПСК-01, ADR-0048): автотранспорт по госномеру (подстрока нормализованного номера
@@ -85,5 +112,13 @@ public interface IPersonRequisiteStore
     /// своим floor'ом, фигурант — по полной решётке и роли). Не больше <paramref name="limit"/> строк.
     /// </summary>
     Task<IReadOnlyList<AddressSearchRow>> SearchAddressesAsync(
+        SearchTerms terms, IReadOnlyCollection<int> caseIds, int limit, AccessContext access, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Единый поиск (ТФ-ПСК-01, ADR-0048/0055): номера телефонов — подстрока нормализованного номера
+    /// <see cref="SearchTerms.Phone"/> («0555 123 456» и «123456» находят «+996 555 123 456»). Область и решётка — как у
+    /// <see cref="SearchVehiclesAsync"/>. Не больше <paramref name="limit"/> строк.
+    /// </summary>
+    Task<IReadOnlyList<PhoneSearchRow>> SearchPhonesAsync(
         SearchTerms terms, IReadOnlyCollection<int> caseIds, int limit, AccessContext access, CancellationToken cancellationToken = default);
 }

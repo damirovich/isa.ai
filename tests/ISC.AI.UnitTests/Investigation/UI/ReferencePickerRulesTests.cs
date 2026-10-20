@@ -66,6 +66,17 @@ public sealed class ReferencePickerRulesTests
         ReferencePickerRules.QuestionnairePhoto([]).ShouldBeNull();
     }
 
+    [Theory(DisplayName = "ТФ-ПЕР-13, ADR-0055: фото меньше 300×400 (в любой ориентации) — предупреждение; 300×400 и больше — нет")]
+    [InlineData(300, 400, false)]
+    [InlineData(400, 300, false)]
+    [InlineData(1920, 1080, false)]
+    [InlineData(299, 400, true)]
+    [InlineData(400, 299, true)]
+    [InlineData(350, 399, true)]
+    [InlineData(200, 1000, true)]
+    public void Small_photo_is_flagged(int width, int height, bool small) =>
+        ReferencePickerRules.IsSmallPhoto(width, height).ShouldBe(small);
+
     private static ReferencePhoto Photo(int id, int? faceId, int? supersededBy) => new(
         id, PersonId: 11, MediaAssetId: 27, MediaFaceId: faceId, QualityScore: 0.9f, Source: "Фото из анкеты",
         LegalBasis: null, ReviewDueAt: null, AddedByUserId: 1, SupersededById: supersededBy, CreatedAt: DateTime.UtcNow);
