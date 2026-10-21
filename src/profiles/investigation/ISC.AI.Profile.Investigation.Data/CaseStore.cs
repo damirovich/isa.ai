@@ -522,9 +522,20 @@ public sealed class CaseStore(
         // фигуранты (→ эталоны, появления), привязки носителей и документов, основания поиска, акт
         // закрытия, записи материалов в корпусе (case_corpus_entry) — уходит каскадом внешних ключей от дела.
         // Переписку чата (таблицы ядра, ADR-0052) и тексты в корпусе уничтожает сценарий ДО этого шага.
+        // Участие фигурантов дела в событиях (ADR-0056) уходит каскадом с фигурантами; событие, у которого в этом
+        // деле были участники и не осталось ни одного, удаляется здесь же — пустое событие не описывает ничего.
+        // Событие с участниками из других дел остаётся: это сведения и тех дел.
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var touchedEvents = await db.LinkEventParticipants
+            .Where(p => db.Persons.Any(person => person.Id == p.PersonId && person.CaseId == caseId))
+            .Select(p => p.EventId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
         await db.Appearances.Where(a => a.CaseId == caseId).ExecuteDeleteAsync(cancellationToken);
         await db.Cases.Where(c => c.Id == caseId).ExecuteDeleteAsync(cancellationToken);
+        await db.LinkEvents
+            .Where(e => touchedEvents.Contains(e.Id) && !db.LinkEventParticipants.Any(p => p.EventId == e.Id))
+            .ExecuteDeleteAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         return CaseWriteResult.Ok;

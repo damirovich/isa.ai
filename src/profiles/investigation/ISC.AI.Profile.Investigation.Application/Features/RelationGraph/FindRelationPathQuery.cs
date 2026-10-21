@@ -16,7 +16,7 @@ namespace ISC.AI.Profile.Investigation.Application.Features.RelationGraph;
 /// фигуранта — обход вширь по тем же правилам раскрытия, что у графа, до <see cref="MaxSteps"/> шагов и
 /// <see cref="MaxExpansions"/> раскрытых узлов. Ответ — граф из узлов и рёбер цепочки.
 /// </summary>
-/// <param name="FromKind">Начало: фигурант или дело (центр страницы графа).</param>
+/// <param name="FromKind">Начало: фигурант, дело или событие (центр страницы графа).</param>
 /// <param name="FromId">Фигурант или дело.</param>
 /// <param name="ToPersonId">Фигурант, до которого ищется цепочка.</param>
 /// <remarks>
@@ -55,6 +55,7 @@ public sealed record FindRelationPathQuery(RelationNodeKind FromKind, int FromId
         IPersonRequisiteStore requisites,
         ICaseStore cases,
         IIntersectionStore intersections,
+        ILinkEventStore events,
         IReferenceStore references,
         IAccessContextProvider accessProvider)
         : IRequestHandler<FindRelationPathQuery, ResponseDto<RelationGraph>>
@@ -66,7 +67,7 @@ public sealed record FindRelationPathQuery(RelationNodeKind FromKind, int FromId
 
             var access = await accessProvider.GetCurrentAsync(cancellationToken);
             var explorer = await RelationGraphExplorers.CreateAsync(
-                persons, requisites, cases, intersections, references, access, cancellationToken);
+                persons, requisites, cases, intersections, events, references, access, cancellationToken);
 
             // Начало и цель — под полной решёткой: недоступные неотличимы от несуществующих (ТБ-020/021).
             var from = await explorer.ResolveAsync(query.FromKind, query.FromId, key: null);
@@ -94,8 +95,8 @@ public sealed class FindRelationPathValidator : AbstractValidator<FindRelationPa
     public FindRelationPathValidator()
     {
         RuleFor(q => q.FromKind)
-            .Must(kind => kind is RelationNodeKind.Person or RelationNodeKind.Case)
-            .WithMessage("Цепочка ищется от фигуранта или дела.");
+            .Must(kind => kind is RelationNodeKind.Person or RelationNodeKind.Case or RelationNodeKind.Event)
+            .WithMessage("Цепочка ищется от фигуранта, дела или события.");
         RuleFor(q => q.FromId).GreaterThan(0);
         RuleFor(q => q.ToPersonId).GreaterThan(0);
     }

@@ -170,6 +170,7 @@ public static class RelationGraphSvg
         RelationNodeKind.ForeignCase => "#ff9800",
         RelationNodeKind.Vehicle => "#ff4081",
         RelationNodeKind.Phone => "#1ec8a5",
+        RelationNodeKind.Event => "#f44336",
         _ => "#00c853",
     };
 

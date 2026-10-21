@@ -131,6 +131,29 @@ public sealed class SearchPageTests : BunitContext, IAsyncLifetime
         persons.QuerySelectorAll("th").Select(th => th.TextContent).ShouldContain("Гражданство");
     }
 
+    [Fact(DisplayName = "ADR-0056: события — свой раздел: дата, событие, участник ссылкой, роль, адрес и госномер контакта, дело, граф события")]
+    public void Events_section()
+    {
+        Respond(Result() with
+        {
+            Events = [new EventSearchRow(5, LinkEventKind.Meeting, "Встреча у рынка", new DateOnly(2026, 10, 5), 7, "Иванов Пётр", 1, "водитель",
+                "г. Ош, ул. Ленина, 1", "01KG123ABC")],
+            Transcripts = [],
+        });
+        Render<MudPopoverProvider>();
+        Services.GetRequiredService<NavigationManager>().NavigateTo("/search?q=рынка");
+
+        var cut = Render<Search>();
+
+        cut.WaitForAssertion(() => cut.Markup.ShouldContain("Встреча у рынка"));
+        var table = cut.FindAll("table").Single(t => t.TextContent.Contains("Встреча у рынка", StringComparison.Ordinal));
+        table.QuerySelectorAll("th").Select(th => th.TextContent).ShouldBe(["Дата", "Событие", "Участник", "Роль", "Адрес и транспорт контакта", "Дело", ""]);
+        table.TextContent.ShouldContain("05.10.2026");
+        table.TextContent.ShouldContain("01KG123ABC");
+        table.QuerySelector("a[href='/persons/7']").ShouldNotBeNull();
+        table.QuerySelector("a[href='/events/5/graph?from=7']").ShouldNotBeNull();
+    }
+
     [Fact(DisplayName = "Найдено больше предела — «показаны первые»; ничего не найдено — так и сказано, без утверждения, что материалов нет")]
     public void Truncated_and_empty_results_are_explained()
     {
@@ -140,7 +163,7 @@ public sealed class SearchPageTests : BunitContext, IAsyncLifetime
         var cut = Render<Search>();
         cut.WaitForAssertion(() => cut.Markup.ShouldContain("показаны первые"));
 
-        Respond(new UnifiedSearchResult("Жок", [], [], [], [], [], [], [], [], new Dictionary<int, string>(), SearchKinds.None));
+        Respond(new UnifiedSearchResult("Жок", [], [], [], [], [], [], [], [], [], new Dictionary<int, string>(), SearchKinds.None));
         Services.GetRequiredService<NavigationManager>().NavigateTo("/search?q=Жок");
         var empty = Render<Search>();
         empty.WaitForAssertion(() => empty.Markup.ShouldContain("ничего не найдено — в пределах ваших дел и допуска"));
@@ -232,6 +255,7 @@ public sealed class SearchPageTests : BunitContext, IAsyncLifetime
         "Иванов",
         [],
         [new PersonRow(7, 1, "Иванов Пётр", false, null, null, null, 1, 5, 0, 0, PersonRole.Target)],
+        [],
         [],
         [],
         [],

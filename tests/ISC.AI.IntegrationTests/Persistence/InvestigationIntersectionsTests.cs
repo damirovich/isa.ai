@@ -544,7 +544,7 @@ public sealed class InvestigationIntersectionsTests : IAsyncLifetime
         var provider = Substitute.For<IAccessContextProvider>();
         provider.GetCurrentAsync(Arg.Any<CancellationToken>()).Returns(access);
         return new GetRelationGraphQuery.Handler(
-            kit.Persons, kit.Requisites, kit.Cases, kit.Intersections, new ReferenceStore(kit.Factory), provider);
+            kit.Persons, kit.Requisites, kit.Cases, kit.Intersections, kit.Events, new ReferenceStore(kit.Factory), provider);
     }
 
     // Цепочка «как связаны» настоящими хранилищами под решёткой.
@@ -553,7 +553,7 @@ public sealed class InvestigationIntersectionsTests : IAsyncLifetime
         var provider = Substitute.For<IAccessContextProvider>();
         provider.GetCurrentAsync(Arg.Any<CancellationToken>()).Returns(access);
         return new FindRelationPathQuery.Handler(
-            kit.Persons, kit.Requisites, kit.Cases, kit.Intersections, new ReferenceStore(kit.Factory), provider);
+            kit.Persons, kit.Requisites, kit.Cases, kit.Intersections, kit.Events, new ReferenceStore(kit.Factory), provider);
     }
 
     [Fact(DisplayName = "ADR-0055: пересечение по телефону — разные написания одного номера сходятся; своё дело, выше допуска и чужое подразделение — нет; узел номера в графе и владельцы номера — под решёткой")]
@@ -648,7 +648,8 @@ public sealed class InvestigationIntersectionsTests : IAsyncLifetime
             InvestigationTestKit.CreateCaseStore(factory, core),
             InvestigationTestKit.CreatePersonStore(factory, core),
             new PersonRequisiteStore(factory, policy, roles),
-            new IntersectionStore(factory, policy, roles, new MediaCatalog(media, policy)));
+            new IntersectionStore(factory, policy, roles, new MediaCatalog(media, policy)),
+            new LinkEventStore(factory, policy, roles));
     }
 
     private sealed record Scene(int OwnCase, int ColleagueCase, int SecretCase, int OtherDivisionCase, int Target);
@@ -659,5 +660,6 @@ public sealed class InvestigationIntersectionsTests : IAsyncLifetime
         CaseStore Cases,
         PersonStore Persons,
         PersonRequisiteStore Requisites,
-        IntersectionStore Intersections);
+        IntersectionStore Intersections,
+        LinkEventStore Events);
 }

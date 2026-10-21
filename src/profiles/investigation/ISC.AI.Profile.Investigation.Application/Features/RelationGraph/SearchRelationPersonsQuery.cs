@@ -42,6 +42,7 @@ public sealed record SearchRelationPersonsQuery(string Text)
         IPersonRequisiteStore requisites,
         ICaseStore cases,
         IIntersectionStore intersections,
+        ILinkEventStore events,
         IReferenceStore references,
         IAccessContextProvider accessProvider)
         : IRequestHandler<SearchRelationPersonsQuery, ResponseDto<IReadOnlyList<RelationNode>>>
@@ -61,7 +62,7 @@ public sealed record SearchRelationPersonsQuery(string Text)
 
             // Подписи — те же, что у узлов графа (роль, псевдоним, номер дела): сотрудник узнаёт человека так же.
             var explorer = await RelationGraphExplorers.CreateAsync(
-                persons, requisites, cases, intersections, references, access, cancellationToken);
+                persons, requisites, cases, intersections, events, references, access, cancellationToken);
             var hits = new List<RelationNode>(found.Count);
             foreach (var row in found)
             {

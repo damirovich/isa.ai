@@ -860,6 +860,158 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                     b.ToTable("intersection_review", "investigation");
                 });
 
+            modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.LinkEvent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<short>("Classification")
+                        .HasColumnType("smallint")
+                        .HasColumnName("classification");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("created_by_user_id");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("description");
+
+                    b.Property<int>("DivisionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("division_id");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer")
+                        .HasColumnName("kind");
+
+                    b.Property<DateOnly?>("OccurredOn")
+                        .HasColumnType("date")
+                        .HasColumnName("occurred_on");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("title");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_link_event");
+
+                    b.ToTable("link_event", "investigation", t =>
+                        {
+                            t.HasCheckConstraint("ck_link_event_kind", "kind BETWEEN 1 AND 4");
+
+                            t.HasCheckConstraint("ck_link_event_title", "btrim(title) <> ''");
+                        });
+                });
+
+            modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.LinkEventParticipant", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<short>("Classification")
+                        .HasColumnType("smallint")
+                        .HasColumnName("classification");
+
+                    b.Property<string>("ContactAddress")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("contact_address");
+
+                    b.Property<string>("ContactAddressNormalized")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("contact_address_normalized");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("DivisionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("division_id");
+
+                    b.Property<int>("EventId")
+                        .HasColumnType("integer")
+                        .HasColumnName("event_id");
+
+                    b.Property<bool>("InSearch")
+                        .HasColumnType("boolean")
+                        .HasColumnName("in_search");
+
+                    b.Property<int>("Level")
+                        .HasColumnType("integer")
+                        .HasColumnName("level");
+
+                    b.Property<int>("PersonId")
+                        .HasColumnType("integer")
+                        .HasColumnName("person_id");
+
+                    b.Property<string>("Role")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("role");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("VehicleDetails")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("vehicle_details");
+
+                    b.Property<string>("VehiclePlate")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("vehicle_plate");
+
+                    b.Property<string>("VehiclePlateNormalized")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("vehicle_plate_normalized");
+
+                    b.HasKey("Id")
+                        .HasName("pk_link_event_participant");
+
+                    b.HasIndex("ContactAddressNormalized")
+                        .HasDatabaseName("ix_link_event_participant_contact_address_normalized");
+
+                    b.HasIndex("PersonId")
+                        .HasDatabaseName("ix_link_event_participant_person_id");
+
+                    b.HasIndex("VehiclePlateNormalized")
+                        .HasDatabaseName("ix_link_event_participant_vehicle_plate_normalized");
+
+                    b.HasIndex("EventId", "PersonId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_link_event_participant_event_id_person_id");
+
+                    b.ToTable("link_event_participant", "investigation", t =>
+                        {
+                            t.HasCheckConstraint("ck_link_event_participant_level", "level BETWEEN 1 AND 3");
+                        });
+                });
+
             modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.Person", b =>
                 {
                     b.Property<int>("Id")
@@ -1693,6 +1845,27 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                     b.Navigation("Person");
                 });
 
+            modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.LinkEventParticipant", b =>
+                {
+                    b.HasOne("ISC.AI.Profile.Investigation.Domain.Entities.LinkEvent", "Event")
+                        .WithMany("Participants")
+                        .HasForeignKey("EventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_link_event_participant_link_event_event_id");
+
+                    b.HasOne("ISC.AI.Profile.Investigation.Domain.Entities.Person", "Person")
+                        .WithMany()
+                        .HasForeignKey("PersonId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_link_event_participant_persons_person_id");
+
+                    b.Navigation("Event");
+
+                    b.Navigation("Person");
+                });
+
             modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.Person", b =>
                 {
                     b.HasOne("ISC.AI.Profile.Investigation.Domain.Entities.CaseFile", "Case")
@@ -1775,6 +1948,11 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                         .HasConstraintName("fk_search_authorization_case_file_case_id");
 
                     b.Navigation("Case");
+                });
+
+            modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.LinkEvent", b =>
+                {
+                    b.Navigation("Participants");
                 });
 #pragma warning restore 612, 618
         }

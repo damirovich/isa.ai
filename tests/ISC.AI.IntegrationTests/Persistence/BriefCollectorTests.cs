@@ -317,6 +317,7 @@ public sealed class BriefCollectorTests : IAsyncLifetime
             "История верификаций",
             "Поиски по эталонам фигуранта",
             "Связи",
+            "События (связи через дело-посредник)",
             "Пересечения с другими делами",
         ]);
 
@@ -652,6 +653,7 @@ public sealed class BriefCollectorTests : IAsyncLifetime
             InvestigationTestKit.CreatePersonStore(_investigation, _core),
             new PersonRequisiteStore(_investigation, policy, roles),
             new IntersectionStore(_investigation, policy, roles, catalog),
+            new LinkEventStore(_investigation, policy, roles),
             new CaseDocumentStore(_investigation, policy, roles),
             new DocumentLookup(_docflow, policy),
             new CaseReportStore(_investigation, policy, roles, new CaseReportOptions(), TimeProvider.System),

@@ -17,7 +17,9 @@ namespace ISC.AI.Profile.Investigation.Application.Features.RelationGraph;
 /// Граф связей фигуранта или дела (ТФ-ПЕР-10, ADR-0045): обход вширь от центра на <paramref name="Depth"/> колец.
 /// Тот же запрос с глубиной 1 раскрывает узел по щелчку на странице графа — в том числе автотранспорт и адрес.
 /// </summary>
-/// <param name="CenterKind">Вид центра: фигурант, дело; при раскрытии щелчком — ещё автотранспорт и адрес.</param>
+/// <param name="CenterKind">
+/// Вид центра: фигурант, дело, событие (ADR-0056); при раскрытии щелчком — ещё автотранспорт, адрес и телефон.
+/// </param>
 /// <param name="CenterId">Фигурант или дело; у автотранспорта и адреса — фигурант, у которого этот реквизит.</param>
 /// <param name="Depth">Сколько колец раскрыть: 1–8.</param>
 /// <param name="CenterKey">Ключ узла автотранспорта или адреса (<see cref="RelationNodeKeys"/>); у фигуранта и дела — нет.</param>
@@ -51,7 +53,7 @@ public sealed record GetRelationGraphQuery(
     public const int MaxKeyLength = 1100;
 
     /// <summary>Неразличимый ответ «нет такого фигуранта/дела либо недоступны» (ТБ-020/021).</summary>
-    public const string NotFound = "Фигурант или дело не найдены либо недоступны.";
+    public const string NotFound = "Фигурант, дело или событие не найдены либо недоступны.";
 
     /// <inheritdoc />
     public AuditAction AuditAction => AuditAction.View;
@@ -73,6 +75,7 @@ public sealed record GetRelationGraphQuery(
         IPersonRequisiteStore requisites,
         ICaseStore cases,
         IIntersectionStore intersections,
+        ILinkEventStore events,
         IReferenceStore references,
         IAccessContextProvider accessProvider)
         : IRequestHandler<GetRelationGraphQuery, ResponseDto<RelationGraph>>
@@ -85,7 +88,7 @@ public sealed record GetRelationGraphQuery(
             // Fail-closed (ТБ-021): без контекста допуска провайдер бросает.
             var access = await accessProvider.GetCurrentAsync(cancellationToken);
             var explorer = await RelationGraphExplorers.CreateAsync(
-                persons, requisites, cases, intersections, references, access, cancellationToken);
+                persons, requisites, cases, intersections, events, references, access, cancellationToken);
 
             var center = await explorer.ResolveAsync(query.CenterKind, query.CenterId, query.CenterKey);
             if (center is null)
@@ -130,6 +133,7 @@ internal static class RelationGraphExplorers
         IPersonRequisiteStore requisites,
         ICaseStore cases,
         IIntersectionStore intersections,
+        ILinkEventStore events,
         IReferenceStore references,
         AccessContext access,
         CancellationToken cancellationToken)
@@ -137,6 +141,6 @@ internal static class RelationGraphExplorers
         // Справочник «тип связи» — подписи рёбер связей (ТФ-ПЕР-06); выключенные записи тоже: связь с ними уже есть.
         var linkTypes = (await references.ListAsync(ReferenceKind.LinkType, cancellationToken))
             .ToDictionary(item => item.Id, item => item.Name);
-        return new RelationGraphExplorer(persons, requisites, cases, intersections, linkTypes, access, cancellationToken);
+        return new RelationGraphExplorer(persons, requisites, cases, intersections, events, linkTypes, access, cancellationToken);
     }
 }

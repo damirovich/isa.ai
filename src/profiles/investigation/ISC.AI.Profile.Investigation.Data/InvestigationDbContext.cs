@@ -37,6 +37,12 @@ public class InvestigationDbContext(DbContextOptions<InvestigationDbContext> opt
     /// <summary>Номера телефонов фигурантов и связей (ТФ-ПЕР-12, ADR-0055).</summary>
     public DbSet<PersonPhone> PersonPhones { get; set; } = null!;
 
+    /// <summary>События — «дела-посредники» связи объектов (ТФ-ПЕР-11, ADR-0056).</summary>
+    public DbSet<LinkEvent> LinkEvents { get; set; } = null!;
+
+    /// <summary>Участники событий: роль, уровень связи, транспорт и адрес контакта (ТФ-ПЕР-11, ADR-0056).</summary>
+    public DbSet<LinkEventParticipant> LinkEventParticipants { get; set; } = null!;
+
     /// <summary>Решения по пересечениям между делами (ТФ-ПЕР-07, ADR-0029).</summary>
     public DbSet<IntersectionReview> IntersectionReviews { get; set; } = null!;
 

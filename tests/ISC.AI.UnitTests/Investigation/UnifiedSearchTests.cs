@@ -32,6 +32,7 @@ public sealed class UnifiedSearchTests
     private readonly ICaseStore _cases = Substitute.For<ICaseStore>();
     private readonly IPersonStore _persons = Substitute.For<IPersonStore>();
     private readonly IPersonRequisiteStore _requisites = Substitute.For<IPersonRequisiteStore>();
+    private readonly ILinkEventStore _events = Substitute.For<ILinkEventStore>();
     private readonly ICaseReportStore _reports = Substitute.For<ICaseReportStore>();
     private readonly ICaseDocumentStore _caseDocuments = Substitute.For<ICaseDocumentStore>();
     private readonly IDocumentLookup _documents = Substitute.For<IDocumentLookup>();
@@ -148,6 +149,25 @@ public sealed class UnifiedSearchTests
             Access, Arg.Any<CancellationToken>());
         await _persons.DidNotReceiveWithAnyArgs().SearchInCasesAsync(default!, default!, default, default!, default);
         SearchKinds.All.HasFlag(SearchKinds.Phones).ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "ADR-0056: события — свой вид выдачи: ищутся хранилищем событий в делах области, входят в общее число и в предел")]
+    public async Task Events_are_searched_as_own_kind()
+    {
+        _events.SearchAsync(Arg.Any<SearchTerms>(), Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<int>(), Access, Arg.Any<CancellationToken>())
+            .Returns([new EventSearchRow(5, LinkEventKind.Meeting, "Встреча у рынка", null, 7, "Иванов", 1, "водитель", "г. Ош", null)]);
+
+        var result = (await HandleAsync(new UnifiedSearchQuery("рынок", SearchKinds.Events))).Data.ShouldNotBeNull();
+
+        result.Events.ShouldHaveSingleItem().Title.ShouldBe("Встреча у рынка");
+        result.TotalCount.ShouldBe(1);
+        await _events.Received(1).SearchAsync(
+            Arg.Is<SearchTerms>(t => t.Raw == "рынок"), Arg.Is<IReadOnlyCollection<int>>(ids => ids.Count == 2), UnifiedSearchQuery.Limit + 1,
+            Access, Arg.Any<CancellationToken>());
+        SearchKinds.All.HasFlag(SearchKinds.Events).ShouldBeTrue();
+
+        await HandleAsync(new UnifiedSearchQuery("рынок", SearchKinds.Persons));
+        await _events.ReceivedWithAnyArgs(1).SearchAsync(default!, default!, default, default!, default); // не выбран — не ищется
     }
 
     [Fact(DisplayName = "Выбранные виды: ищется только выбранное — остальные хранилища и порты пакетов не вызываются")]
@@ -321,7 +341,7 @@ public sealed class UnifiedSearchTests
 
     private async Task<ISC.AI.Abstractions.Application.ResponseDto<UnifiedSearchResult>> HandleAsync(UnifiedSearchQuery query) =>
         await new UnifiedSearchQuery.Handler(
-                _cases, _persons, _requisites, _reports, _caseDocuments, _documents, _media, _accessProvider, _subject, _history)
+                _cases, _persons, _requisites, _events, _reports, _caseDocuments, _documents, _media, _accessProvider, _subject, _history)
             .Handle(query, CancellationToken.None);
 
     private static CaseRow Case(int id, string number, string title, string? task = null) =>

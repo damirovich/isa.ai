@@ -49,6 +49,7 @@ public sealed class BriefCollector(
     IPersonStore persons,
     IPersonRequisiteStore requisites,
     IIntersectionStore intersections,
+    ILinkEventStore events,
     ICaseDocumentStore caseDocuments,
     IDocumentLookup documents,
     ICaseReportStore reports,
@@ -156,6 +157,7 @@ public sealed class BriefCollector(
                 .ToList(),
             names, access, grade, cancellationToken));
         sections.Add(await LinksSectionAsync(person, access, grade, cancellationToken));
+        sections.Add(await EventsSectionAsync(personId, access, grade, cancellationToken));
         sections.Add(await IntersectionsSectionAsync(personId, access, grade, cancellationToken));
 
         return new Brief(
@@ -596,6 +598,41 @@ public sealed class BriefCollector(
             "Связи",
             [new BriefFact("Связей", Count(rows.Count))],
             new BriefTable(["Лицо", "Связь", "Пояснение"], rows.Take(BriefLimits.MaxRows).ToList(), rows.Count));
+    }
+
+    // События — «дела-посредники» (ТФ-ПЕР-11, ADR-0056 п. 6): только видимые субъекту; участник из дела вне его дел по
+    // роли — номером дела (ТБ-084). Гриф справки — не ниже грифа событий и строк участия.
+    private async Task<BriefSection> EventsSectionAsync(int personId, AccessContext access, Grade grade, CancellationToken cancellationToken)
+    {
+        var list = await events.ListForPersonAsync(personId, access, cancellationToken) ?? [];
+        var rows = new List<IReadOnlyList<string>>();
+        foreach (var linkEvent in list)
+        {
+            grade.Add(linkEvent.Classification);
+            var own = linkEvent.Participants.FirstOrDefault(p => p.PersonId == personId);
+            var others = new List<string>();
+            foreach (var participant in linkEvent.Participants.Where(p => !ReferenceEquals(p, own)))
+            {
+                grade.Add(participant.Classification);
+                var who = participant.IsAccessible && participant.PersonName is { } name ? name : "дело № " + participant.CaseNumber;
+                others.Add(participant.Level == LinkLevel.Confirmed ? who : $"{who} ({participant.Level.Label()})");
+            }
+
+            rows.Add(
+            [
+                linkEvent.OccurredOn?.ToString("dd.MM.yyyy", Ru) ?? "—",
+                linkEvent.Kind.Label() + ": " + linkEvent.Title,
+                string.IsNullOrWhiteSpace(own?.Role) ? "—" : own.Role.Trim(),
+                own?.Level.Label() ?? "—",
+                others.Count == 0 ? "—" : string.Join("; ", others),
+            ]);
+        }
+
+        return new BriefSection(
+            "События (связи через дело-посредник)",
+            [new BriefFact("Событий", Count(rows.Count))],
+            new BriefTable(["Дата", "Событие", "Роль", "Уровень связи", "Другие участники"], rows.Take(BriefLimits.MaxRows).ToList(), rows.Count),
+            "Участник из дела вне ваших дел по роли — только номером дела (ТБ-084).");
     }
 
     private async Task<BriefSection> IntersectionsSectionAsync(int personId, AccessContext access, Grade grade, CancellationToken cancellationToken)
