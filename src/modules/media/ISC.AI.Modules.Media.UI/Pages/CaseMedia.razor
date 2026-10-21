@@ -304,9 +304,26 @@ else
     </MudPaper>
 
     @* ================= Носители дела ================= *@
+    @* Печать фото (ТФ-МЕД-20, ADR-0057): фотографии отмечаются галочками — фототаблица на странице «Печать фото». *@
+    @if (_rows.Any(IsPrintable))
+    {
+        <div class="d-flex align-center justify-space-between flex-wrap gap-2 mt-4 mb-2">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                Отметьте фотографии, чтобы напечатать фототаблицу@(_printSelection.Count > 0 ? $" · отмечено: {_printSelection.Count}" : string.Empty)
+            </MudText>
+            <div class="d-flex align-center gap-2">
+                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="TogglePrintAll">
+                    @(_rows.Where(IsPrintable).All(r => _printSelection.Contains(r.Id)) ? "Снять отметки" : "Отметить все фото")
+                </MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Print"
+                           Disabled="@(_printSelection.Count == 0)" OnClick="OpenPrint">Печать фото</MudButton>
+            </div>
+        </div>
+    }
     <MudTable T="MediaAssetRow" Items="_rows" Hover="true" Dense="true" Outlined="true" Loading="_loading"
               LoadingProgressColor="Color.Primary" OnRowClick="@(row => Open(row.Item!))" RowClass="cursor-pointer">
         <HeaderContent>
+            <MudTh Style="width:1%;"></MudTh>
             <MudTh>Дата</MudTh>
             <MudTh>Файл</MudTh>
             <MudTh>Вид</MudTh>
@@ -316,6 +333,16 @@ else
             <MudTh Style="width:1%;"></MudTh>
         </HeaderContent>
         <RowTemplate>
+            <MudTd DataLabel="Печать">
+                @if (IsPrintable(context))
+                {
+                    var assetId = context.Id;
+                    <div @onclick:stopPropagation="true">
+                        <MudCheckBox T="bool" Value="@_printSelection.Contains(assetId)" ValueChanged="@(on => TogglePrint(assetId, on))"
+                                     Dense="true" Color="Color.Primary" aria-label="Отметить для печати" />
+                    </div>
+                }
+            </MudTd>
             <MudTd DataLabel="Дата">@context.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudTd>
             <MudTd DataLabel="Файл">
                 @context.OriginalFileName
@@ -804,6 +831,42 @@ else
     }
 
     private void Open(MediaAssetRow asset) => Navigation.NavigateTo($"/media/assets/{asset.Id}");
+
+    // Печать фото (ADR-0057): только фотографии; порядок — как в списке медиатеки.
+    private readonly HashSet<int> _printSelection = [];
+
+    private static bool IsPrintable(MediaAssetRow asset) => asset.Kind == MediaKind.Image;
+
+    private void TogglePrint(int assetId, bool on)
+    {
+        if (on)
+        {
+            _printSelection.Add(assetId);
+        }
+        else
+        {
+            _printSelection.Remove(assetId);
+        }
+    }
+
+    private void TogglePrintAll()
+    {
+        var photos = _rows.Where(IsPrintable).Select(r => r.Id).ToList();
+        if (photos.All(_printSelection.Contains))
+        {
+            _printSelection.Clear();
+        }
+        else
+        {
+            _printSelection.UnionWith(photos);
+        }
+    }
+
+    private void OpenPrint()
+    {
+        var ids = _rows.Where(r => _printSelection.Contains(r.Id)).Select(r => r.Id.ToString(CultureInfo.InvariantCulture));
+        Navigation.NavigateTo($"/media/print?assets={string.Join(',', ids)}&back={Uri.EscapeDataString($"/media/cases/{CaseId}")}");
+    }
 
     private const string MediaModulePath = "./_content/ISC.AI.Modules.Media.UI/js/media.js";
     private IJSObjectReference? _mediaModule;
