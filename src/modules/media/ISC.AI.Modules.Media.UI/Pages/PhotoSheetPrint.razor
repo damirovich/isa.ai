@@ -1,0 +1,445 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Печать фото — фототаблица (ТФ-МЕД-20, ADR-0057): выбранные снимки своих дел раскладываются на листы A4 по 1, 2, 4,
+   6, 9, 12, 16 или 20, под каждым — подпись цветом текста на подложке; один снимок — на весь лист или в своём размере.
+   Лист формирует сервер (PDF) с грифом — максимум по снимкам — сверху и снизу каждой страницы, «Выдал» и водяным
+   знаком получателя (ТБ-033, ТБ-076); каждая выгрузка — запись «Выгрузка» в журнале без подписей (ТБ-032). Справа —
+   предпросмотр раскладки той же функцией, что и PDF (PhotoSheetLayout); водяной знак — только в файле. Оригиналы не
+   меняются (ТЭ-007). Снимки — по адресу (?assets=1,2,3); недоступные молча не показываются (ТБ-021). *@
+@page "/media/print"
+@rendermode InteractiveServer
+@inject ISnackbar Snackbar
+@using System.Globalization
+@using System.IO
+@using ISC.AI.Abstractions.Security
+@using ISC.AI.Modules.Media.Application.Features.Print
+@using ISC.AI.Modules.Media.Domain.Model
+
+<PageTitle>Печать фото</PageTitle>
+
+<div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-3">
+    <div>
+        <MudText Typo="Typo.h5">Печать фото</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            Фототаблица на листе A4: подписи под снимками, гриф и отметка о выдаче на каждой странице
+        </MudText>
+    </div>
+    <div class="d-flex align-center gap-2 flex-wrap">
+        @if (_entries.Count > 0)
+        {
+            <ClassificationChip Classification="@SheetClassification" />
+        }
+        @if (BackHref is { } back)
+        {
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" Href="@back">Назад</MudButton>
+        }
+    </div>
+</div>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-4" />
+}
+else if (_entries.Count == 0)
+{
+    @* Текст НЕ утверждает «нет таких снимков»: недоступное неотличимо от несуществующего (ТБ-020/021). *@
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+        Снимков для печати нет: выберите фотографии в медиатеке дела и нажмите «Печать фото». Печатаются только фото ваших дел.
+    </MudAlert>
+}
+else
+{
+    @if (_skipped > 0)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+            Не показано снимков: @_skipped — это не фото либо они вне ваших дел.
+        </MudAlert>
+    }
+
+    <MudGrid Spacing="3">
+        <MudItem xs="12" md="5">
+            <MudPaper Outlined="true" Class="pa-4 mb-3">
+                <MudText Typo="Typo.subtitle1" Class="mb-2">Лист</MudText>
+                <MudTextField @bind-Value="_title" Label="Заголовок листа" Variant="Variant.Outlined" Margin="Margin.Dense"
+                              MaxLength="@PhotoSheetLayout.MaxTitleLength" Placeholder="@PhotoSheetLayout.DefaultTitle" Class="mb-3" />
+
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-1">Снимков на лист</MudText>
+                <div class="d-flex flex-wrap gap-1 mb-3">
+                    @foreach (var option in PhotoSheetLayout.PerPageOptions)
+                    {
+                        var value = option;
+                        <MudButton Size="Size.Small" Variant="@(_perPage == value ? Variant.Filled : Variant.Outlined)" Color="Color.Primary"
+                                   Style="min-width:44px;" OnClick="@(() => SetPerPage(value))">@value</MudButton>
+                    }
+                </div>
+
+                @if (_perPage == 1)
+                {
+                    <MudSelect T="string" @bind-Value="_sizePreset" Label="Размер снимка" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2">
+                        @foreach (var preset in SizePresets)
+                        {
+                            <MudSelectItem T="string" Value="@preset.Key">@preset.Label</MudSelectItem>
+                        }
+                    </MudSelect>
+                    @if (_sizePreset == CustomSize)
+                    {
+                        <div class="d-flex gap-2 mb-2">
+                            <MudNumericField T="double?" @bind-Value="_customWidth" Label="Ширина, мм" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                             Min="@PhotoSheetLayout.MinSingleMm" Max="@PhotoSheetLayout.MaxSingleWidthMm" />
+                            <MudNumericField T="double?" @bind-Value="_customHeight" Label="Высота, мм" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                             Min="@PhotoSheetLayout.MinSingleMm" Max="@PhotoSheetLayout.MaxSingleHeightMm" />
+                        </div>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
+                            От @Mm(PhotoSheetLayout.MinSingleMm) до @Mm(PhotoSheetLayout.MaxSingleWidthMm) мм по ширине и @Mm(PhotoSheetLayout.MaxSingleHeightMm) мм по высоте; снимок вписывается с сохранением пропорций.
+                        </MudText>
+                    }
+                }
+
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-1">Цвет подписей для всех снимков</MudText>
+                <div class="d-flex align-center gap-2 flex-wrap">
+                    <ColorSelect Label="Текст" Value="@_allText" ValueChanged="@(v => _allText = v)" />
+                    <ColorSelect Label="Подложка" Value="@_allBackground" ValueChanged="@(v => _allBackground = v)" />
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="ApplyColorsToAll">Применить ко всем</MudButton>
+                </div>
+            </MudPaper>
+
+            <MudPaper Outlined="true" Class="pa-4">
+                <div class="d-flex align-center justify-space-between mb-2">
+                    <MudText Typo="Typo.subtitle1">Снимки</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@Summary</MudText>
+                </div>
+                @for (var i = 0; i < _entries.Count; i++)
+                {
+                    var index = i;
+                    var entry = _entries[index];
+                    <div class="d-flex gap-3 py-3" style="@(index > 0 ? "border-top:1px solid var(--mud-palette-lines-default);" : null)">
+                        <img src="@MediaFileUrl.Originals(entry.Asset.AssetId, entry.Asset.StoredFileName)" alt="@entry.Asset.FileName"
+                             style="width:72px;height:72px;object-fit:cover;border-radius:6px;flex:0 0 auto;" />
+                        <div style="flex:1 1 auto;min-width:0;">
+                            <div class="d-flex align-center justify-space-between gap-1">
+                                <MudText Typo="Typo.body2" Style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@entry.Asset.FileName">
+                                    @(index + 1). @entry.Asset.FileName
+                                </MudText>
+                                <div class="d-flex flex-nowrap">
+                                    <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" title="Выше" Disabled="@(index == 0)"
+                                                   OnClick="@(() => Move(index, -1))" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward" Size="Size.Small" title="Ниже" Disabled="@(index == _entries.Count - 1)"
+                                                   OnClick="@(() => Move(index, 1))" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" title="Убрать из листа" OnClick="@(() => Remove(index))" />
+                                </div>
+                            </div>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                                @entry.Asset.Origin@(entry.Asset.CapturedAt is { } captured ? $" · съёмка {captured.ToLocalTime():dd.MM.yyyy HH:mm}" : string.Empty)
+                            </MudText>
+                            <MudTextField T="string" @bind-Value="entry.Caption" Placeholder="Подпись: псевдоним, дата, место" Variant="Variant.Outlined"
+                                          Margin="Margin.Dense" MaxLength="@PhotoSheetLayout.MaxCaptionLength" Immediate="true" Class="mt-1" />
+                            <div class="d-flex align-center gap-2 flex-wrap mt-1">
+                                <ColorSelect Label="Текст" Value="@entry.TextColor" ValueChanged="@(v => entry.TextColor = v)" />
+                                <ColorSelect Label="Подложка" Value="@entry.BackgroundColor" ValueChanged="@(v => entry.BackgroundColor = v)" />
+                                @if (entry.Asset.AnnotationCount > 0)
+                                {
+                                    <MudCheckBox T="bool" @bind-Value="entry.WithAnnotations" Dense="true" Color="Color.Primary"
+                                                 Label="@($"с пометками ({entry.Asset.AnnotationCount})")" />
+                                }
+                            </div>
+                        </div>
+                    </div>
+                }
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="7">
+            <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+                <MudText Typo="Typo.subtitle1">Предпросмотр</MudText>
+                <div class="d-flex gap-2 flex-wrap">
+                    @if (Blocker is { } blocker && !_busy)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Warning" Class="align-self-center">@blocker</MudText>
+                    }
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download"
+                               Disabled="@(_busy || Blocker is not null)" OnClick="@(() => ExportAsync(print: false))">Скачать PDF</MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Print"
+                               Disabled="@(_busy || Blocker is not null)" OnClick="@(() => ExportAsync(print: true))">Открыть для печати</MudButton>
+                </div>
+            </div>
+            @if (_busy)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-2" />
+            }
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
+                В файле на каждой странице — гриф сверху и снизу, «Выдал: ФИО · дата» и водяной знак получателя. Выгрузка записывается в журнал.
+            </MudText>
+            <div class="d-flex flex-column gap-3">
+                @foreach (var sheet in PreviewPages)
+                {
+                    <div style="position:relative;width:100%;max-width:560px;aspect-ratio:210/297;background:#fff;color:#212121;box-shadow:0 1px 4px rgba(0,0,0,.35);border-radius:2px;">
+                        <div style="@Box(new SheetRect(PhotoSheetLayout.MarginMm, PhotoSheetLayout.MarginMm, PhotoSheetLayout.PageWidthMm - (2 * PhotoSheetLayout.MarginMm), 7))"
+                             class="d-flex align-center justify-space-between">
+                            <span style="font-size:9px;">@TitleText</span>
+                            <span style="font-size:10px;font-weight:700;color:#b71c1c;">@Marking</span>
+                            <span style="font-size:9px;">лист @sheet.Number из @PreviewPages.Count</span>
+                        </div>
+                        @foreach (var cell in sheet.Cells)
+                        {
+                            var entry = _entries[cell.Index];
+                            <div style="@Box(cell.Image)" class="d-flex align-center justify-center">
+                                <img src="@MediaFileUrl.Originals(entry.Asset.AssetId, entry.Asset.StoredFileName)" alt=""
+                                     style="max-width:100%;max-height:100%;object-fit:contain;" />
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(entry.Caption))
+                            {
+                                <div style="@(Box(cell.Caption) + $"background:{entry.BackgroundColor};color:{entry.TextColor};")"
+                                     class="d-flex align-center justify-center px-1">
+                                    <span style="font-size:@CaptionFontSize;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">@entry.Caption</span>
+                                </div>
+                            }
+                        }
+                        <div style="@Box(new SheetRect(PhotoSheetLayout.MarginMm, PhotoSheetLayout.PageHeightMm - PhotoSheetLayout.MarginMm - 6, PhotoSheetLayout.PageWidthMm - (2 * PhotoSheetLayout.MarginMm), 6))"
+                             class="d-flex align-center justify-space-between">
+                            <span style="font-size:9px;">Выдал: ФИО · дата и время выдачи</span>
+                            <span style="font-size:10px;font-weight:700;color:#b71c1c;">@Marking</span>
+                            <span></span>
+                        </div>
+                    </div>
+                }
+            </div>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    private const string FullPage = "full";
+    private const string CustomSize = "custom";
+
+    private static readonly (string Key, string Label, double? Width, double? Height)[] SizePresets =
+    [
+        (FullPage, "На весь лист", null, null),
+        ("130x180", "13 × 18 см", 130, 180),
+        ("100x150", "10 × 15 см", 100, 150),
+        ("90x120", "9 × 12 см", 90, 120),
+        ("60x90", "6 × 9 см", 60, 90),
+        (CustomSize, "Свой размер", null, null),
+    ];
+
+    /// <summary>Снимки — номера носителей через запятую (<c>?assets=1,2,3</c>).</summary>
+    [SupplyParameterFromQuery(Name = "assets")] public string? AssetsParameter { get; set; }
+
+    /// <summary>Куда вернуться — путь внутри системы (медиатека дела, карточка фото).</summary>
+    [SupplyParameterFromQuery(Name = "back")] public string? BackParameter { get; set; }
+
+    private readonly List<EntryModel> _entries = [];
+    private bool _started;
+    private string? _loadedFor;
+    private int _skipped;
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private string? _title;
+    private int _perPage = 4;
+    private string _sizePreset = FullPage;
+    private double? _customWidth = 100;
+    private double? _customHeight = 150;
+    private string _allText = PhotoSheetColors.Black;
+    private string _allBackground = PhotoSheetColors.White;
+
+    // «Назад» — только путь этой системы: внешний адрес из параметра не открывается.
+    private string? BackHref => BackParameter is { Length: > 1 } back && back[0] == '/' && back[1] != '/' && !back.Contains('\\') ? back : null;
+
+    private short SheetClassification => _entries.Count == 0
+        ? ClassificationLevels.Unclassified
+        : ClassificationLevels.Normalize(_entries.Max(e => e.Asset.Classification));
+
+    private string Marking => ClassificationLevels.Marking(SheetClassification);
+
+    private string TitleText => string.IsNullOrWhiteSpace(_title) ? PhotoSheetLayout.DefaultTitle : _title.Trim();
+
+    private PhotoSheetSize? SingleSize
+    {
+        get
+        {
+            if (_perPage != 1 || _sizePreset == FullPage)
+            {
+                return null;
+            }
+
+            if (_sizePreset == CustomSize)
+            {
+                return _customWidth is { } width && _customHeight is { } height ? new PhotoSheetSize(width, height) : null;
+            }
+
+            var preset = SizePresets.First(p => p.Key == _sizePreset);
+            return new PhotoSheetSize(preset.Width!.Value, preset.Height!.Value);
+        }
+    }
+
+    // Что мешает сформировать лист — показывается у кнопок.
+    private string? Blocker =>
+        _entries.Count == 0 ? "Нет снимков"
+        : _perPage == 1 && _sizePreset == CustomSize && (SingleSize is not { } size || !PhotoSheetLayout.FitsSingle(size))
+            ? "Размер снимка вне листа"
+            : null;
+
+    private IReadOnlyList<PhotoSheetPage> PreviewPages =>
+        PhotoSheetLayout.Pages(_entries.Count, _perPage, SingleSize is { } size && PhotoSheetLayout.FitsSingle(size) ? size : null);
+
+    private string Summary => string.Create(CultureInfo.InvariantCulture,
+        $"снимков: {_entries.Count} · листов: {PhotoSheetLayout.PageCount(_entries.Count, _perPage)}");
+
+    private string CaptionFontSize => _perPage switch
+    {
+        <= 2 => "13px",
+        <= 6 => "11px",
+        _ => "9px",
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере снимки не читаются; тот же адрес — не перечитывается.
+        // Отдельный признак «уже начато»: при пустом адресе _loadedFor и параметр оба null с первого показа.
+        if (!RendererInfo.IsInteractive || (_started && _loadedFor == AssetsParameter))
+        {
+            return;
+        }
+
+        _started = true;
+        _loadedFor = AssetsParameter;
+        var ids = (AssetsParameter ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(part => int.TryParse(part, NumberStyles.None, CultureInfo.InvariantCulture, out var id) ? id : 0)
+            .Where(id => id > 0)
+            .Distinct()
+            .Take(PhotoSheetLayout.MaxPhotos)
+            .ToList();
+        _entries.Clear();
+        _skipped = 0;
+        if (ids.Count == 0)
+        {
+            _loading = false;
+            return;
+        }
+
+        _loading = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ListPrintableAssetsQuery(ids));
+            if (response is { Status: true, Data: { } rows })
+            {
+                _entries.AddRange(rows.Select(row => new EntryModel(row)));
+                _skipped = ids.Count - rows.Count;
+                _perPage = rows.Count switch
+                {
+                    1 => 1,
+                    2 => 2,
+                    <= 4 => 4,
+                    _ => 6,
+                };
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void SetPerPage(int perPage) => _perPage = perPage;
+
+    private void ApplyColorsToAll()
+    {
+        foreach (var entry in _entries)
+        {
+            entry.TextColor = _allText;
+            entry.BackgroundColor = _allBackground;
+        }
+    }
+
+    private void Move(int index, int step)
+    {
+        var target = index + step;
+        if (target < 0 || target >= _entries.Count)
+        {
+            return;
+        }
+
+        (_entries[index], _entries[target]) = (_entries[target], _entries[index]);
+    }
+
+    private void Remove(int index) => _entries.RemoveAt(index);
+
+    private async Task ExportAsync(bool print)
+    {
+        if (Blocker is not null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            var size = SingleSize;
+            var query = new ExportPhotoSheetQuery(
+                _entries.Select(e => new PhotoSheetEntry(e.Asset.AssetId, e.Caption, e.TextColor, e.BackgroundColor, e.WithAnnotations)).ToList(),
+                _perPage,
+                size?.WidthMm,
+                size?.HeightMm,
+                string.IsNullOrWhiteSpace(_title) ? null : _title.Trim());
+            var response = await Dispatcher.Send(query);
+            if (response is not { Status: true, Data: { } file })
+            {
+                _error = response?.StatusMessage ?? "Фототаблица не сформирована.";
+                return;
+            }
+
+            if (print)
+            {
+                using var forPrint = new DotNetStreamReference(new MemoryStream(file.Content));
+                if (await JS.InvokeAsync<bool>("openFileFromStream", forPrint, "application/pdf"))
+                {
+                    return;
+                }
+
+                Snackbar.Add("Браузер не дал открыть вкладку — файл скачан, откройте его для печати.", Severity.Info);
+            }
+
+            using var stream = new DotNetStreamReference(new MemoryStream(file.Content));
+            await JS.InvokeVoidAsync("downloadFileFromStream", file.FileName, stream);
+        }
+        catch (JSException exception)
+        {
+            _error = "Фототаблица сформирована, но браузер не принял файл: " + exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    // Положение на листе предпросмотра — в процентах от размеров A4 (как в PDF, из той же раскладки).
+    private static string Box(SheetRect rect) => string.Create(CultureInfo.InvariantCulture,
+        $"position:absolute;left:{rect.X / PhotoSheetLayout.PageWidthMm * 100:0.###}%;top:{rect.Y / PhotoSheetLayout.PageHeightMm * 100:0.###}%;width:{rect.Width / PhotoSheetLayout.PageWidthMm * 100:0.###}%;height:{rect.Height / PhotoSheetLayout.PageHeightMm * 100:0.###}%;");
+
+    private static string Mm(double value) => value.ToString("0", CultureInfo.InvariantCulture);
+
+    // Снимок на листе: сведения о носителе и то, что ввёл сотрудник.
+    private sealed class EntryModel(PrintableAsset asset)
+    {
+        public PrintableAsset Asset { get; } = asset;
+
+        public string? Caption { get; set; }
+
+        public string TextColor { get; set; } = PhotoSheetColors.Black;
+
+        public string BackgroundColor { get; set; } = PhotoSheetColors.White;
+
+        public bool WithAnnotations { get; set; } = asset.AnnotationCount > 0;
+    }
+}

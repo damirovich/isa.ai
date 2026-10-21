@@ -94,6 +94,12 @@ else
                 @* Обработка (ТФ-МЕД-14, ADR-0050): копия отдельным носителем; оригинал не меняется. *@
                 <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Tune" Href="@($"/media/assets/{asset.Id}/edit")">Обработать</MudButton>
             }
+            @if (asset.Kind == MediaKind.Image && !_details.ViewOnly && _details.CaseId is not null)
+            {
+                @* Печать фото (ТФ-МЕД-20, ADR-0057): один снимок — на весь лист или в своём размере, с подписью. *@
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Print"
+                           Href="@($"/media/print?assets={asset.Id}&back={Uri.EscapeDataString($"/media/assets/{asset.Id}")}")">Печать</MudButton>
+            }
             @if (_details.CaseId is { } caseId)
             {
                 <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" Href="@($"/media/cases/{caseId}")">К медиатеке дела</MudButton>

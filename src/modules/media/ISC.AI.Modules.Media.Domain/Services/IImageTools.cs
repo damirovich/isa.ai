@@ -42,7 +42,25 @@ public interface IImageTools
     /// <summary>
     /// Изображение с нанесёнными пометками для выгрузки (ТФ-МЕД-13, ADR-0050): поворот по EXIF, стрелки, рамки и
     /// подписи их цветом, внизу — полоса с <paramref name="caption"/> (гриф и происхождение); PNG без потерь.
+    /// Без подписи (<see langword="null"/>) полосы нет — снимок для фототаблицы, где гриф и выдача — на самом листе
+    /// (ADR-0057).
     /// </summary>
     /// <exception cref="InvalidOperationException">Изображение не распознано.</exception>
-    byte[] RenderAnnotated(byte[] imageBytes, IReadOnlyList<AnnotationRow> annotations, string caption);
+    byte[] RenderAnnotated(byte[] imageBytes, IReadOnlyList<AnnotationRow> annotations, string? caption);
+
+    /// <summary>
+    /// Снимок для листа фототаблицы (ADR-0057): поворот по EXIF (как показывает браузер), затем уменьшение с
+    /// сохранением пропорций, чтобы поместиться в <paramref name="maxWidth"/>×<paramref name="maxHeight"/>; меньший
+    /// снимок не увеличивается. Только масштаб (ТЭ-007); JPEG.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Изображение не распознано.</exception>
+    byte[] FitJpeg(byte[] imageBytes, int maxWidth, int maxHeight, int quality = 90);
+
+    /// <summary>
+    /// Фототаблица в PDF (ТФ-МЕД-20, ADR-0057): листы A4 по <see cref="PhotoSheetLayout"/>, подписи цветом текста и
+    /// подложки, на каждой странице — маркировка грифа сверху и снизу, «Выдал» и водяной знак получателя (ТБ-033,
+    /// ТБ-076); свойства файла — заголовок, исполнитель, гриф.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Снимок не распознан.</exception>
+    byte[] RenderPhotoSheetPdf(PhotoSheetDocument document);
 }

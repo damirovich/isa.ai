@@ -138,8 +138,41 @@ public sealed class SkiaImageTools : IImageTools
     public byte[] ApplyEdits(byte[] imageBytes, ImageEdit edit) => ImageEditing.ApplyEdits(imageBytes, edit);
 
     /// <inheritdoc />
-    public byte[] RenderAnnotated(byte[] imageBytes, IReadOnlyList<AnnotationRow> annotations, string caption) =>
+    public byte[] RenderAnnotated(byte[] imageBytes, IReadOnlyList<AnnotationRow> annotations, string? caption) =>
         ImageEditing.RenderAnnotated(imageBytes, annotations, caption);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Снимок кладётся на белый холст: прозрачный PNG в JPEG иначе стал бы чёрным. Масштаб — только вниз и только с
+    /// сохранением пропорций (ТЭ-007); маленький снимок отдаётся в своём размере — его растягивает сам лист.
+    /// </remarks>
+    public byte[] FitJpeg(byte[] imageBytes, int maxWidth, int maxHeight, int quality = 90)
+    {
+        ArgumentNullException.ThrowIfNull(imageBytes);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxWidth, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxHeight, 1);
+
+        using var source = ImageEditing.DecodeOriented(imageBytes, SKColors.White);
+        var scale = Math.Min(1f, Math.Min((float)maxWidth / source.Width, (float)maxHeight / source.Height));
+        var width = Math.Max(1, (int)MathF.Round(source.Width * scale));
+        var height = Math.Max(1, (int)MathF.Round(source.Height * scale));
+        using var target = NewCanvasBitmap(width, height);
+        using (var canvas = new SKCanvas(target))
+        using (var image = SKImage.FromBitmap(source))
+        {
+            canvas.Clear(SKColors.White);
+            canvas.DrawImage(
+                image,
+                new SKRect(0, 0, source.Width, source.Height),
+                new SKRect(0, 0, width, height),
+                new SKSamplingOptions(SKCubicResampler.Mitchell));
+        }
+
+        return EncodeJpeg(target, quality, "снимок фототаблицы");
+    }
+
+    /// <inheritdoc />
+    public byte[] RenderPhotoSheetPdf(PhotoSheetDocument document) => PhotoSheetPdf.Render(document);
 
     private static SKBitmap NewCanvasBitmap(int width, int height) =>
         new(new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul));

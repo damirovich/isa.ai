@@ -26,7 +26,7 @@ internal static class ImageEditing
             throw new ArgumentException(string.Join(" ", errors), nameof(edit));
         }
 
-        using var rotated = Transform(oriented, RotationOrigin(edit.Rotation));
+        using var rotated = Transform(oriented, RotationOrigin(edit.Rotation), SKColors.Black);
         var crop = edit.Crop ?? new CropRect(0, 0, rotated.Width, rotated.Height);
         var (width, height) = (crop.Width * edit.Zoom, crop.Height * edit.Zoom);
 
@@ -59,8 +59,8 @@ internal static class ImageEditing
         return EncodePng(target);
     }
 
-    /// <summary>Изображение с нанесёнными пометками и полосой подписи внизу.</summary>
-    public static byte[] RenderAnnotated(byte[] imageBytes, IReadOnlyList<AnnotationRow> annotations, string caption)
+    /// <summary>Изображение с нанесёнными пометками и полосой подписи внизу; без подписи — без полосы (ADR-0057).</summary>
+    public static byte[] RenderAnnotated(byte[] imageBytes, IReadOnlyList<AnnotationRow> annotations, string? caption)
     {
         ArgumentNullException.ThrowIfNull(imageBytes);
         ArgumentNullException.ThrowIfNull(annotations);
@@ -68,7 +68,7 @@ internal static class ImageEditing
         using var oriented = DecodeOriented(imageBytes);
         var (width, height) = (oriented.Width, oriented.Height);
         var unit = Math.Max(1f, Math.Min(width, height) / 400f);
-        var captionHeight = (int)Math.Ceiling(Math.Max(28f, 14f * unit + 14f));
+        var captionHeight = caption is null ? 0 : (int)Math.Ceiling(Math.Max(28f, 14f * unit + 14f));
 
         // Шрифт — системный (Arial, иначе любой с кириллицей); общий экземпляр по умолчанию не освобождается.
         var typeface = Typeface();
@@ -84,9 +84,12 @@ internal static class ImageEditing
                 DrawAnnotation(canvas, annotation, unit, typeface);
             }
 
-            using var captionFont = new SKFont(typeface, Math.Max(12f, captionHeight * 0.5f));
-            using var captionPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
-            canvas.DrawText(caption ?? string.Empty, 8f, height + captionHeight * 0.68f, SKTextAlign.Left, captionFont, captionPaint);
+            if (caption is not null)
+            {
+                using var captionFont = new SKFont(typeface, Math.Max(12f, captionHeight * 0.5f));
+                using var captionPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
+                canvas.DrawText(caption, 8f, height + captionHeight * 0.68f, SKTextAlign.Left, captionFont, captionPaint);
+            }
         }
 
         return EncodePng(target);
@@ -156,8 +159,12 @@ internal static class ImageEditing
         return result;
     }
 
-    /// <summary>Декодирование с поворотом по метке EXIF — как изображение показывает браузер (координаты пометок и кадрирования — в нём).</summary>
-    internal static SKBitmap DecodeOriented(byte[] imageBytes)
+    /// <summary>
+    /// Декодирование с поворотом по метке EXIF — как изображение показывает браузер (координаты пометок и кадрирования —
+    /// в нём). Прозрачные участки ложатся на <paramref name="background"/> (по умолчанию чёрный, как прежде; фототаблица
+    /// просит белый — бумага).
+    /// </summary>
+    internal static SKBitmap DecodeOriented(byte[] imageBytes, SKColor? background = null)
     {
         using var data = SKData.CreateCopy(imageBytes);
         using var codec = SKCodec.Create(data)
@@ -167,7 +174,7 @@ internal static class ImageEditing
             ?? throw new InvalidOperationException("Изображение не распознано: формат не поддерживается или файл повреждён.");
         using var rgba = decoded.Copy(SKColorType.Rgba8888)
             ?? throw new InvalidOperationException("Не удалось привести изображение к формату RGBA.");
-        return Transform(rgba, origin);
+        return Transform(rgba, origin, background ?? SKColors.Black);
     }
 
     /// <summary>Поворот пользователя как метка ориентации: 90° — «RightTop», 180° — «BottomRight», 270° — «LeftBottom».</summary>
@@ -180,7 +187,7 @@ internal static class ImageEditing
     };
 
     /// <summary>Новый растр с ориентацией <paramref name="origin"/>, пиксель в пиксель (ближайший сосед: перестановка, без пересчёта).</summary>
-    private static SKBitmap Transform(SKBitmap source, SKEncodedOrigin origin)
+    private static SKBitmap Transform(SKBitmap source, SKEncodedOrigin origin, SKColor background)
     {
         var swap = origin is SKEncodedOrigin.LeftTop or SKEncodedOrigin.RightTop or SKEncodedOrigin.RightBottom or SKEncodedOrigin.LeftBottom;
         var width = swap ? source.Height : source.Width;
@@ -203,7 +210,7 @@ internal static class ImageEditing
         var target = NewBitmap(width, height);
         using var canvas = new SKCanvas(target);
         using var image = SKImage.FromBitmap(source);
-        canvas.Clear(SKColors.Black);
+        canvas.Clear(background);
         canvas.SetMatrix(matrix);
         canvas.DrawImage(image, 0, 0, new SKSamplingOptions(SKFilterMode.Nearest));
         return target;
@@ -255,7 +262,7 @@ internal static class ImageEditing
         }
     }
 
-    private static SKTypeface Typeface() =>
+    internal static SKTypeface Typeface() =>
         SKFontManager.Default.MatchFamily("Arial") ?? SKFontManager.Default.MatchFamily(string.Empty) ?? SKTypeface.Default;
 
     private static SKBitmap NewBitmap(int width, int height) =>
