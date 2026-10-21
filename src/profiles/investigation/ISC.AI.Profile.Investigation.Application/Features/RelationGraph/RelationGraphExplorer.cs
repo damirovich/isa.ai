@@ -23,13 +23,15 @@ internal sealed record RelationPathResult(RelationGraph? Path, bool LimitReached
 /// дела — по полной решётке и роли; чужое дело — лишь строкой пересечения (<see cref="IIntersectionStore"/>) и не
 /// раскрывается; автотранспорт и адрес раскрываются только в доступных фигурантов (<see cref="IPersonStore.ListByPlateAsync"/>,
 /// <see cref="IPersonStore.ListByAddressAsync"/>); совместные появления — только доступных фигурантов
-/// (<see cref="IPersonStore.ListCoAppearancesAsync"/>).
+/// (<see cref="IPersonStore.ListCoAppearancesAsync"/>). События (ADR-0056) — только видимые субъекту
+/// (<see cref="ILinkEventStore"/>); их участники вне дел субъекта по роли — узлом чужого дела, выше допуска — никак.
 /// </remarks>
 internal sealed class RelationGraphExplorer(
     IPersonStore persons,
     IPersonRequisiteStore requisites,
     ICaseStore cases,
     IIntersectionStore intersections,
+    ILinkEventStore events,
     IReadOnlyDictionary<int, string> linkTypes,
     AccessContext access,
     CancellationToken cancellationToken)
@@ -40,6 +42,7 @@ internal sealed class RelationGraphExplorer(
     private readonly Dictionary<int, PersonRow> _persons = [];
     private readonly Dictionary<int, CaseDetails?> _cases = [];
     private readonly Dictionary<int, IReadOnlyList<PersonRow>> _caseMembers = [];
+    private readonly Dictionary<int, LinkEventRow?> _events = [];
 
     /// <summary>
     /// Узел-центр по виду и идентификатору; <see langword="null"/> — недоступен или не существует (ТБ-020/021).
@@ -56,6 +59,9 @@ internal sealed class RelationGraphExplorer(
 
             case RelationNodeKind.Case:
                 return await GetCaseAsync(id) is { } details ? CaseNode(details, 0, null) : null;
+
+            case RelationNodeKind.Event:
+                return await GetEventAsync(id) is { } linkEvent ? EventNode(linkEvent, 0, null) : null;
 
             case RelationNodeKind.Vehicle when RelationNodeKeys.ValueOf(kind, key) is { } plate:
             {
@@ -279,12 +285,16 @@ internal sealed class RelationGraphExplorer(
             case RelationNodeKind.Phone when node.Expandable && RelationNodeKeys.ValueOf(node.Kind, node.Key) is { } phone:
                 return await PhoneNeighborsAsync(phone, node.Key, level);
 
+            case RelationNodeKind.Event when node.EntityId is { } eventId:
+                return await EventNeighborsAsync(eventId, node.Key, level);
+
             default:
                 return ([], []);
         }
     }
 
-    // Фигурант → дело, связи из того же дела (в обе стороны), автотранспорт, адреса, телефоны, пересечения, совместные появления.
+    // Фигурант → дело, связи из того же дела (в обе стороны), автотранспорт, адреса, телефоны, пересечения, совместные
+    // появления, события — «дела-посредники» (ADR-0056).
     private async Task<(List<RelationNode> Nodes, List<RelationEdge> Edges)> PersonNeighborsAsync(PersonRow row, string key, int level)
     {
         var nodes = new List<RelationNode>();
@@ -395,6 +405,51 @@ internal sealed class RelationGraphExplorer(
             edges.Add(new RelationEdge(key, otherNode.Key, RelationEdgeKind.CoAppearance, $"вместе на материалах: {together.MaterialCount}"));
         }
 
+        // События (ADR-0056 п. 4): видимые субъекту; участие «неверно» не рисуется — как отклонённое пересечение.
+        foreach (var linkEvent in await events.ListForPersonAsync(row.Id, access, cancellationToken) ?? [])
+        {
+            _events[linkEvent.Id] = linkEvent;
+            if (linkEvent.Participants.FirstOrDefault(p => p.PersonId == row.Id) is not { } participation || participation.Level == LinkLevel.Wrong)
+            {
+                continue;
+            }
+
+            var eventNode = EventNode(linkEvent, level, key);
+            nodes.Add(eventNode);
+            edges.Add(new RelationEdge(key, eventNode.Key, RelationEdgeKind.EventLink, ParticipationLabel(participation)));
+        }
+
+        return (nodes, edges);
+    }
+
+    // Событие → его видимые участники (ФТ-5.2.5): доступные — узлы фигурантов, остальные в пределах допуска — узлы чужого
+    // дела (номер, вид, статус, ведущий — ТБ-084), участие «неверно» не рисуется.
+    private async Task<(List<RelationNode> Nodes, List<RelationEdge> Edges)> EventNeighborsAsync(int eventId, string key, int level)
+    {
+        var nodes = new List<RelationNode>();
+        var edges = new List<RelationEdge>();
+        if (await GetEventAsync(eventId) is not { } linkEvent)
+        {
+            return (nodes, edges);
+        }
+
+        foreach (var participant in linkEvent.Participants.Where(p => p.Level != LinkLevel.Wrong))
+        {
+            if (participant.IsAccessible && participant.PersonId is { } personId && await GetPersonAsync(personId) is { } person)
+            {
+                var personNode = await PersonNodeAsync(person, level, key);
+                nodes.Add(personNode);
+                edges.Add(new RelationEdge(personNode.Key, key, RelationEdgeKind.EventLink, ParticipationLabel(participant)));
+                continue;
+            }
+
+            var foreign = new RelationNode(RelationNodeKeys.ForeignCase(participant.CaseId), RelationNodeKind.ForeignCase, null,
+                $"Дело № {participant.CaseNumber}", $"{participant.CaseKind.Label()} · {participant.CaseStatus.Label()}", level, key,
+                Expanded: false, participant.ResponsibleUserId);
+            nodes.Add(foreign);
+            edges.Add(new RelationEdge(foreign.Key, key, RelationEdgeKind.EventLink, "участник события"));
+        }
+
         return (nodes, edges);
     }
 
@@ -460,6 +515,26 @@ internal sealed class RelationGraphExplorer(
     }
 
     private const string ResidenceLabel = "жительство (анкета)";
+
+    // Событие: название, вид и дата; гриф — события (не ниже грифов участников, ADR-0056 п. 2).
+    private static RelationNode EventNode(LinkEventRow linkEvent, int level, string? parentKey) =>
+        new(RelationNodeKeys.Event(linkEvent.Id), RelationNodeKind.Event, linkEvent.Id, linkEvent.Title,
+            linkEvent.OccurredOn is { } date
+                ? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{linkEvent.Kind.Label()} · {date:dd.MM.yyyy}")
+                : linkEvent.Kind.Label(),
+            level, parentKey, Expanded: false, Classification: linkEvent.Classification);
+
+    // Подпись участия: роль (свободный текст, укорочена) или «участник»; «предположительно» — дописывается.
+    private static string ParticipationLabel(LinkEventParticipantRow participant)
+    {
+        var role = string.IsNullOrWhiteSpace(participant.Role) ? "участник" : participant.Role.Trim();
+        if (role.Length > MaxLabelLength)
+        {
+            role = string.Concat(role.AsSpan(0, MaxLabelLength - 1), "…");
+        }
+
+        return participant.Level == LinkLevel.Probable ? $"{role} · {participant.Level.Label()}" : role;
+    }
 
     private static RelationNode CaseNode(CaseDetails details, int level, string? parentKey) =>
         new(RelationNodeKeys.Case(details.Id), RelationNodeKind.Case, details.Id, $"Дело № {details.Number}",
@@ -586,6 +661,31 @@ internal sealed class RelationGraphExplorer(
         }
 
         return details;
+    }
+
+    private async Task<LinkEventRow?> GetEventAsync(int eventId)
+    {
+        if (!_events.TryGetValue(eventId, out var linkEvent))
+        {
+            linkEvent = await events.GetAsync(eventId, access, cancellationToken);
+            _events[eventId] = linkEvent;
+        }
+
+        return linkEvent;
+    }
+
+    private async Task<PersonRow?> GetPersonAsync(int personId)
+    {
+        if (!_persons.TryGetValue(personId, out var row))
+        {
+            row = await persons.GetAsync(personId, access, cancellationToken);
+            if (row is not null)
+            {
+                _persons[personId] = row;
+            }
+        }
+
+        return row;
     }
 
     private async Task<IReadOnlyList<PersonRow>> GetCaseMembersAsync(int caseId)

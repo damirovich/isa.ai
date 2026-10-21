@@ -35,6 +35,12 @@ public enum RelationNodeKind
     /// этим номером (ADR-0045 п. 10). Номер без цифр не сохраняется, поэтому узла на строку нет.
     /// </summary>
     Phone = 6,
+
+    /// <summary>
+    /// Событие — «дело-посредник» связи объектов (ТФ-ПЕР-11, ADR-0056 п. 4): узел на событие, видимое субъекту;
+    /// раскрывается во всех видимых участников — доступные фигуранты и чужие дела (ТБ-084).
+    /// </summary>
+    Event = 7,
 }
 
 /// <summary>Вид ребра графа связей.</summary>
@@ -57,6 +63,12 @@ public enum RelationEdgeKind
     /// носителях. Следственная версия, а не утверждение системы (ТФ-ВЕР-03).
     /// </summary>
     CoAppearance = 5,
+
+    /// <summary>
+    /// Участие в событии (ТФ-ПЕР-11, ADR-0056 п. 4): от фигуранта (или чужого дела участника) к событию; подпись — роль
+    /// и уровень связи. Заводит человек (ТБ-073).
+    /// </summary>
+    EventLink = 6,
 }
 
 /// <summary>Узел графа связей.</summary>
@@ -145,10 +157,13 @@ public static class RelationNodeKeys
     /// <summary>Номер телефона по нормализованному значению (ADR-0055).</summary>
     public static string Phone(string phoneNormalized) => PhonePrefix + phoneNormalized;
 
-    /// <summary>Вид узла раскрывается (фигурант, доступное дело, автотранспорт, адрес, телефон).</summary>
+    /// <summary>Событие — «дело-посредник» (ADR-0056).</summary>
+    public static string Event(int eventId) => $"event:{eventId}";
+
+    /// <summary>Вид узла раскрывается (фигурант, доступное дело, автотранспорт, адрес, телефон, событие).</summary>
     public static bool IsExpandable(RelationNodeKind kind) =>
         kind is RelationNodeKind.Person or RelationNodeKind.Case or RelationNodeKind.Vehicle or RelationNodeKind.Address
-            or RelationNodeKind.Phone;
+            or RelationNodeKind.Phone or RelationNodeKind.Event;
 
     /// <summary>
     /// Нормализованное значение из ключа узла автотранспорта или адреса; ключ другого вида (в том числе узла на
@@ -176,6 +191,7 @@ public static class RelationNodeKeys
         RelationNodeKind.Vehicle => "vehicle",
         RelationNodeKind.Address => "address",
         RelationNodeKind.Phone => "phone",
+        RelationNodeKind.Event => "event",
         RelationNodeKind.ForeignCase => "foreign-case",
         _ => "other",
     };

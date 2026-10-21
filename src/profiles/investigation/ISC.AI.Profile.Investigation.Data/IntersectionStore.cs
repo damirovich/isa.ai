@@ -142,6 +142,39 @@ public sealed class IntersectionStore(
             .Select(p => new { Key = p.NumberNormalized, Value = p.Number })
             .ToListAsync(cancellationToken);
 
+        // Места посещения и транспорт контакта из событий (ADR-0056 п. 5): участие с отметкой «в общем поиске» и уровнем
+        // не «неверно» — такие же адрес и госномер объекта, как строки реквизитов. Строка участия и её событие — под
+        // своими floor'ами. События своего объекта запоминаются: совпадение с другим участником того же события —
+        // не пересечение, связь уже заведена человеком.
+        var eventFloor = db.LinkEvents
+            .Where(BaselineAccess.Filter<LinkEvent>(access))
+            .Where(policy.BuildFilter<LinkEvent>(access));
+        var eventPlaces = db.LinkEventParticipants
+            .Where(BaselineAccess.Filter<LinkEventParticipant>(access))
+            .Where(policy.BuildFilter<LinkEventParticipant>(access))
+            .Where(p => p.InSearch && p.Level != LinkLevel.Wrong && eventFloor.Any(e => e.Id == p.EventId));
+        var ownEventIds = await db.LinkEventParticipants.AsNoTracking()
+            .Where(p => p.PersonId == own.Id)
+            .Select(p => p.EventId)
+            .ToListAsync(cancellationToken);
+        var ownEventPlaces = await eventPlaces.AsNoTracking()
+            .Where(p => p.PersonId == own.Id)
+            .OrderBy(p => p.Id)
+            .Select(p => new { p.VehiclePlate, p.VehiclePlateNormalized, p.ContactAddress, p.ContactAddressNormalized })
+            .ToListAsync(cancellationToken);
+        foreach (var place in ownEventPlaces)
+        {
+            if (place.VehiclePlateNormalized is { } plate)
+            {
+                ownPlates.Add(new { Key = plate, Value = place.VehiclePlate ?? plate });
+            }
+
+            if (place.ContactAddressNormalized is { } address)
+            {
+                ownAddresses.Add(new { Key = address, Value = place.ContactAddress ?? address });
+            }
+        }
+
         var ownValues = new Dictionary<(IntersectionKind, string), string>();
         foreach (var plate in ownPlates) { ownValues.TryAdd((IntersectionKind.Vehicle, plate.Key), plate.Value); }
         foreach (var address in ownAddresses) { ownValues.TryAdd((IntersectionKind.Address, address.Key), address.Value); }
@@ -185,6 +218,22 @@ public sealed class IntersectionStore(
             .Select(p => new { Key = p.ResidenceNormalized!, Value = p.Residence, p.CaseId })
             .ToListAsync(cancellationToken);
         matches.AddRange(residenceMatches.Select(m => new Match(IntersectionKind.Address, m.Key, m.Value ?? m.Key, m.CaseId)));
+
+        // Адрес и госномер контакта участников событий других дел (ADR-0056 п. 5) — кроме событий своего объекта.
+        var otherEventPlaces = eventPlaces.AsNoTracking().Where(p => !ownEventIds.Contains(p.EventId));
+        var eventAddressMatches = await otherEventPlaces
+            .Where(p => p.ContactAddressNormalized != null && addressKeys.Contains(p.ContactAddressNormalized))
+            .Join(otherPersons, p => p.PersonId, person => person.Id,
+                (p, person) => new { Key = p.ContactAddressNormalized!, Value = p.ContactAddress, person.CaseId })
+            .ToListAsync(cancellationToken);
+        matches.AddRange(eventAddressMatches.Select(m => new Match(IntersectionKind.Address, m.Key, m.Value ?? m.Key, m.CaseId)));
+
+        var eventPlateMatches = await otherEventPlaces
+            .Where(p => p.VehiclePlateNormalized != null && plateKeys.Contains(p.VehiclePlateNormalized))
+            .Join(otherPersons, p => p.PersonId, person => person.Id,
+                (p, person) => new { Key = p.VehiclePlateNormalized!, Value = p.VehiclePlate, person.CaseId })
+            .ToListAsync(cancellationToken);
+        matches.AddRange(eventPlateMatches.Select(m => new Match(IntersectionKind.Vehicle, m.Key, m.Value ?? m.Key, m.CaseId)));
 
         // Номер телефона (ADR-0055) — точное совпадение нормализованного номера у фигуранта другого дела. Запрос
         // выполняется всегда, и при пустом списке своих номеров: состав запросов не зависит от данных (ТБ-021).

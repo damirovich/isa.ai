@@ -19,7 +19,7 @@
    «История» — список с повтором, закреплением, удалением и очисткой. История хранится на сервере и видна только самому
    сотруднику в пределах его допуска; удаление из неё журнал аудита не меняет. *@
 
-<PageHeader Title="Поиск" Subtitle="Дела, фигуранты, госномера, адреса, телефоны, сводки, расшифровки и документы — в пределах ваших дел"
+<PageHeader Title="Поиск" Subtitle="Дела, фигуранты, госномера, адреса, телефоны, события, сводки, расшифровки и документы — в пределах ваших дел"
             Icon="@Icons.Material.Filled.ManageSearch" />
 
 <MudPaper Outlined="true" Class="pa-3 my-4">
@@ -242,6 +242,37 @@ else if (_result is { } result)
         </SearchSection>
     }
 
+    @* События — «дела-посредники» связи объектов (ADR-0056): ищутся только по участникам с отметкой «в общем поиске»
+       и уровнем не «неверно»; участник — доступный вам фигурант. *@
+    @if (Searched(SearchKinds.Events) && result.Events.Count > 0)
+    {
+        <SearchSection Title="События" Count="result.Events.Count" Truncated="@result.Truncated.HasFlag(SearchKinds.Events)">
+            <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
+                <thead><tr><th>Дата</th><th>Событие</th><th>Участник</th><th>Роль</th><th>Адрес и транспорт контакта</th><th>Дело</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var row in result.Events)
+                    {
+                        <tr>
+                            <td style="white-space:nowrap;">@(row.OccurredOn?.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture) ?? "—")</td>
+                            <td><span class="mud-text-secondary">@row.Kind.Label():</span> @Highlight(row.Title, query)</td>
+                            <td><a href="@($"/persons/{row.PersonId}")">@row.PersonName</a></td>
+                            <td>@Highlight(row.Role, query)</td>
+                            <td>
+                                @Highlight(row.ContactAddress, query)
+                                @if (row.VehiclePlate is { } plate)
+                                {
+                                    <span style="font-family:monospace;"> @plate</span>
+                                }
+                            </td>
+                            <td>@CaseLink(row.CaseId, result)</td>
+                            <td><a href="@($"/events/{row.EventId}/graph?from={row.PersonId}")" title="Все участники события на графе">граф</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </SearchSection>
+    }
+
     @if (Searched(SearchKinds.Reports) && result.Reports.Count > 0)
     {
         <SearchSection Title="Сводки и справки" Count="result.Reports.Count" Truncated="@result.Truncated.HasFlag(SearchKinds.Reports)">
@@ -311,6 +342,7 @@ else if (!_busy)
     <MudText Typo="Typo.body2" Class="mud-text-secondary">
         Госномер ищется при любом написании («01 KG 123 ABC», «01kg123abc»), адрес — с «ул.» и без, ФИО и псевдоним — с «ё» и «е»;
         телефон — по цифрам, с «+996», с нулём или без («0555 123 456» = «+996 555 123 456»), можно часть номера от 5 цифр;
+        событие — по названию, описанию, роли, адресу и госномеру контакта, если участие отмечено «учитывать в общем поиске»;
         дата рождения — в виде «дд.мм.гггг» или годом. Каждый поиск записывается в журнал.
     </MudText>
 }

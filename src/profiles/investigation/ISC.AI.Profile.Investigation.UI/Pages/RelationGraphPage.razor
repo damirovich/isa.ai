@@ -1,6 +1,7 @@
 @namespace ISC.AI.Profile.Investigation.UI
 @page "/persons/{PersonId:int}/graph"
 @page "/cases/{CaseId:int}/graph"
+@page "/events/{EventId:int}/graph"
 @rendermode InteractiveServer
 @implements IAsyncDisposable
 @using System.Globalization
@@ -140,6 +141,7 @@
         (RelationNodeKind.Vehicle, "Автотранспорт", Icons.Material.Filled.DirectionsCar, Color.Secondary),
         (RelationNodeKind.Address, "Адреса", Icons.Material.Filled.Place, Color.Success),
         (RelationNodeKind.Phone, "Телефоны", Icons.Material.Filled.Phone, Color.Tertiary),
+        (RelationNodeKind.Event, "События", Icons.Material.Filled.Event, Color.Error),
     ];
 
     /// <summary>Центр — фигурант (маршрут <c>/persons/{id}/graph</c>).</summary>
@@ -147,6 +149,15 @@
 
     /// <summary>Центр — дело (маршрут <c>/cases/{id}/graph</c>).</summary>
     [Parameter] public int? CaseId { get; set; }
+
+    /// <summary>
+    /// Центр — событие, «дело-посредник» (маршрут <c>/events/{id}/graph</c>, ADR-0056 п. 4): все видимые участники
+    /// события (ФТ-5.2.5). Своей карточки у события нет — «Назад» ведёт к фигуранту из параметра <c>from</c>.
+    /// </summary>
+    [Parameter] public int? EventId { get; set; }
+
+    /// <summary>Фигурант, из карточки которого открыт граф события, — для кнопки «Назад».</summary>
+    [SupplyParameterFromQuery(Name = "from")] public int? FromPersonId { get; set; }
 
     private readonly BlazorDiagram _diagram = CreateDiagram();
     private readonly Dictionary<string, RelationGraphNodeModel> _nodes = new(StringComparer.Ordinal);
@@ -173,11 +184,17 @@
     private RelationNode? _pathTarget;
     private int _depth = GetRelationGraphQuery.DefaultDepth;
 
-    private RelationNodeKind CenterKind => CaseId is not null ? RelationNodeKind.Case : RelationNodeKind.Person;
-    private int CenterId => CaseId ?? PersonId ?? 0;
+    private RelationNodeKind CenterKind => CaseId is not null
+        ? RelationNodeKind.Case
+        : EventId is not null ? RelationNodeKind.Event : RelationNodeKind.Person;
+    private int CenterId => CaseId ?? EventId ?? PersonId ?? 0;
     private string CenterRouteKey => string.Create(CultureInfo.InvariantCulture, $"{CenterKind}:{CenterId}");
-    private string BackHref => CaseId is { } caseId ? $"/cases/{caseId}" : $"/persons/{PersonId}";
-    private string BackLabel => CaseId is not null ? "К делу" : "К фигуранту";
+    private string BackHref => CaseId is { } caseId
+        ? $"/cases/{caseId}"
+        : EventId is not null ? (FromPersonId is { } from ? $"/persons/{from}" : "/cases") : $"/persons/{PersonId}";
+    private string BackLabel => CaseId is not null
+        ? "К делу"
+        : EventId is not null && FromPersonId is null ? "К делам" : "К фигуранту";
     private int CollapsedCount => _nodes.Values.Count(n => !n.IsCenter && n.Node.Expandable && !n.Expanded);
     private int HiddenCount => _nodes.Values.Count(n => !n.Visible);
 

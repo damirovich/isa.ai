@@ -68,6 +68,7 @@
         RelationNodeKind.ForeignCase => "foreign",
         RelationNodeKind.Vehicle => "vehicle",
         RelationNodeKind.Phone => "phone",
+        RelationNodeKind.Event => "event",
         _ => "address",
     };
 
@@ -78,6 +79,7 @@
         RelationNodeKind.ForeignCase => Icons.Material.Filled.FolderShared,
         RelationNodeKind.Vehicle => Icons.Material.Filled.DirectionsCar,
         RelationNodeKind.Phone => Icons.Material.Filled.Phone,
+        RelationNodeKind.Event => Icons.Material.Filled.Event,
         _ => Icons.Material.Filled.Place,
     };
 
@@ -89,6 +91,7 @@
         RelationNodeKind.ForeignCase => "var(--mud-palette-warning)",
         RelationNodeKind.Vehicle => "var(--mud-palette-secondary)",
         RelationNodeKind.Phone => "var(--mud-palette-tertiary)",
+        RelationNodeKind.Event => "var(--mud-palette-error)",
         _ => "var(--mud-palette-success)",
     };
 
@@ -119,6 +122,7 @@
                     RelationNodeKind.Vehicle => "Щелчок — у кого ещё этот госномер (в доступных вам делах)",
                     RelationNodeKind.Address => "Щелчок — кто ещё по этому адресу (в доступных вам делах)",
                     RelationNodeKind.Phone => "Щелчок — у кого ещё этот номер (в доступных вам делах)",
+                    RelationNodeKind.Event => "Щелчок — все участники события (в пределах вашего допуска)",
                     _ => "Щелчок — показать связи",
                 });
             }

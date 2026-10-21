@@ -155,7 +155,7 @@ public sealed class CaseBriefTests
         brief.Sections.Select(s => s.Title).ShouldBe(
         [
             "Фигурант", "Адреса", "Транспорт", "Телефоны", "Дело фигуранта", "Подтверждённые появления", "История верификаций",
-            "Поиски по эталонам фигуранта", "Связи", "Пересечения с другими делами",
+            "Поиски по эталонам фигуранта", "Связи", "События (связи через дело-посредник)", "Пересечения с другими делами",
         ]);
         Fact(Section(brief, "Фигурант"), "Псевдоним").ShouldBe("Ваня");
         Section(brief, "Транспорт").Table.ShouldNotBeNull().Rows.ShouldHaveSingleItem()[0].ShouldBe("01KG123ABC");
@@ -193,6 +193,32 @@ public sealed class CaseBriefTests
         intersections.Columns.ShouldBe(["Реквизит", "Значение", "Дело", "Вид дела", "Статус дела", "Решение"]);
         intersections.Rows.ShouldHaveSingleItem().ShouldBe(
             [IntersectionKind.Vehicle.Label(), "01KG123ABC", "12-2026/099", CaseKind.CriminalCase.Label(), CaseStatus.InProgress.Label(), "не рассмотрено"]);
+    }
+
+    [Fact(DisplayName = "ADR-0056: справка по фигуранту — события: дата, событие, роль, уровень, другие участники (чужой — номером дела); гриф — не ниже грифа события")]
+    public async Task Person_brief_lists_events()
+    {
+        var kit = new Kit();
+        kit.Events.ListForPersonAsync(PersonId, Access, Arg.Any<CancellationToken>()).Returns(
+        [
+            new LinkEventRow(5, LinkEventKind.Meeting, "Встреча у рынка", new DateOnly(2026, 10, 5), null, 3, 5, 42, DateTime.UtcNow,
+            [
+                new LinkEventParticipantRow(1, PersonId, "Иванов Иван", null, CaseId, "12-2026/045", CaseKind.ObjectTask, CaseStatus.InProgress, 42,
+                    true, "водитель", LinkLevel.Confirmed, true, null, null, null, 1),
+                new LinkEventParticipantRow(2, 8, "Петров Пётр", null, CaseId, "12-2026/045", CaseKind.ObjectTask, CaseStatus.InProgress, 42,
+                    true, null, LinkLevel.Probable, true, null, null, null, 1),
+                new LinkEventParticipantRow(3, null, null, null, 99, "77/26", CaseKind.CriminalCase, CaseStatus.InProgress, 50,
+                    false, null, LinkLevel.Confirmed, false, null, null, null, 2),
+            ]),
+        ]);
+
+        var brief = (await kit.Collector.PersonAsync(PersonId, Access, CancellationToken.None)).ShouldNotBeNull();
+
+        var section = Section(brief, "События (связи через дело-посредник)");
+        Fact(section, "Событий").ShouldBe("1");
+        section.Table.ShouldNotBeNull().Rows.ShouldHaveSingleItem().ShouldBe(
+            ["05.10.2026", "Встреча: Встреча у рынка", "водитель", "верно", "Петров Пётр (предположительно); дело № 77/26"]);
+        brief.Classification.ShouldBe((short)3, "гриф события 3");
     }
 
     [Fact(DisplayName = "Гриф справки по фигуранту поднимают строки появлений, транспорта и чужое дело пересечения (на экран гриф чужого дела не выводится)")]
@@ -690,7 +716,8 @@ public sealed class CaseBriefTests
                 ],
             });
 
-            Collector = new BriefCollector(Cases, Persons, Requisites, Intersections, CaseDocuments, Documents, Reports, Sessions, Catalog,
+            Events.ListForPersonAsync(Arg.Any<int>(), Arg.Any<AccessContext>(), Arg.Any<CancellationToken>()).Returns([]);
+            Collector = new BriefCollector(Cases, Persons, Requisites, Intersections, Events, CaseDocuments, Documents, Reports, Sessions, Catalog,
                 Accounts, References, Divisions, new FixedTime(new DateTimeOffset(2026, 10, 15, 12, 0, 0, TimeSpan.Zero)));
         }
 
@@ -703,6 +730,8 @@ public sealed class CaseBriefTests
         public IPersonRequisiteStore Requisites { get; } = Substitute.For<IPersonRequisiteStore>();
 
         public IIntersectionStore Intersections { get; } = Substitute.For<IIntersectionStore>();
+
+        public ILinkEventStore Events { get; } = Substitute.For<ILinkEventStore>();
 
         public ICaseDocumentStore CaseDocuments { get; } = Substitute.For<ICaseDocumentStore>();
 

@@ -1,0 +1,71 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@using ISC.AI.Profile.Investigation.Application.Features.LinkEvents
+@using ISC.AI.Profile.Investigation.Domain.Enums
+
+@* Поля участия объекта в событии (ТФ-ПЕР-11, ADR-0056) — для диалогов «Связать через событие» и «Изменить»: уровень
+   связи [АИС ПМИ 3], отметка «учитывать в общем поиске», транспорт и адрес контакта. Ячейки сетки — внутри MudGrid
+   вызывающего. Значения передаются выражениями (`Value="@VehiclePlate"`): строковый параметр без «@» Razor подставил бы
+   как текст — так в поля попадали имена переменных. *@
+
+<MudItem xs="12" sm="6">
+    <MudSelect T="LinkLevel" Value="@Level" ValueChanged="LevelChanged" Label="Уровень связи" Variant="Variant.Outlined"
+               HelperText="«неверно» — остаётся историей, но не идёт в граф, поиск и пересечения">
+        @foreach (var level in Enum.GetValues<LinkLevel>())
+        {
+            <MudSelectItem T="LinkLevel" Value="@level">@level.Label()</MudSelectItem>
+        }
+    </MudSelect>
+</MudItem>
+<MudItem xs="12" sm="6" Class="d-flex align-center">
+    <MudCheckBox T="bool" Value="@InSearch" ValueChanged="InSearchChanged" Color="Color.Primary" Label="Учитывать в общем поиске" />
+</MudItem>
+<MudItem xs="12">
+    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+        Без отметки связь видна на карточках и графе, но не находится общим поиском, а её адрес и транспорт не дают
+        пересечений по местам посещения.
+    </MudText>
+</MudItem>
+<MudItem xs="12" sm="4">
+    <MudTextField T="string" Value="@VehiclePlate" ValueChanged="VehiclePlateChanged" Label="Госномер транспорта"
+                  Variant="Variant.Outlined" MaxLength="@LinkParticipantDraftValidator.MaxPlateLength" />
+</MudItem>
+<MudItem xs="12" sm="8">
+    <MudTextField T="string" Value="@VehicleDetails" ValueChanged="VehicleDetailsChanged" Label="Марка, модель, цвет"
+                  Variant="Variant.Outlined" MaxLength="@LinkParticipantDraftValidator.MaxVehicleDetailsLength" />
+</MudItem>
+<MudItem xs="12">
+    <MudTextField T="string" Value="@ContactAddress" ValueChanged="ContactAddressChanged" Label="Адрес контакта"
+                  Variant="Variant.Outlined" MaxLength="@LinkParticipantDraftValidator.MaxAddressLength" />
+</MudItem>
+
+@code {
+    /// <summary>Уровень связи.</summary>
+    [Parameter] public LinkLevel Level { get; set; } = LinkLevel.Confirmed;
+
+    /// <summary>Уровень связи изменён.</summary>
+    [Parameter] public EventCallback<LinkLevel> LevelChanged { get; set; }
+
+    /// <summary>Учитывать в общем поиске.</summary>
+    [Parameter] public bool InSearch { get; set; } = true;
+
+    /// <summary>Отметка поиска изменена.</summary>
+    [Parameter] public EventCallback<bool> InSearchChanged { get; set; }
+
+    /// <summary>Госномер транспорта контакта.</summary>
+    [Parameter] public string? VehiclePlate { get; set; }
+
+    /// <summary>Госномер изменён.</summary>
+    [Parameter] public EventCallback<string?> VehiclePlateChanged { get; set; }
+
+    /// <summary>Марка, модель, цвет.</summary>
+    [Parameter] public string? VehicleDetails { get; set; }
+
+    /// <summary>Марка и модель изменены.</summary>
+    [Parameter] public EventCallback<string?> VehicleDetailsChanged { get; set; }
+
+    /// <summary>Адрес контакта.</summary>
+    [Parameter] public string? ContactAddress { get; set; }
+
+    /// <summary>Адрес контакта изменён.</summary>
+    [Parameter] public EventCallback<string?> ContactAddressChanged { get; set; }
+}

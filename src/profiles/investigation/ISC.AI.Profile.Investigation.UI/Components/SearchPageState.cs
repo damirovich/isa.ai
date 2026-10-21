@@ -23,7 +23,7 @@ public sealed record SearchPageState(string? Text = null, SearchKinds Kinds = Se
     public static IReadOnlyList<SearchKinds> AllKinds { get; } =
     [
         SearchKinds.Cases, SearchKinds.Persons, SearchKinds.Vehicles, SearchKinds.Addresses, SearchKinds.Phones,
-        SearchKinds.Reports, SearchKinds.Transcripts, SearchKinds.Documents,
+        SearchKinds.Events, SearchKinds.Reports, SearchKinds.Transcripts, SearchKinds.Documents,
     ];
 
     /// <summary>Состояние по параметрам адреса; неразобранное — умолчание.</summary>
@@ -78,6 +78,7 @@ public sealed record SearchPageState(string? Text = null, SearchKinds Kinds = Se
         SearchKinds.Vehicles => "Автотранспорт",
         SearchKinds.Addresses => "Адреса",
         SearchKinds.Phones => "Телефоны",
+        SearchKinds.Events => "События",
         SearchKinds.Reports => "Сводки и справки",
         SearchKinds.Transcripts => "Расшифровки",
         SearchKinds.Documents => "Документы дел",

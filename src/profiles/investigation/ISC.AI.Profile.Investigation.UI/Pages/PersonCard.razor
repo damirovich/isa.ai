@@ -281,6 +281,12 @@ else
         </div>
     </MudTabPanel>
 
+    @* --- События (ТФ-ПЕР-11, ADR-0056): связи с объектами других дел через «дело-посредник». Читаются при открытии
+       вкладки; отметка числа появляется после первого чтения. --- *@
+    <MudTabPanel Text="События" Icon="@Icons.Material.Filled.Event" BadgeData="@_eventCount" BadgeColor="Color.Default">
+        <PersonEventLinks PersonId="Id" CountChanged="@(count => _eventCount = count)" />
+    </MudTabPanel>
+
     @* --- Адреса, автотранспорт и телефоны (ТФ-ПЕР-06, ТФ-ПЕР-12): по нормализованным значениям ищутся пересечения
        (ТФ-ПЕР-07) --- *@
     <MudTabPanel Text="Адреса, транспорт, телефоны" Icon="@Icons.Material.Filled.DirectionsCar"
@@ -943,6 +949,7 @@ else
     private readonly List<PersonAddressRow> _addresses = [];
     private readonly List<PersonVehicleRow> _vehicles = [];
     private string? _casePersonsError;
+    private int? _eventCount;
     private string? _requisitesError;
 
     // --- Пересечения (ТФ-ПЕР-07) ---

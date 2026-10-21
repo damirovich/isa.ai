@@ -26,7 +26,7 @@ public enum RelationGraphExportFormat
 /// уже на холсте, — новых сведений сервер не отдаёт; но выгрузка выносит их за пределы системы, поэтому сама — запись
 /// <see cref="AuditAction.Export"/>, и страница выгружает файл только после успешной записи.
 /// </summary>
-/// <param name="CenterKind">Центр графа (или начало цепочки): фигурант или дело.</param>
+/// <param name="CenterKind">Центр графа (или начало цепочки): фигурант, дело или событие (ADR-0056).</param>
 /// <param name="CenterId">Фигурант или дело.</param>
 /// <param name="Format">Формат.</param>
 /// <param name="NodeCount">Сколько узлов на картинке.</param>
@@ -82,7 +82,7 @@ public sealed class ExportRelationGraphValidator : AbstractValidator<ExportRelat
     /// <inheritdoc cref="ExportRelationGraphValidator" />
     public ExportRelationGraphValidator()
     {
-        RuleFor(c => c.CenterKind).Must(kind => kind is RelationNodeKind.Person or RelationNodeKind.Case);
+        RuleFor(c => c.CenterKind).Must(kind => kind is RelationNodeKind.Person or RelationNodeKind.Case or RelationNodeKind.Event);
         RuleFor(c => c.CenterId).GreaterThan(0);
         RuleFor(c => c.Format).IsInEnum();
         RuleFor(c => c.NodeCount).GreaterThan(0);

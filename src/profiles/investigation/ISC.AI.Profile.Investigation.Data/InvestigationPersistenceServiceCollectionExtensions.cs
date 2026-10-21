@@ -44,6 +44,7 @@ public static class InvestigationPersistenceServiceCollectionExtensions
 
         // Адреса и автотранспорт фигурантов (ТФ-ПЕР-06) — та же решётка через PersonAccess.
         services.AddScoped<IPersonRequisiteStore, PersonRequisiteStore>();
+        services.AddScoped<ILinkEventStore, LinkEventStore>();
         services.AddScoped<ISearchHistoryStore, SearchHistoryStore>();
 
         // Пересечения между делами (ТФ-ПЕР-07, ТБ-084, ADR-0029): floor допуска без сужения по роли.

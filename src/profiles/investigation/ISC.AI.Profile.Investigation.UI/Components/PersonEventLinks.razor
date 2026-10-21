@@ -1,0 +1,565 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@using System.Globalization
+@using System.Net
+@using ISC.AI.Abstractions.Application
+@using ISC.AI.Profile.Investigation.Application.Features.LinkEvents
+@using ISC.AI.Profile.Investigation.Domain.Enums
+@using ISC.AI.Profile.Investigation.Domain.Services
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+@* События фигуранта — «дела-посредники» его связей с объектами других дел (ТФ-ПЕР-11, ADR-0056). Показывается только
+   то, что сервер отдал под решёткой: событие — в пределах допуска и с доступным участником; участник вне ваших дел по
+   роли — номером дела, ведущим, видом и статусом (ТБ-084); выше допуска — никак. Связь заводит человек (ТБ-073),
+   каждое действие — в журнале (ТБ-030). Участие «неверно» остаётся здесь историей, но в граф, поиск и пересечения не
+   идёт. *@
+
+<div class="pt-3">
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+    }
+    <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+            Связь с объектом другого дела через событие — встречу, контакт, совместную поездку. Видна в карточках обоих
+            объектов и на графе.
+        </MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.AddLink"
+                   OnClick="OpenLink" Disabled="_busy">Связать через событие</MudButton>
+    </div>
+
+    <MudTable T="LinkEventRow" Items="_events" Hover="true" Dense="true" Outlined="true" Loading="_busy">
+        <HeaderContent>
+            <MudTh Style="white-space:nowrap;">Дата</MudTh>
+            <MudTh>Событие</MudTh>
+            <MudTh>Участие объекта</MudTh>
+            <MudTh>Другие участники</MudTh>
+            <MudTh Style="width:1%;white-space:nowrap;">Действия</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            @{ var own = Own(context); }
+            <MudTd DataLabel="Дата" Style="white-space:nowrap;">@DateLabel(context.OccurredOn)</MudTd>
+            <MudTd DataLabel="Событие">
+                <MudText Typo="Typo.body2"><span class="mud-text-secondary">@context.Kind.Label():</span> @context.Title</MudText>
+                @if (!string.IsNullOrWhiteSpace(context.Description))
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block" Style="white-space:pre-wrap;">@context.Description</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Участие объекта">
+                @if (own is not null)
+                {
+                    <div class="d-flex align-center flex-wrap gap-1">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@LevelColor(own.Level)"
+                                 Style="@(own.Level == LinkLevel.Wrong ? "text-decoration:line-through;" : null)">@own.Level.Label()</MudChip>
+                        @if (!string.IsNullOrWhiteSpace(own.Role))
+                        {
+                            <span>@own.Role</span>
+                        }
+                    </div>
+                    @if (Contact(own) is { } contact)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">@contact</MudText>
+                    }
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                        @(own.InSearch ? "учитывается в общем поиске" : "не учитывается в общем поиске")
+                    </MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Другие участники">
+                @{ var others = context.Participants.Where(p => !ReferenceEquals(p, own)).ToList(); }
+                @if (others.Count == 0)
+                {
+                    <span class="mud-text-secondary">других участников нет</span>
+                }
+                @foreach (var other in others)
+                {
+                    <div class="d-flex align-center flex-wrap gap-1">
+                        @if (other.IsAccessible && other.PersonId is { } otherId)
+                        {
+                            <MudLink Href="@($"/persons/{otherId}")">@other.PersonName</MudLink>
+                            @if (!string.IsNullOrWhiteSpace(other.Role))
+                            {
+                                <span class="mud-text-secondary"> · @other.Role</span>
+                            }
+                        }
+                        else
+                        {
+                            @* ТБ-084: участник из дела вне ваших дел по роли — только номер, вид и статус дела. *@
+                            <span>дело № @other.CaseNumber</span>
+                            <span class="mud-text-secondary"> · @other.CaseKind.Label() · @other.CaseStatus.Label()</span>
+                        }
+                        @if (other.Level != LinkLevel.Confirmed)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@LevelColor(other.Level)">@other.Level.Label()</MudChip>
+                        }
+                    </div>
+                }
+            </MudTd>
+            <MudTd DataLabel="Действия" Style="white-space:nowrap;">
+                <div class="d-flex flex-nowrap align-center gap-2">
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="@(_busy || own is null)"
+                               OnClick="@(() => OpenEdit(context))">Изменить</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Href="@($"/events/{context.Id}/graph?from={PersonId}")"
+                               StartIcon="@Icons.Material.Filled.AccountTree">Граф</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" Disabled="@(_busy || own is null)"
+                               OnClick="@(() => RemoveAsync(context))">Исключить…</MudButton>
+                </div>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                Событий нет либо они вне вашего допуска. Свяжите объект с другим объектом кнопкой «Связать через событие».
+            </MudText>
+        </NoRecordsContent>
+    </MudTable>
+</div>
+
+@* --- Связать через событие (ТФ-ПЕР-11): второй объект — только из доступных вам; событие — новое или уже связанное с
+   одним из двух объектов. --- *@
+<MudDialog @bind-Visible="_linkOpen" Options="DialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Связать через событие</MudText></TitleContent>
+    <DialogContent>
+        @if (_formError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_formError</MudAlert>
+        }
+        <MudGrid Spacing="2">
+            <MudItem xs="12">
+                <MudAutocomplete T="EventLinkCandidate" Value="_other" ValueChanged="SelectOtherAsync" Label="Второй объект *"
+                                 Placeholder="ФИО или псевдоним" SearchFunc="SearchCandidatesAsync"
+                                 ToStringFunc="@(c => c is null ? string.Empty : c.DisplayName)"
+                                 MinCharacters="2" DebounceInterval="400" MaxItems="@SearchEventLinkCandidatesQuery.MaxResults"
+                                 Clearable="true" ResetValueOnEmptyText="true" Variant="Variant.Outlined"
+                                 HelperText="фигурант любого доступного вам дела">
+                    <ItemTemplate Context="hit">
+                        <MudText Typo="Typo.body2">@hit.DisplayName</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@hit.Details</MudText>
+                    </ItemTemplate>
+                </MudAutocomplete>
+            </MudItem>
+            <MudItem xs="12">
+                <MudSelect T="int?" @bind-Value="_eventId" Label="Событие" Variant="Variant.Outlined"
+                           HelperText="новое или уже связанное с одним из двух объектов">
+                    <MudSelectItem T="int?" Value="@((int?)null)">Новое событие</MudSelectItem>
+                    @foreach (var existing in ExistingEvents)
+                    {
+                        <MudSelectItem T="int?" Value="@((int?)existing.Id)">@EventCaption(existing)</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            @if (_eventId is null)
+            {
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="LinkEventKind" @bind-Value="_kind" Label="Вид события" Variant="Variant.Outlined">
+                        @foreach (var kind in Enum.GetValues<LinkEventKind>())
+                        {
+                            <MudSelectItem T="LinkEventKind" Value="@kind">@kind.Label()</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudDatePicker @bind-Date="_date" Label="Дата события" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" Clearable="true" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="_title" Label="Название *" Variant="Variant.Outlined" Immediate="true"
+                                  MaxLength="@LinkEventDraftValidator.MaxTitleLength" Placeholder="Встреча у рынка «Ош»" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="_description" Label="Описание" Variant="Variant.Outlined" Lines="2"
+                                  MaxLength="@LinkEventDraftValidator.MaxDescriptionLength" />
+                </MudItem>
+            }
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_role" Label="Роль этого объекта" Variant="Variant.Outlined"
+                              MaxLength="@LinkParticipantDraftValidator.MaxRoleLength" Placeholder="водитель, организатор…" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_otherRole" Label="Роль второго объекта" Variant="Variant.Outlined"
+                              MaxLength="@LinkParticipantDraftValidator.MaxRoleLength" />
+            </MudItem>
+            <ParticipationFields Level="@_level" LevelChanged="@(v => _level = v)" InSearch="@_inSearch" InSearchChanged="@(v => _inSearch = v)"
+                                 VehiclePlate="@_plate" VehiclePlateChanged="@(v => _plate = v)"
+                                 VehicleDetails="@_vehicle" VehicleDetailsChanged="@(v => _vehicle = v)"
+                                 ContactAddress="@_address" ContactAddressChanged="@(v => _address = v)" />
+        </MudGrid>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+            Уровень, отметка, транспорт и адрес получают новые участники; объект, уже участвующий в событии, сохраняет свою
+            запись — её меняют кнопкой «Изменить».
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _linkOpen = false)">Отмена</MudButton>
+        @if (LinkBlocker is { } blocker && !_busy)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">@blocker</MudText>
+        }
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_busy || LinkBlocker is not null)" OnClick="SaveLinkAsync">Связать</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* --- Изменить событие и участие этого объекта --- *@
+<MudDialog @bind-Visible="_editOpen" Options="DialogOptions">
+    <TitleContent><MudText Typo="Typo.h6">Изменить событие и участие</MudText></TitleContent>
+    <DialogContent>
+        @if (_formError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_formError</MudAlert>
+        }
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="6">
+                <MudSelect T="LinkEventKind" @bind-Value="_kind" Label="Вид события" Variant="Variant.Outlined">
+                    @foreach (var kind in Enum.GetValues<LinkEventKind>())
+                    {
+                        <MudSelectItem T="LinkEventKind" Value="@kind">@kind.Label()</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudDatePicker @bind-Date="_date" Label="Дата события" Variant="Variant.Outlined" DateFormat="dd.MM.yyyy" Clearable="true" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_title" Label="Название *" Variant="Variant.Outlined" Immediate="true"
+                              MaxLength="@LinkEventDraftValidator.MaxTitleLength" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_description" Label="Описание" Variant="Variant.Outlined" Lines="2"
+                              MaxLength="@LinkEventDraftValidator.MaxDescriptionLength" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_role" Label="Роль этого объекта" Variant="Variant.Outlined"
+                              MaxLength="@LinkParticipantDraftValidator.MaxRoleLength" />
+            </MudItem>
+            <ParticipationFields Level="@_level" LevelChanged="@(v => _level = v)" InSearch="@_inSearch" InSearchChanged="@(v => _inSearch = v)"
+                                 VehiclePlate="@_plate" VehiclePlateChanged="@(v => _plate = v)"
+                                 VehicleDetails="@_vehicle" VehicleDetailsChanged="@(v => _vehicle = v)"
+                                 ContactAddress="@_address" ContactAddressChanged="@(v => _address = v)" />
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _editOpen = false)">Отмена</MudButton>
+        @if (string.IsNullOrWhiteSpace(_title) && !_busy)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mr-2">Заполните: название</MudText>
+        }
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_busy || string.IsNullOrWhiteSpace(_title))"
+                   OnClick="SaveEditAsync">Сохранить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly DialogOptions DialogOptions = new() { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true };
+
+    /// <summary>Фигурант, чья это карточка.</summary>
+    [Parameter, EditorRequired] public int PersonId { get; set; }
+
+    /// <summary>Число событий изменилось — для отметки на вкладке карточки.</summary>
+    [Parameter] public EventCallback<int> CountChanged { get; set; }
+
+    private readonly List<LinkEventRow> _events = [];
+    private readonly List<LinkEventRow> _otherEvents = [];
+    private int? _loadedFor;
+    private bool _busy;
+    private string? _error;
+    private string? _formError;
+
+    private bool _linkOpen;
+    private bool _editOpen;
+    private EventLinkCandidate? _other;
+    private int? _eventId;
+    private LinkEventRow? _editing;
+    private LinkEventKind _kind = LinkEventKind.Meeting;
+    private DateTime? _date;
+    private string? _title;
+    private string? _description;
+    private string? _role;
+    private string? _otherRole;
+    private LinkLevel _level = LinkLevel.Confirmed;
+    private bool _inSearch = true;
+    private string? _plate;
+    private string? _vehicle;
+    private string? _address;
+
+    // События, через которые можно связать: этого объекта и выбранного второго, кроме тех, где оба уже участвуют.
+    private IEnumerable<LinkEventRow> ExistingEvents => _events.Concat(_otherEvents)
+        .DistinctBy(e => e.Id)
+        .Where(e => _other is null || !(e.Participants.Any(p => p.PersonId == PersonId) && e.Participants.Any(p => p.PersonId == _other.PersonId)))
+        .OrderByDescending(e => e.OccurredOn.HasValue)
+        .ThenByDescending(e => e.OccurredOn)
+        .ThenByDescending(e => e.Id);
+
+    // Что мешает связать — показывается у кнопки (самосвязь отсекает и сервер, [АИС табл. 7.1 № 3]).
+    private string? LinkBlocker =>
+        _other is null ? "Выберите второй объект"
+        : _other.PersonId == PersonId ? LinkEventGuard.SelfLink
+        : _eventId is null && string.IsNullOrWhiteSpace(_title) ? "Заполните: название события"
+        : null;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере события не читаются.
+        if (!RendererInfo.IsInteractive || _loadedFor == PersonId)
+        {
+            return;
+        }
+
+        _loadedFor = PersonId;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ListPersonEventsQuery(PersonId));
+            _events.Clear();
+            if (response is { Status: true, Data: { } list })
+            {
+                _events.AddRange(list);
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await CountChanged.InvokeAsync(_events.Count);
+    }
+
+    private LinkEventParticipantRow? Own(LinkEventRow linkEvent) =>
+        linkEvent.Participants.FirstOrDefault(p => p.PersonId == PersonId);
+
+    private void OpenLink()
+    {
+        ResetForm();
+        _other = null;
+        _otherEvents.Clear();
+        _eventId = null;
+        _linkOpen = true;
+    }
+
+    private void OpenEdit(LinkEventRow linkEvent)
+    {
+        if (Own(linkEvent) is not { } own)
+        {
+            return;
+        }
+
+        _formError = null;
+        _editing = linkEvent;
+        _kind = linkEvent.Kind;
+        _date = linkEvent.OccurredOn?.ToDateTime(TimeOnly.MinValue);
+        _title = linkEvent.Title;
+        _description = linkEvent.Description;
+        _role = own.Role;
+        _level = own.Level;
+        _inSearch = own.InSearch;
+        _plate = own.VehiclePlate;
+        _vehicle = own.VehicleDetails;
+        _address = own.ContactAddress;
+        _editOpen = true;
+    }
+
+    private void ResetForm()
+    {
+        _formError = null;
+        _kind = LinkEventKind.Meeting;
+        _date = null;
+        _title = null;
+        _description = null;
+        _role = null;
+        _otherRole = null;
+        _level = LinkLevel.Confirmed;
+        _inSearch = true;
+        _plate = null;
+        _vehicle = null;
+        _address = null;
+    }
+
+    private async Task<IEnumerable<EventLinkCandidate>> SearchCandidatesAsync(string? text, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(text) || text.Trim().Length < 2)
+        {
+            return [];
+        }
+
+        var response = await Dispatcher.Send(new SearchEventLinkCandidatesQuery(text.Trim()), cancellationToken);
+        return response is { Status: true, Data: { } hits } ? hits.Where(h => h.PersonId != PersonId) : [];
+    }
+
+    // Второй объект выбран — его события тоже можно выбрать посредником.
+    private async Task SelectOtherAsync(EventLinkCandidate? candidate)
+    {
+        _other = candidate;
+        _otherEvents.Clear();
+        if (_eventId is { } chosen && _events.All(e => e.Id != chosen))
+        {
+            _eventId = null;
+        }
+
+        if (candidate is null)
+        {
+            return;
+        }
+
+        var response = await Dispatcher.Send(new ListPersonEventsQuery(candidate.PersonId));
+        if (response is { Status: true, Data: { } list })
+        {
+            _otherEvents.AddRange(list);
+        }
+    }
+
+    private async Task SaveLinkAsync()
+    {
+        if (_other is null || LinkBlocker is not null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _formError = null;
+        try
+        {
+            var command = new LinkPersonsViaEventCommand(
+                PersonId,
+                _other.PersonId,
+                _eventId,
+                _eventId is null ? new LinkEventDraft(_kind, _title!.Trim(), DateOnlyOf(_date), Clean(_description)) : null,
+                Clean(_role),
+                Clean(_otherRole),
+                Participation());
+            var response = await Dispatcher.Send(command);
+            if (!response.Status)
+            {
+                _formError = response.StatusMessage;
+                return;
+            }
+
+            _linkOpen = false;
+            Snackbar.Add($"Связь с объектом «{_other.DisplayName}» заведена.", Severity.Success);
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await LoadAsync();
+    }
+
+    private async Task SaveEditAsync()
+    {
+        if (_editing is not { } linkEvent || Own(linkEvent) is not { } own || string.IsNullOrWhiteSpace(_title))
+        {
+            return;
+        }
+
+        _busy = true;
+        _formError = null;
+        try
+        {
+            var draft = new LinkEventDraft(_kind, _title.Trim(), DateOnlyOf(_date), Clean(_description));
+            if (draft != new LinkEventDraft(linkEvent.Kind, linkEvent.Title, linkEvent.OccurredOn, linkEvent.Description))
+            {
+                var eventResponse = await Dispatcher.Send(new UpdateLinkEventCommand(linkEvent.Id, draft));
+                if (!eventResponse.Status)
+                {
+                    _formError = eventResponse.StatusMessage;
+                    return;
+                }
+            }
+
+            var participation = Participation() with { Role = Clean(_role) };
+            if (participation != new LinkParticipantDraft(own.Role, own.Level, own.InSearch, own.VehiclePlate, own.VehicleDetails, own.ContactAddress))
+            {
+                var participantResponse = await Dispatcher.Send(new UpdateEventParticipantCommand(own.Id, participation));
+                if (!participantResponse.Status)
+                {
+                    _formError = participantResponse.StatusMessage;
+                    return;
+                }
+            }
+
+            _editOpen = false;
+            Snackbar.Add("Изменения сохранены.", Severity.Success);
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await LoadAsync();
+    }
+
+    private async Task RemoveAsync(LinkEventRow linkEvent)
+    {
+        if (Own(linkEvent) is not { } own)
+        {
+            return;
+        }
+
+        var html = $"<p>Объект будет исключён из события «{WebUtility.HtmlEncode(linkEvent.Title)}».</p>"
+            + "<p class=\"mud-text-secondary\">Если других участников не останется, событие удалится. Исключение записывается в журнал.</p>";
+        var answer = await DialogService.ShowMessageBoxAsync("Исключить из события?", (MarkupString)html,
+            yesText: "Исключить", cancelText: "Отмена", options: DialogOptions);
+        if (answer != true)
+        {
+            return;
+        }
+
+        _error = null;
+        var response = await Dispatcher.Send(new RemoveEventParticipantCommand(own.Id));
+        if (!response.Status)
+        {
+            _error = response.StatusMessage;
+        }
+        else
+        {
+            Snackbar.Add("Объект исключён из события.", Severity.Success);
+        }
+
+        await LoadAsync();
+    }
+
+    private LinkParticipantDraft Participation() =>
+        new(Clean(_role), _level, _inSearch, Clean(_plate), Clean(_vehicle), Clean(_address));
+
+    private static DateOnly? DateOnlyOf(DateTime? value) => value is { } date ? DateOnly.FromDateTime(date) : null;
+
+    private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string DateLabel(DateOnly? date) => date?.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture) ?? "—";
+
+    private static string EventCaption(LinkEventRow linkEvent) =>
+        $"{DateLabel(linkEvent.OccurredOn)} · {linkEvent.Kind.Label()}: {linkEvent.Title}";
+
+    private static Color LevelColor(LinkLevel level) => level switch
+    {
+        LinkLevel.Confirmed => Color.Success,
+        LinkLevel.Probable => Color.Warning,
+        _ => Color.Default,
+    };
+
+    // Транспорт и адрес контакта одной строкой.
+    private static string? Contact(LinkEventParticipantRow participant)
+    {
+        var parts = new List<string>();
+        var vehicle = string.Join(' ', new[] { participant.VehiclePlate, participant.VehicleDetails }.Where(p => !string.IsNullOrWhiteSpace(p)));
+        if (vehicle.Length > 0)
+        {
+            parts.Add("транспорт: " + vehicle);
+        }
+
+        if (!string.IsNullOrWhiteSpace(participant.ContactAddress))
+        {
+            parts.Add("адрес контакта: " + participant.ContactAddress);
+        }
+
+        return parts.Count == 0 ? null : string.Join(" · ", parts);
+    }
+}

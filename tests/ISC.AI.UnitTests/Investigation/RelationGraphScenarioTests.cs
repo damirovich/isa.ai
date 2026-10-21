@@ -43,6 +43,7 @@ public sealed class RelationGraphScenarioTests
     private readonly IPersonRequisiteStore _requisites = Substitute.For<IPersonRequisiteStore>();
     private readonly ICaseStore _cases = Substitute.For<ICaseStore>();
     private readonly IIntersectionStore _intersections = Substitute.For<IIntersectionStore>();
+    private readonly ILinkEventStore _events = Substitute.For<ILinkEventStore>();
     private readonly IReferenceStore _references = Substitute.For<IReferenceStore>();
     private readonly IAccessContextProvider _access = Substitute.For<IAccessContextProvider>();
 
@@ -70,6 +71,7 @@ public sealed class RelationGraphScenarioTests
             _persons.GetAsync(person.Id, Access, Arg.Any<CancellationToken>()).Returns(person);
             _persons.ListCoAppearancesAsync(person.Id, Access, Arg.Any<CancellationToken>()).Returns([]);
             _intersections.FindForPersonAsync(person.Id, Access, Arg.Any<CancellationToken>()).Returns([]);
+            _events.ListForPersonAsync(person.Id, Access, Arg.Any<CancellationToken>()).Returns([]);
             _requisites.GetAsync(person.Id, Access, Arg.Any<CancellationToken>()).Returns(new PersonRequisites([], [], []));
         }
 
@@ -297,7 +299,7 @@ public sealed class RelationGraphScenarioTests
         _persons.SearchAsync("Иван", SearchRelationPersonsQuery.MaxResults, Access, Arg.Any<CancellationToken>()).Returns([_target]);
         var query = new SearchRelationPersonsQuery("Иван");
 
-        var response = await new SearchRelationPersonsQuery.Handler(_persons, _requisites, _cases, _intersections, _references, _access)
+        var response = await new SearchRelationPersonsQuery.Handler(_persons, _requisites, _cases, _intersections, _events, _references, _access)
             .Handle(query, CancellationToken.None);
 
         var hit = response.Data.ShouldNotBeNull().ShouldHaveSingleItem();
@@ -392,12 +394,132 @@ public sealed class RelationGraphScenarioTests
         new GetRelationGraphValidator().Validate(new GetRelationGraphQuery(RelationNodeKind.Phone, TargetId, 1, null)).IsValid.ShouldBeFalse();
     }
 
+    [Fact(DisplayName = "ADR-0056: событие — узел (название, вид, дата, гриф); ребро участия — роль и «предположительно»; раскрытие — доступные участники и чужое дело без ФИО; «неверно» не рисуется")]
+    public async Task Event_node_and_participants()
+    {
+        var linkEvent = new LinkEventRow(900, LinkEventKind.Meeting, "Встреча у рынка", new DateOnly(2026, 10, 5), "обсуждали", 2, 5, 42,
+            new DateTime(2026, 10, 6, 0, 0, 0, DateTimeKind.Utc),
+            [
+                Participant(1, _target, LinkLevel.Probable, "водитель"),
+                Participant(2, _stranger, LinkLevel.Confirmed),
+                new LinkEventParticipantRow(3, null, null, null, 77, "77/26", CaseKind.ObjectTask, CaseStatus.InProgress, 99, false,
+                    null, LinkLevel.Confirmed, false, null, null, null, 1),
+                Participant(4, _loner, LinkLevel.Wrong),
+            ]);
+        _events.ListForPersonAsync(TargetId, Access, Arg.Any<CancellationToken>()).Returns([linkEvent]);
+        _events.ListForPersonAsync(LonerId, Access, Arg.Any<CancellationToken>()).Returns([linkEvent]);
+        _events.GetAsync(900, Access, Arg.Any<CancellationToken>()).Returns(linkEvent);
+
+        var graph = (await Handle(new GetRelationGraphQuery(RelationNodeKind.Person, TargetId, Depth: 1))).Data.ShouldNotBeNull();
+
+        var node = Node(graph, RelationNodeKeys.Event(900));
+        node.Kind.ShouldBe(RelationNodeKind.Event);
+        node.EntityId.ShouldBe(900);
+        node.Title.ShouldBe("Встреча у рынка");
+        node.Subtitle.ShouldBe("Встреча · 05.10.2026");
+        node.Classification.ShouldBe<short?>(2);
+        node.Expandable.ShouldBeTrue();
+        Edge(graph, RelationNodeKeys.Person(TargetId), node.Key).Label.ShouldBe("водитель · предположительно");
+        Edge(graph, RelationNodeKeys.Person(TargetId), node.Key).Kind.ShouldBe(RelationEdgeKind.EventLink);
+
+        // Событие в центре (ФТ-5.2.5): все видимые участники; чужой — делом без ФИО (ТБ-084); «неверно» — нет.
+        var query = new GetRelationGraphQuery(RelationNodeKind.Event, 900, Depth: 1);
+        var around = (await Handle(query)).Data.ShouldNotBeNull();
+        around.Nodes[0].Key.ShouldBe(RelationNodeKeys.Event(900));
+        Edge(around, RelationNodeKeys.Person(StrangerId), RelationNodeKeys.Event(900)).Label.ShouldBe("участник");
+        var foreign = Node(around, RelationNodeKeys.ForeignCase(77));
+        foreign.Title.ShouldBe("Дело № 77/26");
+        foreign.EntityId.ShouldBeNull();
+        foreign.ResponsibleUserId.ShouldBe(99);
+        Edge(around, foreign.Key, RelationNodeKeys.Event(900)).Label.ShouldBe("участник события");
+        around.Nodes.ShouldNotContain(n => n.Key == RelationNodeKeys.Person(LonerId));
+        query.AuditSummary.ShouldBe("investigation:graph:event:900:view;depth=1");
+
+        // У того, чьё участие «неверно», события на графе нет.
+        var lonerGraph = (await Handle(new GetRelationGraphQuery(RelationNodeKind.Person, LonerId, Depth: 1))).Data.ShouldNotBeNull();
+        lonerGraph.Nodes.ShouldNotContain(n => n.Kind == RelationNodeKind.Event);
+
+        // Недоступное событие — «не найден», как фигурант или дело.
+        (await Handle(new GetRelationGraphQuery(RelationNodeKind.Event, 901, Depth: 1))).StatusCode.ShouldBe(ResponseStatusCode.NotFound);
+    }
+
+    [Fact(DisplayName = "ПМИ 4: «как связан с…» — цепочка 2-го порядка через события: Объект 2 → Событие 2 → Объект 3 → Событие 3 → Объект 4")]
+    public async Task Path_goes_through_events()
+    {
+        var second = Lone(102, 62);
+        var third = Lone(103, 63);
+        var fourth = Lone(104, 64);
+        LinkEvents(Event(2, second, third), Event(3, third, fourth));
+
+        var path = (await HandlePath(new FindRelationPathQuery(RelationNodeKind.Person, second.Id, fourth.Id))).Data.ShouldNotBeNull();
+
+        path.Nodes.Select(n => n.Key).ShouldBe(
+        [
+            RelationNodeKeys.Person(102), RelationNodeKeys.Event(2), RelationNodeKeys.Person(103), RelationNodeKeys.Event(3),
+            RelationNodeKeys.Person(104),
+        ]);
+        path.Edges.ShouldAllBe(e => e.Kind == RelationEdgeKind.EventLink);
+    }
+
+    [Fact(DisplayName = "ПМИ 5: кольцо Объект 1 → 2 → 3 → 4 → 1 через события — граф на наибольшую глубину строится без зацикливания, каждый узел один раз")]
+    public async Task Ring_of_events_does_not_loop()
+    {
+        var people = Enumerable.Range(1, 4).Select(i => Lone(110 + i, 70 + i)).ToArray();
+        LinkEvents(
+            Event(11, people[0], people[1]), Event(12, people[1], people[2]), Event(13, people[2], people[3]), Event(14, people[3], people[0]));
+
+        var graph = (await Handle(new GetRelationGraphQuery(RelationNodeKind.Person, people[0].Id, GetRelationGraphQuery.MaxDepth)))
+            .Data.ShouldNotBeNull();
+
+        graph.Nodes.Select(n => n.Key).ShouldBeUnique();
+        graph.Nodes.Count(n => n.Kind == RelationNodeKind.Event).ShouldBe(4);
+        graph.Nodes.Count(n => n.Kind == RelationNodeKind.Person).ShouldBe(4);
+        graph.Edges.Count(e => e.Kind == RelationEdgeKind.EventLink).ShouldBe(8); // кольцо замкнуто: у каждого события два ребра
+        graph.Truncated.ShouldBeFalse();
+    }
+
+    // Фигурант в отдельном деле без связей и реквизитов — звено цепочки только через события.
+    private PersonRow Lone(int id, int caseId)
+    {
+        var row = Person(id, $"Объект {id}", PersonRole.Target, caseId);
+        _persons.GetAsync(id, Access, Arg.Any<CancellationToken>()).Returns(row);
+        _persons.ListCoAppearancesAsync(id, Access, Arg.Any<CancellationToken>()).Returns([]);
+        _persons.ListByCaseAsync(caseId, Access, Arg.Any<CancellationToken>()).Returns([row]);
+        _intersections.FindForPersonAsync(id, Access, Arg.Any<CancellationToken>()).Returns([]);
+        _requisites.GetAsync(id, Access, Arg.Any<CancellationToken>()).Returns(new PersonRequisites([], [], []));
+        _cases.GetAsync(caseId, Access, Arg.Any<CancellationToken>()).Returns(Case(caseId, $"{caseId}/26"));
+        return row;
+    }
+
+    // События под заглушки хранилища: по событию и по каждому участнику — его события.
+    private void LinkEvents(params LinkEventRow[] list)
+    {
+        foreach (var linkEvent in list)
+        {
+            _events.GetAsync(linkEvent.Id, Access, Arg.Any<CancellationToken>()).Returns(linkEvent);
+        }
+
+        foreach (var personId in list.SelectMany(e => e.Participants).Select(p => p.PersonId!.Value).Distinct())
+        {
+            IReadOnlyList<LinkEventRow> own = list.Where(e => e.Participants.Any(p => p.PersonId == personId)).ToList();
+            _events.ListForPersonAsync(personId, Access, Arg.Any<CancellationToken>()).Returns(own);
+        }
+    }
+
+    private static LinkEventRow Event(int id, params PersonRow[] people) =>
+        new(id, LinkEventKind.Contact, $"Событие {id}", null, null, 0, 5, 42, new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc),
+            people.Select((person, index) => Participant((id * 10) + index, person, LinkLevel.Confirmed)).ToList());
+
+    private static LinkEventParticipantRow Participant(int id, PersonRow person, LinkLevel level, string? role = null) =>
+        new(id, person.Id, person.DisplayName, null, person.CaseId, $"{person.CaseId}/26", CaseKind.ObjectTask, CaseStatus.InProgress, 42,
+            IsAccessible: true, role, level, InSearch: true, null, null, null, person.Classification);
+
     private async Task<ResponseDto<RelationGraph>> Handle(GetRelationGraphQuery query) =>
-        await new GetRelationGraphQuery.Handler(_persons, _requisites, _cases, _intersections, _references, _access)
+        await new GetRelationGraphQuery.Handler(_persons, _requisites, _cases, _intersections, _events, _references, _access)
             .Handle(query, CancellationToken.None);
 
     private async Task<ResponseDto<RelationGraph>> HandlePath(FindRelationPathQuery query) =>
-        await new FindRelationPathQuery.Handler(_persons, _requisites, _cases, _intersections, _references, _access)
+        await new FindRelationPathQuery.Handler(_persons, _requisites, _cases, _intersections, _events, _references, _access)
             .Handle(query, CancellationToken.None);
 
     private static RelationNode Node(RelationGraph graph, string key) =>

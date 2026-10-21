@@ -106,8 +106,14 @@ public enum SearchKinds
     /// <summary>Номера телефонов фигурантов и связей (ADR-0055).</summary>
     Phones = 128,
 
+    /// <summary>
+    /// События — «дела-посредники» связи объектов (ADR-0056): название, описание, роль, адрес и госномер контакта
+    /// участников с отметкой «в общем поиске».
+    /// </summary>
+    Events = 256,
+
     /// <summary>Все виды.</summary>
-    All = Cases | Persons | Vehicles | Addresses | Reports | Transcripts | Documents | Phones,
+    All = Cases | Persons | Vehicles | Addresses | Reports | Transcripts | Documents | Phones | Events,
 }
 
 /// <summary>Автотранспорт, найденный единым поиском: фигурант (владелец записи) и сама запись.</summary>
