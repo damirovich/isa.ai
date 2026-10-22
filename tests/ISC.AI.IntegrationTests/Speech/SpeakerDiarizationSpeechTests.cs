@@ -12,9 +12,9 @@ using Xunit;
 namespace ISC.AI.IntegrationTests.Speech;
 
 /// <summary>
-/// Разделение говорящих НАСТОЯЩИМИ моделями, процессом-распознавателем и ffmpeg (ТФ-МЕД-19, ADR-0062): модели
-/// говорящих загружаются и проходят разметку, длинная запись пропускается с причиной, адаптер выбирает режим — стерео с
-/// раздельными каналами по каналам, каналы-копии — моделью, без моделей — без дикторов. Звук синтетический (тишина,
+/// Разделение говорящих НАСТОЯЩИМИ моделями, процессом-распознавателем и ffmpeg (ТФ-МЕД-19, ADR-0062 v0.3): модель
+/// «голосовых отпечатков» загружается и проходит разметку, длинная запись пропускается с причиной, адаптер выбирает режим —
+/// стерео с раздельными каналами по каналам, каналы-копии — моделью, «без дикторов» и без модели — без дикторов. Звук синтетический (тишина,
 /// тон) — записей людей в тестах нет (ТО-прог-13); точность разделения голосов проверяется пилотом (КИ-10).
 /// </summary>
 /// <remarks>
@@ -98,8 +98,14 @@ public sealed class SpeakerDiarizationSpeechTests : IAsyncLifetime
         result.SpeakerNote.ShouldBeNull();
 
         // v0.2: сотрудник задал троих — каналов два, значит разметку делает модель с этим числом; двое — по каналам.
-        (await new SpeechWorkerTranscriber(_options).TranscribeAsync(wav, 3)).SpeakerSource.ShouldBe(TranscriptSpeakerSource.Model);
-        (await new SpeechWorkerTranscriber(_options).TranscribeAsync(wav, 2)).SpeakerSource.ShouldBe(TranscriptSpeakerSource.StereoChannels);
+        (await new SpeechWorkerTranscriber(_options).TranscribeAsync(wav, new SpeakerMarkupRequest(true, 3)))
+            .SpeakerSource.ShouldBe(TranscriptSpeakerSource.Model);
+        (await new SpeechWorkerTranscriber(_options).TranscribeAsync(wav, new SpeakerMarkupRequest(true, 2)))
+            .SpeakerSource.ShouldBe(TranscriptSpeakerSource.StereoChannels);
+
+        // v0.3: «без дикторов» — ни каналов, ни модели, без пометки.
+        var off = await new SpeechWorkerTranscriber(_options).TranscribeAsync(wav, SpeakerMarkupRequest.Off);
+        (off.SpeakerSource, off.SpeakerNote).ShouldBe((TranscriptSpeakerSource.None, (string?)null));
     }
 
     [Fact(DisplayName = "ADR-0062: адаптер — каналы-копии уходят модели; без моделей в настройке — без дикторов и без пометки")]
@@ -120,7 +126,7 @@ public sealed class SpeakerDiarizationSpeechTests : IAsyncLifetime
         SpeechTestEnvironment.RunWorkerAsync(_options.WorkerPath,
         [
             "--model", _options.ModelPath, "--tokens", _options.TokensPath, "--vad", _options.VadPath, "--input", wav, "--threads", "2",
-            "--speaker-segmentation", _speakers.SegmentationPath, "--speaker-embedding", _speakers.EmbeddingPath, .. extra,
+            "--speaker-embedding", _speakers.EmbeddingPath, .. extra,
         ]);
 
     // WAV 16 кГц, 2 канала: участки (секунды, звучит ли левый, звучит ли правый) — синус 440 Гц.

@@ -2,7 +2,8 @@
 @* Настройки поиска и верификации (ТФ-ВЕР-07, ТФ-ПЛ-08, ТФ-АДМ-03, ADR-0054): режим подтверждения (один оператор / два
    лица), рабочий порог схожести и нижняя граница порога. Меняет Администратор (право проверяет сервер; без права экран
    показывает значения только для чтения). Проверка 40–99 % и «рабочий не ниже границы» — на сервере; форма лишь
-   подсказывает. Каждое изменение — в журнале с прежними и новыми значениями. *@
+   подсказывает. Каждое изменение — в журнале с прежними и новыми значениями. ADR-0062 v0.3: здесь же — размечать ли
+   дикторов при расшифровке загруженных материалов (переключатель сохраняется сразу). *@
 @page "/media/settings"
 @rendermode InteractiveServer
 @using ISC.AI.Modules.Media.Application.Features.Settings
@@ -89,6 +90,16 @@ else
         </MudText>
     </MudPaper>
 
+    <MudPaper Outlined="true" Class="pa-4 my-4" Style="max-width:720px;">
+        <MudText Typo="Typo.subtitle1" Class="mb-1">Расшифровка речи</MudText>
+        <MudSwitch T="bool" Value="@view.TranscriptSpeakers" ValueChanged="SetSpeakersAsync" Color="Color.Primary"
+                   Disabled="@(!view.CanManage || _busy)" Label="Размечать дикторов при расшифровке загруженных материалов" />
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
+            Сохраняется сразу и действует со следующей расшифровки. При «Расшифровать заново» сотрудник сам выбирает для
+            записи: без дикторов, «авто» или число говорящих.
+        </MudText>
+    </MudPaper>
+
     <div class="d-flex align-center justify-space-between flex-wrap gap-2" style="max-width:720px;">
         <MudText Typo="Typo.caption" Class="mud-text-secondary">
             @(view.UpdatedAtUtc is { } at
@@ -138,6 +149,34 @@ else
         else
         {
             _error = response.StatusMessage;
+        }
+    }
+
+    // Разметка дикторов (ADR-0062 v0.3) — отдельной командой, без кнопки «Сохранить»: переключатель сохраняется сразу.
+    private async Task SetSpeakersAsync(bool enabled)
+    {
+        _busy = true;
+        _error = null;
+        _saved = null;
+        try
+        {
+            var response = await Dispatcher.Send(new SetTranscriptSpeakersCommand(enabled));
+            if (response is { Status: true })
+            {
+                // Несохранённые правки порогов и режима не теряются: перечитывается только сохранённое.
+                var form = (_mode, _threshold, _minThreshold);
+                _saved = response.StatusMessage;
+                await LoadAsync();
+                (_mode, _threshold, _minThreshold) = form;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
         }
     }
 

@@ -50,6 +50,10 @@ namespace ISC.AI.Modules.Media.Application.Features.Transcription;
 /// Индексация готовой расшифровки в корпус ядра для поиска по смыслу и чата по материалам (ADR-0051); без неё
 /// (тесты конвейера) — не индексируется.
 /// </param>
+/// <param name="settings">
+/// Настройки Администратора: размечать ли дикторов, когда сотрудник этого не выбирал — расшифровка при загрузке
+/// (ADR-0062 v0.3); без них — размечать.
+/// </param>
 public sealed class MediaTranscriptionPipeline(
     IMediaStore store,
     IFileStorage fileStorage,
@@ -57,7 +61,8 @@ public sealed class MediaTranscriptionPipeline(
     IAuditWriter auditWriter,
     MediaTempFiles tempFiles,
     ILogger<MediaTranscriptionPipeline> logger,
-    ITranscriptCorpus? corpus = null) : IMediaTranscriptionPipeline
+    ITranscriptCorpus? corpus = null,
+    IMediaSettingsStore? settings = null) : IMediaTranscriptionPipeline
 {
     /// <summary>Причина отказа для изображения (результат задачи; статус носителя не меняется).</summary>
     public const string NotApplicableToImageError = "К изображению расшифровка неприменима.";
@@ -66,7 +71,7 @@ public sealed class MediaTranscriptionPipeline(
     public const string CancelledReason = "расшифровка отменена";
 
     /// <inheritdoc />
-    public async Task<MediaTranscriptionResult> TranscribeAsync(int assetId, int? speakerCount = null, CancellationToken cancellationToken = default)
+    public async Task<MediaTranscriptionResult> TranscribeAsync(int assetId, SpeakerMarkupRequest? speakers = null, CancellationToken cancellationToken = default)
     {
         var info = await store.GetForTranscriptionAsync(assetId, cancellationToken);
         if (info is null)
@@ -87,12 +92,15 @@ public sealed class MediaTranscriptionPipeline(
         {
             await store.MarkTranscriptionProcessingAsync(assetId, cancellationToken);
 
+            // Выбор сотрудника; не выбирал (загрузка) — общая настройка Администратора (ADR-0062 v0.3).
+            var markup = speakers ?? await DefaultMarkupAsync(cancellationToken);
+
             // Длительность ЗАПИСИ (длина подготовленного звука) сообщает распознаватель — не конец последней
             // речи: у диктофона на 45 минут с последней фразой на 12-й минуте длительность — 45 минут.
-            var (durationMs, speakers) = await TranscribeSourceAsync(info, segments, speakerCount, cancellationToken);
+            var (durationMs, speakerMarkup) = await TranscribeSourceAsync(info, segments, markup, cancellationToken);
             var modelVersion = transcriber.ModelVersion;
 
-            await store.CompleteTranscriptionAsync(assetId, segments, modelVersion, durationMs, speakers, cancellationToken);
+            await store.CompleteTranscriptionAsync(assetId, segments, modelVersion, durationMs, speakerMarkup, cancellationToken);
 
             // ТБ-030: новый материал, порождённый моделью, — в неизменяемый журнал с режимом носителя.
             await auditWriter.WriteAsync(
@@ -104,7 +112,8 @@ public sealed class MediaTranscriptionPipeline(
                     DivisionId: info.DivisionId,
                     PayloadSensitive:
                         $"расшифровка речи: фрагментов {segments.Count}, модель {modelVersion}; "
-                        + (speakerCount is { } count ? $"говорящих задано {count}; " : string.Empty)
+                        + (!markup.Enabled ? "дикторы не размечались; "
+                            : markup.Count is { } count ? $"говорящих задано {count}; " : string.Empty)
                         + "автоматическая расшифровка, требует проверки, не является протоколом (ТЭ-002, ADR-0026)"),
                 cancellationToken);
 
@@ -127,6 +136,12 @@ public sealed class MediaTranscriptionPipeline(
             return new MediaTranscriptionResult(false, segments.Count, exception.Message);
         }
     }
+
+    // Размечать ли дикторов, если сотрудник не выбирал: так решил Администратор (по умолчанию — размечать).
+    private async Task<SpeakerMarkupRequest> DefaultMarkupAsync(CancellationToken cancellationToken) =>
+        settings is null || (await settings.GetAsync(cancellationToken)).TranscriptSpeakers
+            ? SpeakerMarkupRequest.Auto
+            : SpeakerMarkupRequest.Off;
 
     /// <summary>
     /// Текст готовой расшифровки — в корпус ядра (ADR-0051). Сбой индексации НЕ делает расшифровку неудачной: она уже
@@ -162,7 +177,7 @@ public sealed class MediaTranscriptionPipeline(
     /// первым, без пропусков номеров из-за отброшенных пустых фрагментов.
     /// </summary>
     private async Task<(long? DurationMs, TranscriptSpeakerMarkup Speakers)> TranscribeSourceAsync(
-        MediaAssetTranscriptionInfo info, List<TranscriptSegmentDraft> segments, int? speakerCount, CancellationToken cancellationToken)
+        MediaAssetTranscriptionInfo info, List<TranscriptSegmentDraft> segments, SpeakerMarkupRequest speakers, CancellationToken cancellationToken)
     {
         // Копия — в управляемом каталоге (ТБ-064): переживи она аварийную остановку, её удалит уборка при старте
         // хоста. Расширение — через фильтр: путь уходит ffmpeg/ffprobe текстом командной строки, а носители,
@@ -180,7 +195,7 @@ public sealed class MediaTranscriptionPipeline(
                 await source.CopyToAsync(target, cancellationToken);
             }
 
-            var transcription = await transcriber.TranscribeAsync(tempPath, speakerCount, cancellationToken);
+            var transcription = await transcriber.TranscribeAsync(tempPath, speakers, cancellationToken);
             var numbers = new Dictionary<int, int>();
             foreach (var segment in transcription.Segments)
             {

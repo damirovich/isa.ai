@@ -46,6 +46,9 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
         Services.AddSingleton(new ISC.AI.Modules.Media.Application.MediaSearchOptions());
         SetRendererInfo(new RendererInfo("Server", true));
 
+        // Поставщик всплывающих списков MudBlazor — один на тест: в панели расшифровки выбор «Дикторы» (ADR-0062 v0.3).
+        Render<MudPopoverProvider>();
+
         // Блок «Сверка с фигурантами дела» (ТФ-ПЕР-09) есть на каждой карточке с лицами: по умолчанию — пустое состояние.
         _mediator.Send(Arg.Any<GetAssetSuggestionStatusQuery>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ResponseDto<AssetSuggestionStatus>>(ResponseDto<AssetSuggestionStatus>.Ok(
@@ -270,7 +273,6 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
     /// <summary>Карточка носителя с заданной строкой носителя; лица — по желанию, дело № 3 (или без дела).</summary>
     private IRenderedComponent<ISC.AI.Modules.Media.UI.AssetCard> RenderCard(MediaAssetRow asset, IReadOnlyList<FaceRow>? faces = null, int? caseId = 3)
     {
-        Render<MudPopoverProvider>();
         _mediator.Send(Arg.Any<GetMediaAssetQuery>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ResponseDto<MediaAssetDetails>>(ResponseDto<MediaAssetDetails>.Ok(
                 new MediaAssetDetails(asset, faces ?? [], caseId))));
@@ -343,7 +345,6 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
     [Fact(DisplayName = "Карточка аудио: проигрыватель, без блоков лиц и переиндексации, ?t= перематывает")]
     public void AssetCard_audio_player_no_faces_and_query_t()
     {
-        Render<MudPopoverProvider>();
         _mediator.Send(Arg.Any<GetMediaAssetQuery>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ResponseDto<MediaAssetDetails>>(ResponseDto<MediaAssetDetails>.Ok(
                 new MediaAssetDetails(Asset(MediaKind.Audio, "audio/ogg"), [], 3))));
@@ -368,7 +369,6 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
     [Fact(DisplayName = "Карточка AMR: вместо проигрывателя — ссылка «Скачать оригинал»")]
     public void AssetCard_amr_download_link()
     {
-        Render<MudPopoverProvider>();
         _mediator.Send(Arg.Any<GetMediaAssetQuery>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ResponseDto<MediaAssetDetails>>(ResponseDto<MediaAssetDetails>.Ok(
                 new MediaAssetDetails(Asset(MediaKind.Audio, "audio/amr"), [], 3))));
@@ -386,7 +386,6 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
     [InlineData("video/3gpp", false)]
     public void AssetCard_audio_in_video_container(string contentType, bool playable)
     {
-        Render<MudPopoverProvider>();
         _mediator.Send(Arg.Any<GetMediaAssetQuery>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ResponseDto<MediaAssetDetails>>(ResponseDto<MediaAssetDetails>.Ok(
                 new MediaAssetDetails(Asset(MediaKind.Audio, contentType), [], 3))));
@@ -411,7 +410,6 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
     [Fact(DisplayName = "Карточка видео: лица на месте и есть панель расшифровки")]
     public void AssetCard_video_has_faces_and_transcript()
     {
-        Render<MudPopoverProvider>();
         _mediator.Send(Arg.Any<GetMediaAssetQuery>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ResponseDto<MediaAssetDetails>>(ResponseDto<MediaAssetDetails>.Ok(
                 new MediaAssetDetails(Asset(MediaKind.Video, "video/mp4"), [], 3))));
@@ -431,7 +429,6 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
     [InlineData("/media/assets/5?t=1e5&face=1.5")]
     public void AssetCard_bad_query_values_ignored(string url)
     {
-        Render<MudPopoverProvider>();
         _mediator.Send(Arg.Any<GetMediaAssetQuery>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ResponseDto<MediaAssetDetails>>(ResponseDto<MediaAssetDetails>.Ok(
                 new MediaAssetDetails(Asset(MediaKind.Audio, "audio/ogg"), [], 3))));
@@ -454,7 +451,6 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
     [InlineData("/media/search?caseId=3.0&faceId=1e1", false)]
     public void FaceSearch_query_values_parsed_or_ignored(string url, bool valid)
     {
-        Render<MudPopoverProvider>();
         _mediator.Send(Arg.Any<ListAccessibleCasesQuery>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ResponseDto<IReadOnlyList<CaseScopeItem>>>(
                 ResponseDto<IReadOnlyList<CaseScopeItem>>.Ok([new CaseScopeItem(3, "12-345", "Дело", 0, 1)])));
@@ -487,7 +483,6 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
     [InlineData("/media/verification/21?stage=Expert&person=-7", false)]
     public void CandidateVerification_person_query_parsed_or_ignored(string url, bool valid)
     {
-        Render<MudPopoverProvider>();
         _mediator.Send(Arg.Any<GetCandidatePairQuery>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ResponseDto<VerificationQueueItem>>(ResponseDto<VerificationQueueItem>.Ok(
                 new VerificationQueueItem(21, 4, 3, 1, 11, 5, null, null, 0.61, null, "probe.jpg", new string('a', 64), null,
@@ -514,7 +509,6 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
     [Fact(DisplayName = "Решение эксперта: у фигуранта это лицо уже подтверждено — пометка в списке и предупреждение «повтор», запрос с лицом кандидата")]
     public void CandidateVerification_warns_when_face_already_confirmed_for_person()
     {
-        Render<MudPopoverProvider>();
         _mediator.Send(Arg.Any<GetCandidatePairQuery>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ResponseDto<VerificationQueueItem>>(ResponseDto<VerificationQueueItem>.Ok(
                 new VerificationQueueItem(21, 4, 3, 1, 11, 5, null, null, 0.61, null, "probe.jpg", new string('a', 64), null,
@@ -874,7 +868,6 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
     [Fact(DisplayName = "Поиск по расшифровкам дела: найденное выделено, разметка экранирована, ссылка ведёт к месту записи")]
     public void CaseMedia_search_highlights_escaped_and_links_with_t()
     {
-        Render<MudPopoverProvider>();
         _mediator.Send(Arg.Any<ListAccessibleCasesQuery>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ResponseDto<IReadOnlyList<CaseScopeItem>>>(
                 ResponseDto<IReadOnlyList<CaseScopeItem>>.Ok([new CaseScopeItem(3, "12-345", "Дело", 0, 1)])));
@@ -938,7 +931,6 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
 
     private IRenderedComponent<ISC.AI.Modules.Media.UI.CaseMedia> RenderCaseMedia(IReadOnlyList<CaseScopeItem> cases)
     {
-        Render<MudPopoverProvider>();
         _mediator.Send(Arg.Any<ListAccessibleCasesQuery>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ResponseDto<IReadOnlyList<CaseScopeItem>>>(ResponseDto<IReadOnlyList<CaseScopeItem>>.Ok(cases)));
         _mediator.Send(Arg.Any<ListCaseMediaQuery>(), Arg.Any<CancellationToken>())
@@ -949,7 +941,6 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
     [Fact(DisplayName = "Пустой результат поиска не утверждает, что сказанного нет в материалах (ТБ-020/021)")]
     public void CaseMedia_search_empty_result_does_not_claim_absence()
     {
-        Render<MudPopoverProvider>();
         _mediator.Send(Arg.Any<ListAccessibleCasesQuery>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ResponseDto<IReadOnlyList<CaseScopeItem>>>(
                 ResponseDto<IReadOnlyList<CaseScopeItem>>.Ok([new CaseScopeItem(3, "12-345", "Дело", 0, 1)])));

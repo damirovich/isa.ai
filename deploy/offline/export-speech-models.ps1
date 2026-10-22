@@ -12,12 +12,12 @@
 #   * silero_vad.onnx — детектор речи Silero VAD, лицензия MIT (snakers4/silero-vad); файл из релиза
 #     sherpa-onnx «asr-models» (k2-fsa/sherpa-onnx, Apache-2.0) — в формате, который ждёт sherpa-onnx.
 #   * Тексты лицензий GigaAM и Silero VAD — MIT требует передавать уведомление вместе с весами.
-#   * С ключом -Speakers — модели разделения говорящих (ADR-0062): сегментация pyannote/segmentation-3.0 (MIT,
-#     архив sherpa-onnx «speaker-segmentation-models», внутри model.onnx) и «голосовой отпечаток» CAM++ из
-#     3D-Speaker (Apache-2.0, релиз sherpa-onnx «speaker-recongition-models» — опечатка в имени релиза авторская).
-#     У этих ассетов API GitHub не даёт хеша: пины SHA-256 закреплены по первой выгрузке 22.10.2026 (размеры совпали
-#     с API релизов, лицензия сегментации в архиве — MIT, © CNRS). Дальше файлы сверяются по пину (ТИ-004); хост
-#     требует пины в Speech:Speakers:*:Sha256.
+#   * С ключом -Speakers — модель разделения говорящих (ADR-0062 v0.3): «голосовой отпечаток» CAM++ из 3D-Speaker
+#     (Apache-2.0, релиз sherpa-onnx «speaker-recongition-models» — опечатка в имени релиза авторская). Сегментация
+#     pyannote (v0.1–0.2) больше не нужна: дикторы размечаются по отпечаткам целых реплик распознавателя. У ассета API
+#     GitHub не даёт хеша: пин SHA-256 закреплён по первой выгрузке 22.10.2026 (размер совпал с API релиза); дальше файл
+#     сверяется по пину (ТИ-004), хост требует пин в Speech:Speakers:Embedding:Sha256. Текст лицензии Apache-2.0 в
+#     релизе не лежит — его прикладывают к поставке отдельно (3D-Speaker, файл LICENSE).
 #
 # !!! ЗАПРЕЩЕНО: старые пакеты GigaAM v1 2024 года (например csukuangfj/sherpa-onnx-nemo-ctc-giga-am-russian-2024-10-24
 # и ...-transducer-giga-am-russian-2024-10-24) — их веса под НЕКОММЕРЧЕСКОЙ лицензией. Брать ТОЛЬКО
@@ -103,14 +103,7 @@ $sileroLicense = @{ Url         = 'https://raw.githubusercontent.com/snakers4/si
                     Target      = 'LICENSE-silero-vad.txt'
                     GitBlobSha1 = '0bf5e90cac691b999d4a35044f97167d7bbbf0b9' }
 
-# Разделение говорящих (ADR-0062). Размеры — из API релизов, пины — по выгрузке 22.10.2026 (см. шапку). Пин
-# сегментации — у АРХИВА; model.onnx из него в поставке: 220AD67CA923BEF2FA91F2390C786097BF305BCEB5E261D4AF67B38E938E1079.
-$speakerSegmentation = @{ Url     = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2'
-                          Archive = 'sherpa-onnx-pyannote-segmentation-3-0.tar.bz2'
-                          Target  = 'pyannote-segmentation-3-0.onnx'
-                          Size    = 6958444
-                          Sha256  = '24615EE884C897D9D2BA09BB4D30DA6BB1B15E685065962DB5B02E76E4996488' }
-
+# Разделение говорящих (ADR-0062 v0.3). Размер — из API релиза, пин — по выгрузке 22.10.2026 (см. шапку).
 $speakerEmbedding = @{ Url    = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx'
                        Target = '3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx'
                        Size   = 28281164
@@ -186,36 +179,6 @@ Save-Pinned $gigaAmLicense.Url (Join-Path $ModelsDir $gigaAmLicense.Target) -Git
 Save-Pinned $sileroLicense.Url (Join-Path $ModelsDir $sileroLicense.Target) -GitBlobSha1 $sileroLicense.GitBlobSha1
 
 if ($Speakers) {
-    foreach ($pin in $speakerSegmentation, $speakerEmbedding) {
-        if (-not $pin.Sha256) {
-            Write-Warning "Пин SHA-256 для $($pin.Url.Split('/')[-1]) не закреплён: сверяется только размер. Проверьте файл и впишите напечатанный SHA-256 в скрипт (ТИ-004)."
-        }
-    }
-
-    # Архив сегментации распаковывается во временную папку (tar из Windows 10+ понимает bz2); в поставку идут
-    # model.onnx под своим именем и текст лицензии, если он в архиве есть.
-    $work = Join-Path ([IO.Path]::GetTempPath()) ('iscai-speakers-' + [Guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Force $work | Out-Null
-    try {
-        $archive = Join-Path $work $speakerSegmentation.Archive
-        Save-Pinned $speakerSegmentation.Url $archive -Sha256 $speakerSegmentation.Sha256 -SizeBytes $speakerSegmentation.Size
-        tar -xjf $archive -C $work
-        if ($LASTEXITCODE -ne 0) { throw "Не удалось распаковать $($speakerSegmentation.Archive) (tar, код $LASTEXITCODE)." }
-        $segmentationModel = Get-ChildItem $work -Recurse -File -Filter 'model.onnx' | Select-Object -First 1
-        if (-not $segmentationModel) { throw "В архиве $($speakerSegmentation.Archive) нет model.onnx — состав релиза изменился, поставка остановлена." }
-        Copy-Item $segmentationModel.FullName (Join-Path $ModelsDir $speakerSegmentation.Target) -Force
-        $segmentationLicense = Get-ChildItem $work -Recurse -File -Filter 'LICENSE*' | Select-Object -First 1
-        if ($segmentationLicense) {
-            Copy-Item $segmentationLicense.FullName (Join-Path $ModelsDir 'LICENSE-pyannote-segmentation.txt') -Force
-        }
-        else {
-            Write-Warning 'В архиве сегментации нет текста лицензии MIT — приложите его вручную (LICENSE-pyannote-segmentation.txt).'
-        }
-    }
-    finally {
-        Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
-    }
-
     Save-Pinned $speakerEmbedding.Url (Join-Path $ModelsDir $speakerEmbedding.Target) -Sha256 $speakerEmbedding.Sha256 -SizeBytes $speakerEmbedding.Size
 }
 
@@ -242,12 +205,10 @@ Write-Host '    (поставка утилиты — deploy/offline/publish-spee
 Write-Host '  Speech:Ffmpeg:Folder = <каталог ffmpeg>  (пусто — берётся Vision:Ffmpeg:Folder; поставка — export-ffmpeg.ps1)'
 if ($Speakers) {
     Write-Host ''
-    Write-Host 'Разделение говорящих (ADR-0062; без этих ключей расшифровка идёт без дикторов, стерео-звонки — по каналам):'
-    Write-Host "  Speech:Speakers:Segmentation:Path   = <путь к $($speakerSegmentation.Target)>"
-    Write-Host "  Speech:Speakers:Segmentation:Sha256 = $(Get-Pin $speakerSegmentation.Target)"
-    Write-Host "  Speech:Speakers:Embedding:Path      = <путь к $($speakerEmbedding.Target)>"
-    Write-Host "  Speech:Speakers:Embedding:Sha256    = $(Get-Pin $speakerEmbedding.Target)"
-    Write-Host '  Speech:Speakers:Count     = 0    (0 — число дикторов по порогу; 2 — если записи всегда диалоги)'
-    Write-Host '  Speech:Speakers:Threshold = 0.5  (калибруется на пилоте, КИ-10)'
-    Write-Host '  Speech:Speakers:MaxMinutes = 120 (длиннее — без разметки моделью: модели нужна вся запись в памяти)'
+    Write-Host 'Разделение говорящих (ADR-0062 v0.3; без этих ключей расшифровка идёт без дикторов, стерео-звонки — по каналам):'
+    Write-Host "  Speech:Speakers:Embedding:Path   = <путь к $($speakerEmbedding.Target)>"
+    Write-Host "  Speech:Speakers:Embedding:Sha256 = $(Get-Pin $speakerEmbedding.Target)"
+    Write-Host '  Speech:Speakers:Count      = 0    (0 — число дикторов по порогу; 2 — если записи всегда диалоги)'
+    Write-Host '  Speech:Speakers:Threshold  = 0.4  (сходство реплик одного диктора; калибруется на пилоте, КИ-10)'
+    Write-Host '  Speech:Speakers:MaxMinutes = 120  (длиннее — без разметки моделью: время группировки растёт с числом реплик)'
 }

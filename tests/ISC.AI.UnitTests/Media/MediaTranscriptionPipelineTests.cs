@@ -123,22 +123,38 @@ public sealed class MediaTranscriptionPipelineTests : IDisposable
             Arg.Any<CancellationToken>());
     }
 
-    [Fact(DisplayName = "ADR-0062 v0.2: заданное число говорящих уходит распознавателю и в журнал; без него — «по настройке», в журнале не упомянуто")]
-    public async Task Speaker_count_reaches_transcriber_and_audit()
+    [Fact(DisplayName = "ADR-0062 v0.2–0.3: выбор сотрудника (число говорящих, «без дикторов») уходит распознавателю и в журнал")]
+    public async Task Speaker_choice_reaches_transcriber_and_audit()
     {
         _transcriber.Segments = [new TranscriptSegmentDraft(0, 0, 900, "салам", Speaker: 1)];
 
-        (await Pipeline().TranscribeAsync(AssetId, 2)).Success.ShouldBeTrue();
-
-        _transcriber.SpeakerCount.ShouldBe(2);
+        (await Pipeline().TranscribeAsync(AssetId, new SpeakerMarkupRequest(true, 2))).Success.ShouldBeTrue();
+        _transcriber.Speakers.ShouldBe(new SpeakerMarkupRequest(true, 2));
         await _audit.Received(1).WriteAsync(
             Arg.Is<AuditEntry>(e => e.PayloadSensitive!.Contains("говорящих задано 2", StringComparison.Ordinal)), Arg.Any<CancellationToken>());
 
         _audit.ClearReceivedCalls();
-        (await Pipeline().TranscribeAsync(AssetId)).Success.ShouldBeTrue();
-        _transcriber.SpeakerCount.ShouldBeNull();
+        (await Pipeline().TranscribeAsync(AssetId, SpeakerMarkupRequest.Off)).Success.ShouldBeTrue();
+        _transcriber.Speakers.ShouldBe(SpeakerMarkupRequest.Off);
         await _audit.Received(1).WriteAsync(
-            Arg.Is<AuditEntry>(e => !e.PayloadSensitive!.Contains("говорящих", StringComparison.Ordinal)), Arg.Any<CancellationToken>());
+            Arg.Is<AuditEntry>(e => e.PayloadSensitive!.Contains("дикторы не размечались", StringComparison.Ordinal)), Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "ADR-0062 v0.3: сотрудник не выбирал (загрузка) — как решил Администратор; без настроек — размечать; выбор сотрудника важнее")]
+    public async Task Admin_setting_applies_when_employee_did_not_choose()
+    {
+        _transcriber.Segments = [new TranscriptSegmentDraft(0, 0, 900, "салам")];
+        var off = Substitute.For<IMediaSettingsStore>();
+        off.GetAsync(Arg.Any<CancellationToken>()).Returns(MediaSettings.Defaults with { TranscriptSpeakers = false });
+
+        (await Pipeline(settings: off).TranscribeAsync(AssetId)).Success.ShouldBeTrue();
+        _transcriber.Speakers.ShouldBe(SpeakerMarkupRequest.Off);
+
+        (await Pipeline(settings: off).TranscribeAsync(AssetId, SpeakerMarkupRequest.Auto)).Success.ShouldBeTrue();
+        _transcriber.Speakers.ShouldBe(SpeakerMarkupRequest.Auto);
+
+        (await Pipeline().TranscribeAsync(AssetId)).Success.ShouldBeTrue();
+        _transcriber.Speakers.ShouldBe(SpeakerMarkupRequest.Auto);
     }
 
     [Fact(DisplayName = "ADR-0062: разметка не удалась — фрагменты без дикторов, причина уходит в хранилище для подписи в карточке")]
@@ -331,8 +347,8 @@ public sealed class MediaTranscriptionPipelineTests : IDisposable
         }
     }
 
-    private MediaTranscriptionPipeline Pipeline(ITranscriptCorpus? corpus = null) =>
-        new(_store, _files, _transcriber, _audit, _tempFiles, NullLogger<MediaTranscriptionPipeline>.Instance, corpus);
+    private MediaTranscriptionPipeline Pipeline(ITranscriptCorpus? corpus = null, IMediaSettingsStore? settings = null) =>
+        new(_store, _files, _transcriber, _audit, _tempFiles, NullLogger<MediaTranscriptionPipeline>.Instance, corpus, settings);
 
     /// <summary>
     /// Фейк распознавателя: отдаёт заданные фрагменты, запоминает путь к временной копии (и проверяет, что она
@@ -356,18 +372,18 @@ public sealed class MediaTranscriptionPipelineTests : IDisposable
         /// <summary>Чем размечены дикторы (ADR-0062).</summary>
         public TranscriptSpeakerSource SpeakerSource { get; set; }
 
-        /// <summary>Число говорящих, переданное конвейером (v0.2).</summary>
-        public int? SpeakerCount { get; private set; }
+        /// <summary>Как размечать дикторов — передал конвейер (v0.3).</summary>
+        public SpeakerMarkupRequest? Speakers { get; private set; }
 
         /// <summary>Почему дикторы не размечены.</summary>
         public string? SpeakerNote { get; set; }
 
         public string ModelVersion => Model;
 
-        public async Task<AudioTranscription> TranscribeAsync(string sourcePath, int? speakerCount = null, CancellationToken cancellationToken = default)
+        public async Task<AudioTranscription> TranscribeAsync(string sourcePath, SpeakerMarkupRequest? speakers = null, CancellationToken cancellationToken = default)
         {
             Calls++;
-            SpeakerCount = speakerCount;
+            Speakers = speakers;
             SourcePath = sourcePath;
             File.Exists(sourcePath).ShouldBeTrue("Распознаватель получает путь к уже записанной временной копии.");
             (await File.ReadAllBytesAsync(sourcePath, cancellationToken)).ShouldBe(new byte[] { 1, 2, 3 });

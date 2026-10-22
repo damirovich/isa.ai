@@ -37,6 +37,32 @@ public enum TranscriptSpeakerSource : short
 /// <param name="Note">Почему не размечены (без содержимого записи).</param>
 public sealed record TranscriptSpeakerMarkup(TranscriptSpeakerSource Source, string? Note);
 
+/// <summary>
+/// Как размечать дикторов при расшифровке (ADR-0062 v0.3): не размечать, «авто» (число говорящих — по настройке разметки)
+/// или заданное сотрудником число говорящих.
+/// </summary>
+/// <param name="Enabled">Размечать ли дикторов.</param>
+/// <param name="Count">Сколько говорящих (1–<see cref="MaxCount"/>); <see langword="null"/> — по настройке разметки.</param>
+public sealed record SpeakerMarkupRequest(bool Enabled, int? Count = null)
+{
+    /// <summary>Наибольшее число говорящих, которое можно задать.</summary>
+    public const int MaxCount = 20;
+
+    /// <summary>Не размечать дикторов.</summary>
+    public static SpeakerMarkupRequest Off { get; } = new(false);
+
+    /// <summary>Размечать; число говорящих — по настройке разметки.</summary>
+    public static SpeakerMarkupRequest Auto { get; } = new(true);
+
+    /// <summary>Число задано верно: не задано либо от 1 до <see cref="MaxCount"/>.</summary>
+    public bool IsValid => Count is null or (>= 1 and <= MaxCount);
+
+    /// <summary>Для журнала: <c>off</c>, <c>auto</c> или число.</summary>
+    public string AuditText => !Enabled
+        ? "off"
+        : Count is { } count ? count.ToString(System.Globalization.CultureInfo.InvariantCulture) : "auto";
+}
+
 /// <summary>Исход правки дикторов (ADR-0062).</summary>
 public enum TranscriptSpeakerEditResult
 {

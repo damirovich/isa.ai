@@ -38,6 +38,7 @@ public sealed class AudioPlayerUiTests : BunitContext, IAsyncLifetime
 
     private readonly IMediator _mediator = Substitute.For<IMediator>();
     private readonly BunitJSModuleInterop _module;
+    private readonly IRenderedComponent<MudPopoverProvider> _popovers;
 
     public AudioPlayerUiTests()
     {
@@ -50,6 +51,9 @@ public sealed class AudioPlayerUiTests : BunitContext, IAsyncLifetime
         Services.AddSingleton(ISC.AI.Modules.Media.Application.MediaUploadOptions.Default);
         Services.AddSingleton(new ISC.AI.Modules.Media.Application.MediaSearchOptions());
         SetRendererInfo(new RendererInfo("Server", true));
+
+        // Поставщик всплывающих списков MudBlazor — один на тест: в панели расшифровки выбор «Дикторы» (ADR-0062 v0.3).
+        _popovers = Render<MudPopoverProvider>();
         _mediator.Send(Arg.Any<GetAssetSuggestionStatusQuery>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ResponseDto<AssetSuggestionStatus>>(ResponseDto<AssetSuggestionStatus>.Ok(
                 new AssetSuggestionStatus(true, false, 0.5, [], []))));
@@ -272,7 +276,7 @@ public sealed class AudioPlayerUiTests : BunitContext, IAsyncLifetime
     [Fact(DisplayName = "Карточка аудио: проигрыватель с волной, реквизиты строкой (без блока «Реквизиты»), «Удалить» — в меню «⋯», участки речи из расшифровки — в проигрыватель")]
     public void AssetCard_audio_uses_new_player_and_inline_requisites()
     {
-        var popovers = Render<MudPopoverProvider>();
+        var popovers = _popovers;
         _mediator.Send(Arg.Any<GetMediaAssetQuery>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ResponseDto<MediaAssetDetails>>(ResponseDto<MediaAssetDetails>.Ok(
                 new MediaAssetDetails(Asset(), [], 3))));

@@ -42,7 +42,19 @@
             @if (_transcript is { } shown && !ReadOnly)
             {
                 @* Пока расшифровка в очереди или идёт, повторный запуск неактивен: иначе нажатие вместо «Обновить»
-                   ставило бы ещё один полный прогон в общую очередь (сервер такой запуск тоже отклоняет). *@
+                   ставило бы ещё один полный прогон в общую очередь (сервер такой запуск тоже отклоняет).
+                   Дикторы (ADR-0062 v0.3): сотрудник выбирает для этой записи — без дикторов, «авто» или число говорящих
+                   (модель по порогу может ошибиться в числе, а сотрудник обычно знает, сколько людей говорит). *@
+                <div style="width:170px;">
+                    <MudSelect T="int" @bind-Value="_speakerChoice" Label="Дикторы" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                               Disabled="@(_busy || _loading || shown.Status.IsInProgress())" ToStringFunc="@SpeakerChoiceLabel">
+                        @for (var choice = NoSpeakers; choice <= MaxSpeakerChoice; choice++)
+                        {
+                            var value = choice;
+                            <MudSelectItem T="int" Value="@value">@SpeakerChoiceLabel(value)</MudSelectItem>
+                        }
+                    </MudSelect>
+                </div>
                 <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.RecordVoiceOver"
                            Disabled="@(_busy || _loading || shown.Status.IsInProgress())"
                            OnClick="RetranscribeAsync">@RetranscribeLabel</MudButton>
@@ -152,8 +164,7 @@
             @* Дикторы (ТФ-МЕД-19, ADR-0062): полоса — если разметка есть или была включена, но не выполнена. *@
             @if (transcript.Speakers is { Count: > 0 } || transcript.SpeakerNote is not null)
             {
-                <TranscriptSpeakersBar Transcript="@transcript" ActiveSegment="@ActiveSegmentRow" ReadOnly="@ReadOnly" OnChanged="LoadAsync"
-                                       OnRetranscribe="RetranscribeWithSpeakersAsync" />
+                <TranscriptSpeakersBar Transcript="@transcript" ActiveSegment="@ActiveSegmentRow" ReadOnly="@ReadOnly" OnChanged="LoadAsync" />
             }
 
             @if (PlayerElementId is null)
@@ -282,6 +293,26 @@
     private int? _revealIndex;
     private bool _revealForce;
     private string? _followKey;
+
+    // Выбор дикторов для «Расшифровать заново» (ADR-0062 v0.3): −1 — без дикторов, 0 — «авто», 1–6 — число говорящих.
+    private const int NoSpeakers = -1;
+    private const int MaxSpeakerChoice = 6;
+    private int _speakerChoice;
+
+    private static string SpeakerChoiceLabel(int choice) => choice switch
+    {
+        NoSpeakers => "без дикторов",
+        0 => "авто",
+        1 => "1 говорящий",
+        _ => choice.ToString(CultureInfo.InvariantCulture) + " говорящих",
+    };
+
+    private SpeakerMarkupRequest SpeakerRequest => _speakerChoice switch
+    {
+        NoSpeakers => SpeakerMarkupRequest.Off,
+        0 => SpeakerMarkupRequest.Auto,
+        var count => new SpeakerMarkupRequest(true, count),
+    };
 
     private string RetranscribeLabel =>
         _transcript is { Status: TranscriptStatus.NotApplicable } ? "Расшифровать" : "Расшифровать заново";
@@ -734,22 +765,19 @@
     /// «Расшифровать (заново)»: поставить носитель в очередь (RetranscribeMediaCommand — право, решётка и
     /// сужение по делам проверяет сервер, запуск аудируется). Прежняя расшифровка остаётся видна до успеха новой.
     /// </summary>
-    private Task RetranscribeAsync() => RetranscribeWithSpeakersAsync(null);
-
-    /// <summary>То же с числом говорящих из полосы «Дикторы» (ADR-0062 v0.2); <see langword="null"/> — авто.</summary>
-    private async Task RetranscribeWithSpeakersAsync(int? speakers)
+    private async Task RetranscribeAsync()
     {
         _busy = true;
         _error = null;
         _notice = null;
         try
         {
+            var speakers = SpeakerRequest;
             var response = await Dispatcher.Send(new RetranscribeMediaCommand(AssetId, speakers));
             if (response.Status)
             {
-                _notice = "Носитель поставлен в очередь на расшифровку"
-                    + (speakers is { } count ? $" (говорящих: {count})" : string.Empty)
-                    + ". Нажмите «Обновить», чтобы увидеть результат.";
+                _notice = "Носитель поставлен в очередь на расшифровку ("
+                    + SpeakerChoiceLabel(_speakerChoice) + "). Нажмите «Обновить», чтобы увидеть результат.";
                 await LoadAsync();
             }
             else

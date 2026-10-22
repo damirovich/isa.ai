@@ -27,14 +27,12 @@ namespace ISC.AI.Modules.Media.Application.Features.Transcripts;
 /// </remarks>
 /// <param name="AssetId">Носитель (аудио или видео).</param>
 /// <param name="Speakers">
-/// Сколько говорящих (ADR-0062 v0.2): модель по порогу может разделить одного человека на нескольких (шум, эхо, короткие
-/// реплики), а сотрудник обычно знает, сколько людей говорит. <see langword="null"/> — по настройке разметки.
+/// Как размечать дикторов (ADR-0062 v0.3): сотрудник выбирает «без дикторов», «авто» или число говорящих — модель по
+/// порогу может ошибиться в числе, а сотрудник обычно знает, сколько людей говорит. <see langword="null"/> — как решил
+/// Администратор для расшифровки при загрузке.
 /// </param>
-public sealed record RetranscribeMediaCommand(int AssetId, int? Speakers = null) : IRequest<ResponseDto<Guid>>, IAuditableRequest
+public sealed record RetranscribeMediaCommand(int AssetId, SpeakerMarkupRequest? Speakers = null) : IRequest<ResponseDto<Guid>>, IAuditableRequest
 {
-    /// <summary>Наибольшее число говорящих, которое можно задать.</summary>
-    public const int MaxSpeakers = 20;
-
     /// <summary>Вид фоновой задачи (показывается в списке задач).</summary>
     public const string TaskKind = "Повторная расшифровка речи носителя";
 
@@ -46,7 +44,7 @@ public sealed record RetranscribeMediaCommand(int AssetId, int? Speakers = null)
 
     /// <inheritdoc />
     public string? AuditSummary => "media:retranscribe:asset=" + AssetId.ToString(CultureInfo.InvariantCulture)
-        + (Speakers is { } speakers ? ":speakers=" + speakers.ToString(CultureInfo.InvariantCulture) : string.Empty);
+        + (Speakers is { } speakers ? ":speakers=" + speakers.AuditText : string.Empty);
 
     /// <inheritdoc cref="RetranscribeMediaCommand" />
     public sealed class Handler(
@@ -63,9 +61,9 @@ public sealed record RetranscribeMediaCommand(int AssetId, int? Speakers = null)
         {
             ArgumentNullException.ThrowIfNull(command);
 
-            if (command.Speakers is < 1 or > MaxSpeakers)
+            if (command.Speakers is { IsValid: false })
             {
-                return ResponseDto<Guid>.BadRequest($"Число говорящих — от 1 до {MaxSpeakers}.");
+                return ResponseDto<Guid>.BadRequest($"Число говорящих — от 1 до {SpeakerMarkupRequest.MaxCount}.");
             }
 
             if (!await administration.CanUploadAsync(cancellationToken))

@@ -30,8 +30,13 @@ internal sealed class ProtocolWriter(TextWriter output)
 
     private readonly ArrayBufferWriter<byte> _buffer = new(256);
 
+    private readonly List<SegmentSpan> _spans = [];
+
     /// <summary>Сколько фрагментов записано — это же число уходит в строку <c>done</c>.</summary>
     public int SegmentsWritten { get; private set; }
+
+    /// <summary>Участки записанных фрагментов по порядку — по ним размечаются дикторы (ADR-0062 v0.3).</summary>
+    public IReadOnlyList<SegmentSpan> Spans => _spans;
 
     /// <summary>
     /// Пишет фрагмент. Текст обрезается по краям; пустой не пишется (у модели бывает пустой ответ на
@@ -54,10 +59,11 @@ internal sealed class ProtocolWriter(TextWriter output)
             json.WriteString("text", trimmed);
         });
         SegmentsWritten++;
+        _spans.Add(new SegmentSpan(startMs, endMs));
         return true;
     }
 
-    /// <summary>Пишет реплику говорящего (ADR-0062): участок записи и номер диктора модели.</summary>
+    /// <summary>Пишет реплику говорящего (ADR-0062): участок записи (у v0.3 — ровно участок фрагмента) и номер диктора.</summary>
     public void WriteTurn(long startMs, long endMs, int speaker) =>
         WriteLine(json =>
         {

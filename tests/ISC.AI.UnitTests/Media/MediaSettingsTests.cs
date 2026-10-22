@@ -137,6 +137,46 @@ public sealed class MediaSettingsTests
         (await handler.Handle(new GetMediaSettingsQuery(), CancellationToken.None)).Status.ShouldBeFalse();
     }
 
+    [Fact(DisplayName = "ADR-0062 v0.3: разметка дикторов при загрузке — сохраняется с правом, «было → стало» в журнале; без права — отказ, попытка в журнале")]
+    public async Task Transcript_speakers_setting()
+    {
+        _store.GetAsync(Arg.Any<CancellationToken>()).Returns(MediaSettings.Defaults, MediaSettings.Defaults with { TranscriptSpeakers = false });
+        var handler = new SetTranscriptSpeakersCommand.Handler(_store, _administration, _subjects, _audit);
+
+        var response = await handler.Handle(new SetTranscriptSpeakersCommand(false), CancellationToken.None);
+
+        response.Status.ShouldBeTrue();
+        response.Data!.TranscriptSpeakers.ShouldBeFalse();
+        await _store.Received(1).SaveTranscriptSpeakersAsync(false, 7, Arg.Any<CancellationToken>());
+        await _audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.Action == AuditAction.Modify && e.ObjectRef == "media:settings" && e.SubjectId == 7
+                && e.PayloadSensitive!.Contains("включена → выключена")),
+            Arg.Any<CancellationToken>());
+
+        _audit.ClearReceivedCalls();
+        _store.ClearReceivedCalls();
+        _administration.CanManageSettingsAsync(Arg.Any<CancellationToken>()).Returns(false);
+        var denied = await handler.Handle(new SetTranscriptSpeakersCommand(true), CancellationToken.None);
+
+        denied.StatusMessage.ShouldBe(SetMediaSettingsCommand.DeniedMessage);
+        await _store.DidNotReceiveWithAnyArgs().SaveTranscriptSpeakersAsync(default, default, default);
+        await _audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.PayloadSensitive!.Contains("изменение отклонено") && e.PayloadSensitive.Contains("разметка дикторов")),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "ADR-0062 v0.3: чтение настроек отдаёт и «размечать дикторов при загрузке»; по умолчанию — да")]
+    public async Task View_has_transcript_speakers()
+    {
+        MediaSettings.Defaults.TranscriptSpeakers.ShouldBeTrue();
+        _store.GetAsync(Arg.Any<CancellationToken>()).Returns(MediaSettings.Defaults with { TranscriptSpeakers = false });
+
+        var view = await new GetMediaSettingsQuery.Handler(_store, _administration, _subjects, new MediaSearchOptions())
+            .Handle(new GetMediaSettingsQuery(), CancellationToken.None);
+
+        view.Data!.TranscriptSpeakers.ShouldBeFalse();
+    }
+
     private async Task<ResponseDto<MediaSettings>> SetAsync(SetMediaSettingsCommand command) =>
         await new SetMediaSettingsCommand.Handler(_store, _administration, _subjects, _audit).Handle(command, CancellationToken.None);
 }

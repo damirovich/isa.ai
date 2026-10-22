@@ -97,12 +97,14 @@ public sealed class SpeechWorkerTranscriber : IAudioTranscriber, IDisposable
     /// </exception>
     /// <exception cref="OperationCanceledException">Отмена вызывающим (не таймаут).</exception>
     /// <exception cref="ArgumentOutOfRangeException">Число говорящих вне 1–<see cref="SpeakerOptions.MaxCount"/>.</exception>
-    public async Task<AudioTranscription> TranscribeAsync(string sourcePath, int? speakerCount = null, CancellationToken cancellationToken = default)
+    public async Task<AudioTranscription> TranscribeAsync(
+        string sourcePath, SpeakerMarkupRequest? speakers = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
-        if (speakerCount is < 1 or > SpeakerOptions.MaxCount)
+        var markup = speakers ?? SpeakerMarkupRequest.Auto;
+        if (markup.Count is < 1 or > SpeakerOptions.MaxCount)
         {
-            throw new ArgumentOutOfRangeException(nameof(speakerCount), speakerCount, $"Число говорящих — от 1 до {SpeakerOptions.MaxCount}.");
+            throw new ArgumentOutOfRangeException(nameof(speakers), markup.Count, $"Число говорящих — от 1 до {SpeakerOptions.MaxCount}.");
         }
 
         if (!File.Exists(sourcePath))
@@ -145,11 +147,13 @@ public sealed class SpeechWorkerTranscriber : IAudioTranscriber, IDisposable
 
             // Дикторы (ADR-0062): двухканальная запись с раздельными каналами размечается по ним — точно и без модели;
             // иначе — моделью в процессе-распознавателе, если она настроена. Каналов два — значит и абонентов двое: если
-            // сотрудник задал иное число говорящих (v0.2), разметку делает модель с этим числом.
-            var stereoTurns = audio.Channels == 2 && speakerCount is null or 2
+            // сотрудник задал иное число говорящих (v0.2), разметку делает модель с этим числом. «Без дикторов» (v0.3) —
+            // ни каналов, ни модели.
+            var stereoTurns = markup.Enabled && audio.Channels == 2 && markup.Count is null or 2
                 ? await TryStereoTurnsAsync(sourcePath, Path.Combine(workDir, "stereo.wav"), deadline.Token).ConfigureAwait(false)
                 : null;
-            var transcription = await RunWorkerAsync(files, wavPath, diarize: stereoTurns is null, speakerCount, deadline.Token).ConfigureAwait(false);
+            var transcription = await RunWorkerAsync(
+                files, wavPath, diarize: markup.Enabled && stereoTurns is null, markup.Count, deadline.Token).ConfigureAwait(false);
             return stereoTurns is null
                 ? transcription
                 : transcription with
@@ -231,11 +235,11 @@ public sealed class SpeechWorkerTranscriber : IAudioTranscriber, IDisposable
     /// <param name="vadPath">Проверенный путь к детектору речи.</param>
     /// <param name="wavPath">Подготовленный WAV.</param>
     /// <param name="options">Настройки (потоки, длина куска).</param>
-    /// <param name="speakers">Проверенные модели говорящих (ADR-0062); <see langword="null"/> — разметки моделью нет.</param>
+    /// <param name="speakerEmbedding">Проверенная модель «голосовых отпечатков» (ADR-0062 v0.3); <see langword="null"/> — разметки моделью нет.</param>
     /// <param name="speakerCount">Число говорящих, заданное сотрудником (v0.2); <see langword="null"/> — из настройки.</param>
     public static IReadOnlyList<string> BuildWorkerArguments(
         string modelPath, string tokensPath, string vadPath, string wavPath, SpeechOptions options,
-        (string Segmentation, string Embedding)? speakers = null, int? speakerCount = null)
+        string? speakerEmbedding = null, int? speakerCount = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         var threads = Math.Clamp(options.Threads, 1, 64);
@@ -250,14 +254,14 @@ public sealed class SpeechWorkerTranscriber : IAudioTranscriber, IDisposable
             "--max-segment-seconds", maxSeconds.ToString(CultureInfo.InvariantCulture),
         };
 
-        if (speakers is { } models && options.Speakers is { } speakerOptions)
+        if (speakerEmbedding is { } embedding && options.Speakers is { } speakerOptions)
         {
             arguments.AddRange(
             [
-                "--speaker-segmentation", models.Segmentation,
-                "--speaker-embedding", models.Embedding,
+                "--speaker-embedding", embedding,
                 "--speakers", Math.Clamp(speakerCount ?? speakerOptions.Count, 0, SpeakerOptions.MaxCount).ToString(CultureInfo.InvariantCulture),
-                "--speaker-threshold", Math.Clamp(speakerOptions.Threshold, 0.05, 2).ToString(CultureInfo.InvariantCulture),
+                "--speaker-threshold", Math.Clamp(speakerOptions.Threshold, SpeakerOptions.MinThreshold, SpeakerOptions.MaxThreshold)
+                    .ToString(CultureInfo.InvariantCulture),
                 "--speaker-max-minutes", Math.Clamp(speakerOptions.MaxMinutes, 1, 360).ToString(CultureInfo.InvariantCulture),
             ]);
         }
@@ -303,12 +307,10 @@ public sealed class SpeechWorkerTranscriber : IAudioTranscriber, IDisposable
                 worker);
         }
 
-        // Модели говорящих (ADR-0062) — те же правила, что у модели речи: путь задан — пин обязателен и сверяется (ТИ-004).
-        (string Segmentation, string Embedding)? speakers = _options.Speakers is { ModelEnabled: true } speakerOptions
-            ? (SpeechModelIntegrity.EnsureTrusted(speakerOptions.SegmentationPath, speakerOptions.SegmentationSha256, "сегментация говорящих",
-                    SpeechConfigurationKeys.SpeakersSegmentationPath, SpeechConfigurationKeys.SpeakersSegmentationSha256),
-                SpeechModelIntegrity.EnsureTrusted(speakerOptions.EmbeddingPath, speakerOptions.EmbeddingSha256, "голосовые отпечатки",
-                    SpeechConfigurationKeys.SpeakersEmbeddingPath, SpeechConfigurationKeys.SpeakersEmbeddingSha256))
+        // Модель говорящих (ADR-0062) — те же правила, что у модели речи: путь задан — пин обязателен и сверяется (ТИ-004).
+        var speakers = _options.Speakers is { ModelEnabled: true } speakerOptions
+            ? SpeechModelIntegrity.EnsureTrusted(speakerOptions.EmbeddingPath, speakerOptions.EmbeddingSha256, "голосовые отпечатки",
+                SpeechConfigurationKeys.SpeakersEmbeddingPath, SpeechConfigurationKeys.SpeakersEmbeddingSha256)
             : null;
 
         return new VerifiedFiles(
@@ -554,5 +556,5 @@ public sealed class SpeechWorkerTranscriber : IAudioTranscriber, IDisposable
         SpeechWorkDirSweeper.Sweep(WorkRoot, _processStartUtc, _logger);
     }
 
-    private sealed record VerifiedFiles(string Worker, string Model, string Tokens, string Vad, (string Segmentation, string Embedding)? Speakers);
+    private sealed record VerifiedFiles(string Worker, string Model, string Tokens, string Vad, string? Speakers);
 }

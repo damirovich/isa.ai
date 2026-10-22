@@ -106,6 +106,25 @@ public sealed class MediaSettingsStoreTests : IAsyncLifetime
         settings.ThresholdPercent.ShouldBe(75); // 60 ниже границы 75 → действует граница
     }
 
+    [Fact(DisplayName = "ADR-0062 v0.3: «размечать дикторов при загрузке» — по умолчанию да; конфигурация, затем база; сохранение сбрасывает кеш, остальное не трогает")]
+    public async Task Transcript_speakers_flag()
+    {
+        (await Store().GetAsync()).TranscriptSpeakers.ShouldBeTrue();
+        (await Store(Configuration(("Media:Transcription:Speakers", "false"))).GetAsync()).TranscriptSpeakers.ShouldBeFalse();
+        (await Store(Configuration(("Media:Transcription:Speakers", "мусор"))).GetAsync()).TranscriptSpeakers.ShouldBeTrue();
+
+        var cache = new MediaSettingsCache();
+        (await Store(cache: cache).GetAsync()).TranscriptSpeakers.ShouldBeTrue();
+        await Store(cache: cache).SaveTranscriptSpeakersAsync(false, changedByUserId: 3);
+
+        var saved = await Store(cache: cache).GetAsync();
+        (saved.TranscriptSpeakers, saved.UpdatedByUserId, saved.Mode).ShouldBe((false, (int?)3, MediaSettings.DefaultMode));
+        (await Store(Configuration(("Media:Transcription:Speakers", "true"))).GetAsync()).TranscriptSpeakers.ShouldBeFalse(); // база главнее
+
+        await Store(cache: cache).SaveTranscriptSpeakersAsync(true, changedByUserId: 3);
+        (await Store(cache: cache).GetAsync()).TranscriptSpeakers.ShouldBeTrue();
+    }
+
     private MediaSettingsStore Store(IConfiguration? configuration = null, MediaSettingsCache? cache = null) =>
         new(_media, cache ?? new MediaSettingsCache(), configuration ?? new ConfigurationBuilder().Build());
 
