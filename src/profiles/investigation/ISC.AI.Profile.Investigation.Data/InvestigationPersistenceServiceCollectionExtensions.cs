@@ -55,6 +55,9 @@ public static class InvestigationPersistenceServiceCollectionExtensions
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<ICaseReportStore, CaseReportStore>();
 
+        // Отчётные формы [АИС 6] (ADR-0061): журнал суточной активности и статистика карточек объектов — под правилом дел.
+        services.AddScoped<IActivityReportStore, ActivityReportStore>();
+
         // Перенос баз Access (ADR-0043): чтение файла базы драйвером ACE только на чтение и учёт перенесённых
         // записей для повтора без дублей.
         services.AddSingleton<IAccessDatabaseReader, OleDbAccessDatabaseReader>();

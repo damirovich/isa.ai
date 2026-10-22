@@ -1,0 +1,197 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@page "/reports/object-cards"
+@rendermode InteractiveServer
+@inject TimeProvider Clock
+@using System.Globalization
+@using System.IO
+@using ISC.AI.Modules.DocFlow.Domain.Services
+@using ISC.AI.Profile.Investigation.Application.Features.Statistics
+@using ISC.AI.Profile.Investigation.Domain.Enums
+
+@* Статистика карточек объектов по подразделениям-инициаторам (ОР-6.0.1, ТФ-ОТЧ-04, ADR-0061 ч. 3): карточки «Задание по
+   объекту», заведённые за период, по инициатору из справочника — всего, в работе, приостановлено, закрыто. Отбор —
+   период (по умолчанию — текущий год) и группа ОН/ОУ/ОТМ. Дела — тем же правилом, что реестр. Построение и выгрузка
+   пишутся в журнал аудита. Право — «Статистические отчёты». *@
+
+<PageHeader Title="Статистика карточек объектов" Subtitle="Заведённые карточки объектов по подразделениям-инициаторам за период"
+            Icon="@Icons.Material.Filled.BarChart">
+    @if (_report is { } shown)
+    {
+        <ClassificationChip Value="@shown.MaxClassification" Prefix="гриф отчёта " />
+    }
+</PageHeader>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+<MudPaper Outlined="true" Class="pa-3 mb-3">
+    <div class="d-flex gap-3 align-center flex-wrap">
+        <div style="width:160px;">
+            <MudDatePicker @bind-Date="_from" Label="С" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="dd.MM.yyyy" />
+        </div>
+        <div style="width:160px;">
+            <MudDatePicker @bind-Date="_to" Label="По" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="dd.MM.yyyy" />
+        </div>
+        <div style="width:260px;">
+            <MudSelect T="CaseDirection?" @bind-Value="_direction" Label="Группа" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem T="CaseDirection?" Value="@((CaseDirection?)null)">Все в пределах допуска</MudSelectItem>
+                @foreach (var direction in _directions)
+                {
+                    <MudSelectItem T="CaseDirection?" Value="@((CaseDirection?)direction)">@direction.ShortLabel() — @direction.Label()</MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow"
+                   Disabled="@(_busy || !PeriodValid)" OnClick="LoadAsync">Сформировать</MudButton>
+        <MudSpacer />
+        @foreach (var (format, label) in Formats)
+        {
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" Disabled="@(_busy || _report is null)"
+                       OnClick="@(() => ExportAsync(format))">@label</MudButton>
+        }
+    </div>
+    @if (!PeriodValid)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Error" Class="d-block mt-1">Укажите период: дата «с» не позже даты «по».</MudText>
+    }
+</MudPaper>
+
+@if (_busy && _report is null)
+{
+    <MudProgressLinear Indeterminate="true" Class="my-3" />
+}
+else if (_report is { } report)
+{
+    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2">
+        Период: @Date(report.From) — @Date(report.To). Карточка объекта — дело «Задание по объекту»; учтены только карточки в
+        пределах вашего допуска, статус — на момент построения.
+    </MudText>
+    <MudSimpleTable Dense="true" Hover="true" Bordered="true">
+        <thead>
+            <tr>
+                @foreach (var column in ObjectCardReportBuilder.Columns)
+                {
+                    <th>@column</th>
+                }
+            </tr>
+        </thead>
+        <tbody>
+            @if (report.Rows.Count == 0)
+            {
+                <tr>
+                    <td colspan="@ObjectCardReportBuilder.Columns.Count" class="mud-text-secondary">
+                        За период в пределах вашего допуска карточек объектов не заводили.
+                    </td>
+                </tr>
+            }
+            @foreach (var row in report.Rows)
+            {
+                <tr>
+                    <td>@row.Initiator</td>
+                    @foreach (var cell in ObjectCardReportBuilder.Cells(row.Count))
+                    {
+                        <td style="text-align:right;">@cell</td>
+                    }
+                </tr>
+            }
+            @if (report.Rows.Count > 1)
+            {
+                <tr style="font-weight:600;">
+                    <td>Итого</td>
+                    @foreach (var cell in ObjectCardReportBuilder.Cells(report.Total))
+                    {
+                        <td style="text-align:right;">@cell</td>
+                    }
+                </tr>
+            }
+        </tbody>
+    </MudSimpleTable>
+}
+
+@code {
+    private static readonly (ReportFormat Format, string Label)[] Formats =
+        [(ReportFormat.Excel, "Excel"), (ReportFormat.Word, "Word"), (ReportFormat.Pdf, "PDF")];
+
+    private DateTime? _from;
+    private DateTime? _to;
+    private CaseDirection? _direction;
+    private IReadOnlyList<CaseDirection> _directions = [];
+    private ObjectCardReport? _report;
+    private bool _busy = true; // «загрузка…» до первой интерактивной загрузки
+    private string? _error;
+
+    private bool PeriodValid => _from is { } from && _to is { } to && from.Date <= to.Date;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // По умолчанию — текущий год по местному времени.
+        var today = TimeZoneInfo.ConvertTime(Clock.GetUtcNow(), Clock.LocalTimeZone).Date;
+        _from = new DateTime(today.Year, 1, 1, 0, 0, 0, DateTimeKind.Unspecified);
+        _to = today;
+
+        // ТБ-030 «одно открытие — одна запись»: на предрендере отчёт не строится.
+        if (!RendererInfo.IsInteractive) { return; }
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (_from is not { } from || _to is not { } to)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ObjectCardReportQuery(DateOnly.FromDateTime(from), DateOnly.FromDateTime(to), _direction));
+            if (response is { Status: true, Data: { } report })
+            {
+                _report = report;
+                _directions = report.Directions;
+                _error = null;
+            }
+            else
+            {
+                _report = null;
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ExportAsync(ReportFormat format)
+    {
+        if (_report is not { } report)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ExportObjectCardReportCommand(report.From, report.To, report.Direction, format));
+            if (response is not { Status: true, Data: { } file })
+            {
+                _error = response.StatusMessage;
+                return;
+            }
+
+            using var stream = new DotNetStreamReference(new MemoryStream(file.Content));
+            await JS.InvokeVoidAsync("downloadFileFromStream", file.FileName, stream);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string Date(DateOnly date) => date.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture);
+}

@@ -63,6 +63,8 @@ public static class InvestigationApplicationServiceCollectionExtensions
 
         // Отчётность [АИС 6] (ADR-0061): общая часть показа и выгрузки отчёта результативности распознавания.
         services.AddScoped<Features.Statistics.RecognitionReportSource>();
+        services.AddScoped<Features.Statistics.ActivityJournalSource>();
+        services.AddScoped<Features.Statistics.ObjectCardReportSource>();
 
         services.AddValidatorsFromAssembly(typeof(InvestigationApplicationServiceCollectionExtensions).Assembly);
         return services;

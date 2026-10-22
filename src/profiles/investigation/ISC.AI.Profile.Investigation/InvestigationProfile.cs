@@ -104,6 +104,13 @@ public sealed class InvestigationProfile : IProfile
         new ModuleDescriptor("reports-recognition", "/reports/recognition", "Результативность распознавания",
             Icons.Material.Filled.QueryStats, typeof(RecognitionReportPage), ReadPolicy, GroupReports),
 
+        // Журнал суточной оперативной активности (ТФ-ОТЧ-05, [АИС 6.3]) и статистика карточек объектов по инициаторам
+        // (ОР-6.0.1) — то же право; отчёт по графу (ТФ-ОТЧ-06) — кнопкой на странице графа фигуранта.
+        new ModuleDescriptor("reports-activity", "/reports/activity", "Журнал суточной активности",
+            Icons.Material.Filled.EventNote, typeof(ActivityJournalPage), ReadPolicy, GroupReports),
+        new ModuleDescriptor("reports-object-cards", "/reports/object-cards", "Статистика карточек объектов",
+            Icons.Material.Filled.BarChart, typeof(ObjectCardReportPage), ReadPolicy, GroupReports),
+
         // --- Секция «Администрирование» (ТФ-АДМ-01..03, 07). «Пользователи» (учётная запись, роль, допуск в карточке
         // сотрудника) и журнал аудита даёт ПАКЕТ (ADR-0023) — те же экраны, что у «ИнспекторAI»; роли пакет назначает
         // через порт профиля (IUserRoleCatalog), подразделения и справочники — страницы профиля. Разделы видны по роли

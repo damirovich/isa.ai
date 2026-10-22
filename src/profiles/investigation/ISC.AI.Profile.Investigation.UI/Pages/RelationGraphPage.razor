@@ -13,6 +13,7 @@
 @using ISC.AI.Abstractions.Security
 @using ISC.AI.Profile.Investigation.Application.Features.Directory
 @using ISC.AI.Profile.Investigation.Application.Features.RelationGraph
+@using ISC.AI.Modules.DocFlow.Domain.Services
 @inject ISnackbar Snackbar
 
 @* Граф связей фигуранта или дела (ТФ-ПЕР-10, ADR-0045) — по образцу «Графа связей» АСИО-10, с анализом связей v0.2.
@@ -67,6 +68,15 @@
              Dense="true" Disabled="@(_nodes.Count == 0 || _loading)">
         <MudMenuItem OnClick="@(() => ExportAsync(RelationGraphExportFormat.Png))">Картинка PNG — для справки</MudMenuItem>
         <MudMenuItem OnClick="@(() => ExportAsync(RelationGraphExportFormat.Svg))">Картинка SVG — для печати</MudMenuItem>
+        @if (CenterKind == RelationNodeKind.Person)
+        {
+            @* Отчёт по графу (ТФ-ОТЧ-06, [АИС 6.4], ADR-0061 ч. 4): сервер заново строит граф тем же обходом и выдаёт
+               таблицы — объекты 1-го порядка, цепочки 2-го и 3-го, пересечения; запись в журнал — до выдачи файла. *@
+            <MudDivider />
+            <MudMenuItem OnClick="@(() => ExportReportAsync(ReportFormat.Word))">Отчёт по графу — Word</MudMenuItem>
+            <MudMenuItem OnClick="@(() => ExportReportAsync(ReportFormat.Excel))">Отчёт по графу — Excel</MudMenuItem>
+            <MudMenuItem OnClick="@(() => ExportReportAsync(ReportFormat.Pdf))">Отчёт по графу — PDF</MudMenuItem>
+        }
     </MudMenu>
 </div>
 
@@ -700,6 +710,21 @@
     private static string Steps(int count) =>
         (count % 100) is >= 11 and <= 14 ? "шагов"
         : (count % 10) switch { 1 => "шаг", 2 or 3 or 4 => "шага", _ => "шагов" };
+
+    // --- Отчёт по графу (ТФ-ОТЧ-06, ADR-0061 ч. 4): файл собирает сервер, запись в журнал — до выдачи ---
+
+    private async Task ExportReportAsync(ReportFormat format)
+    {
+        var response = await Dispatcher.Send(new ExportRelationGraphReportCommand(CenterId, format));
+        if (response is not { Status: true, Data: { } file })
+        {
+            Snackbar.Add(response.StatusMessage, Severity.Error);
+            return;
+        }
+
+        using var stream = new DotNetStreamReference(new System.IO.MemoryStream(file.Content));
+        await JS.InvokeVoidAsync("downloadFileFromStream", file.FileName, stream);
+    }
 
     // --- Выгрузка (ADR-0045 п. 14): сначала запись в журнал, затем файл ---
 
