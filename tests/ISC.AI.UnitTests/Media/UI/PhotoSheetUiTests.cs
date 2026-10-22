@@ -37,6 +37,7 @@ public sealed class PhotoSheetUiTests : BunitContext, IAsyncLifetime
         JSInterop.Mode = JSRuntimeMode.Loose;
         Services.AddMudServices();
         Services.AddSingleton(_mediator);
+        Services.AddSingleton<ISC.AI.Modules.Media.Domain.Services.IMediaLinks>(new ISC.AI.Modules.Media.Application.Features.Navigation.NoMediaLinks());
         Services.AddSingleton(ISC.AI.Modules.Media.Application.MediaUploadOptions.Default);
         Services.AddSingleton(new ISC.AI.Modules.Media.Application.MediaSearchOptions());
         SetRendererInfo(new RendererInfo("Server", true));

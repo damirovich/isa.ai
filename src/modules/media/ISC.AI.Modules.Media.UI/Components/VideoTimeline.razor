@@ -36,7 +36,16 @@
                 @foreach (var lane in Lanes)
                 {
                     <span class="vt-legend-item" @key="lane.Key">
-                        <span class="vt-dot" style="@($"background:{lane.Color};")"></span>@lane.Title
+                        <span class="vt-dot" style="@($"background:{lane.Color};")"></span>
+                        @if (lane.Href is { Length: > 0 } href)
+                        {
+                            @* Переход к карточке фигуранта (ADR-0059); щелчок по отметке на ленте — по-прежнему к моменту. *@
+                            <a class="vt-legend-link" href="@href" title="Открыть карточку фигуранта">@lane.Title</a>
+                        }
+                        else
+                        {
+                            @lane.Title
+                        }
                     </span>
                 }
             </div>

@@ -15,6 +15,7 @@
 @implements IAsyncDisposable
 @inject NavigationManager Navigation
 @inject MediaUploadOptions UploadOptions
+@inject IMediaLinks Links
 @using System.Diagnostics
 @using System.Globalization
 @using ISC.AI.Modules.Media.Application
@@ -48,6 +49,12 @@
         }
         <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonSearch"
                    Href="@($"/media/search?caseId={CaseId}")">Поиск по лицу в этом деле</MudButton>
+        @if (CaseCardHref is { Length: > 0 } caseCard)
+        {
+            @* Назад к карточке дела (ADR-0059): адрес даёт профиль — пакет маршрутов профиля не знает. Только для дела,
+               уже отданного под решёткой субъекта: недоступное дело ссылки не получает (ТБ-020/021). *@
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" Href="@caseCard">К карточке дела</MudButton>
+        }
     </div>
 </div>
 
@@ -443,6 +450,9 @@ else
 
     private CaseScopeItem? _case;
     private bool _caseChecked;
+
+    /// <summary>Карточка дела в интерфейсе профиля (ADR-0059); <see langword="null"/> — дело недоступно или профиль адреса не дал.</summary>
+    private string? CaseCardHref => _case is { } item ? Links.CaseCard(item.CaseId) : null;
     private bool _busy;
     private bool _loading;
     private string? _error;

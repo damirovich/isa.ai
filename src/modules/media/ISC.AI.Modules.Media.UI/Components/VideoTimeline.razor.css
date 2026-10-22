@@ -46,6 +46,16 @@
     gap: 4px;
 }
 
+/* Имя фигуранта — ссылка на его карточку (ADR-0059). */
+.vt-legend-link {
+    color: var(--mud-palette-primary);
+    text-decoration: none;
+}
+
+.vt-legend-link:hover {
+    text-decoration: underline;
+}
+
 .vt-dot {
     display: inline-block;
     width: 10px;

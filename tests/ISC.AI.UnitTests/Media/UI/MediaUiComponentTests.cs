@@ -30,6 +30,7 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
 {
     private const string ModulePath = "./_content/ISC.AI.Modules.Media.UI/js/media.js";
     private readonly IMediator _mediator = Substitute.For<IMediator>();
+    private readonly IMediaLinks _links = Substitute.For<IMediaLinks>();
     private readonly BunitJSModuleInterop _module;
 
     public MediaUiComponentTests()
@@ -39,6 +40,7 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
         _module.Mode = JSRuntimeMode.Loose;
         Services.AddMudServices();
         Services.AddSingleton(_mediator);
+        Services.AddSingleton(_links);
         Services.AddSingleton(ISC.AI.Modules.Media.Application.MediaUploadOptions.Default);
         // Страница поиска по лицу показывает предел порога схожести из настроек поиска (ТФ-ПЛ-06).
         Services.AddSingleton(new ISC.AI.Modules.Media.Application.MediaSearchOptions());
@@ -908,6 +910,40 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
         cut.Markup.ShouldContain("voice&lt;1&gt;.ogg");
         cut.Markup.ShouldContain("href=\"/media/assets/7?t=65000\"");
         cut.Markup.ShouldContain("[01:05]");
+    }
+
+    [Fact(DisplayName = "ADR-0059: медиатека дела — «К карточке дела» по адресу от профиля")]
+    public void CaseMedia_links_back_to_case_card()
+    {
+        _links.CaseCard(3).Returns("/profile/cases/3");
+        var cut = RenderCaseMedia([new CaseScopeItem(3, "12-345", "Дело", 0, 1)]);
+
+        var back = cut.FindAll("a").Single(a => a.TextContent.Contains("К карточке дела", StringComparison.Ordinal));
+        back.GetAttribute("href").ShouldBe("/profile/cases/3");
+    }
+
+    [Fact(DisplayName = "ADR-0059: профиль адреса не дал — перехода нет; дело недоступно — ссылки нет, даже если адрес есть (ТБ-020/021)")]
+    public void CaseMedia_case_card_link_requires_profile_address_and_access()
+    {
+        // Подстановка NSubstitute для string без настройки отдаёт пустую строку — как «адреса нет».
+        var cut = RenderCaseMedia([new CaseScopeItem(3, "12-345", "Дело", 0, 1)]);
+        cut.Markup.ShouldNotContain("К карточке дела");
+
+        _links.CaseCard(4).Returns("/profile/cases/4");
+        var foreign = Render<ISC.AI.Modules.Media.UI.CaseMedia>(p => p.Add(x => x.CaseId, 4));
+        foreign.Markup.ShouldContain("Дело недоступно");
+        foreign.Markup.ShouldNotContain("К карточке дела");
+        _links.DidNotReceive().CaseCard(4);
+    }
+
+    private IRenderedComponent<ISC.AI.Modules.Media.UI.CaseMedia> RenderCaseMedia(IReadOnlyList<CaseScopeItem> cases)
+    {
+        Render<MudPopoverProvider>();
+        _mediator.Send(Arg.Any<ListAccessibleCasesQuery>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<ResponseDto<IReadOnlyList<CaseScopeItem>>>(ResponseDto<IReadOnlyList<CaseScopeItem>>.Ok(cases)));
+        _mediator.Send(Arg.Any<ListCaseMediaQuery>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<ResponseDto<IReadOnlyList<MediaAssetRow>>>(ResponseDto<IReadOnlyList<MediaAssetRow>>.Ok([])));
+        return Render<ISC.AI.Modules.Media.UI.CaseMedia>(p => p.Add(x => x.CaseId, 3));
     }
 
     [Fact(DisplayName = "Пустой результат поиска не утверждает, что сказанного нет в материалах (ТБ-020/021)")]

@@ -23,6 +23,7 @@
 @rendermode InteractiveServer
 @implements IAsyncDisposable
 @inject NavigationManager Navigation
+@inject IMediaLinks Links
 @using System.Globalization
 @using ISC.AI.Modules.Media.Application.Features.Assets
 @using ISC.AI.Modules.Media.Application.Features.Assets.Commands.SnapshotFrame
@@ -103,6 +104,11 @@ else
             @if (_details.CaseId is { } caseId)
             {
                 <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" Href="@($"/media/cases/{caseId}")">К медиатеке дела</MudButton>
+                @if (Links.CaseCard(caseId) is { Length: > 0 } caseCard)
+                {
+                    @* Назад к карточке дела профиля (ADR-0059): CaseId — дело, доступное субъекту (иначе null, ТБ-020/021). *@
+                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" Href="@caseCard">К карточке дела</MudButton>
+                }
             }
             @if (!_details.ViewOnly)
             {
@@ -835,9 +841,10 @@ else
     /// <summary>
     /// Дорожки ленты: по дорожке на каждого подтверждённого фигуранта (свой цвет, по порядку первого появления).
     /// Фигуранты — только доступные сотруднику (их отбирает сервер). Треки всех найденных лиц на ленту не выводятся:
-    /// их много, и они загромождают ленту, — они есть карточками ниже.
+    /// их много, и они загромождают ленту, — они есть карточками ниже. Имя в легенде — ссылка на карточку фигуранта,
+    /// если профиль дал адрес (ADR-0059).
     /// </summary>
-    private static IReadOnlyList<TimelineLane> BuildLanes(MediaAssetDetails details)
+    private static IReadOnlyList<TimelineLane> BuildLanes(MediaAssetDetails details, IMediaLinks links)
     {
         var lanes = new List<TimelineLane>();
         var persons = (details.PersonSpans ?? [])
@@ -852,7 +859,8 @@ else
                 "person-" + persons[i].Key.ToString(CultureInfo.InvariantCulture),
                 name,
                 VideoTimelineModel.PersonColor(i),
-                persons[i].Select(s => new TimelineSpan(s.StartMs, s.EndMs, name + " · " + SpanText(s.StartMs, s.EndMs))).ToList()));
+                persons[i].Select(s => new TimelineSpan(s.StartMs, s.EndMs, name + " · " + SpanText(s.StartMs, s.EndMs))).ToList(),
+                links.PersonCard(persons[i].Key)));
         }
 
         return lanes;
@@ -947,7 +955,7 @@ else
         {
             _details = details;
             _tracks = details.Asset.Kind == MediaKind.Video ? GroupByTrack(details.Faces) : [];
-            _lanes = details.Asset.Kind == MediaKind.Video ? BuildLanes(details) : [];
+            _lanes = details.Asset.Kind == MediaKind.Video ? BuildLanes(details, Links) : [];
             _recordClock = VideoTimelineModel.ClockBase(details.Asset.RecordedAt, details.Asset.CapturedAt, TimeZoneInfo.Local);
         }
         else
