@@ -48,8 +48,9 @@ internal static class WorkerApp
     }
 
     /// <summary>
-    /// Разметка дикторов (ADR-0062) после распознавания: реплики — строками протокола. Длинная запись не размечается,
-    /// сбой моделей не роняет расшифровку — исход и причина уходят в строку <c>done</c> и в stderr.
+    /// Разметка дикторов (ADR-0062 v0.3) после распознавания: «голосовой отпечаток» каждого записанного фрагмента, их
+    /// группировка — и по строке реплики на фрагмент. Длинная запись не размечается, сбой модели не роняет расшифровку —
+    /// исход и причина уходят в строку <c>done</c> и в stderr.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static (string Outcome, string? Note) Diarize(WorkerArguments arguments, long durationMs, ProtocolWriter writer, TextWriter stderr)
@@ -64,15 +65,18 @@ internal static class WorkerApp
         var running = Stopwatch.StartNew();
         try
         {
-            using var diarizer = SherpaSpeakerDiarizer.Load(arguments);
-            var turns = diarizer.Run(arguments.InputPath);
-            foreach (var turn in turns)
+            var spans = writer.Spans;
+            using var embedder = SherpaSpeakerEmbedder.Load(arguments);
+            var embeddings = embedder.Compute(arguments.InputPath, spans);
+            var speakers = SpeakerClustering.Cluster(
+                embeddings, spans.Select(s => s.EndMs - s.StartMs).ToList(), arguments.Speakers, arguments.SpeakerThreshold);
+            for (var i = 0; i < spans.Count; i++)
             {
-                writer.WriteTurn(turn.StartMs, turn.EndMs, turn.Speaker);
+                writer.WriteTurn(spans[i].StartMs, spans[i].EndMs, speakers[i]);
             }
 
             stderr.WriteLine(string.Create(CultureInfo.InvariantCulture,
-                $"Дикторы размечены: реплик {turns.Count}, дикторов {turns.Select(t => t.Speaker).Distinct().Count()}, за {running.Elapsed.TotalSeconds:0.0} с."));
+                $"Дикторы размечены: реплик {spans.Count}, дикторов {speakers.Distinct().Count()}, за {running.Elapsed.TotalSeconds:0.0} с."));
             return ("done", null);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)

@@ -61,7 +61,8 @@ public sealed class MediaSettingsStore(
     MediaSettingsCache cache,
     IConfiguration configuration) : IMediaSettingsStore
 {
-    private static readonly string[] Keys = [MediaSettings.ModeKey, MediaSettings.ThresholdKey, MediaSettings.MinThresholdKey];
+    private static readonly string[] Keys =
+        [MediaSettings.ModeKey, MediaSettings.ThresholdKey, MediaSettings.MinThresholdKey, MediaSettings.TranscriptSpeakersKey];
 
     /// <inheritdoc />
     public async Task<MediaSettings> GetAsync(CancellationToken cancellationToken = default)
@@ -109,6 +110,18 @@ public sealed class MediaSettingsStore(
         return null;
     }
 
+    /// <inheritdoc />
+    public async Task SaveTranscriptSpeakersAsync(bool enabled, int? changedByUserId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var rows = await db.Settings
+            .Where(s => s.Key == MediaSettings.TranscriptSpeakersKey)
+            .ToDictionaryAsync(s => s.Key, StringComparer.Ordinal, cancellationToken);
+        Put(db, rows, MediaSettings.TranscriptSpeakersKey, enabled ? "true" : "false", changedByUserId, DateTime.UtcNow);
+        await db.SaveChangesAsync(cancellationToken);
+        cache.Invalidate();
+    }
+
     private static void Put(
         MediaDbContext db, Dictionary<string, MediaSetting> rows, string key, string value, int? changedByUserId, DateTime now)
     {
@@ -145,12 +158,20 @@ public sealed class MediaSettingsStore(
             ?? Percent(configuration[MediaSettings.ThresholdConfigKey])
             ?? MediaSettings.DefaultThresholdPercent;
 
+        // Разметка дикторов (ADR-0062 v0.3): мусор — «не задано», по умолчанию — размечать.
+        var speakers = Flag(Stored(MediaSettings.TranscriptSpeakersKey))
+            ?? Flag(configuration[MediaSettings.TranscriptSpeakersConfigKey])
+            ?? true;
+
         var latest = rows.Count == 0 ? null : rows.MaxBy(r => r.UpdatedAt);
         return new MediaSettings(
             mode, Math.Max(threshold, min), min,
             latest is null ? null : DateTime.SpecifyKind(latest.UpdatedAt, DateTimeKind.Utc),
-            latest?.UpdatedByUserId);
+            latest?.UpdatedByUserId,
+            speakers);
     }
+
+    private static bool? Flag(string? text) => bool.TryParse(text?.Trim(), out var value) ? value : null;
 
     private static int? Percent(string? text) =>
         int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)

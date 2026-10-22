@@ -145,7 +145,7 @@ public sealed class SpeakerDiarizationTests
         StereoChannelAnalyzer.Turns(windows).ShouldBe([new SpeakerTurnSpan(0, 700, 0), new SpeakerTurnSpan(800, 1_300, 0)]);
     }
 
-    [Fact(DisplayName = "Настройки: Speech:Speakers читаются; без путей моделей разметки моделью нет; числа — в границах")]
+    [Fact(DisplayName = "Настройки: Speech:Speakers читаются; без модели отпечатков разметки моделью нет; числа — в границах; ключей pyannote нет (v0.3)")]
     public void Speaker_options_are_read_and_bound()
     {
         var empty = SpeechServiceCollectionExtensions.ReadOptions(Configuration(new Dictionary<string, string?>())).Speakers.ShouldNotBeNull();
@@ -154,27 +154,28 @@ public sealed class SpeakerDiarizationTests
 
         var full = SpeechServiceCollectionExtensions.ReadOptions(Configuration(new Dictionary<string, string?>
         {
-            ["Speech:Speakers:Segmentation:Path"] = " seg.onnx ",
-            ["Speech:Speakers:Segmentation:Sha256"] = "AA",
-            ["Speech:Speakers:Embedding:Path"] = "emb.onnx",
+            ["Speech:Speakers:Embedding:Path"] = " emb.onnx ",
             ["Speech:Speakers:Embedding:Sha256"] = "BB",
             ["Speech:Speakers:Count"] = "50",
-            ["Speech:Speakers:Threshold"] = "0.7",
+            ["Speech:Speakers:Threshold"] = "0.99",
             ["Speech:Speakers:MaxMinutes"] = "1000",
         })).Speakers.ShouldNotBeNull();
 
         full.ModelEnabled.ShouldBeTrue();
-        full.SegmentationPath.ShouldBe("seg.onnx");
-        (full.Count, full.Threshold, full.MaxMinutes).ShouldBe((SpeakerOptions.MaxCount, 0.7, 360));
+        full.EmbeddingPath.ShouldBe("emb.onnx");
+        (full.Count, full.Threshold, full.MaxMinutes).ShouldBe((SpeakerOptions.MaxCount, SpeakerOptions.MaxThreshold, 360));
+        SpeakerOptions.DefaultThreshold.ShouldBe(0.4);
 
         foreach (var key in new[]
                  {
-                     "Speech:Speakers:Segmentation:Path", "Speech:Speakers:Segmentation:Sha256", "Speech:Speakers:Embedding:Path",
-                     "Speech:Speakers:Embedding:Sha256", "Speech:Speakers:Count", "Speech:Speakers:Threshold", "Speech:Speakers:MaxMinutes",
+                     "Speech:Speakers:Embedding:Path", "Speech:Speakers:Embedding:Sha256", "Speech:Speakers:Count", "Speech:Speakers:Threshold",
+                     "Speech:Speakers:MaxMinutes",
                  })
         {
             SpeechConfigurationKeys.All.ShouldContain(key);
         }
+
+        SpeechConfigurationKeys.All.ShouldNotContain(key => key.Contains("Segmentation", StringComparison.Ordinal));
     }
 
     [Fact(DisplayName = "Аргументы процесса: модели говорящих — парой с числом, порогом и пределом в инвариантной культуре; без моделей — ключей нет")]
@@ -185,15 +186,14 @@ public sealed class SpeakerDiarizationTests
         try
         {
             var options = new SpeechOptions("w.exe", "m", "00", "t", "00", "v", "00",
-                Speakers: new SpeakerOptions("s", "00", "e", "00", Count: 2, Threshold: 0.75, MaxMinutes: 90));
+                Speakers: new SpeakerOptions("e", "00", Count: 2, Threshold: 0.75, MaxMinutes: 90));
 
             var args = SpeechWorkerTranscriber.BuildWorkerArguments(@"C:\m.onnx", @"C:\t.txt", @"C:\v.onnx", @"C:\a.wav", options,
-                (@"C:\seg.onnx", @"C:\emb.onnx"));
+                @"C:\emb.onnx");
 
             args.Skip(12).ShouldBe(
             [
-                "--speaker-segmentation", @"C:\seg.onnx", "--speaker-embedding", @"C:\emb.onnx",
-                "--speakers", "2", "--speaker-threshold", "0.75", "--speaker-max-minutes", "90",
+                "--speaker-embedding", @"C:\emb.onnx", "--speakers", "2", "--speaker-threshold", "0.75", "--speaker-max-minutes", "90",
             ]);
 
             SpeechWorkerTranscriber.BuildWorkerArguments(@"C:\m.onnx", @"C:\t.txt", @"C:\v.onnx", @"C:\a.wav", options)
@@ -201,7 +201,7 @@ public sealed class SpeakerDiarizationTests
 
             // v0.2: число, заданное сотрудником, важнее числа из настройки.
             var fixedCount = SpeechWorkerTranscriber.BuildWorkerArguments(@"C:\m.onnx", @"C:\t.txt", @"C:\v.onnx", @"C:\a.wav", options,
-                (@"C:\seg.onnx", @"C:\emb.onnx"), speakerCount: 3);
+                @"C:\emb.onnx", speakerCount: 3);
             fixedCount[fixedCount.ToList().IndexOf("--speakers") + 1].ShouldBe("3");
         }
         finally
@@ -217,7 +217,7 @@ public sealed class SpeakerDiarizationTests
     {
         var transcriber = new SpeechWorkerTranscriber(new SpeechOptions("w.exe", "m", "00", "t", "00", "v", "00"));
 
-        await Should.ThrowAsync<ArgumentOutOfRangeException>(() => transcriber.TranscribeAsync("нет-файла.wav", count));
+        await Should.ThrowAsync<ArgumentOutOfRangeException>(() => transcriber.TranscribeAsync("нет-файла.wav", new SpeakerMarkupRequest(true, count)));
     }
 
     private const short Voice = 8_000;

@@ -7,53 +7,65 @@ using Xunit;
 namespace ISC.AI.Speech.Worker.Tests;
 
 /// <summary>
-/// Разметка дикторов в процессе-распознавателе (ADR-0062) без sherpa-onnx: ключи моделей говорящих — только парой, числа —
-/// в границах, файлы моделей проверяются вместе с остальными; строки реплик и исход разметки в <c>done</c> разбирает
-/// адаптер.
+/// Разметка дикторов в процессе-распознавателе (ADR-0062 v0.3) без sherpa-onnx: модель «голосовых отпечатков» включает
+/// разметку, ключи числа, порога и предела без неё — ошибка, числа — в границах, файл модели проверяется вместе с
+/// остальными; строки реплик и исход разметки в <c>done</c> разбирает адаптер.
 /// </summary>
 public sealed class SpeakerArgumentsTests
 {
     private static readonly string[] Base = ["--model", "m.onnx", "--tokens", "t.txt", "--vad", "v.onnx", "--input", "a.wav"];
 
-    [Fact(DisplayName = "Дикторы: без ключей — разметки нет; с парой моделей — включена, умолчания: число по порогу 0,5, до 120 мин")]
+    [Fact(DisplayName = "Дикторы: без ключей — разметки нет; с моделью отпечатков — включена, умолчания: число по порогу 0,4, до 120 мин")]
     public void Speaker_arguments_defaults()
     {
         var plain = WorkerArguments.Parse(Base);
         plain.Diarize.ShouldBeFalse();
 
-        var args = WorkerArguments.Parse([.. Base, "--speaker-segmentation", "seg.onnx", "--speaker-embedding", "emb.onnx"]);
+        var args = WorkerArguments.Parse([.. Base, "--speaker-embedding", "emb.onnx"]);
         args.Diarize.ShouldBeTrue();
-        args.SpeakerSegmentationPath.ShouldBe("seg.onnx");
         args.SpeakerEmbeddingPath.ShouldBe("emb.onnx");
+        WorkerArguments.DefaultSpeakerThreshold.ShouldBe(0.4);
         args.Speakers.ShouldBe(0);
         args.SpeakerThreshold.ShouldBe(WorkerArguments.DefaultSpeakerThreshold);
         args.SpeakerMaxMinutes.ShouldBe(WorkerArguments.DefaultSpeakerMaxMinutes);
     }
 
-    [Fact(DisplayName = "Дикторы: число, порог и предел — в границах; одна модель без другой — отказ с понятным текстом")]
+    [Fact(DisplayName = "Дикторы: число, порог (0,05–0,95) и предел — в границах; ключи дикторов без модели отпечатков — отказ с понятным текстом")]
     public void Speaker_arguments_validation()
     {
         var args = WorkerArguments.Parse(
-            [.. Base, "--speaker-segmentation", "s", "--speaker-embedding", "e", "--speakers", "2", "--speaker-threshold", "0.7", "--speaker-max-minutes", "60"]);
+            [.. Base, "--speaker-embedding", "e", "--speakers", "2", "--speaker-threshold", "0.7", "--speaker-max-minutes", "60"]);
         (args.Speakers, args.SpeakerThreshold, args.SpeakerMaxMinutes).ShouldBe((2, 0.7, 60));
 
+        Should.Throw<WorkerUsageException>(() => WorkerArguments.Parse([.. Base, "--speakers", "2"]))
+            .Message.ShouldContain("--speaker-embedding");
         Should.Throw<WorkerUsageException>(() => WorkerArguments.Parse([.. Base, "--speaker-segmentation", "s"]))
-            .Message.ShouldContain("парой");
-        Should.Throw<WorkerUsageException>(() => WorkerArguments.Parse([.. Base, "--speaker-segmentation", "s", "--speaker-embedding", "e", "--speakers", "21"]));
-        Should.Throw<WorkerUsageException>(() => WorkerArguments.Parse([.. Base, "--speaker-segmentation", "s", "--speaker-embedding", "e", "--speaker-threshold", "0,5"]));
-        Should.Throw<WorkerUsageException>(() => WorkerArguments.Parse([.. Base, "--speaker-segmentation", "s", "--speaker-embedding", "e", "--speaker-max-minutes", "0"]));
+            .Message.ShouldContain("Неизвестный аргумент");
+        Should.Throw<WorkerUsageException>(() => WorkerArguments.Parse([.. Base, "--speaker-embedding", "e", "--speakers", "21"]));
+        Should.Throw<WorkerUsageException>(() => WorkerArguments.Parse([.. Base, "--speaker-embedding", "e", "--speaker-threshold", "0,5"]));
+        Should.Throw<WorkerUsageException>(() => WorkerArguments.Parse([.. Base, "--speaker-embedding", "e", "--speaker-threshold", "1.2"]));
+        Should.Throw<WorkerUsageException>(() => WorkerArguments.Parse([.. Base, "--speaker-embedding", "e", "--speaker-max-minutes", "0"]));
     }
 
-    [Fact(DisplayName = "Дикторы: отсутствующие файлы моделей говорящих перечисляются вместе с остальными")]
+    [Fact(DisplayName = "Дикторы: отсутствующий файл модели отпечатков перечисляется вместе с остальными")]
     public void Speaker_model_files_are_checked()
     {
-        var args = WorkerArguments.Parse([.. Base, "--speaker-segmentation", "seg.onnx", "--speaker-embedding", "emb.onnx"]);
+        var args = WorkerArguments.Parse([.. Base, "--speaker-embedding", "emb.onnx"]);
 
-        var missing = args.FindMissingFiles(path => !path.StartsWith("seg", System.StringComparison.Ordinal) && !path.StartsWith("emb", System.StringComparison.Ordinal));
+        var missing = args.FindMissingFiles(path => !path.StartsWith("emb", System.StringComparison.Ordinal));
 
-        missing.Count.ShouldBe(2);
-        missing.ShouldContain(m => m.StartsWith("--speaker-segmentation:", System.StringComparison.Ordinal));
-        missing.ShouldContain(m => m.StartsWith("--speaker-embedding:", System.StringComparison.Ordinal));
+        missing.ShouldHaveSingleItem().ShouldStartWith("--speaker-embedding:");
+    }
+
+    [Fact(DisplayName = "Протокол: записанные фрагменты запоминаются участками — по ним размечаются дикторы; пустой не запоминается")]
+    public void Writer_keeps_segment_spans()
+    {
+        var writer = new ProtocolWriter(new StringWriter());
+        writer.WriteSegment(0, 900, "салам");
+        writer.WriteSegment(1_000, 1_500, "   ");
+        writer.WriteSegment(2_000, 3_000, "кандай");
+
+        writer.Spans.ShouldBe([new SegmentSpan(0, 900), new SegmentSpan(2_000, 3_000)]);
     }
 
     [Fact(DisplayName = "Протокол: реплики и исход разметки в done пишет утилита и разбирает адаптер; без разметки — поля нет")]

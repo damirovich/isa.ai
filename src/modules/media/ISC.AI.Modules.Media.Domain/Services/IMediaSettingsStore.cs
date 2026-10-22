@@ -17,12 +17,17 @@ namespace ISC.AI.Modules.Media.Domain.Services;
 /// </param>
 /// <param name="UpdatedAtUtc">Когда настройки меняли последний раз; <see langword="null"/> — не меняли, действуют умолчания.</param>
 /// <param name="UpdatedByUserId">Кто менял последним (слабая ссылка на <c>core.app_user</c>).</param>
+/// <param name="TranscriptSpeakers">
+/// Размечать ли дикторов при расшифровке, когда сотрудник этого не выбирал — расшифровка загруженных материалов
+/// (ADR-0062 v0.3). По умолчанию — размечать; при «Расшифровать заново» сотрудник выбирает сам.
+/// </param>
 public sealed record MediaSettings(
     ConfirmationMode Mode,
     int ThresholdPercent,
     int MinThresholdPercent,
     DateTime? UpdatedAtUtc = null,
-    int? UpdatedByUserId = null)
+    int? UpdatedByUserId = null,
+    bool TranscriptSpeakers = true)
 {
     /// <summary>
     /// Наименьший допустимый порог — 1 %: решение Заказчика от 17.10.2026 «оператор выбирает любой порог и ищет по нему»
@@ -50,6 +55,12 @@ public sealed record MediaSettings(
 
     /// <summary>Ключ нижней границы в таблице <c>media.setting</c>.</summary>
     public const string MinThresholdKey = "search.min-threshold-percent";
+
+    /// <summary>Ключ «размечать дикторов при расшифровке загруженных материалов» в таблице <c>media.setting</c>.</summary>
+    public const string TranscriptSpeakersKey = "transcription.speakers";
+
+    /// <summary>Запасной ключ конфигурации разметки дикторов (<c>true</c> / <c>false</c>) — пока в базе ничего нет.</summary>
+    public const string TranscriptSpeakersConfigKey = "Media:Transcription:Speakers";
 
     /// <summary>Запасной ключ конфигурации режима (<c>single-operator</c> / <c>two-person</c>) — пока в базе ничего нет.</summary>
     public const string ModeConfigKey = "Media:Verification:Mode";
@@ -124,4 +135,10 @@ public interface IMediaSettingsStore
     Task<string?> SaveAsync(
         ConfirmationMode mode, int thresholdPercent, int minThresholdPercent, int? changedByUserId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Сохраняет «размечать дикторов при расшифровке загруженных материалов» (ADR-0062 v0.3) и сбрасывает кеш: действует
+    /// со следующей расшифровки, без перезапуска.
+    /// </summary>
+    Task SaveTranscriptSpeakersAsync(bool enabled, int? changedByUserId, CancellationToken cancellationToken = default);
 }

@@ -85,24 +85,11 @@ public sealed class TranscriptSpeakersUiTests : BunitContext, IAsyncLifetime
         bar.ShouldContain("Дикторы размечены моделью");
     }
 
-    [Fact(DisplayName = "ADR-0062 v0.2: «Говорящих» и «Расшифровать заново» в полосе — повторная расшифровка с числом говорящих; «авто» — без числа")]
-    public async Task Bar_retranscribes_with_speaker_count()
-    {
-        var requested = new List<int?>();
-        var cut = RenderBar(Transcript(Speakers(), TranscriptSpeakerSource.Model),
-            retranscribe: EventCallback.Factory.Create<int?>(this, requested.Add));
-
-        await cut.InvokeAsync(() => cut.FindComponent<MudSelect<int>>().Instance.ValueChanged.InvokeAsync(2));
-        Button(cut, "Расшифровать заново").Click();
-        await cut.InvokeAsync(() => cut.FindComponent<MudSelect<int>>().Instance.ValueChanged.InvokeAsync(0));
-        Button(cut, "Расшифровать заново").Click();
-
-        requested.ShouldBe([2, null]);
-        _sent.ShouldBeEmpty(); // повторную расшифровку запускает панель, не полоса
-    }
-
-    [Fact(DisplayName = "ADR-0062 v0.2: панель — число говорящих из полосы уходит в RetranscribeMediaCommand")]
-    public async Task Panel_sends_retranscribe_with_speaker_count()
+    [Theory(DisplayName = "ADR-0062 v0.3: «Дикторы» у «Расшифровать заново» — без дикторов, «авто» или число говорящих уходит в RetranscribeMediaCommand")]
+    [InlineData(-1, false, null, "без дикторов")]
+    [InlineData(0, true, null, "авто")]
+    [InlineData(2, true, 2, "2 говорящих")]
+    public async Task Panel_sends_retranscribe_with_speaker_choice(int choice, bool enabled, int? count, string label)
     {
         _mediator.Send(Arg.Any<RetranscribeMediaCommand>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ResponseDto<Guid>>(ResponseDto<Guid>.Ok(Guid.NewGuid())));
@@ -110,12 +97,22 @@ public sealed class TranscriptSpeakersUiTests : BunitContext, IAsyncLifetime
         Render<MudPopoverProvider>();
         var cut = Render<TranscriptPanel>(p => p.Add(x => x.AssetId, 5).Add(x => x.PlayerElementId, "media-audio-5"));
 
-        var bar = cut.FindComponent<TranscriptSpeakersBar>();
-        await cut.InvokeAsync(() => bar.FindComponent<MudSelect<int>>().Instance.ValueChanged.InvokeAsync(2));
-        bar.FindAll("button").First(b => b.TextContent.Trim() == "Расшифровать заново").Click();
+        await cut.InvokeAsync(() => cut.FindComponent<MudSelect<int>>().Instance.ValueChanged.InvokeAsync(choice));
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Расшифровать заново").Click();
 
-        await _mediator.Received(1).Send(Arg.Is<RetranscribeMediaCommand>(c => c.AssetId == 5 && c.Speakers == 2), Arg.Any<CancellationToken>());
-        cut.Markup.ShouldContain("говорящих: 2");
+        await _mediator.Received(1).Send(
+            Arg.Is<RetranscribeMediaCommand>(c => c.AssetId == 5 && c.Speakers == new SpeakerMarkupRequest(enabled, count)), Arg.Any<CancellationToken>());
+        cut.Markup.ShouldContain($"({label})");
+    }
+
+    [Fact(DisplayName = "ADR-0062 v0.3: в полосе «Дикторы» выбора числа нет — он у «Расшифровать заново»; только просмотр — нет и там")]
+    public void Speaker_choice_only_in_header()
+    {
+        RenderBar(Transcript(Speakers(), TranscriptSpeakerSource.Model)).FindComponents<MudSelect<int>>().ShouldBeEmpty();
+
+        SetupTranscript(Speakers(), new TranscriptSegmentRow(0, 1_000, 2_000, "салам", Speaker: 1, SpeakerLabel: "объект"));
+        var readOnly = Render<TranscriptPanel>(p => p.Add(x => x.AssetId, 5).Add(x => x.PlayerElementId, "media-audio-5").Add(x => x.ReadOnly, true));
+        readOnly.FindComponents<MudSelect<int>>().ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Полоса: разметки нет — причина и подсказка «Расшифровать заново»; по каналам стерео — своя подпись")]
@@ -189,8 +186,7 @@ public sealed class TranscriptSpeakersUiTests : BunitContext, IAsyncLifetime
     public void Read_only_has_no_edits()
     {
         var cut = RenderBar(Transcript(Speakers(), TranscriptSpeakerSource.Model), readOnly: true,
-            active: new TranscriptSegmentRow(0, 0, 1_000, "а", Speaker: 1, SpeakerLabel: "объект"),
-            retranscribe: EventCallback.Factory.Create<int?>(this, _ => { }));
+            active: new TranscriptSegmentRow(0, 0, 1_000, "а", Speaker: 1, SpeakerLabel: "объект"));
 
         cut.FindAll(".speaker-chip").ShouldAllBe(c => c.HasAttribute("disabled"));
         cut.FindComponents<MudTextField<string>>().ShouldBeEmpty();
@@ -202,8 +198,7 @@ public sealed class TranscriptSpeakersUiTests : BunitContext, IAsyncLifetime
 
     // Поставщик всплывающих списков MudBlazor (MudSelect «Объединить с» / «Перенести к») — один на тест.
     private IRenderedComponent<TranscriptSpeakersBar> RenderBar(
-        MediaTranscript transcript, bool readOnly = false, TranscriptSegmentRow? active = null, Action? onChanged = null,
-        EventCallback<int?> retranscribe = default)
+        MediaTranscript transcript, bool readOnly = false, TranscriptSegmentRow? active = null, Action? onChanged = null)
     {
         if (!_popovers)
         {
@@ -215,8 +210,7 @@ public sealed class TranscriptSpeakersUiTests : BunitContext, IAsyncLifetime
             .Add(x => x.Transcript, transcript)
             .Add(x => x.ReadOnly, readOnly)
             .Add(x => x.ActiveSegment, active)
-            .Add(x => x.OnChanged, EventCallback.Factory.Create(this, () => onChanged?.Invoke()))
-            .Add(x => x.OnRetranscribe, retranscribe));
+            .Add(x => x.OnChanged, EventCallback.Factory.Create(this, () => onChanged?.Invoke())));
     }
 
     private static AngleSharp.Dom.IElement Button(IRenderedComponent<TranscriptSpeakersBar> cut, string text) =>

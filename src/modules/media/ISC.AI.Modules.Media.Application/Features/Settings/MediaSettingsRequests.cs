@@ -22,6 +22,7 @@ namespace ISC.AI.Modules.Media.Application.Features.Settings;
 /// <param name="UpdatedByUserId">Кто менял последним.</param>
 /// <param name="CanManage">Текущий субъект вправе менять настройки (экран Администратора).</param>
 /// <param name="ScaleDescription">Шкала процентов словами: «балл 0,363 = 70 %».</param>
+/// <param name="TranscriptSpeakers">Размечать дикторов при расшифровке загруженных материалов (ADR-0062 v0.3).</param>
 public sealed record MediaSettingsView(
     ConfirmationMode Mode,
     int ThresholdPercent,
@@ -29,7 +30,8 @@ public sealed record MediaSettingsView(
     DateTime? UpdatedAtUtc,
     int? UpdatedByUserId,
     bool CanManage,
-    string ScaleDescription);
+    string ScaleDescription,
+    bool TranscriptSpeakers = true);
 
 /// <summary>
 /// Прочитать настройки поиска и верификации (ADR-0054). Значения не секретны — их видит каждый вошедший: оператору
@@ -54,7 +56,7 @@ public sealed record GetMediaSettingsQuery : IRequest<ResponseDto<MediaSettingsV
             var canManage = await administration.CanManageSettingsAsync(cancellationToken);
             return ResponseDto<MediaSettingsView>.Ok(new MediaSettingsView(
                 settings.Mode, settings.ThresholdPercent, settings.MinThresholdPercent,
-                settings.UpdatedAtUtc, settings.UpdatedByUserId, canManage, options.Scale.Describe()));
+                settings.UpdatedAtUtc, settings.UpdatedByUserId, canManage, options.Scale.Describe(), settings.TranscriptSpeakers));
         }
     }
 }
@@ -137,6 +139,60 @@ public sealed record SetMediaSettingsCommand(ConfirmationMode Mode, int Threshol
                     subjectId,
                     ObjectRef: "media:settings",
                     PayloadSensitive: payload),
+                cancellationToken);
+    }
+}
+
+/// <summary>
+/// Размечать ли дикторов при расшифровке загруженных материалов (ТФ-МЕД-19, ADR-0062 v0.3) — общая настройка
+/// Администратора; при «Расшифровать заново» сотрудник выбирает для своей записи сам. Право и журнал — как у настроек
+/// поиска и верификации: изменение «было → стало», отказ без права тоже в журнале.
+/// </summary>
+/// <param name="Enabled">Размечать.</param>
+public sealed record SetTranscriptSpeakersCommand(bool Enabled) : IRequest<ResponseDto<MediaSettings>>
+{
+    /// <inheritdoc cref="SetTranscriptSpeakersCommand" />
+    public sealed class Handler(
+        IMediaSettingsStore store,
+        IMediaAdministration administration,
+        ISubjectProvider subjectProvider,
+        IAuditWriter auditWriter)
+        : IRequestHandler<SetTranscriptSpeakersCommand, ResponseDto<MediaSettings>>
+    {
+        /// <inheritdoc />
+        public async ValueTask<ResponseDto<MediaSettings>> Handle(SetTranscriptSpeakersCommand command, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(command);
+
+            var subjectId = await subjectProvider.GetCurrentUserIdAsync(cancellationToken);
+            if (subjectId is null)
+            {
+                return ResponseDto<MediaSettings>.BadRequest("Субъект не установлен.");
+            }
+
+            if (!await administration.CanManageSettingsAsync(cancellationToken))
+            {
+                await WriteAsync(subjectId, $"изменение отклонено: нет права; запрошено: разметка дикторов — {Label(command.Enabled)}", cancellationToken);
+                return ResponseDto<MediaSettings>.BadRequest(SetMediaSettingsCommand.DeniedMessage);
+            }
+
+            var previous = await store.GetAsync(cancellationToken);
+            await store.SaveTranscriptSpeakersAsync(command.Enabled, subjectId, cancellationToken);
+            var current = await store.GetAsync(cancellationToken);
+            await WriteAsync(
+                subjectId,
+                $"разметка дикторов при расшифровке загруженных материалов: {Label(previous.TranscriptSpeakers)} → {Label(current.TranscriptSpeakers)}",
+                cancellationToken);
+            return ResponseDto<MediaSettings>.Ok(current, command.Enabled
+                ? "Дикторы будут размечаться при расшифровке загруженных материалов."
+                : "Загруженные материалы будут расшифровываться без дикторов.");
+        }
+
+        private static string Label(bool enabled) => enabled ? "включена" : "выключена";
+
+        private Task WriteAsync(int? subjectId, string payload, CancellationToken cancellationToken) =>
+            auditWriter.WriteAsync(
+                new AuditEntry(AuditAction.Modify, Classification: 0, subjectId, ObjectRef: "media:settings", PayloadSensitive: payload),
                 cancellationToken);
     }
 }

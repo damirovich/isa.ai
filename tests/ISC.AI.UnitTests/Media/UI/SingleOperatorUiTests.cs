@@ -136,6 +136,27 @@ public sealed class SingleOperatorUiTests : BunitContext, IAsyncLifetime
         cut.WaitForAssertion(() => cut.Markup.ShouldContain("Настройки сохранены"));
     }
 
+    [Fact(DisplayName = "ADR-0062 v0.3: экран настроек — переключатель «Размечать дикторов» сохраняется сразу командой; без права недоступен")]
+    public void Settings_page_toggles_transcript_speakers()
+    {
+        GivenSettings(ConfirmationMode.SingleOperator, canManage: true);
+        _mediator.Send(Arg.Any<SetTranscriptSpeakersCommand>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<ResponseDto<MediaSettings>>(ResponseDto<MediaSettings>.Ok(
+                MediaSettings.Defaults with { TranscriptSpeakers = false }, "Загруженные материалы будут расшифровываться без дикторов.")));
+        var cut = Render<MediaSettingsPage>();
+
+        var toggle = cut.Find("input[type='checkbox']");
+        toggle.HasAttribute("checked").ShouldBeTrue();
+        toggle.Change(false);
+
+        cut.WaitForAssertion(() => _mediator.Received(1).Send(
+            Arg.Is<SetTranscriptSpeakersCommand>(c => !c.Enabled), Arg.Any<CancellationToken>()));
+        cut.WaitForAssertion(() => cut.Markup.ShouldContain("без дикторов"));
+
+        GivenSettings(ConfirmationMode.SingleOperator, canManage: false);
+        Render<MediaSettingsPage>().Find("input[type='checkbox']").HasAttribute("disabled").ShouldBeTrue();
+    }
+
     private static AngleSharp.Dom.IElement Button<T>(IRenderedComponent<T> cut, string text)
         where T : IComponent =>
         cut.FindAll("button").Single(b => b.TextContent.Contains(text, StringComparison.Ordinal));

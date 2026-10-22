@@ -35,14 +35,14 @@ public interface IAudioTranscriber
     /// (частичный результат сбойного прогона не сохраняется), а длительность записи известна только в конце.
     /// </remarks>
     /// <param name="sourcePath">Путь к локальному файлу (временная копия исходника носителя).</param>
-    /// <param name="speakerCount">
-    /// Сколько говорящих (ADR-0062 v0.2) — задал сотрудник при повторной расшифровке; <see langword="null"/> — по
-    /// настройке разметки (число из конфигурации или по порогу похожести голосов).
+    /// <param name="speakers">
+    /// Как размечать дикторов (ADR-0062 v0.3): не размечать, «авто» или заданное число говорящих; <see langword="null"/> —
+    /// «авто».
     /// </param>
     /// <param name="cancellationToken">Отмена прекращает распознавание и останавливает внешний процесс.</param>
     /// <returns>Фрагменты и длительность записи; без звуковой дорожки — <see cref="AudioTranscription.NoAudio"/>.</returns>
     /// <exception cref="InvalidOperationException">Распознавание не настроено, модель не прошла проверку или прогон не удался.</exception>
-    Task<AudioTranscription> TranscribeAsync(string sourcePath, int? speakerCount = null, CancellationToken cancellationToken = default);
+    Task<AudioTranscription> TranscribeAsync(string sourcePath, SpeakerMarkupRequest? speakers = null, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -53,7 +53,9 @@ public interface IMediaTranscriptionPipeline
 {
     /// <summary>Расшифровать носитель; ошибка фиксируется в статусе носителя и возвращается, не бросается.</summary>
     /// <param name="assetId">Носитель.</param>
-    /// <param name="speakerCount">Сколько говорящих (ADR-0062 v0.2); <see langword="null"/> — по настройке разметки.</param>
+    /// <param name="speakers">
+    /// Как размечать дикторов (ADR-0062 v0.3); <see langword="null"/> — как решил Администратор для расшифровки при загрузке.
+    /// </param>
     /// <param name="cancellationToken">Отмена прекращает расшифровку.</param>
-    Task<MediaTranscriptionResult> TranscribeAsync(int assetId, int? speakerCount = null, CancellationToken cancellationToken = default);
+    Task<MediaTranscriptionResult> TranscribeAsync(int assetId, SpeakerMarkupRequest? speakers = null, CancellationToken cancellationToken = default);
 }

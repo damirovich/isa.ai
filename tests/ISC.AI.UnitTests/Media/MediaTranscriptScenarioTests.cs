@@ -199,21 +199,23 @@ public sealed class MediaTranscriptScenarioTests
         command.AuditSummary.ShouldBe("media:retranscribe:asset=50");
     }
 
-    [Fact(DisplayName = "ADR-0062 v0.2: число говорящих уходит с задачей в конвейер и в журнал запуска; вне 1–20 — отказ до чтения носителя")]
-    public async Task Retranscribe_passes_speaker_count()
+    [Fact(DisplayName = "ADR-0062 v0.2–0.3: выбор дикторов уходит с задачей в конвейер и в журнал запуска; число вне 1–20 — отказ до чтения носителя")]
+    public async Task Retranscribe_passes_speaker_choice()
     {
-        (await RetranscribeAsync(new RetranscribeMediaCommand(50, 2))).Status.ShouldBeTrue();
+        (await RetranscribeAsync(new RetranscribeMediaCommand(50, new SpeakerMarkupRequest(true, 2)))).Status.ShouldBeTrue();
 
         var pipeline = Substitute.For<IMediaTranscriptionPipeline>();
         using var services = new ServiceCollection().AddSingleton(pipeline).BuildServiceProvider();
         await _queue.Works.ShouldHaveSingleItem()(services, CancellationToken.None);
-        await pipeline.Received(1).TranscribeAsync(50, 2, Arg.Any<CancellationToken>());
+        await pipeline.Received(1).TranscribeAsync(50, new SpeakerMarkupRequest(true, 2), Arg.Any<CancellationToken>());
 
-        new RetranscribeMediaCommand(50, 2).AuditSummary.ShouldBe("media:retranscribe:asset=50:speakers=2");
+        new RetranscribeMediaCommand(50, new SpeakerMarkupRequest(true, 2)).AuditSummary.ShouldBe("media:retranscribe:asset=50:speakers=2");
+        new RetranscribeMediaCommand(50, SpeakerMarkupRequest.Off).AuditSummary.ShouldBe("media:retranscribe:asset=50:speakers=off");
+        new RetranscribeMediaCommand(50, SpeakerMarkupRequest.Auto).AuditSummary.ShouldBe("media:retranscribe:asset=50:speakers=auto");
 
-        foreach (var wrong in new[] { 0, RetranscribeMediaCommand.MaxSpeakers + 1 })
+        foreach (var wrong in new[] { 0, SpeakerMarkupRequest.MaxCount + 1 })
         {
-            var response = await RetranscribeAsync(new RetranscribeMediaCommand(50, wrong));
+            var response = await RetranscribeAsync(new RetranscribeMediaCommand(50, new SpeakerMarkupRequest(true, wrong)));
             response.StatusCode.ShouldBe(ResponseStatusCode.BadRequest);
             response.StatusMessage.ShouldContain("Число говорящих");
         }

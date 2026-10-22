@@ -34,20 +34,25 @@ internal sealed record WorkerArguments(
     double MaxSegmentSeconds = WorkerArguments.DefaultMaxSegmentSeconds,
     int FeatureDim = WorkerArguments.DefaultFeatureDim,
     bool DecodeWhole = false,
-    string? SpeakerSegmentationPath = null,
     string? SpeakerEmbeddingPath = null,
     int Speakers = 0,
     double SpeakerThreshold = WorkerArguments.DefaultSpeakerThreshold,
     int SpeakerMaxMinutes = WorkerArguments.DefaultSpeakerMaxMinutes)
 {
-    /// <summary>Порог кластеризации по умолчанию (как в примерах sherpa-onnx; калибруется на пилоте, ADR-0062).</summary>
-    public const double DefaultSpeakerThreshold = 0.5;
+    /// <summary>
+    /// Порог среднего косинусного сходства реплик для объединения в одного диктора (ADR-0062 v0.3): выше — одним; по
+    /// проверке 22.10.2026 0,4 разделил синтетический диалог и не порвал рассказчика записи с телефона; калибруется на пилоте.
+    /// </summary>
+    public const double DefaultSpeakerThreshold = 0.4;
 
-    /// <summary>Длина записи по умолчанию, до которой размечаются дикторы, минут (~1,7 ГБ отсчётов на 2 часа — нет; 120 мин ≈ 460 МБ).</summary>
+    /// <summary>
+    /// Длина записи по умолчанию, до которой размечаются дикторы, минут: время группировки растёт как квадрат числа реплик
+    /// (120 мин — порядка 2000 реплик, секунды).
+    /// </summary>
     public const int DefaultSpeakerMaxMinutes = 120;
 
-    /// <summary>Разметка дикторов включена: заданы обе модели говорящих.</summary>
-    public bool Diarize => SpeakerSegmentationPath is not null && SpeakerEmbeddingPath is not null;
+    /// <summary>Разметка дикторов включена: задана модель «голосовых отпечатков».</summary>
+    public bool Diarize => SpeakerEmbeddingPath is not null;
 
     /// <summary>Ключ диагностического режима (переключатель без значения); на это имя опираются интеграционные тесты.</summary>
     public const string DecodeWholeKey = "--decode-whole";
@@ -74,7 +79,7 @@ internal sealed record WorkerArguments(
     public const string Usage =
         "ISC.AI.Speech.Worker --model <model.onnx> --tokens <tokens.txt> --vad <silero_vad.onnx> --input <wav 16 кГц моно>"
         + " [--threads N] [--max-segment-seconds 20] [--feature-dim 64] [" + DecodeWholeKey + "]"
-        + " [--speaker-segmentation <pyannote.onnx> --speaker-embedding <campplus.onnx> [--speakers N] [--speaker-threshold 0.5]"
+        + " [--speaker-embedding <campplus.onnx> [--speakers N] [--speaker-threshold 0.4]"
         + " [--speaker-max-minutes 120]]\n"
         + "  " + DecodeWholeKey + " — диагностика: вся запись без детектора речи кусками до --max-segment-seconds"
         + " (проверка декодирования на синтетическом звуке; в работе не используется).";
@@ -108,7 +113,7 @@ internal sealed record WorkerArguments(
             }
 
             if (key is not ("--model" or "--tokens" or "--vad" or "--input" or "--threads" or "--max-segment-seconds" or "--feature-dim"
-                or "--speaker-segmentation" or "--speaker-embedding" or "--speakers" or "--speaker-threshold" or "--speaker-max-minutes"))
+                or "--speaker-embedding" or "--speakers" or "--speaker-threshold" or "--speaker-max-minutes"))
             {
                 throw new WorkerUsageException($"Неизвестный аргумент «{key}».");
             }
@@ -124,13 +129,12 @@ internal sealed record WorkerArguments(
             }
         }
 
-        // Модели говорящих — только парой: одна без другой разметку не даст, а молча выключенная разметка скрыла бы
-        // ошибку настройки (ADR-0062).
-        var segmentation = values.GetValueOrDefault("--speaker-segmentation");
+        // Число, порог и предел без модели «голосовых отпечатков» разметки не дадут — молча выключенная разметка скрыла
+        // бы ошибку настройки (ADR-0062).
         var embedding = values.GetValueOrDefault("--speaker-embedding");
-        if ((segmentation is null) != (embedding is null))
+        if (embedding is null && (values.ContainsKey("--speakers") || values.ContainsKey("--speaker-threshold") || values.ContainsKey("--speaker-max-minutes")))
         {
-            throw new WorkerUsageException("Модели говорящих задаются парой: --speaker-segmentation и --speaker-embedding.");
+            throw new WorkerUsageException("Ключи дикторов (--speakers, --speaker-threshold, --speaker-max-minutes) действуют только с --speaker-embedding.");
         }
 
         return new WorkerArguments(
@@ -144,11 +148,10 @@ internal sealed record WorkerArguments(
                 : DefaultMaxSegmentSeconds,
             FeatureDim: values.TryGetValue("--feature-dim", out var dim) ? ParseInt(dim, "--feature-dim", 1, 512) : DefaultFeatureDim,
             DecodeWhole: decodeWhole,
-            SpeakerSegmentationPath: segmentation,
             SpeakerEmbeddingPath: embedding,
             Speakers: values.TryGetValue("--speakers", out var speakers) ? ParseInt(speakers, "--speakers", 0, 20) : 0,
             SpeakerThreshold: values.TryGetValue("--speaker-threshold", out var threshold)
-                ? ParseDouble(threshold, "--speaker-threshold", 0.05, 2)
+                ? ParseDouble(threshold, "--speaker-threshold", 0.05, 0.95)
                 : DefaultSpeakerThreshold,
             SpeakerMaxMinutes: values.TryGetValue("--speaker-max-minutes", out var minutes)
                 ? ParseInt(minutes, "--speaker-max-minutes", 1, 360)
@@ -162,11 +165,6 @@ internal sealed record WorkerArguments(
 
         var missing = new List<string>();
         var files = new List<(string Key, string Path)> { ("--model", ModelPath), ("--tokens", TokensPath), ("--vad", VadPath), ("--input", InputPath) };
-        if (SpeakerSegmentationPath is { } segmentation)
-        {
-            files.Add(("--speaker-segmentation", segmentation));
-        }
-
         if (SpeakerEmbeddingPath is { } embedding)
         {
             files.Add(("--speaker-embedding", embedding));

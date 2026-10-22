@@ -83,14 +83,13 @@ public static class SpeechServiceCollectionExtensions
             TimeoutFactor: Positive(configuration, SpeechConfigurationKeys.TimeoutFactor, SpeechOptions.DefaultTimeoutFactor,
                 SpeechOptions.MinAllowedTimeoutFactor, SpeechOptions.MaxAllowedTimeoutFactor),
             Speakers: new SpeakerOptions(
-                Text(configuration, SpeechConfigurationKeys.SpeakersSegmentationPath),
-                Text(configuration, SpeechConfigurationKeys.SpeakersSegmentationSha256),
                 Text(configuration, SpeechConfigurationKeys.SpeakersEmbeddingPath),
                 Text(configuration, SpeechConfigurationKeys.SpeakersEmbeddingSha256),
                 int.TryParse(configuration[SpeechConfigurationKeys.SpeakersCount], NumberStyles.Integer, CultureInfo.InvariantCulture, out var count)
                     ? Math.Clamp(count, 0, SpeakerOptions.MaxCount)
                     : 0,
-                Positive(configuration, SpeechConfigurationKeys.SpeakersThreshold, SpeakerOptions.DefaultThreshold, 0.05, 2),
+                Positive(configuration, SpeechConfigurationKeys.SpeakersThreshold, SpeakerOptions.DefaultThreshold,
+                    SpeakerOptions.MinThreshold, SpeakerOptions.MaxThreshold),
                 (int)Positive(configuration, SpeechConfigurationKeys.SpeakersMaxMinutes, SpeakerOptions.DefaultMaxMinutes, 1, 360)));
     }
 
