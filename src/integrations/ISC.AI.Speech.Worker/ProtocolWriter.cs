@@ -57,13 +57,35 @@ internal sealed class ProtocolWriter(TextWriter output)
         return true;
     }
 
-    /// <summary>Пишет итоговую строку: длительность записи и число фрагментов.</summary>
-    public void WriteDone(long durationMs) =>
+    /// <summary>Пишет реплику говорящего (ADR-0062): участок записи и номер диктора модели.</summary>
+    public void WriteTurn(long startMs, long endMs, int speaker) =>
+        WriteLine(json =>
+        {
+            json.WriteString("type", "turn");
+            json.WriteNumber("startMs", startMs);
+            json.WriteNumber("endMs", endMs);
+            json.WriteNumber("speaker", speaker);
+        });
+
+    /// <summary>
+    /// Пишет итоговую строку: длительность записи и число фрагментов; при включённой разметке дикторов — её исход
+    /// (<c>done</c>, <c>skipped</c>, <c>failed</c>) и причину пропуска или сбоя — без содержимого записи.
+    /// </summary>
+    public void WriteDone(long durationMs, string? diarization = null, string? diarizationNote = null) =>
         WriteLine(json =>
         {
             json.WriteString("type", "done");
             json.WriteNumber("durationMs", durationMs);
             json.WriteNumber("segments", SegmentsWritten);
+            if (diarization is not null)
+            {
+                json.WriteString("diarization", diarization);
+            }
+
+            if (diarizationNote is not null)
+            {
+                json.WriteString("diarizationNote", diarizationNote);
+            }
         });
 
     private void WriteLine(Action<Utf8JsonWriter> body)

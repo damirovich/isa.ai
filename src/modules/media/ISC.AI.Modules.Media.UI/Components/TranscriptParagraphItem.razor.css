@@ -50,3 +50,11 @@ button.tp-seg:focus-visible {
     white-space: nowrap;
     color: var(--mud-palette-text-secondary);
 }
+
+/* Подпись диктора абзаца (ADR-0062): его цветом, перед текстом реплики. */
+.transcript-speaker {
+    font-weight: 600;
+    font-size: 0.8125rem;
+    margin-right: 4px;
+    white-space: nowrap;
+}

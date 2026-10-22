@@ -11,6 +11,7 @@ using ISC.AI.Modules.Media.Domain.Model;
 using ISC.AI.Modules.Media.Domain.Services;
 using ISC.AI.Speech.Audio;
 using ISC.AI.Speech.Protocol;
+using ISC.AI.Speech.Speakers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -95,9 +96,15 @@ public sealed class SpeechWorkerTranscriber : IAudioTranscriber, IDisposable
     /// завершился с ошибкой или нарушил протокол; прогон не уложился в таймаут (текст объясняет причину).
     /// </exception>
     /// <exception cref="OperationCanceledException">Отмена вызывающим (не таймаут).</exception>
-    public async Task<AudioTranscription> TranscribeAsync(string sourcePath, CancellationToken cancellationToken = default)
+    /// <exception cref="ArgumentOutOfRangeException">Число говорящих вне 1–<see cref="SpeakerOptions.MaxCount"/>.</exception>
+    public async Task<AudioTranscription> TranscribeAsync(string sourcePath, int? speakerCount = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
+        if (speakerCount is < 1 or > SpeakerOptions.MaxCount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(speakerCount), speakerCount, $"Число говорящих — от 1 до {SpeakerOptions.MaxCount}.");
+        }
+
         if (!File.Exists(sourcePath))
         {
             throw new FileNotFoundException($"Файл для расшифровки не найден: {Path.GetFullPath(sourcePath)}", sourcePath);
@@ -136,7 +143,21 @@ public sealed class SpeechWorkerTranscriber : IAudioTranscriber, IDisposable
             var remaining = budget - clock.Elapsed;
             deadline.CancelAfter(remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero);
 
-            return await RunWorkerAsync(files, wavPath, deadline.Token).ConfigureAwait(false);
+            // Дикторы (ADR-0062): двухканальная запись с раздельными каналами размечается по ним — точно и без модели;
+            // иначе — моделью в процессе-распознавателе, если она настроена. Каналов два — значит и абонентов двое: если
+            // сотрудник задал иное число говорящих (v0.2), разметку делает модель с этим числом.
+            var stereoTurns = audio.Channels == 2 && speakerCount is null or 2
+                ? await TryStereoTurnsAsync(sourcePath, Path.Combine(workDir, "stereo.wav"), deadline.Token).ConfigureAwait(false)
+                : null;
+            var transcription = await RunWorkerAsync(files, wavPath, diarize: stereoTurns is null, speakerCount, deadline.Token).ConfigureAwait(false);
+            return stereoTurns is null
+                ? transcription
+                : transcription with
+                {
+                    Segments = SpeakerAssignment.Assign(transcription.Segments, stereoTurns),
+                    SpeakerSource = TranscriptSpeakerSource.StereoChannels,
+                    SpeakerNote = null,
+                };
         }
         catch (Exception exception) when (deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
@@ -210,21 +231,57 @@ public sealed class SpeechWorkerTranscriber : IAudioTranscriber, IDisposable
     /// <param name="vadPath">Проверенный путь к детектору речи.</param>
     /// <param name="wavPath">Подготовленный WAV.</param>
     /// <param name="options">Настройки (потоки, длина куска).</param>
+    /// <param name="speakers">Проверенные модели говорящих (ADR-0062); <see langword="null"/> — разметки моделью нет.</param>
+    /// <param name="speakerCount">Число говорящих, заданное сотрудником (v0.2); <see langword="null"/> — из настройки.</param>
     public static IReadOnlyList<string> BuildWorkerArguments(
-        string modelPath, string tokensPath, string vadPath, string wavPath, SpeechOptions options)
+        string modelPath, string tokensPath, string vadPath, string wavPath, SpeechOptions options,
+        (string Segmentation, string Embedding)? speakers = null, int? speakerCount = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         var threads = Math.Clamp(options.Threads, 1, 64);
         var maxSeconds = Math.Clamp(options.MaxSegmentSeconds, SpeechOptions.MinAllowedSegmentSeconds, SpeechOptions.MaxAllowedSegmentSeconds);
-        return
-        [
+        var arguments = new List<string>
+        {
             "--model", modelPath,
             "--tokens", tokensPath,
             "--vad", vadPath,
             "--input", wavPath,
             "--threads", threads.ToString(CultureInfo.InvariantCulture),
             "--max-segment-seconds", maxSeconds.ToString(CultureInfo.InvariantCulture),
-        ];
+        };
+
+        if (speakers is { } models && options.Speakers is { } speakerOptions)
+        {
+            arguments.AddRange(
+            [
+                "--speaker-segmentation", models.Segmentation,
+                "--speaker-embedding", models.Embedding,
+                "--speakers", Math.Clamp(speakerCount ?? speakerOptions.Count, 0, SpeakerOptions.MaxCount).ToString(CultureInfo.InvariantCulture),
+                "--speaker-threshold", Math.Clamp(speakerOptions.Threshold, 0.05, 2).ToString(CultureInfo.InvariantCulture),
+                "--speaker-max-minutes", Math.Clamp(speakerOptions.MaxMinutes, 1, 360).ToString(CultureInfo.InvariantCulture),
+            ]);
+        }
+
+        return arguments;
+    }
+
+    /// <summary>
+    /// Реплики по каналам стерео-записи (ADR-0062) или <see langword="null"/>, если каналы не раздельные. Сбой стерео-копии
+    /// расшифровку не роняет — разметка уходит модели.
+    /// </summary>
+    private async Task<IReadOnlyList<SpeakerTurnSpan>?> TryStereoTurnsAsync(string sourcePath, string stereoPath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _extractor.ExtractStereoAsync(sourcePath, stereoPath, cancellationToken).ConfigureAwait(false);
+            await using var stream = new FileStream(stereoPath, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan);
+            return StereoChannelAnalyzer.Analyze(stream);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or InvalidDataException or IOException)
+        {
+            SpeechTranscriberLog.StereoAnalysisFailed(_logger, exception);
+            return null;
+        }
     }
 
     private VerifiedFiles VerifyFiles()
@@ -246,6 +303,14 @@ public sealed class SpeechWorkerTranscriber : IAudioTranscriber, IDisposable
                 worker);
         }
 
+        // Модели говорящих (ADR-0062) — те же правила, что у модели речи: путь задан — пин обязателен и сверяется (ТИ-004).
+        (string Segmentation, string Embedding)? speakers = _options.Speakers is { ModelEnabled: true } speakerOptions
+            ? (SpeechModelIntegrity.EnsureTrusted(speakerOptions.SegmentationPath, speakerOptions.SegmentationSha256, "сегментация говорящих",
+                    SpeechConfigurationKeys.SpeakersSegmentationPath, SpeechConfigurationKeys.SpeakersSegmentationSha256),
+                SpeechModelIntegrity.EnsureTrusted(speakerOptions.EmbeddingPath, speakerOptions.EmbeddingSha256, "голосовые отпечатки",
+                    SpeechConfigurationKeys.SpeakersEmbeddingPath, SpeechConfigurationKeys.SpeakersEmbeddingSha256))
+            : null;
+
         return new VerifiedFiles(
             worker,
             SpeechModelIntegrity.EnsureTrusted(_options.ModelPath, _options.ModelSha256, "модель распознавания речи",
@@ -253,15 +318,17 @@ public sealed class SpeechWorkerTranscriber : IAudioTranscriber, IDisposable
             SpeechModelIntegrity.EnsureTrusted(_options.TokensPath, _options.TokensSha256, "словарь модели распознавания",
                 SpeechConfigurationKeys.TokensPath, SpeechConfigurationKeys.TokensSha256),
             SpeechModelIntegrity.EnsureTrusted(_options.VadPath, _options.VadSha256, "детектор речи Silero VAD",
-                SpeechConfigurationKeys.VadPath, SpeechConfigurationKeys.VadSha256));
+                SpeechConfigurationKeys.VadPath, SpeechConfigurationKeys.VadSha256),
+            speakers);
     }
 
     // Запускает процесс, разбирает stdout, собирает фрагменты, в конце сверяет код выхода и итоговую строку
     // done — из неё же берётся длительность записи (длина WAV, а не конец последней речи).
-    private async Task<AudioTranscription> RunWorkerAsync(VerifiedFiles files, string wavPath, CancellationToken cancellationToken)
+    private async Task<AudioTranscription> RunWorkerAsync(
+        VerifiedFiles files, string wavPath, bool diarize, int? speakerCount, CancellationToken cancellationToken)
     {
         var segments = new List<TranscriptSegmentDraft>();
-        using var process = new Process { StartInfo = CreateStartInfo(files, wavPath) };
+        using var process = new Process { StartInfo = CreateStartInfo(files, wavPath, diarize, speakerCount) };
         var stderr = new BoundedTextTail(MaxStderrChars);
         process.ErrorDataReceived += (_, e) =>
         {
@@ -336,10 +403,18 @@ public sealed class SpeechWorkerTranscriber : IAudioTranscriber, IDisposable
                 "Процесс-распознаватель нарушил протокол: " + exception.Message + Diagnostics(stderr), exception);
         }
 
-        return new AudioTranscription(segments, parser.Done!.DurationMs); // EnsureCompleted гарантирует done
+        var done = parser.Done!; // EnsureCompleted гарантирует done
+        if (done.Diarization == SpeechWorkerProtocol.DiarizationDone)
+        {
+            return new AudioTranscription(SpeakerAssignment.Assign(segments, parser.Turns), done.DurationMs, TranscriptSpeakerSource.Model);
+        }
+
+        // Разметка была включена, но пропущена (длинная запись) или не удалась — расшифровка остаётся, а у неё причина.
+        return new AudioTranscription(segments, done.DurationMs, TranscriptSpeakerSource.None,
+            done.Diarization is null ? null : done.DiarizationNote ?? "дикторы не размечены");
     }
 
-    private ProcessStartInfo CreateStartInfo(VerifiedFiles files, string wavPath)
+    private ProcessStartInfo CreateStartInfo(VerifiedFiles files, string wavPath, bool diarize, int? speakerCount)
     {
         // Сборку .dll (framework-dependent без apphost, другая ОС) запускает dotnet; .exe — напрямую.
         var viaDotnet = files.Worker.EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
@@ -359,7 +434,7 @@ public sealed class SpeechWorkerTranscriber : IAudioTranscriber, IDisposable
             info.ArgumentList.Add(files.Worker);
         }
 
-        foreach (var argument in BuildWorkerArguments(files.Model, files.Tokens, files.Vad, wavPath, _options))
+        foreach (var argument in BuildWorkerArguments(files.Model, files.Tokens, files.Vad, wavPath, _options, diarize ? files.Speakers : null, speakerCount))
         {
             info.ArgumentList.Add(argument);
         }
@@ -479,5 +554,5 @@ public sealed class SpeechWorkerTranscriber : IAudioTranscriber, IDisposable
         SpeechWorkDirSweeper.Sweep(WorkRoot, _processStartUtc, _logger);
     }
 
-    private sealed record VerifiedFiles(string Worker, string Model, string Tokens, string Vad);
+    private sealed record VerifiedFiles(string Worker, string Model, string Tokens, string Vad, (string Segmentation, string Embedding)? Speakers);
 }

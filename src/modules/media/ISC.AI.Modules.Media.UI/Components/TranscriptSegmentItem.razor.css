@@ -37,3 +37,11 @@ button.transcript-row:focus-visible {
     flex: 1 1 auto;
     min-width: 0;
 }
+
+/* Подпись диктора реплики (ADR-0062): его цветом, перед текстом, не переносится. */
+.transcript-speaker {
+    flex: 0 0 auto;
+    font-weight: 600;
+    font-size: 0.8125rem;
+    white-space: nowrap;
+}

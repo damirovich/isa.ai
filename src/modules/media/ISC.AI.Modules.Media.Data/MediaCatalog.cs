@@ -208,22 +208,53 @@ public sealed class MediaCatalog(
         var asset = await db.Assets.AsNoTracking()
             .VisibleTo(access, accessPolicy)
             .Where(a => a.Id == assetId)
-            .Select(a => new { a.Id, a.TranscriptStatus, a.TranscriptError, a.TranscriberVersion, a.TranscribedAt })
+            .Select(a => new
+            {
+                a.Id, a.TranscriptStatus, a.TranscriptError, a.TranscriberVersion, a.TranscribedAt,
+                a.TranscriptSpeakerSource, a.TranscriptSpeakerNote,
+            })
             .FirstOrDefaultAsync(cancellationToken);
         if (asset is null)
         {
             return null;
         }
 
-        var segments = await db.TranscriptSegments.AsNoTracking()
+        var raw = await db.TranscriptSegments.AsNoTracking()
             .VisibleTo(access, accessPolicy)
             .Where(s => s.AssetId == assetId)
             .OrderBy(s => s.Index)
-            .Select(s => new TranscriptSegmentRow(s.Index, s.StartMs, s.EndMs, s.Text))
+            .Select(s => new { s.Index, s.StartMs, s.EndMs, s.Text, s.Speaker, s.SpeakerOverride })
             .ToListAsync(cancellationToken);
 
+        // Дикторы (ADR-0062) — под той же решёткой: имя может быть ФИО. Действующий диктор реплики — перенос, иначе
+        // автоматический, затем цепочка объединений; подпись — имя, иначе «Диктор N».
+        var speakerRows = await db.TranscriptSpeakers.AsNoTracking()
+            .VisibleTo(access, accessPolicy)
+            .Where(s => s.AssetId == assetId)
+            .OrderBy(s => s.Number)
+            .Select(s => new { s.Number, s.Name, s.MergedInto })
+            .ToListAsync(cancellationToken);
+        var merges = speakerRows.ToDictionary(s => (int)s.Number, s => (int?)s.MergedInto);
+        var names = speakerRows.ToDictionary(s => (int)s.Number, s => s.Name);
+        string Label(int number) => names.GetValueOrDefault(number) ?? TranscriptSpeakers.DefaultLabel(number);
+
+        var segments = raw
+            .Select(s =>
+            {
+                var effective = TranscriptSpeakers.Effective(s.Speaker, s.SpeakerOverride, merges);
+                // Реплика без диктора при размеченной записи — «Диктор ?» (ADR-0062 v0.2); без разметки — без подписи.
+                var label = effective is { } n ? Label(n) : speakerRows.Count > 0 ? TranscriptSpeakers.UnknownLabel : null;
+                return new TranscriptSegmentRow(s.Index, s.StartMs, s.EndMs, s.Text, effective, label, s.SpeakerOverride is not null);
+            })
+            .ToList();
+        var speakers = speakerRows
+            .Select(s => new TranscriptSpeakerRow(
+                s.Number, Label(s.Number), s.Name, s.MergedInto, segments.Count(x => x.Speaker == s.Number)))
+            .ToList();
+
         return new MediaTranscript(
-            asset.Id, asset.TranscriptStatus, asset.TranscriptError, asset.TranscriberVersion, asset.TranscribedAt, segments);
+            asset.Id, asset.TranscriptStatus, asset.TranscriptError, asset.TranscriberVersion, asset.TranscribedAt, segments,
+            speakers, asset.TranscriptSpeakerSource, asset.TranscriptSpeakerNote);
     }
 
     /// <inheritdoc />

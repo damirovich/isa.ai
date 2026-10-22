@@ -60,6 +60,27 @@ public static class SpeechConfigurationKeys
     /// <summary>Каталог ffmpeg распознавания лиц — запасной источник для <see cref="FfmpegFolder"/> (одна поставка ffmpeg на оба конвейера).</summary>
     public const string VisionFfmpegFolder = "Vision:Ffmpeg:Folder";
 
+    /// <summary>Путь к ONNX сегментации говорящих (pyannote segmentation-3.0, MIT; ADR-0062). Не задан — дикторы не размечаются.</summary>
+    public const string SpeakersSegmentationPath = "Speech:Speakers:Segmentation:Path";
+
+    /// <summary>Пин SHA-256 сегментации говорящих.</summary>
+    public const string SpeakersSegmentationSha256 = "Speech:Speakers:Segmentation:Sha256";
+
+    /// <summary>Путь к ONNX «голосовых отпечатков» (CAM++ 3D-Speaker, Apache-2.0; ADR-0062).</summary>
+    public const string SpeakersEmbeddingPath = "Speech:Speakers:Embedding:Path";
+
+    /// <summary>Пин SHA-256 «голосовых отпечатков».</summary>
+    public const string SpeakersEmbeddingSha256 = "Speech:Speakers:Embedding:Sha256";
+
+    /// <summary>Число дикторов (0 — определять по порогу; по умолчанию 0, до 20).</summary>
+    public const string SpeakersCount = "Speech:Speakers:Count";
+
+    /// <summary>Порог кластеризации «отпечатков», когда число дикторов неизвестно (по умолчанию 0,5).</summary>
+    public const string SpeakersThreshold = "Speech:Speakers:Threshold";
+
+    /// <summary>Длиннее этой записи дикторы моделью не размечаются, минут (по умолчанию 120, до 360).</summary>
+    public const string SpeakersMaxMinutes = "Speech:Speakers:MaxMinutes";
+
     /// <summary>Все ключи секции <c>Speech</c>, которые читает интеграция.</summary>
     public static IReadOnlyList<string> All { get; } =
     [
@@ -70,5 +91,8 @@ public static class SpeechConfigurationKeys
         Threads, MaxSegmentSeconds,
         MaxDurationHours, TimeoutFactor,
         FfmpegFolder,
+        SpeakersSegmentationPath, SpeakersSegmentationSha256,
+        SpeakersEmbeddingPath, SpeakersEmbeddingSha256,
+        SpeakersCount, SpeakersThreshold, SpeakersMaxMinutes,
     ];
 }

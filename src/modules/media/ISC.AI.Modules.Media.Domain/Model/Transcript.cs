@@ -13,7 +13,50 @@ namespace ISC.AI.Modules.Media.Domain.Model;
 /// Текст ДОСЛОВНО, как распознала модель: язык речи (русский, киргизский или вперемешку), строчными
 /// буквами, без знаков препинания. Это первичный слой — никакая последующая обработка его не заменяет.
 /// </param>
-public sealed record TranscriptSegmentDraft(int Index, long StartMs, long EndMs, string Text);
+/// <param name="Speaker">
+/// Диктор автоматической разметки (ADR-0062): номер с 1 по первому появлению в записи; <see langword="null"/> — не
+/// размечен (разметки нет или фрагмент не перекрылся ни с одной репликой).
+/// </param>
+public sealed record TranscriptSegmentDraft(int Index, long StartMs, long EndMs, string Text, int? Speaker = null);
+
+/// <summary>Чем размечены дикторы расшифровки (ADR-0062).</summary>
+public enum TranscriptSpeakerSource : short
+{
+    /// <summary>Не размечены: модели не настроены, запись длиннее предела или разметка не удалась.</summary>
+    None = 0,
+
+    /// <summary>По каналам стерео-записи: у каждого абонента свой канал — точно и без модели.</summary>
+    StereoChannels = 1,
+
+    /// <summary>Моделью разделения говорящих (pyannote + CAM++).</summary>
+    Model = 2,
+}
+
+/// <summary>Разметка дикторов прогона для записи в хранилище: источник и причина, если не размечены (ADR-0062).</summary>
+/// <param name="Source">Чем размечены.</param>
+/// <param name="Note">Почему не размечены (без содержимого записи).</param>
+public sealed record TranscriptSpeakerMarkup(TranscriptSpeakerSource Source, string? Note);
+
+/// <summary>Исход правки дикторов (ADR-0062).</summary>
+public enum TranscriptSpeakerEditResult
+{
+    /// <summary>Записано.</summary>
+    Ok = 0,
+
+    /// <summary>Нет такого носителя, диктора или реплики.</summary>
+    NotFound = 1,
+
+    /// <summary>Правка невозможна: объединение с самим собой или по кругу, перенос к слитому диктору.</summary>
+    Invalid = 2,
+}
+
+/// <summary>Диктор расшифровки для показа: номер, подпись, имя и объединение (ADR-0062).</summary>
+/// <param name="Number">Номер автоматической разметки (с 1).</param>
+/// <param name="Label">Подпись: имя, а без него — «Диктор N».</param>
+/// <param name="Name">Имя, данное сотрудником; <see langword="null"/> — не переименован.</param>
+/// <param name="MergedInto">Слит в диктора с этим номером; <see langword="null"/> — самостоятельный.</param>
+/// <param name="Segments">Сколько реплик у диктора после правок (у слитого — 0).</param>
+public sealed record TranscriptSpeakerRow(int Number, string Label, string? Name, int? MergedInto, int Segments);
 
 /// <summary>
 /// Итог прогона распознавателя (<see cref="Services.IAudioTranscriber"/>): фрагменты по порядку и
@@ -24,7 +67,13 @@ public sealed record TranscriptSegmentDraft(int Index, long StartMs, long EndMs,
 /// Длительность ЗАПИСИ (подготовленного звука), мс, как её измерил распознаватель, — не конец последней
 /// речи. <see langword="null"/> — длительность неизвестна (например, у видео нет звуковой дорожки).
 /// </param>
-public sealed record AudioTranscription(IReadOnlyList<TranscriptSegmentDraft> Segments, long? DurationMs)
+/// <param name="SpeakerSource">Чем размечены дикторы фрагментов (ADR-0062).</param>
+/// <param name="SpeakerNote">Почему дикторы не размечены, если разметка была включена; без содержимого записи.</param>
+public sealed record AudioTranscription(
+    IReadOnlyList<TranscriptSegmentDraft> Segments,
+    long? DurationMs,
+    TranscriptSpeakerSource SpeakerSource = TranscriptSpeakerSource.None,
+    string? SpeakerNote = null)
 {
     /// <summary>Пустой итог: звука нет — говорить в записи некому.</summary>
     public static AudioTranscription NoAudio { get; } = new([], null);
@@ -50,7 +99,11 @@ public sealed record MediaTranscriptionResult(bool Success, int Segments, string
 /// <param name="StartMs">Начало, мс.</param>
 /// <param name="EndMs">Конец, мс.</param>
 /// <param name="Text">Дословный текст модели.</param>
-public sealed record TranscriptSegmentRow(int Index, long StartMs, long EndMs, string Text);
+/// <param name="Speaker">Действующий диктор: перенос сотрудника, иначе автоматический, по цепочке объединений.</param>
+/// <param name="SpeakerLabel">Подпись действующего диктора.</param>
+/// <param name="SpeakerMoved">Реплика перенесена сотрудником к другому диктору.</param>
+public sealed record TranscriptSegmentRow(
+    int Index, long StartMs, long EndMs, string Text, int? Speaker = null, string? SpeakerLabel = null, bool SpeakerMoved = false);
 
 /// <summary>Расшифровка носителя для карточки (ADR-0026).</summary>
 /// <param name="AssetId">Носитель.</param>
@@ -59,13 +112,52 @@ public sealed record TranscriptSegmentRow(int Index, long StartMs, long EndMs, s
 /// <param name="ModelVersion">Модель, которой сделана расшифровка (для акта и воспроизводимости).</param>
 /// <param name="TranscribedAt">Когда сделана (UTC).</param>
 /// <param name="Segments">Фрагменты по порядку.</param>
+/// <param name="Speakers">Дикторы (ADR-0062); пусто — не размечены.</param>
+/// <param name="SpeakerSource">Чем размечены дикторы.</param>
+/// <param name="SpeakerNote">Почему не размечены, если разметка была включена.</param>
 public sealed record MediaTranscript(
     int AssetId,
     TranscriptStatus Status,
     string? Error,
     string? ModelVersion,
     DateTime? TranscribedAt,
-    IReadOnlyList<TranscriptSegmentRow> Segments);
+    IReadOnlyList<TranscriptSegmentRow> Segments,
+    IReadOnlyList<TranscriptSpeakerRow>? Speakers = null,
+    TranscriptSpeakerSource SpeakerSource = TranscriptSpeakerSource.None,
+    string? SpeakerNote = null);
+
+/// <summary>
+/// Действующие дикторы расшифровки (ADR-0062): автоматическая разметка, поверх неё — перенос реплики, затем цепочка
+/// объединений; подпись — имя, иначе «Диктор N». Чистые функции — одни и те же в каталоге, экспорте и проверках.
+/// </summary>
+public static class TranscriptSpeakers
+{
+    /// <summary>
+    /// Подпись реплики, которой диктор не достался (ADR-0062 v0.2): речь услышал распознаватель, но не модель разметки
+    /// (тихо, коротко). Видна, чтобы сотрудник перенёс реплику к нужному диктору, а не принял её за сбой.
+    /// </summary>
+    public const string UnknownLabel = "Диктор ?";
+
+    /// <summary>Подпись диктора без имени.</summary>
+    public static string DefaultLabel(int number) => "Диктор " + number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Действующий номер: перенос сотрудника, иначе автоматический, затем по цепочке «слит в». Цикл в цепочке (не
+    /// должен возникать — команда его не допускает) обрывается на первом повторе.
+    /// </summary>
+    public static int? Effective(int? automatic, int? moved, IReadOnlyDictionary<int, int?> mergedInto)
+    {
+        System.ArgumentNullException.ThrowIfNull(mergedInto);
+        var current = moved ?? automatic;
+        var seen = new HashSet<int>();
+        while (current is { } number && seen.Add(number) && mergedInto.TryGetValue(number, out var into) && into is { } target)
+        {
+            current = target;
+        }
+
+        return current;
+    }
+}
 
 /// <summary>Найденный по словам фрагмент расшифровки (поиск по материалам дела).</summary>
 /// <param name="AssetId">Носитель.</param>

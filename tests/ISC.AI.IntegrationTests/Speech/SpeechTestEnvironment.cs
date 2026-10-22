@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using ISC.AI.Speech;
+using ISC.AI.Speech.Speakers;
 using Shouldly;
 
 namespace ISC.AI.IntegrationTests.Speech;
@@ -127,6 +128,35 @@ internal static class SpeechTestEnvironment
             VadSha256: Pin(pins, "vad", "silero_vad.onnx", manifest),
             FfmpegFolder: ffmpegFolder,
             Threads: 2);
+    }
+
+    /// <summary>
+    /// Модели разделения говорящих из той же поставки (ADR-0062, <c>export-speech-models.ps1 -Speakers</c>): пути и пины
+    /// — из манифеста <c>speech-models.sha256</c>. Нет в поставке — явная ошибка с инструкцией.
+    /// </summary>
+    public static SpeakerOptions LoadDeliveredSpeakerOptions()
+    {
+        var dir = Path.Combine(RepositoryRoot, "deploy", "offline", "models", "speech");
+        var manifest = Path.Combine(dir, "speech-models.sha256");
+        var pins = File.Exists(manifest)
+            ? File.ReadAllLines(manifest, Encoding.UTF8)
+                .Select(line => line.Trim().TrimStart('\uFEFF'))
+                .Where(line => line.Length > 0)
+                .Select(line => line.Split("  ", 2))
+                .ToDictionary(parts => parts[1].Trim(), parts => parts[0].Trim(), StringComparer.OrdinalIgnoreCase)
+            : [];
+        const string segmentation = "pyannote-segmentation-3-0.onnx";
+        const string embedding = "3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx";
+        if (!pins.ContainsKey(segmentation) || !pins.ContainsKey(embedding))
+        {
+            throw new InvalidOperationException(
+                $"Модели разделения говорящих не поставлены: в {manifest} нет {segmentation} и {embedding}. Выполните на машине с "
+                + "интернетом deploy/offline/export-speech-models.ps1 -Speakers (pyannote MIT + CAM++ Apache-2.0, ADR-0062; "
+                + $"скачивание — с разрешения заказчика) {ExcludeHint}.");
+        }
+
+        return new SpeakerOptions(
+            Path.Combine(dir, segmentation), pins[segmentation], Path.Combine(dir, embedding), pins[embedding]);
     }
 
     /// <summary>Запускает ffmpeg поставки для подготовки тестового файла (исходники генерирует сам ffmpeg — медиафайлов в репозитории нет).</summary>

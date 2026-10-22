@@ -1,5 +1,6 @@
 using System.Globalization;
 using ISC.AI.Modules.Media.Domain.Services;
+using ISC.AI.Speech.Speakers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -80,7 +81,17 @@ public static class SpeechServiceCollectionExtensions
             MaxDurationHours: Positive(configuration, SpeechConfigurationKeys.MaxDurationHours, SpeechOptions.DefaultMaxDurationHours,
                 SpeechOptions.MinAllowedDurationHours, SpeechOptions.MaxAllowedDurationHours),
             TimeoutFactor: Positive(configuration, SpeechConfigurationKeys.TimeoutFactor, SpeechOptions.DefaultTimeoutFactor,
-                SpeechOptions.MinAllowedTimeoutFactor, SpeechOptions.MaxAllowedTimeoutFactor));
+                SpeechOptions.MinAllowedTimeoutFactor, SpeechOptions.MaxAllowedTimeoutFactor),
+            Speakers: new SpeakerOptions(
+                Text(configuration, SpeechConfigurationKeys.SpeakersSegmentationPath),
+                Text(configuration, SpeechConfigurationKeys.SpeakersSegmentationSha256),
+                Text(configuration, SpeechConfigurationKeys.SpeakersEmbeddingPath),
+                Text(configuration, SpeechConfigurationKeys.SpeakersEmbeddingSha256),
+                int.TryParse(configuration[SpeechConfigurationKeys.SpeakersCount], NumberStyles.Integer, CultureInfo.InvariantCulture, out var count)
+                    ? Math.Clamp(count, 0, SpeakerOptions.MaxCount)
+                    : 0,
+                Positive(configuration, SpeechConfigurationKeys.SpeakersThreshold, SpeakerOptions.DefaultThreshold, 0.05, 2),
+                (int)Positive(configuration, SpeechConfigurationKeys.SpeakersMaxMinutes, SpeakerOptions.DefaultMaxMinutes, 1, 360)));
     }
 
     private static string Text(IConfiguration configuration, string key) => configuration[key]?.Trim() ?? string.Empty;

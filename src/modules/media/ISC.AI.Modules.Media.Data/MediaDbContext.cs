@@ -46,6 +46,9 @@ public class MediaDbContext(DbContextOptions<MediaDbContext> options) : AuditedD
     /// <summary>Фрагменты расшифровки речи (ADR-0026) — первичный дословный слой под решёткой носителя.</summary>
     public DbSet<TranscriptSegment> TranscriptSegments { get; set; } = null!;
 
+    /// <summary>Дикторы расшифровок и правки сотрудников (ADR-0062).</summary>
+    public DbSet<TranscriptSpeaker> TranscriptSpeakers { get; set; } = null!;
+
     /// <summary>Слой пометок фотографий (ТФ-МЕД-13, ADR-0050).</summary>
     public DbSet<MediaAnnotation> Annotations { get; set; } = null!;
 

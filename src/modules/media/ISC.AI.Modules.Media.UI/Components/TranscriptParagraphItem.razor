@@ -15,6 +15,11 @@
 
 <div class="tp">
     <span class="transcript-time">[@MediaLabels.ClockTimecode(Paragraph.StartMs)]</span>
+    @if (Paragraph.SpeakerLabel is { } speakerLabel)
+    {
+        @* Реплика диктора (ADR-0062): подпись его цветом перед текстом абзаца. *@
+        <span class="transcript-speaker" style="@($"color:{TranscriptSpeakerColors.Of(Paragraph.Speaker)};")">@speakerLabel:</span>
+    }
     <span class="tp-text mud-typography mud-typography-body2">
         @foreach (var segment in Paragraph.Segments)
         {

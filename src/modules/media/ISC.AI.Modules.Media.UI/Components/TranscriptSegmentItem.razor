@@ -17,6 +17,7 @@
     <button type="button" id="@ElementId" class="transcript-row" style="@RowStyle"
             title="@Title" @onclick="PlayAsync">
         <span class="transcript-time">[@MediaLabels.ClockTimecode(StartMs)]</span>
+        @SpeakerPart
         <span class="transcript-text mud-typography mud-typography-body2">@foreach (var part in TranscriptHighlight.Split(Text, Query))
             {
                 if (part.IsMatch)
@@ -34,6 +35,7 @@ else
 {
     <div id="@ElementId" class="transcript-row" style="@RowStyle">
         <span class="transcript-time">[@MediaLabels.ClockTimecode(StartMs)]</span>
+        @SpeakerPart
         <span class="transcript-text mud-typography mud-typography-body2">@foreach (var part in TranscriptHighlight.Split(Text, Query))
             {
                 if (part.IsMatch)
@@ -82,7 +84,24 @@ else
     /// <summary>Строка — текущее совпадение поиска (к ней перешли «следующее/предыдущее») — обводится.</summary>
     [Parameter] public bool IsCurrentMatch { get; set; }
 
-    private (int Index, string ElementId, long StartMs, string? Text, bool IsActive, bool Clickable, string Title, string? Query, bool IsCurrentMatch) _shown;
+    /// <summary>Действующий диктор реплики (ADR-0062); <see langword="null"/> — не размечен.</summary>
+    [Parameter] public int? Speaker { get; set; }
+
+    /// <summary>Подпись диктора; <see langword="null"/> — подписи нет.</summary>
+    [Parameter] public string? SpeakerLabel { get; set; }
+
+    /// <summary>Реплика перенесена сотрудником к другому диктору — помечается «✎».</summary>
+    [Parameter] public bool SpeakerMoved { get; set; }
+
+    private (int Index, string ElementId, long StartMs, string? Text, bool IsActive, bool Clickable, string Title, string? Query, bool IsCurrentMatch,
+        int? Speaker, string? SpeakerLabel, bool SpeakerMoved) _shown;
+
+    // Подпись диктора перед текстом (ADR-0062): его цветом; перенесённая сотрудником реплика — с «✎».
+    private RenderFragment? SpeakerPart => SpeakerLabel is null ? null : __builder =>
+    {
+        <span class="transcript-speaker" style="@($"color:{TranscriptSpeakerColors.Of(Speaker)};")"
+              title="@(SpeakerMoved ? "Реплика перенесена сотрудником" : null)">@SpeakerLabel@(SpeakerMoved ? " ✎" : string.Empty):</span>
+    };
     private bool _changed = true;
 
     // Раскладка строки и сброс оформления кнопки — в TranscriptSegmentItem.razor.css; здесь только выделение активной
@@ -96,7 +115,7 @@ else
     protected override void OnParametersSet()
     {
         // OnPlay в сравнение не входит: он читается в момент щелчка, а не при отрисовке.
-        var current = (Index, ElementId, StartMs, Text, IsActive, Clickable, Title, Query, IsCurrentMatch);
+        var current = (Index, ElementId, StartMs, Text, IsActive, Clickable, Title, Query, IsCurrentMatch, Speaker, SpeakerLabel, SpeakerMoved);
         _changed = _changed || current != _shown;
         _shown = current;
     }

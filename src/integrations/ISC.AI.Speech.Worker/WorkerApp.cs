@@ -47,6 +47,43 @@ internal static class WorkerApp
         return Transcribe(arguments, stdout, stderr);
     }
 
+    /// <summary>
+    /// Разметка дикторов (ADR-0062) после распознавания: реплики — строками протокола. Длинная запись не размечается,
+    /// сбой моделей не роняет расшифровку — исход и причина уходят в строку <c>done</c> и в stderr.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (string Outcome, string? Note) Diarize(WorkerArguments arguments, long durationMs, ProtocolWriter writer, TextWriter stderr)
+    {
+        if (durationMs > arguments.SpeakerMaxMinutes * 60_000L)
+        {
+            var note = string.Create(CultureInfo.InvariantCulture, $"запись длиннее {arguments.SpeakerMaxMinutes} мин");
+            stderr.WriteLine("Дикторы не размечены: " + note + ".");
+            return ("skipped", note);
+        }
+
+        var running = Stopwatch.StartNew();
+        try
+        {
+            using var diarizer = SherpaSpeakerDiarizer.Load(arguments);
+            var turns = diarizer.Run(arguments.InputPath);
+            foreach (var turn in turns)
+            {
+                writer.WriteTurn(turn.StartMs, turn.EndMs, turn.Speaker);
+            }
+
+            stderr.WriteLine(string.Create(CultureInfo.InvariantCulture,
+                $"Дикторы размечены: реплик {turns.Count}, дикторов {turns.Select(t => t.Speaker).Distinct().Count()}, за {running.Elapsed.TotalSeconds:0.0} с."));
+            return ("done", null);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // Причина — тип и сообщение sherpa-onnx (пути моделей, не содержимое записи).
+            var note = exception is ModelLoadException ? exception.Message : $"{exception.GetType().Name}: {exception.Message}";
+            stderr.WriteLine("Дикторы не размечены: " + note);
+            return ("failed", "сбой разметки дикторов");
+        }
+    }
+
     // Отдельный метод без встраивания: всё, что касается sherpa-onnx, собрано здесь, и разбор аргументов
     // выше не тянет загрузку нативной сборки (тесты проверяют его без неё).
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -97,7 +134,8 @@ internal static class WorkerApp
                 try
                 {
                     var durationMs = arguments.DecodeWhole ? recognizer.RunWhole(reader, writer) : recognizer.Run(reader, writer);
-                    writer.WriteDone(durationMs);
+                    var (diarization, note) = arguments.Diarize ? Diarize(arguments, durationMs, writer, stderr) : (null, null);
+                    writer.WriteDone(durationMs, diarization, note);
                     stderr.WriteLine(string.Create(CultureInfo.InvariantCulture,
                         $"Готово: {writer.SegmentsWritten} фрагм. (кусков декодировано {recognizer.PiecesDecoded}), запись {durationMs / 1000.0:0.0} с, распознавание {running.Elapsed.TotalSeconds:0.0} с."));
                     return WorkerExitCodes.Success;

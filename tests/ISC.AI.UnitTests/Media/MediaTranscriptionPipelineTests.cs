@@ -70,6 +70,7 @@ public sealed class MediaTranscriptionPipelineTests : IDisposable
                 && s[1].Text == "ну давай завтра встретимся" && s[1].Index == 2),
             Model,
             45_000L, // длительность записи от распознавателя, а не конец последней речи (7800)
+            Arg.Any<TranscriptSpeakerMarkup?>(),
             Arg.Any<CancellationToken>());
         await _store.DidNotReceive().FailTranscriptionAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
 
@@ -96,6 +97,65 @@ public sealed class MediaTranscriptionPipelineTests : IDisposable
         Path.GetExtension(_transcriber.SourcePath).ShouldBe(".ogg");
         Path.GetDirectoryName(_transcriber.SourcePath).ShouldBe(_tempFiles.Root);
         Path.GetFileName(_transcriber.SourcePath).ShouldStartWith(MediaTempFiles.SpeechPrefix);
+    }
+
+    [Fact(DisplayName = "ADR-0062: дикторы уплотняются по первому появлению среди сохранённых фрагментов; источник и пометка разметки уходят в хранилище")]
+    public async Task Speakers_are_compacted_and_markup_is_stored()
+    {
+        _transcriber.Segments =
+        [
+            new TranscriptSegmentDraft(0, 0, 900, "  ", Speaker: 4),          // пустой — отброшен, номер 4 не занимает
+            new TranscriptSegmentDraft(1, 1000, 1900, "салам", Speaker: 2),
+            new TranscriptSegmentDraft(2, 2000, 2900, "без диктора"),
+            new TranscriptSegmentDraft(3, 3000, 3900, "привет", Speaker: 4),
+            new TranscriptSegmentDraft(4, 4000, 4900, "ещё раз", Speaker: 2),
+        ];
+        _transcriber.SpeakerSource = TranscriptSpeakerSource.Model;
+
+        (await Pipeline().TranscribeAsync(AssetId)).Success.ShouldBeTrue();
+
+        await _store.Received(1).CompleteTranscriptionAsync(
+            AssetId,
+            Arg.Is<IReadOnlyList<TranscriptSegmentDraft>>(s => s.Select(x => x.Speaker).SequenceEqual(new int?[] { 1, null, 2, 1 })),
+            Model,
+            45_000L,
+            new TranscriptSpeakerMarkup(TranscriptSpeakerSource.Model, null),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "ADR-0062 v0.2: заданное число говорящих уходит распознавателю и в журнал; без него — «по настройке», в журнале не упомянуто")]
+    public async Task Speaker_count_reaches_transcriber_and_audit()
+    {
+        _transcriber.Segments = [new TranscriptSegmentDraft(0, 0, 900, "салам", Speaker: 1)];
+
+        (await Pipeline().TranscribeAsync(AssetId, 2)).Success.ShouldBeTrue();
+
+        _transcriber.SpeakerCount.ShouldBe(2);
+        await _audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.PayloadSensitive!.Contains("говорящих задано 2", StringComparison.Ordinal)), Arg.Any<CancellationToken>());
+
+        _audit.ClearReceivedCalls();
+        (await Pipeline().TranscribeAsync(AssetId)).Success.ShouldBeTrue();
+        _transcriber.SpeakerCount.ShouldBeNull();
+        await _audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => !e.PayloadSensitive!.Contains("говорящих", StringComparison.Ordinal)), Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "ADR-0062: разметка не удалась — фрагменты без дикторов, причина уходит в хранилище для подписи в карточке")]
+    public async Task Speaker_note_is_stored_when_markup_failed()
+    {
+        _transcriber.Segments = [new TranscriptSegmentDraft(0, 0, 900, "салам")];
+        _transcriber.SpeakerNote = "запись длиннее 120 мин";
+
+        (await Pipeline().TranscribeAsync(AssetId)).Success.ShouldBeTrue();
+
+        await _store.Received(1).CompleteTranscriptionAsync(
+            AssetId,
+            Arg.Is<IReadOnlyList<TranscriptSegmentDraft>>(s => s.Single().Speaker == null),
+            Model,
+            45_000L,
+            new TranscriptSpeakerMarkup(TranscriptSpeakerSource.None, "запись длиннее 120 мин"),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact(DisplayName = "ADR-0051: готовая расшифровка уходит в поиск ИИ; сбой индексации расшифровку неудачной не делает")]
@@ -150,7 +210,7 @@ public sealed class MediaTranscriptionPipelineTests : IDisposable
         result.Success.ShouldBeTrue();
         result.Segments.ShouldBe(0);
         await _store.Received(1).CompleteTranscriptionAsync(
-            AssetId, Arg.Is<IReadOnlyList<TranscriptSegmentDraft>>(s => s.Count == 0), Model, 45_000L, Arg.Any<CancellationToken>());
+            AssetId, Arg.Is<IReadOnlyList<TranscriptSegmentDraft>>(s => s.Count == 0), Model, 45_000L, Arg.Any<TranscriptSpeakerMarkup?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact(DisplayName = "Звуковой дорожки нет: ноль фрагментов, длительность неизвестна (null) — хранилище её не трогает")]
@@ -163,7 +223,7 @@ public sealed class MediaTranscriptionPipelineTests : IDisposable
 
         result.Success.ShouldBeTrue();
         await _store.Received(1).CompleteTranscriptionAsync(
-            AssetId, Arg.Is<IReadOnlyList<TranscriptSegmentDraft>>(s => s.Count == 0), Model, null, Arg.Any<CancellationToken>());
+            AssetId, Arg.Is<IReadOnlyList<TranscriptSegmentDraft>>(s => s.Count == 0), Model, null, Arg.Any<TranscriptSpeakerMarkup?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact(DisplayName = "Сбой распознавателя: FailTranscriptionAsync с причиной, результат с ошибкой, исключение не пробрасывается, журнала нет")]
@@ -179,7 +239,7 @@ public sealed class MediaTranscriptionPipelineTests : IDisposable
         result.Segments.ShouldBe(0); // итог порта — целиком; частичный результат сбойного прогона не существует
         await _store.Received(1).FailTranscriptionAsync(AssetId, "Модель не прошла проверку SHA-256.", Arg.Any<CancellationToken>());
         await _store.DidNotReceive().CompleteTranscriptionAsync(
-            Arg.Any<int>(), Arg.Any<IReadOnlyList<TranscriptSegmentDraft>>(), Arg.Any<string>(), Arg.Any<long?>(), Arg.Any<CancellationToken>());
+            Arg.Any<int>(), Arg.Any<IReadOnlyList<TranscriptSegmentDraft>>(), Arg.Any<string>(), Arg.Any<long?>(), Arg.Any<TranscriptSpeakerMarkup?>(), Arg.Any<CancellationToken>());
         await _audit.DidNotReceive().WriteAsync(Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>());
         File.Exists(_transcriber.SourcePath!).ShouldBeFalse();
     }
@@ -191,11 +251,11 @@ public sealed class MediaTranscriptionPipelineTests : IDisposable
         _transcriber.Segments = [new TranscriptSegmentDraft(0, 0, 1000, "алло")];
         _transcriber.OnSegment = cts.Cancel;
 
-        await Should.ThrowAsync<OperationCanceledException>(() => Pipeline().TranscribeAsync(AssetId, cts.Token));
+        await Should.ThrowAsync<OperationCanceledException>(() => Pipeline().TranscribeAsync(AssetId, cancellationToken: cts.Token));
 
         await _store.Received(1).FailTranscriptionAsync(AssetId, MediaTranscriptionPipeline.CancelledReason, CancellationToken.None);
         await _store.DidNotReceive().CompleteTranscriptionAsync(
-            Arg.Any<int>(), Arg.Any<IReadOnlyList<TranscriptSegmentDraft>>(), Arg.Any<string>(), Arg.Any<long?>(), Arg.Any<CancellationToken>());
+            Arg.Any<int>(), Arg.Any<IReadOnlyList<TranscriptSegmentDraft>>(), Arg.Any<string>(), Arg.Any<long?>(), Arg.Any<TranscriptSpeakerMarkup?>(), Arg.Any<CancellationToken>());
         await _audit.DidNotReceive().WriteAsync(Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>());
         File.Exists(_transcriber.SourcePath!).ShouldBeFalse();
     }
@@ -293,11 +353,21 @@ public sealed class MediaTranscriptionPipelineTests : IDisposable
         /// <summary>Длительность записи, которую «измерил» распознаватель (строка done).</summary>
         public long? DurationMs { get; set; } = 45_000;
 
+        /// <summary>Чем размечены дикторы (ADR-0062).</summary>
+        public TranscriptSpeakerSource SpeakerSource { get; set; }
+
+        /// <summary>Число говорящих, переданное конвейером (v0.2).</summary>
+        public int? SpeakerCount { get; private set; }
+
+        /// <summary>Почему дикторы не размечены.</summary>
+        public string? SpeakerNote { get; set; }
+
         public string ModelVersion => Model;
 
-        public async Task<AudioTranscription> TranscribeAsync(string sourcePath, CancellationToken cancellationToken = default)
+        public async Task<AudioTranscription> TranscribeAsync(string sourcePath, int? speakerCount = null, CancellationToken cancellationToken = default)
         {
             Calls++;
+            SpeakerCount = speakerCount;
             SourcePath = sourcePath;
             File.Exists(sourcePath).ShouldBeTrue("Распознаватель получает путь к уже записанной временной копии.");
             (await File.ReadAllBytesAsync(sourcePath, cancellationToken)).ShouldBe(new byte[] { 1, 2, 3 });
@@ -314,7 +384,7 @@ public sealed class MediaTranscriptionPipelineTests : IDisposable
                 throw FailAfterSegments;
             }
 
-            return new AudioTranscription(Segments, DurationMs);
+            return new AudioTranscription(Segments, DurationMs, SpeakerSource, SpeakerNote);
         }
     }
 }

@@ -246,7 +246,7 @@ public static class MediaProcessing
         {
             transcript = await queue.EnqueueAsync(
                 TranscriptionTaskKind,
-                async (sp, ct) => await sp.GetRequiredService<IMediaTranscriptionPipeline>().TranscribeAsync(assetId, ct),
+                async (sp, ct) => await sp.GetRequiredService<IMediaTranscriptionPipeline>().TranscribeAsync(assetId, cancellationToken: ct),
                 cancellationToken);
         }
 

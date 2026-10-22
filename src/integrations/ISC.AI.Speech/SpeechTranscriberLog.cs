@@ -13,6 +13,9 @@ internal static partial class SpeechTranscriberLog
         Message = "Временный каталог расшифровки не удалён: {WorkDir}. Повтор — перед следующей расшифровкой и при старте хоста (ТБ-064).")]
     public static partial void WorkDirNotDeleted(ILogger logger, Exception exception, string workDir);
 
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Расшифровка: стерео-копия для разметки дикторов по каналам не получена — дикторы размечаются моделью (ADR-0062)")]
+    public static partial void StereoAnalysisFailed(ILogger logger, Exception exception);
+
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Уборка остатков расшифровки в {WorkRoot} не завершена.")]
     public static partial void SweepFailed(ILogger logger, Exception exception, string workRoot);

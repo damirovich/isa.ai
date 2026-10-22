@@ -1,0 +1,223 @@
+@namespace ISC.AI.Modules.Media.UI
+@* Полоса «Дикторы» панели расшифровки (ТФ-МЕД-19, ADR-0062): чем размечены дикторы или почему нет; дикторы своим
+   цветом с числом реплик; правки слоем поверх автоматической разметки — переименовать («Диктор 1 → объект»),
+   объединить с другим, перенести выбранную реплику (последнюю, по которой щёлкнули) к другому диктору или вернуть как
+   разметила система. Дословный текст не меняется (ТЭ-007). Право, решётку и дела проверяет сервер — отказ виден
+   текстом; в режиме «только просмотр» правок нет. Имя диктора выводится только как текст. v0.2: «Говорящих» и
+   «Расшифровать заново» — повторная расшифровка с заданным числом говорящих (запускает панель). *@
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using ISC.AI.Modules.Media.Application.Features.Transcripts
+@using ISC.AI.Modules.Media.Domain.Model
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+
+<div class="speakers-bar mb-2">
+    @if (Transcript.SpeakerSource == TranscriptSpeakerSource.None)
+    {
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+            Дикторы не размечены@(Transcript.SpeakerNote is { } note ? ": " + note : string.Empty). Чтобы разметить — «Расшифровать заново».
+        </MudText>
+    }
+    else
+    {
+        <div class="d-flex align-center gap-2 flex-wrap">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">@SourceCaption</MudText>
+            @foreach (var speaker in Active)
+            {
+                <button type="button" class="speaker-chip" disabled="@(ReadOnly || _busy)"
+                        style="@($"border-color:{TranscriptSpeakerColors.Of(speaker.Number)};")"
+                        title="@(ReadOnly ? speaker.Label : "Переименовать или объединить")" @onclick="@(() => Edit(speaker))">
+                    <span class="speaker-dot" style="@($"background:{TranscriptSpeakerColors.Of(speaker.Number)};")"></span>
+                    @speaker.Label · @speaker.Segments
+                </button>
+            }
+        </div>
+
+        @if (Merged.Count > 0)
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
+                Объединены: @string.Join("; ", Merged.Select(m => m.Label + " → " + LabelOf(m.MergedInto)))
+            </MudText>
+        }
+
+        @if (!ReadOnly && _editing is { } editing)
+        {
+            <div class="d-flex align-center gap-2 flex-wrap mt-2">
+                <div style="width:220px;">
+                    <MudTextField T="string" @bind-Value="_name" Label="@($"Имя «{TranscriptSpeakers.DefaultLabel(editing.Number)}»")"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" MaxLength="@RenameTranscriptSpeakerCommand.MaxNameLength"
+                                  Placeholder="например: объект" />
+                </div>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="_busy" OnClick="RenameAsync">Сохранить имя</MudButton>
+                @if (Active.Count > 1)
+                {
+                    <div style="width:200px;">
+                        <MudSelect T="int?" @bind-Value="_mergeInto" Label="Объединить с" Variant="Variant.Outlined" Margin="Margin.Dense">
+                            @foreach (var other in Active.Where(s => s.Number != editing.Number))
+                            {
+                                <MudSelectItem T="int?" Value="@((int?)other.Number)">@other.Label</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </div>
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="@(_busy || _mergeInto is null)" OnClick="MergeAsync">Объединить</MudButton>
+                }
+                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _editing = null)">Закрыть</MudButton>
+            </div>
+        }
+
+        @if (!ReadOnly && ActiveSegment is { } segment)
+        {
+            <div class="d-flex align-center gap-2 flex-wrap mt-2">
+                <MudText Typo="Typo.caption">Реплика [@MediaLabels.ClockTimecode(segment.StartMs)] — @(segment.SpeakerLabel ?? "без диктора"):</MudText>
+                <div style="width:200px;">
+                    <MudSelect T="int?" @bind-Value="_moveTo" Label="Перенести к" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        @foreach (var target in Active.Where(s => s.Number != segment.Speaker))
+                        {
+                            <MudSelectItem T="int?" Value="@((int?)target.Number)">@target.Label</MudSelectItem>
+                        }
+                    </MudSelect>
+                </div>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="@(_busy || _moveTo is null)" OnClick="@(() => MoveAsync(segment, _moveTo))">Перенести</MudButton>
+                @if (segment.SpeakerMoved)
+                {
+                    <MudButton Variant="Variant.Text" Size="Size.Small" Disabled="_busy" OnClick="@(() => MoveAsync(segment, null))">Как разметила система</MudButton>
+                }
+            </div>
+        }
+        else if (!ReadOnly && Active.Count > 0)
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
+                Чтобы перенести реплику к другому диктору, щёлкните по ней в списке.
+            </MudText>
+        }
+    }
+
+    @if (!ReadOnly && OnRetranscribe.HasDelegate)
+    {
+        @* Число говорящих (ADR-0062 v0.2): по порогу модель может разделить одного человека на нескольких (шум, эхо,
+           короткие реплики), а сотрудник обычно знает, сколько людей говорит. Повторная расшифровка заменяет и
+           разметку, и правки дикторов. *@
+        <div class="d-flex align-center gap-2 flex-wrap mt-2">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">Неверно определено число говорящих?</MudText>
+            <div style="width:140px;">
+                <MudSelect T="int" @bind-Value="_count" Label="Говорящих" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                           ToStringFunc="@(n => n == 0 ? "авто" : n.ToString(System.Globalization.CultureInfo.InvariantCulture))">
+                    @for (var n = 0; n <= MaxChoice; n++)
+                    {
+                        var value = n;
+                        <MudSelectItem T="int" Value="@value">@(value == 0 ? "авто" : value.ToString(System.Globalization.CultureInfo.InvariantCulture))</MudSelectItem>
+                    }
+                </MudSelect>
+            </div>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="@(_busy || Transcript.Status.IsInProgress())"
+                       title="Правки дикторов этой расшифровки при этом сбросятся"
+                       OnClick="@(() => OnRetranscribe.InvokeAsync(_count == 0 ? null : _count))">Расшифровать заново</MudButton>
+        </div>
+    }
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-2"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+    }
+</div>
+
+@code {
+    /// <summary>Расшифровка с дикторами.</summary>
+    [Parameter, EditorRequired] public MediaTranscript Transcript { get; set; } = default!;
+
+    /// <summary>Выбранная реплика (последняя, по которой щёлкнули); <see langword="null"/> — не выбрана.</summary>
+    [Parameter] public TranscriptSegmentRow? ActiveSegment { get; set; }
+
+    /// <summary>Только просмотр — без правок.</summary>
+    [Parameter] public bool ReadOnly { get; set; }
+
+    /// <summary>Правка записана — панель перечитывает расшифровку.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    /// <summary>
+    /// «Расшифровать заново» с числом говорящих (v0.2; <see langword="null"/> — авто); не задан — строки выбора нет.
+    /// </summary>
+    [Parameter] public EventCallback<int?> OnRetranscribe { get; set; }
+
+    // Наибольшее число говорящих в списке (больше в одной записи на практике не бывает; сервер допускает до 20).
+    private const int MaxChoice = 6;
+
+    // Выбранное число говорящих; 0 — «авто» (по настройке разметки).
+    private int _count;
+
+    private TranscriptSpeakerRow? _editing;
+    private string? _name;
+    private int? _mergeInto;
+    private int? _moveTo;
+    private bool _busy;
+    private string? _error;
+
+    private IReadOnlyList<TranscriptSpeakerRow> Speakers => Transcript.Speakers ?? [];
+
+    private List<TranscriptSpeakerRow> Active => Speakers.Where(s => s.MergedInto is null).ToList();
+
+    private List<TranscriptSpeakerRow> Merged => Speakers.Where(s => s.MergedInto is not null).ToList();
+
+    private string SourceCaption => Transcript.SpeakerSource == TranscriptSpeakerSource.StereoChannels
+        ? "Дикторы — по каналам стерео-записи:"
+        : "Дикторы размечены моделью — проверьте и поправьте:";
+
+    private string LabelOf(int? number) =>
+        Speakers.FirstOrDefault(s => s.Number == number)?.Label ?? (number is { } n ? TranscriptSpeakers.DefaultLabel(n) : "—");
+
+    protected override void OnParametersSet()
+    {
+        // Выбранная реплика сменилась — цель переноса сбрасывается.
+        if (ActiveSegment?.Index != _shownSegment)
+        {
+            _shownSegment = ActiveSegment?.Index;
+            _moveTo = null;
+        }
+    }
+
+    private int? _shownSegment;
+
+    private void Edit(TranscriptSpeakerRow speaker)
+    {
+        _editing = speaker;
+        _name = speaker.Name;
+        _mergeInto = null;
+    }
+
+    private Task RenameAsync() =>
+        _editing is { } editing ? SendAsync(new RenameTranscriptSpeakerCommand(Transcript.AssetId, editing.Number, _name)) : Task.CompletedTask;
+
+    private Task MergeAsync() =>
+        _editing is { } editing && _mergeInto is { } into
+            ? SendAsync(new MergeTranscriptSpeakersCommand(Transcript.AssetId, editing.Number, into))
+            : Task.CompletedTask;
+
+    private Task MoveAsync(TranscriptSegmentRow segment, int? speaker) =>
+        SendAsync(new MoveTranscriptSegmentCommand(Transcript.AssetId, segment.Index, speaker));
+
+    private async Task SendAsync(Mediator.IRequest<ISC.AI.Abstractions.Application.ResponseDto<bool>> command)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(command);
+            if (!response.Status)
+            {
+                _error = response.StatusMessage;
+                return;
+            }
+
+            _editing = null;
+            _moveTo = null;
+            await OnChanged.InvokeAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

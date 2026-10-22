@@ -18,11 +18,26 @@ public enum TranscriptView
 /// <summary>Абзац режима «Текстом»: начало и фрагменты по порядку.</summary>
 /// <param name="StartMs">Начало абзаца (первого фрагмента), мс.</param>
 /// <param name="Segments">Фрагменты абзаца по порядку.</param>
-public sealed record TranscriptParagraph(long StartMs, IReadOnlyList<TranscriptSegmentRow> Segments);
+/// <param name="Speaker">Диктор абзаца (ADR-0062); <see langword="null"/> — дикторы не размечены или не определён.</param>
+/// <param name="SpeakerLabel">Подпись диктора абзаца.</param>
+public sealed record TranscriptParagraph(
+    long StartMs, IReadOnlyList<TranscriptSegmentRow> Segments, int? Speaker = null, string? SpeakerLabel = null);
+
+/// <summary>Цвета дикторов (ADR-0062): один и тот же номер — один цвет в строках, абзацах и полосе «Дикторы».</summary>
+public static class TranscriptSpeakerColors
+{
+    private static readonly string[] Palette =
+        ["#1E88E5", "#D81B60", "#43A047", "#FB8C00", "#8E24AA", "#00897B", "#6D4C41", "#3949AB"];
+
+    /// <summary>Цвет диктора; без диктора — приглушённый цвет текста.</summary>
+    public static string Of(int? speaker) =>
+        speaker is { } number and > 0 ? Palette[(number - 1) % Palette.Length] : "var(--mud-palette-text-secondary)";
+}
 
 /// <summary>
 /// Раскладка расшифровки в абзацы для чтения (ADR-0047, режим «Текстом»): фрагменты идут подряд, новый абзац — после
-/// паузы не короче <see cref="PauseMs"/> либо когда абзац длиннее <see cref="MaxParagraphMs"/>. Меняется только
+/// паузы не короче <see cref="PauseMs"/>, когда абзац длиннее <see cref="MaxParagraphMs"/> либо когда сменился диктор
+/// (ADR-0062: абзац — реплика одного диктора с его подписью). Меняется только
 /// раскладка: текст фрагментов — дословный первичный слой (ТЭ-002), ни один фрагмент не теряется и не склеивается в
 /// одну строку с другим.
 /// </summary>
@@ -47,11 +62,12 @@ public static class TranscriptParagraphs
         {
             if (current is null
                 || segment.StartMs - previousEnd >= PauseMs
-                || segment.StartMs - start >= MaxParagraphMs)
+                || segment.StartMs - start >= MaxParagraphMs
+                || segment.Speaker != paragraphs[^1].Speaker)
             {
                 current = [];
                 start = segment.StartMs;
-                paragraphs.Add(new TranscriptParagraph(start, current));
+                paragraphs.Add(new TranscriptParagraph(start, current, segment.Speaker, segment.SpeakerLabel));
             }
 
             current.Add(segment);

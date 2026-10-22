@@ -461,6 +461,15 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                         .HasColumnType("character varying(2000)")
                         .HasColumnName("transcript_error");
 
+                    b.Property<string>("TranscriptSpeakerNote")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("transcript_speaker_note");
+
+                    b.Property<short>("TranscriptSpeakerSource")
+                        .HasColumnType("smallint")
+                        .HasColumnName("transcript_speaker_source");
+
                     b.Property<int>("TranscriptStatus")
                         .HasColumnType("integer")
                         .HasColumnName("transcript_status");
@@ -1204,6 +1213,22 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("model_version");
 
+                    b.Property<short?>("Speaker")
+                        .HasColumnType("smallint")
+                        .HasColumnName("speaker");
+
+                    b.Property<DateTime?>("SpeakerEditedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("speaker_edited_at");
+
+                    b.Property<int?>("SpeakerEditedByUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("speaker_edited_by_user_id");
+
+                    b.Property<short?>("SpeakerOverride")
+                        .HasColumnType("smallint")
+                        .HasColumnName("speaker_override");
+
                     b.Property<long>("StartMs")
                         .HasColumnType("bigint")
                         .HasColumnName("start_ms");
@@ -1228,6 +1253,66 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                         .HasDatabaseName("ix_transcript_segment_classification_division_id");
 
                     b.ToTable("transcript_segment", "media");
+                });
+
+            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.TranscriptSpeaker", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AssetId")
+                        .HasColumnType("integer")
+                        .HasColumnName("asset_id");
+
+                    b.Property<short>("Classification")
+                        .HasColumnType("smallint")
+                        .HasColumnName("classification");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("DivisionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("division_id");
+
+                    b.Property<DateTime?>("EditedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("edited_at");
+
+                    b.Property<int?>("EditedByUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("edited_by_user_id");
+
+                    b.Property<short?>("MergedInto")
+                        .HasColumnType("smallint")
+                        .HasColumnName("merged_into");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<short>("Number")
+                        .HasColumnType("smallint")
+                        .HasColumnName("number");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_transcript_speaker");
+
+                    b.HasIndex("AssetId", "Number")
+                        .IsUnique()
+                        .HasDatabaseName("ix_transcript_speaker_asset_id_number");
+
+                    b.ToTable("transcript_speaker", "media");
                 });
 
             modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.VerificationDecisionEntity", b =>
@@ -1414,6 +1499,18 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_transcript_segment_asset_asset_id");
+
+                    b.Navigation("Asset");
+                });
+
+            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.TranscriptSpeaker", b =>
+                {
+                    b.HasOne("ISC.AI.Modules.Media.Data.Entities.MediaAsset", "Asset")
+                        .WithMany()
+                        .HasForeignKey("AssetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_transcript_speaker_asset_asset_id");
 
                     b.Navigation("Asset");
                 });

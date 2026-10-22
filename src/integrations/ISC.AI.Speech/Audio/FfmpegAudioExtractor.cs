@@ -15,7 +15,8 @@ namespace ISC.AI.Speech.Audio;
 /// Длительность WAV по объёму данных — ровно то, что получит процесс-распознаватель (с тишиной, которой ffmpeg
 /// добил начало и разрывы меток времени). По ней считается таймаут прогона.
 /// </param>
-public sealed record ExtractedAudio(TimeSpan Duration);
+/// <param name="Channels">Каналов в исходной звуковой дорожке (по ffprobe); 2 — возможно, звонок с раздельной записью (ADR-0062).</param>
+public sealed record ExtractedAudio(TimeSpan Duration, int Channels = 1);
 
 /// <summary>
 /// Приведение звука любого файла (аудио или видео) к единому формату модели — WAV 16 кГц, моно, PCM 16 бит —
@@ -51,6 +52,10 @@ public sealed class FfmpegAudioExtractor
     // -ac 1 -ar 16000 pcm_s16le — формат детектора речи и модели. Ключ -t (жёсткий потолок) — в ExtractAsync.
     private const string OutputArguments =
         "-vn -sn -dn -map_metadata -1 -af aresample=async=1:first_pts=0 -ac 1 -ar 16000 -c:a pcm_s16le -f wav";
+
+    // Стерео-копия для разметки дикторов по каналам (ADR-0062): два канала как есть, 8 кГц — для громкости речи хватает.
+    private const string StereoOutputArguments =
+        "-vn -sn -dn -map_metadata -1 -af aresample=async=1:first_pts=0 -ac 2 -ar 8000 -c:a pcm_s16le -f wav";
 
     // Запас потолка -t над пределом: вывод длиннее предела отличим от записи ровно по пределу, даже если
     // ffmpeg режет по границе кадра, а не по отсчёту.
@@ -150,7 +155,42 @@ public sealed class FfmpegAudioExtractor
                 + $"а звук после приведения к формату модели вышел за предел. {SplitAdvice(_maxDuration)}");
         }
 
-        return new ExtractedAudio(extracted);
+        return new ExtractedAudio(extracted, analysis.PrimaryAudioStream?.Channels ?? 1);
+    }
+
+    /// <summary>
+    /// Копия звука в стерео 8 кГц для разметки дикторов по каналам (ADR-0062): частоты 8 кГц достаточно для громкости
+    /// речи, файл вдвое меньше. Вызывается только для двухканальной записи после <see cref="ExtractAsync"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">ffmpeg не извлёк звук.</exception>
+    public async Task ExtractStereoAsync(string sourcePath, string wavPath, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(wavPath);
+        EnsureSafeForCommandLine(sourcePath);
+        EnsureSafeForCommandLine(wavPath);
+
+        var options = new FFOptions();
+        if (!string.IsNullOrWhiteSpace(_ffmpegFolder))
+        {
+            options.BinaryFolder = _ffmpegFolder;
+        }
+
+        var cap = (_maxDuration + OutputCapMargin).TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
+        try
+        {
+            await FFMpegArguments
+                .FromFileInput(sourcePath)
+                .WithGlobalOptions(global => global.WithVerbosityLevel(FFMpegCore.Arguments.VerbosityLevel.Error))
+                .OutputToFile(wavPath, overwrite: true, output => output.WithCustomArgument($"{StereoOutputArguments} -t {cap}"))
+                .CancellableThrough(cancellationToken)
+                .ProcessAsynchronously(true, options)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            throw new InvalidOperationException(Describe("ffmpeg не извлёк стерео-звук", exception), exception);
+        }
     }
 
     /// <summary>
