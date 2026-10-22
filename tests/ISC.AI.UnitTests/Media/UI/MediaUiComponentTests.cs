@@ -291,7 +291,8 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
         cut.Markup.ShouldContain("Трек 1");
         cut.Markup.ShouldContain("Трек 2");
         cut.Markup.ShouldContain("0:01.0 – 0:03.0");
-        cut.Markup.ShouldContain("3 кадра · лучшее лицо № 12");
+        cut.Markup.ShouldContain("3 кадра · лучший кадр — лицо № 12"); // без оценок кадра — по общему баллу (ADR-0058)
+        cut.Markup.ShouldContain("оценок кадра нет — переиндексируйте носитель");
         cut.Markup.ShouldNotContain("ещё не связаны в треки");
 
         // Кадры трека скрыты, пока не раскрыты; раскрытие показывает каждый кадр с переходом к нему.
@@ -299,6 +300,26 @@ public sealed class MediaUiComponentTests : BunitContext, IAsyncLifetime
         cut.FindAll("button").First(b => b.TextContent.Contains("Показать кадры (3)")).Click();
         cut.FindAll("button").First(b => b.TextContent.Trim() == "0:03.0").Click();
         FrameSrc(cut).ShouldBe("/media/frames/5?t=3000");
+    }
+
+    [Fact(DisplayName = "ADR-0058: лучший кадр трека — по оценке кадра, а не по общему баллу; оценки словами; «к лучшему кадру»; ★ у лучшего")]
+    public void Track_best_frame_uses_frame_score()
+    {
+        SetupTranscript(Transcript(TranscriptStatus.NotApplicable));
+        var cut = RenderCard(Asset(MediaKind.Video, "video/x-matroska", frameRate: 25),
+        [
+            TrackFace(11, 1_000, track: 1, quality: 0.9f) with { Frame = new FrameMetrics(0.3f, 0.5f, 40, 0, 0, 30, 0.35f) },
+            TrackFace(12, 2_000, track: 1, quality: 0.95f) with { Frame = new FrameMetrics(0.4f, 0.6f, 25, 0, 0, 40, 0.45f) },
+            TrackFace(13, 3_000, track: 1, quality: 0.7f) with { Frame = new FrameMetrics(0.82f, 0.75f, -5, 3, 0, 64, 0.81f) },
+        ]);
+
+        cut.Markup.ShouldContain("3 кадра · лучший кадр — лицо № 13 · оценка кадра 81 %");
+        cut.Markup.ShouldContain("резкость 82 % · поворот ≈ 5° · кивок ≈ 3° · освещённость 75 % · между глазами 64 пикс.");
+        cut.FindAll("button").First(b => b.TextContent.Contains("к лучшему кадру · 0:03.0")).Click();
+        FrameSrc(cut).ShouldBe("/media/frames/5?t=3000");
+
+        cut.FindAll("button").First(b => b.TextContent.Contains("Показать кадры (3)")).Click();
+        cut.FindAll("p, span, div").Count(e => e.TextContent.Trim() == "★ лучший").ShouldBeGreaterThan(0);
     }
 
     private static FaceRow TrackFace(int id, long timestampMs, int track, float quality) =>

@@ -221,6 +221,12 @@ else if (_asset is { } current)
     /// <summary>Открыть сразу на загрузке нового фото (фото из анкеты фигуранта, ТФ-ПЕР-05).</summary>
     [Parameter] public bool StartWithUpload { get; set; }
 
+    /// <summary>
+    /// Сразу выбрать этот носитель и лицо — подсказка лучшего кадра (ТФ-МЕД-21, ADR-0058). Человек видит выбор и может
+    /// сменить его; эталоном кадр становится только по «Добавить» (ТБ-077).
+    /// </summary>
+    [Parameter] public ReferencePick? Initial { get; set; }
+
     private int _tab;
     private List<MediaAssetRow>? _assets;
     private string? _listError;
@@ -244,13 +250,28 @@ else if (_asset is { } current)
     private bool _uploading;
     private string? _uploadError;
 
-    protected override Task OnInitializedAsync()
+    protected override async Task OnInitializedAsync()
     {
         // Из анкеты — сразу вкладка загрузки (вкладки: 0 — из материалов дела, 1 — загрузить новое фото).
         _tab = StartWithUpload ? 1 : 0;
 
         // ТБ-030 «одно открытие — одна запись»: на предрендере не грузим.
-        return RendererInfo.IsInteractive ? LoadAssetsAsync() : Task.CompletedTask;
+        if (!RendererInfo.IsInteractive)
+        {
+            return;
+        }
+
+        await LoadAssetsAsync();
+
+        // Подсказанный кадр выбирается так же, как мышкой: носитель из списка дела и пригодное лицо на нём.
+        if (Initial is { } initial && !StartWithUpload && _assets?.Any(a => a.Id == initial.AssetId) == true)
+        {
+            await SelectAssetAsync(initial.AssetId);
+            if (_faces.FirstOrDefault(f => f.Id == initial.FaceId) is { } face)
+            {
+                await PickFaceAsync(face);
+            }
+        }
     }
 
     private async Task LoadAssetsAsync()

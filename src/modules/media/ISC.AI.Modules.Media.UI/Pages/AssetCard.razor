@@ -373,12 +373,21 @@ else
                                             ? $"{MediaLabels.Timecode(current.StartMs)} – {MediaLabels.Timecode(current.EndMs)}"
                                             : MediaLabels.Timecode(current.StartMs))
                                     </MudText>
+                                    @* Лучший кадр трека — по оценке кадра (ТФ-МЕД-21, ADR-0058): резкость, поза, свет, размер. *@
                                     <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                                        @FramesCaption(current.Faces.Count) · лучшее лицо № @best.Id · качество @best.QualityScore.ToString("0.00")
+                                        @FramesCaption(current.Faces.Count) · лучший кадр — лицо № @best.Id · @FrameLabels.Score(best.Frame)
                                     </MudText>
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@FrameLabels.Details(best.Frame)</MudText>
                                     @* «К кадру» работает в обоих режимах просмотрщика: перемотка <video> либо кадр с сервера. *@
-                                    <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.PlayCircle" Class="align-self-start"
-                                               OnClick="@(() => ShowFrameAsync(current.StartMs))">к началу · @MediaLabels.Timecode(current.StartMs)</MudButton>
+                                    <div class="d-flex flex-wrap">
+                                        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.PlayCircle"
+                                                   OnClick="@(() => ShowFrameAsync(current.StartMs))">к началу · @MediaLabels.Timecode(current.StartMs)</MudButton>
+                                        @if (best.FrameTimestampMs is { } bestMs && bestMs != current.StartMs)
+                                        {
+                                            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Star"
+                                                       OnClick="@(() => ShowFrameAsync(bestMs))">к лучшему кадру · @MediaLabels.Timecode(bestMs)</MudButton>
+                                        }
+                                    </div>
                                 </div>
                             </div>
                             <div class="d-flex gap-1 flex-wrap">
@@ -401,9 +410,13 @@ else
                                         @foreach (var face in current.Faces)
                                         {
                                             var frameFace = face;
-                                            <div class="d-flex flex-column align-center" style="width:72px;">
+                                            <div class="d-flex flex-column align-center" style="width:72px;" title="@(FrameLabels.Score(frameFace.Frame) + "\n" + FrameLabels.Details(frameFace.Frame))">
                                                 <FaceCropTile Url="@CropUrl(frameFace)" Size="56" Highlighted="@(HighlightFaceId == frameFace.Id)"
                                                               Unusable="@(!frameFace.QualityAcceptable)" UnusableReason="@frameFace.QualityReason" />
+                                                @if (frameFace.Id == best.Id)
+                                                {
+                                                    <MudText Typo="Typo.caption" Color="Color.Warning">★ лучший</MudText>
+                                                }
                                                 @if (frameFace.FrameTimestampMs is { } frameMs)
                                                 {
                                                     <MudButton Variant="Variant.Text" Size="Size.Small" Style="min-width:0;padding:0 4px;"
@@ -434,6 +447,9 @@ else
                                 <MudText Typo="Typo.caption" Class="mud-text-secondary">
                                     детектор @current.DetectionScore.ToString("0.00", CultureInfo.CurrentCulture) · качество @current.QualityScore.ToString("0.00", CultureInfo.CurrentCulture)
                                 </MudText>
+                                @* Оценки кадра для эталона (ТФ-МЕД-21, ADR-0058). *@
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">@FrameLabels.Score(current.Frame)</MudText>
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary" Style="max-width:320px;">@FrameLabels.Details(current.Frame)</MudText>
                                 @if (!_details.ViewOnly)
                                 {
                                     <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PersonSearch" Class="mt-2"
@@ -767,8 +783,8 @@ else
     // --- Лица видео по трекам (ТФ-ПЕР-02, ADR-0037) ---
 
     /// <summary>
-    /// Трек лица для карточки: лица трека по времени, лучшее (пригодное с наибольшим качеством, иначе просто с
-    /// наибольшим) и отрезок. <see cref="Key"/> — номер трека, а у лица без трека — отрицательный номер лица.
+    /// Трек лица для карточки: лица трека по времени, лучший кадр (правило <see cref="FaceRanking"/>: пригодные, по
+    /// оценке кадра, ADR-0058) и отрезок. <see cref="Key"/> — номер трека, а у лица без трека — отрицательный номер лица.
     /// </summary>
     private sealed record FaceTrackGroup(int Key, int? TrackId, IReadOnlyList<FaceRow> Faces, FaceRow Best, long StartMs, long EndMs);
 
@@ -781,8 +797,7 @@ else
             .Select(g =>
             {
                 var ordered = g.OrderBy(f => f.FrameTimestampMs ?? 0).ThenBy(f => f.Id).ToList();
-                var best = ordered.Where(f => f.QualityAcceptable).OrderByDescending(f => f.QualityScore).ThenBy(f => f.Id).FirstOrDefault()
-                    ?? ordered.OrderByDescending(f => f.QualityScore).ThenBy(f => f.Id).First();
+                var best = FaceRanking.Best(ordered)!;
                 return new FaceTrackGroup(
                     g.Key, ordered[0].TrackId, ordered, best, ordered[0].FrameTimestampMs ?? 0, ordered[^1].FrameTimestampMs ?? 0);
             })

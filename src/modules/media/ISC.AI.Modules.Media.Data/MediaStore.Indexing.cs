@@ -71,6 +71,13 @@ public sealed partial class MediaStore
                 QualityReason = indexed.Quality.Reason,
                 CropStoredFileName = indexed.CropStoredFileName,
                 TrackId = indexed.TrackId,
+                FrameSharpness = indexed.Metrics?.Sharpness,
+                FrameLighting = indexed.Metrics?.Lighting,
+                FrameYaw = indexed.Metrics?.YawDegrees,
+                FramePitch = indexed.Metrics?.PitchDegrees,
+                FrameRoll = indexed.Metrics?.RollDegrees,
+                FrameEyeDistance = indexed.Metrics?.EyeDistance,
+                FrameScore = indexed.Metrics?.Score,
                 // Денормализация режимных полей с носителя (ТБ-020): строка самодостаточна для фильтра.
                 Classification = asset.Classification,
                 DivisionId = asset.DivisionId,

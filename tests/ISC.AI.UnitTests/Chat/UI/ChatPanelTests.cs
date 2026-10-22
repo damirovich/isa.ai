@@ -296,7 +296,8 @@ public sealed class ChatPanelTests : BunitContext, IAsyncLifetime
 
         cut.FindAll(".mud-toggle-item").Single(b => b.TextContent.Trim() == "По документам").Click();
         cut.Find("textarea").Input("Что требуется по сроку?");
-        cut.Find("button.cc-ask").Click();
+        // Ответ может показаться раньше, чем закроется поток: до этого вместо «Отправить» стоит «Остановить».
+        cut.WaitForElement("button.cc-ask").Click();
         cut.WaitForAssertion(() => sent.Count.ShouldBe(2));
         sent[1].Mode.ShouldBe(ChatMode.Grounded);
         sent[1].ConversationId.ShouldBe(15);

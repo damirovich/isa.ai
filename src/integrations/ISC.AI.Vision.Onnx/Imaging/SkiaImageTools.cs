@@ -74,6 +74,68 @@ public sealed class SkiaImageTools : IImageTools
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Тот же декодер, что у детектора и вырезки (<see cref="ImageDecoder.DecodeRgba"/>): рамка — в его координатах.
+    /// Область приводится к 96 пикселям по ширине — дисперсия лапласиана сравнима у крупных и мелких лиц; яркость —
+    /// Y = 0,299·R + 0,587·G + 0,114·B; лапласиан — четыре соседа.
+    /// </remarks>
+    public FaceImageStats MeasureFace(byte[] imageBytes, BoundingBox box)
+    {
+        ArgumentNullException.ThrowIfNull(imageBytes);
+        const int TargetWidth = 96;
+
+        using var source = ImageDecoder.DecodeRgba(imageBytes);
+        var left = Math.Clamp((int)MathF.Floor(box.X), 0, source.Width);
+        var top = Math.Clamp((int)MathF.Floor(box.Y), 0, source.Height);
+        var right = Math.Clamp((int)MathF.Ceiling(box.Right), 0, source.Width);
+        var bottom = Math.Clamp((int)MathF.Ceiling(box.Bottom), 0, source.Height);
+        if (right - left <= 0 || bottom - top <= 0)
+        {
+            throw new ArgumentException("Рамка лица не пересекается с изображением — измерить нечего.", nameof(box));
+        }
+
+        var height = Math.Max(1, (int)MathF.Round((bottom - top) * (TargetWidth / (float)(right - left))));
+        using var target = NewCanvasBitmap(TargetWidth, height);
+        using (var canvas = new SKCanvas(target))
+        using (var image = SKImage.FromBitmap(source))
+        {
+            canvas.DrawImage(
+                image, new SKRect(left, top, right, bottom), new SKRect(0, 0, TargetWidth, height), new SKSamplingOptions(SKFilterMode.Linear));
+        }
+
+        var pixels = target.GetPixelSpan();
+        var luma = new float[TargetWidth * height];
+        double sum = 0, squares = 0;
+        for (var i = 0; i < luma.Length; i++)
+        {
+            var y = (0.299f * pixels[i * 4]) + (0.587f * pixels[(i * 4) + 1]) + (0.114f * pixels[(i * 4) + 2]);
+            luma[i] = y;
+            sum += y;
+            squares += y * y;
+        }
+
+        var mean = sum / luma.Length;
+        var deviation = Math.Sqrt(Math.Max(0, (squares / luma.Length) - (mean * mean)));
+
+        double laplacianSum = 0, laplacianSquares = 0;
+        var count = 0;
+        for (var y = 1; y < height - 1; y++)
+        {
+            for (var x = 1; x < TargetWidth - 1; x++)
+            {
+                var at = (y * TargetWidth) + x;
+                double value = (4 * luma[at]) - luma[at - 1] - luma[at + 1] - luma[at - TargetWidth] - luma[at + TargetWidth];
+                laplacianSum += value;
+                laplacianSquares += value * value;
+                count++;
+            }
+        }
+
+        var variance = count == 0 ? 0 : (laplacianSquares / count) - Math.Pow(laplacianSum / count, 2);
+        return new FaceImageStats((float)Math.Max(0, variance), (float)mean, (float)deviation);
+    }
+
+    /// <inheritdoc />
     public byte[] ThumbnailJpeg(byte[] imageBytes, int width, int height, int quality = 80)
     {
         ArgumentNullException.ThrowIfNull(imageBytes);

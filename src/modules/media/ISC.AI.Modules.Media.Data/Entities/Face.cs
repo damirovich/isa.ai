@@ -55,6 +55,30 @@ public class Face : AuditableEntity, IClassified
     /// <summary>Трек лица в видео (серия кадров одного человека), если построен.</summary>
     public int? TrackId { get; set; }
 
+    /// <summary>
+    /// Резкость кадра лица, 0–1 (ТФ-МЕД-21, ADR-0058). Оценки кадра пусты у лиц, проиндексированных до них, — их даёт
+    /// переиндексация.
+    /// </summary>
+    public float? FrameSharpness { get; set; }
+
+    /// <summary>Освещённость кадра лица, 0–1.</summary>
+    public float? FrameLighting { get; set; }
+
+    /// <summary>Поворот головы влево-вправо, ≈ градусы.</summary>
+    public float? FrameYaw { get; set; }
+
+    /// <summary>Кивок, ≈ градусы.</summary>
+    public float? FramePitch { get; set; }
+
+    /// <summary>Наклон (угол линии глаз), градусы.</summary>
+    public float? FrameRoll { get; set; }
+
+    /// <summary>Межзрачковое расстояние, пикселей.</summary>
+    public float? FrameEyeDistance { get; set; }
+
+    /// <summary>Итоговая оценка кадра для эталона, 0–1; у непригодного лица — 0.</summary>
+    public float? FrameScore { get; set; }
+
     /// <summary>Гриф (денормализован с носителя, ТБ-020). NOT NULL.</summary>
     public short Classification { get; set; }
 

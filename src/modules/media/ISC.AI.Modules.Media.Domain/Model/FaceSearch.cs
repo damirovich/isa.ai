@@ -124,6 +124,7 @@ public sealed record MediaAssetReceipt(int AssetId, bool Duplicate, string? Cont
 /// <param name="Template">L2-нормированный вектор; <see langword="null"/> — шаблон не строился.</param>
 /// <param name="CropStoredFileName">Имя файла вырезки лица в хранилище (для показа в выдаче), если сохранена.</param>
 /// <param name="TrackId">Идентификатор трека лица в видео (одно лицо на серии кадров), если известен.</param>
+/// <param name="Metrics">Оценки кадра для подсказки эталона (ADR-0058); <see langword="null"/> — оценить не удалось.</param>
 public sealed record IndexedFace(
     int? FrameIndex,
     long? FrameTimestampMs,
@@ -131,7 +132,8 @@ public sealed record IndexedFace(
     FaceQuality Quality,
     float[]? Template,
     string? CropStoredFileName = null,
-    int? TrackId = null);
+    int? TrackId = null,
+    FrameMetrics? Metrics = null);
 
 /// <summary>Результат гарантированного удаления носителя (ТБ-064 для медиа, GATE-6).</summary>
 /// <param name="Found">Носитель существовал (иначе — идемпотентный no-op без аудита).</param>

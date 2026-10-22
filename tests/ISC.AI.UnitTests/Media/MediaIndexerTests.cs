@@ -276,6 +276,31 @@ public sealed class MediaIndexerTests : IDisposable
         await _audit.DidNotReceive().WriteAsync(Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact(DisplayName = "ADR-0058: оценки кадра пишутся у каждого лица; у непригодного итог 0; сбой измерения — лицо без оценок, индексация успешна")]
+    public async Task Frame_metrics_are_stored()
+    {
+        _store.GetForIndexingAsync(AssetId, Arg.Any<CancellationToken>())
+            .Returns(new MediaAssetIndexingInfo(AssetId, MediaKind.Image, "img.jpg", "image/jpeg", 2, 7, []));
+        _imageTools.MeasureFace(Arg.Any<byte[]>(), Arg.Any<BoundingBox>()).Returns(new FaceImageStats(150, 128, 50));
+
+        (await Indexer().IndexAsync(AssetId)).Success.ShouldBeTrue();
+
+        await _store.Received(1).CompleteIndexingAsync(
+            AssetId,
+            Arg.Is<IReadOnlyList<IndexedFace>>(faces => faces.Count == 2
+                && faces.All(f => f.Metrics != null && f.Metrics.Sharpness == 0.5f)
+                && faces.Count(f => f.Quality.Acceptable && f.Metrics!.Score > 0) == 1
+                && faces.Count(f => !f.Quality.Acceptable && f.Metrics!.Score == 0) == 1),
+            "yunet-1", "sface-1", null, null, null, Arg.Any<CancellationToken>());
+
+        _store.ClearReceivedCalls();
+        _imageTools.MeasureFace(Arg.Any<byte[]>(), Arg.Any<BoundingBox>()).Returns(_ => throw new InvalidOperationException("битый кадр"));
+        (await Indexer().IndexAsync(AssetId)).Success.ShouldBeTrue();
+        await _store.Received(1).CompleteIndexingAsync(
+            AssetId, Arg.Is<IReadOnlyList<IndexedFace>>(faces => faces.Count == 2 && faces.All(f => f.Metrics == null)),
+            "yunet-1", "sface-1", null, null, null, Arg.Any<CancellationToken>());
+    }
+
     [Fact(DisplayName = "Изображение: один кадр без индекса/таймкода, длительность null, раскадровка не вызывается")]
     public async Task Image_is_single_frame_without_timestamps()
     {
