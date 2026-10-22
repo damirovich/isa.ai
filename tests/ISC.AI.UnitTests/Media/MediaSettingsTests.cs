@@ -23,6 +23,7 @@ public sealed class MediaSettingsTests
     private readonly IMediaAdministration _administration = Substitute.For<IMediaAdministration>();
     private readonly ISubjectProvider _subjects = Substitute.For<ISubjectProvider>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
+    private readonly IUserAccountStore _accounts = Substitute.For<IUserAccountStore>();
 
     public MediaSettingsTests()
     {
@@ -124,7 +125,7 @@ public sealed class MediaSettingsTests
     [Fact(DisplayName = "Чтение настроек: значения, право менять и шкала словами; без субъекта — отказ")]
     public async Task Get_returns_view_and_requires_subject()
     {
-        var handler = new GetMediaSettingsQuery.Handler(_store, _administration, _subjects, new MediaSearchOptions());
+        var handler = new GetMediaSettingsQuery.Handler(_store, _administration, _subjects, new MediaSearchOptions(), _accounts);
 
         var view = (await handler.Handle(new GetMediaSettingsQuery(), CancellationToken.None)).Data!;
         view.Mode.ShouldBe(ConfirmationMode.SingleOperator);
@@ -171,10 +172,32 @@ public sealed class MediaSettingsTests
         MediaSettings.Defaults.TranscriptSpeakers.ShouldBeTrue();
         _store.GetAsync(Arg.Any<CancellationToken>()).Returns(MediaSettings.Defaults with { TranscriptSpeakers = false });
 
-        var view = await new GetMediaSettingsQuery.Handler(_store, _administration, _subjects, new MediaSearchOptions())
+        var view = await new GetMediaSettingsQuery.Handler(_store, _administration, _subjects, new MediaSearchOptions(), _accounts)
             .Handle(new GetMediaSettingsQuery(), CancellationToken.None);
 
         view.Data!.TranscriptSpeakers.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Чтение настроек: кто менял последним — по имени (отображаемому, иначе имени входа); не меняли или учётки нет — без имени")]
+    public async Task View_names_who_changed()
+    {
+        _accounts.ListAsync(Arg.Any<CancellationToken>()).Returns(
+        [
+            new UserAccountRow(7, "petrov", "Петров П.П.", IsActive: true, HasLocalPassword: true, MustChangePassword: false),
+            new UserAccountRow(8, "sidorov", null, IsActive: true, HasLocalPassword: true, MustChangePassword: false),
+        ]);
+        var handler = new GetMediaSettingsQuery.Handler(_store, _administration, _subjects, new MediaSearchOptions(), _accounts);
+
+        async Task<string?> NameAsync(int? userId)
+        {
+            _store.GetAsync(Arg.Any<CancellationToken>()).Returns(MediaSettings.Defaults with { UpdatedByUserId = userId });
+            return (await handler.Handle(new GetMediaSettingsQuery(), CancellationToken.None)).Data!.UpdatedByName;
+        }
+
+        (await NameAsync(7)).ShouldBe("Петров П.П.");
+        (await NameAsync(8)).ShouldBe("sidorov");
+        (await NameAsync(99)).ShouldBeNull();
+        (await NameAsync(null)).ShouldBeNull();
     }
 
     private async Task<ResponseDto<MediaSettings>> SetAsync(SetMediaSettingsCommand command) =>

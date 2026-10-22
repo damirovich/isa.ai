@@ -35,6 +35,7 @@ namespace ISC.AI.UnitTests.Media.UI;
 public sealed class SingleOperatorUiTests : BunitContext, IAsyncLifetime
 {
     private readonly IMediator _mediator = Substitute.For<IMediator>();
+    private readonly IRenderedComponent<MudSnackbarProvider> _snackbars;
 
     public SingleOperatorUiTests()
     {
@@ -43,6 +44,9 @@ public sealed class SingleOperatorUiTests : BunitContext, IAsyncLifetime
         Services.AddSingleton(_mediator);
         Services.AddSingleton(new MediaSearchOptions());
         SetRendererInfo(new RendererInfo("Server", true));
+
+        // Итог сохранения настроек — всплывающим сообщением: его показывает поставщик сообщений, а не страница.
+        _snackbars = Render<MudSnackbarProvider>();
 
         _mediator.Send(Arg.Any<GetCandidatePairQuery>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ResponseDto<VerificationQueueItem>>(ResponseDto<VerificationQueueItem>.Ok(
@@ -133,7 +137,7 @@ public sealed class SingleOperatorUiTests : BunitContext, IAsyncLifetime
         cut.WaitForAssertion(() => _mediator.Received(1).Send(
             Arg.Is<SetMediaSettingsCommand>(c => c.Mode == ConfirmationMode.SingleOperator && c.ThresholdPercent == 80 && c.MinThresholdPercent == 72),
             Arg.Any<CancellationToken>()));
-        cut.WaitForAssertion(() => cut.Markup.ShouldContain("Настройки сохранены"));
+        cut.WaitForAssertion(() => _snackbars.Markup.ShouldContain("Настройки сохранены"));
     }
 
     [Fact(DisplayName = "ADR-0062 v0.3: экран настроек — переключатель «Размечать дикторов» сохраняется сразу командой; без права недоступен")]
@@ -145,16 +149,66 @@ public sealed class SingleOperatorUiTests : BunitContext, IAsyncLifetime
                 MediaSettings.Defaults with { TranscriptSpeakers = false }, "Загруженные материалы будут расшифровываться без дикторов.")));
         var cut = Render<MediaSettingsPage>();
 
+        cut.FindAll(".settings-savebar").ShouldBeEmpty(); // переключатель — без панели сохранения
         var toggle = cut.Find("input[type='checkbox']");
         toggle.HasAttribute("checked").ShouldBeTrue();
         toggle.Change(false);
 
         cut.WaitForAssertion(() => _mediator.Received(1).Send(
             Arg.Is<SetTranscriptSpeakersCommand>(c => !c.Enabled), Arg.Any<CancellationToken>()));
-        cut.WaitForAssertion(() => cut.Markup.ShouldContain("без дикторов"));
+        cut.WaitForAssertion(() => _snackbars.Markup.ShouldContain("расшифровываться без дикторов"));
 
         GivenSettings(ConfirmationMode.SingleOperator, canManage: false);
         Render<MediaSettingsPage>().Find("input[type='checkbox']").HasAttribute("disabled").ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Экран настроек: плитка режима — черновик; панель «Есть изменения» называет что изменено; «Отменить» возвращает сохранённое")]
+    public void Settings_page_draft_and_discard()
+    {
+        GivenSettings(ConfirmationMode.SingleOperator, canManage: true);
+        var cut = Render<MediaSettingsPage>();
+
+        cut.FindAll(".settings-savebar").ShouldBeEmpty();
+        var tiles = cut.FindAll("[role='radio']");
+        tiles.Select(t => t.GetAttribute("aria-checked")).ShouldBe(["true", "false"]);
+
+        tiles[1].Click(); // «Два лица»
+        cut.FindAll("[role='radio']")[1].GetAttribute("aria-checked").ShouldBe("true");
+        cut.Find(".settings-savebar").TextContent.ShouldContain("режим подтверждения");
+        _mediator.DidNotReceive().Send(Arg.Any<SetMediaSettingsCommand>(), Arg.Any<CancellationToken>());
+
+        Button(cut, "Отменить").Click();
+        cut.FindAll(".settings-savebar").ShouldBeEmpty();
+        cut.FindAll("[role='radio']")[0].GetAttribute("aria-checked").ShouldBe("true");
+    }
+
+    [Fact(DisplayName = "Экран настроек: кто и когда менял — именем; не менялись — «значения поставки»; без права плитки недоступны")]
+    public void Settings_page_shows_who_changed()
+    {
+        _mediator.Send(Arg.Any<GetMediaSettingsQuery>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<ResponseDto<MediaSettingsView>>(ResponseDto<MediaSettingsView>.Ok(new MediaSettingsView(
+                ConfirmationMode.SingleOperator, 70, 1, new DateTime(2026, 10, 22, 9, 5, 0, DateTimeKind.Utc), 7, false,
+                "балл 0,363 = 70 %", UpdatedByName: "Петров П.П."))));
+        var cut = Render<MediaSettingsPage>();
+
+        cut.Find(".settings-meta").TextContent.ShouldContain("· Петров П.П.");
+        cut.Find(".settings-meta").TextContent.ShouldContain("Изменено 22.10.2026");
+        cut.FindAll("[role='radio']").ShouldAllBe(t => t.HasAttribute("disabled"));
+
+        GivenSettings(ConfirmationMode.SingleOperator, canManage: true);
+        Render<MediaSettingsPage>().Find(".settings-meta").TextContent.ShouldContain("действуют значения поставки");
+    }
+
+    [Fact(DisplayName = "Экран настроек: не загрузились — причина и «Повторить», которая запрашивает снова")]
+    public void Settings_page_load_error_can_retry()
+    {
+        _mediator.Send(Arg.Any<GetMediaSettingsQuery>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<ResponseDto<MediaSettingsView>>(ResponseDto<MediaSettingsView>.BadRequest("Субъект не установлен.")));
+        var cut = Render<MediaSettingsPage>();
+
+        cut.Markup.ShouldContain("Настройки не загрузились: Субъект не установлен.");
+        Button(cut, "Повторить").Click();
+        _mediator.Received(2).Send(Arg.Any<GetMediaSettingsQuery>(), Arg.Any<CancellationToken>());
     }
 
     private static AngleSharp.Dom.IElement Button<T>(IRenderedComponent<T> cut, string text)

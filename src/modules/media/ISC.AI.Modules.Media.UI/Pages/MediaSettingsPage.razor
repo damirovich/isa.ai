@@ -1,135 +1,280 @@
 @namespace ISC.AI.Modules.Media.UI
-@* Настройки поиска и верификации (ТФ-ВЕР-07, ТФ-ПЛ-08, ТФ-АДМ-03, ADR-0054): режим подтверждения (один оператор / два
-   лица), рабочий порог схожести и нижняя граница порога. Меняет Администратор (право проверяет сервер; без права экран
-   показывает значения только для чтения). Проверка 40–99 % и «рабочий не ниже границы» — на сервере; форма лишь
-   подсказывает. Каждое изменение — в журнале с прежними и новыми значениями. ADR-0062 v0.3: здесь же — размечать ли
-   дикторов при расшифровке загруженных материалов (переключатель сохраняется сразу). *@
+@* Настройки поиска и верификации (ТФ-ВЕР-07, ТФ-ПЛ-08, ТФ-АДМ-03, ADR-0054) и разметка дикторов при расшифровке
+   (ADR-0062 v0.3). Меняет Администратор: право проверяет сервер, без права экран — только для чтения с пояснением.
+   Режим и пороги — черновиком: правки копятся, панель «Есть изменения» внизу появляется только при отличии от
+   сохранённого, «Отменить» возвращает сохранённое, «Сохранить» — одной командой (проверка 1–99 % и «рабочий не ниже
+   границы» — на сервере, форма подсказывает тем же правилом). Переключатель дикторов сохраняется сразу — отдельной
+   командой. Итог сохранения — всплывающим сообщением; каждое изменение — в журнале с прежними и новыми значениями. *@
 @page "/media/settings"
 @rendermode InteractiveServer
+@using System.Collections.Generic
+@using System.Globalization
 @using ISC.AI.Modules.Media.Application.Features.Settings
 @using ISC.AI.Modules.Media.Domain.Model
 @using ISC.AI.Modules.Media.Domain.Services
+@inject ISnackbar Snackbar
 
 <PageTitle>Настройки поиска и верификации</PageTitle>
 
-<MudText Typo="Typo.h5">Настройки поиска и верификации</MudText>
-<MudText Typo="Typo.body2" Class="mud-text-secondary">
-    Режим подтверждения совпадений по лицу и порог схожести · изменяет Администратор
-</MudText>
+<div class="settings">
+    <header class="settings-header">
+        <div>
+            <MudText Typo="Typo.h5">Настройки поиска и верификации</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                Правила подтверждения совпадений по лицу, порог схожести и расшифровка речи
+            </MudText>
+        </div>
+        @if (_view is { } header)
+        {
+            <div class="settings-meta" title="@ChangedHint(header)">
+                <MudIcon Icon="@Icons.Material.Outlined.History" Size="Size.Small" />
+                <span>@ChangedText(header)</span>
+            </div>
+        }
+    </header>
 
-@if (_error is not null)
-{
-    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3"
-              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
-}
-
-@if (_saved is not null)
-{
-    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="my-3"
-              ShowCloseIcon="true" CloseIconClicked="@(() => _saved = null)">@_saved</MudAlert>
-}
-
-@if (_view is null)
-{
-    @if (_error is null)
+    @if (_loadError is not null)
     {
-        <MudProgressLinear Indeterminate="true" Class="my-4" />
-    }
-}
-else
-{
-    var view = _view;
-    @if (!view.CanManage)
-    {
-        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="my-3">
-            Значения показаны для сведения: менять их может только Администратор (право «Настройки поиска и верификации»).
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="my-4">
+            <div class="d-flex align-center gap-3 flex-wrap">
+                <span>Настройки не загрузились: @_loadError</span>
+                <MudButton Variant="Variant.Text" Color="Color.Error" Size="Size.Small" OnClick="LoadAsync">Повторить</MudButton>
+            </div>
         </MudAlert>
     }
-
-    <MudPaper Outlined="true" Class="pa-4 my-4" Style="max-width:720px;">
-        <MudText Typo="Typo.subtitle1" Class="mb-1">Подтверждение совпадения по лицу</MudText>
-        <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">
-            Кто присваивает кандидату статус «подтверждён» (ТБ-073). Автоматического подтверждения нет ни в одном режиме.
-        </MudText>
-        <MudRadioGroup T="ConfirmationMode" @bind-Value="_mode" Disabled="@(!view.CanManage || _busy)">
-            <MudRadio T="ConfirmationMode" Value="ConfirmationMode.SingleOperator" Color="Color.Primary">
-                Один оператор — решение сотрудника с правом «Верификация — первая подпись» окончательное
-            </MudRadio>
-            <MudRadio T="ConfirmationMode" Value="ConfirmationMode.TwoPerson" Color="Color.Primary">
-                Два лица — эксперт и слепой верификатор, при расхождении итог выносит руководитель
-            </MudRadio>
-        </MudRadioGroup>
-        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
-            Смена режима не меняет уже вынесенных решений. Разборы, начатые вдвоём, доводятся вдвоём; новый режим действует
-            для кандидатов, по которым ещё нет ни одного решения. «Неопределённо» в любом режиме решает руководитель — другой
-            сотрудник.
-        </MudText>
-    </MudPaper>
-
-    <MudPaper Outlined="true" Class="pa-4 my-4" Style="max-width:720px;">
-        <MudText Typo="Typo.subtitle1" Class="mb-1">Порог схожести</MudText>
-        <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">
-            С рабочим порогом открывается поиск по лицу; оператор может выбрать любой порог от 1 до 100 %. Нижняя граница —
-            по желанию: 1 % — без ограничения, выше — оператор не опустит порог ниже неё. Кандидаты ниже порога не показываются.
-        </MudText>
-        <div class="d-flex gap-3 flex-wrap">
-            <MudNumericField T="int" @bind-Value="_threshold" Label="Рабочий порог, %" Variant="Variant.Outlined"
-                             Min="@MediaSettings.MinPercent" Max="@MediaSettings.MaxPercent" Style="max-width:200px;"
-                             Disabled="@(!view.CanManage || _busy)" HelperText="@($"от {MediaSettings.MinPercent} до {MediaSettings.MaxPercent}")" />
-            <MudNumericField T="int" @bind-Value="_minThreshold" Label="Нижняя граница, %" Variant="Variant.Outlined"
-                             Min="@MediaSettings.MinPercent" Max="@MediaSettings.MaxPercent" Style="max-width:200px;"
-                             Disabled="@(!view.CanManage || _busy)" HelperText="1 % — без ограничения; не выше рабочего" />
-        </div>
-        @if (ValidationError is { } validation)
+    else if (_view is null)
+    {
+        @* Заготовка на время загрузки — того же размера, что разделы: страница не «прыгает». *@
+        @for (var i = 0; i < 3; i++)
         {
-            <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mt-2">@validation</MudText>
+            <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="148px" Class="settings-skeleton" />
         }
-        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
-            Проценты — шкала балла модели (@view.ScaleDescription), до калибровки на пилоте. Это вероятностная оценка, а не
-            установление личности (ТЭ-006).
-        </MudText>
-    </MudPaper>
+    }
+    else
+    {
+        var view = _view;
+        var readOnly = !view.CanManage;
 
-    <MudPaper Outlined="true" Class="pa-4 my-4" Style="max-width:720px;">
-        <MudText Typo="Typo.subtitle1" Class="mb-1">Расшифровка речи</MudText>
-        <MudSwitch T="bool" Value="@view.TranscriptSpeakers" ValueChanged="SetSpeakersAsync" Color="Color.Primary"
-                   Disabled="@(!view.CanManage || _busy)" Label="Размечать дикторов при расшифровке загруженных материалов" />
-        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
-            Сохраняется сразу и действует со следующей расшифровки. При «Расшифровать заново» сотрудник сам выбирает для
-            записи: без дикторов, «авто» или число говорящих.
-        </MudText>
-    </MudPaper>
-
-    <div class="d-flex align-center justify-space-between flex-wrap gap-2" style="max-width:720px;">
-        <MudText Typo="Typo.caption" Class="mud-text-secondary">
-            @(view.UpdatedAtUtc is { } at
-                ? $"Последнее изменение: {at.ToLocalTime():dd.MM.yyyy HH:mm}, пользователь № {view.UpdatedByUserId}"
-                : "Не менялись: действуют значения поставки (один оператор, рабочий порог 70 %, без нижней границы) или конфигурации.")
-        </MudText>
-        @if (view.CanManage)
+        @if (readOnly)
         {
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
-                       OnClick="SaveAsync" Disabled="@(_busy || ValidationError is not null || !Changed)">
-                @(_busy ? "Сохраняем…" : "Сохранить")
-            </MudButton>
+            <div class="settings-readonly">
+                <MudIcon Icon="@Icons.Material.Outlined.Lock" Size="Size.Small" />
+                <span>Значения показаны для сведения: менять их может только Администратор (право «Настройки поиска и верификации»).</span>
+            </div>
         }
-    </div>
-}
+
+        <section class="settings-section" aria-labelledby="settings-mode">
+            <div class="section-head">
+                <span class="section-icon"><MudIcon Icon="@Icons.Material.Outlined.VerifiedUser" Size="Size.Small" /></span>
+                <div>
+                    <MudText Typo="Typo.subtitle1" id="settings-mode" Class="section-title">Подтверждение совпадения по лицу</MudText>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                        Кто присваивает кандидату статус «подтверждён» (ТБ-073). Автоматического подтверждения нет ни в одном режиме.
+                    </MudText>
+                </div>
+            </div>
+
+            <div class="mode-grid" role="radiogroup" aria-labelledby="settings-mode">
+                @foreach (var option in ModeOptions)
+                {
+                    var selected = _mode == option.Mode;
+                    <button type="button" role="radio" aria-checked="@(selected ? "true" : "false")"
+                            class="@($"mode-tile{(selected ? " selected" : string.Empty)}")" disabled="@(readOnly || _busy)"
+                            @onclick="@(() => _mode = option.Mode)">
+                        <span class="tile-icon"><MudIcon Icon="@option.Icon" /></span>
+                        <span class="tile-body">
+                            <span class="tile-title">@option.Title</span>
+                            <span class="tile-text">@option.Text</span>
+                        </span>
+                        <MudIcon Class="tile-check" Size="Size.Small"
+                                 Icon="@(selected ? Icons.Material.Filled.CheckCircle : Icons.Material.Outlined.Circle)" />
+                    </button>
+                }
+            </div>
+
+            <div class="section-note">
+                <MudIcon Icon="@Icons.Material.Outlined.Info" Size="Size.Small" />
+                <span>
+                    Смена режима не меняет вынесенных решений: разборы, начатые вдвоём, доводятся вдвоём; новый режим действует для
+                    кандидатов без решений. «Неопределённо» в любом режиме решает руководитель — другой сотрудник.
+                </span>
+            </div>
+        </section>
+
+        <section class="settings-section" aria-labelledby="settings-threshold">
+            <div class="section-head">
+                <span class="section-icon"><MudIcon Icon="@Icons.Material.Outlined.Tune" Size="Size.Small" /></span>
+                <div>
+                    <MudText Typo="Typo.subtitle1" id="settings-threshold" Class="section-title">Порог схожести</MudText>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                        С рабочим порогом открывается поиск по лицу; оператор может выбрать любой порог не ниже границы.
+                        Кандидаты ниже порога не показываются.
+                    </MudText>
+                </div>
+            </div>
+
+            <div class="threshold-grid">
+                <div class="threshold-field">
+                    <div class="field-head">
+                        <span class="field-label">Рабочий порог</span>
+                        <span class="field-value">@_threshold %</span>
+                    </div>
+                    <MudSlider T="int" Min="@MediaSettings.MinPercent" Max="@MediaSettings.MaxPercent" Step="1" Value="_threshold"
+                               ValueChanged="@(value => _threshold = value)" Color="Color.Primary" Disabled="@(readOnly || _busy)"
+                               aria-label="Рабочий порог, %" />
+                    <div class="field-foot">
+                        <MudNumericField T="int" @bind-Value="_threshold" Label="Рабочий порог, %" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                         Min="@MediaSettings.MinPercent" Max="@MediaSettings.MaxPercent" Class="field-number"
+                                         Disabled="@(readOnly || _busy)" />
+                        <span class="field-hint">С ним открывается поиск</span>
+                    </div>
+                </div>
+
+                <div class="threshold-field">
+                    <div class="field-head">
+                        <span class="field-label">Нижняя граница</span>
+                        <span class="field-value">@(_minThreshold <= MediaSettings.MinPercent ? "нет" : $"{_minThreshold} %")</span>
+                    </div>
+                    <MudSlider T="int" Min="@MediaSettings.MinPercent" Max="@MediaSettings.MaxPercent" Step="1" Value="_minThreshold"
+                               ValueChanged="@(value => _minThreshold = value)" Color="Color.Primary" Disabled="@(readOnly || _busy)"
+                               aria-label="Нижняя граница, %" />
+                    <div class="field-foot">
+                        <MudNumericField T="int" @bind-Value="_minThreshold" Label="Нижняя граница, %" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                         Min="@MediaSettings.MinPercent" Max="@MediaSettings.MaxPercent" Class="field-number"
+                                         Disabled="@(readOnly || _busy)" />
+                        <span class="field-hint">1 % — без ограничения; не выше рабочего</span>
+                    </div>
+                </div>
+            </div>
+
+            @* Шкала 0–100 %: ниже границы — недоступная оператору зона, метка — рабочий порог. *@
+            <div class="scale" aria-hidden="true">
+                <div class="scale-track">
+                    @if (_minThreshold > MediaSettings.MinPercent)
+                    {
+                        <div class="scale-blocked" style="@($"width:{Percent(_minThreshold)};")"></div>
+                    }
+                    <div class="@($"scale-marker{(ValidationError is null ? string.Empty : " invalid")}")" style="@($"left:{Percent(_threshold)};")">
+                        <span>@_threshold %</span>
+                    </div>
+                </div>
+                <div class="scale-legend">
+                    <span>0 %</span>
+                    <span class="scale-model">шкала модели: @view.ScaleDescription</span>
+                    <span>100 %</span>
+                </div>
+            </div>
+
+            @if (ValidationError is { } validation)
+            {
+                <div class="field-error" role="alert">
+                    <MudIcon Icon="@Icons.Material.Outlined.ErrorOutline" Size="Size.Small" />
+                    <span>@validation</span>
+                </div>
+            }
+
+            <div class="section-note">
+                <MudIcon Icon="@Icons.Material.Outlined.Info" Size="Size.Small" />
+                <span>
+                    Проценты — шкала балла модели (@view.ScaleDescription), до калибровки на пилоте. Это вероятностная оценка, а не
+                    установление личности (ТЭ-006).
+                </span>
+            </div>
+        </section>
+
+        <section class="settings-section" aria-labelledby="settings-speech">
+            <div class="section-head">
+                <span class="section-icon"><MudIcon Icon="@Icons.Material.Outlined.RecordVoiceOver" Size="Size.Small" /></span>
+                <div>
+                    <MudText Typo="Typo.subtitle1" id="settings-speech" Class="section-title">Расшифровка речи</MudText>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">Как обрабатываются аудио и видео при загрузке в дело.</MudText>
+                </div>
+            </div>
+
+            <div class="setting-row">
+                <div>
+                    <div class="row-title">Размечать дикторов</div>
+                    <div class="row-text">
+                        Реплики подписываются «Диктор 1», «Диктор 2»… При «Расшифровать заново» сотрудник выбирает для записи сам:
+                        без дикторов, «авто» или число говорящих. Сохраняется сразу.
+                    </div>
+                </div>
+                <MudSwitch T="bool" Value="@view.TranscriptSpeakers" ValueChanged="SetSpeakersAsync" Color="Color.Primary"
+                           Disabled="@(readOnly || _busy)" aria-label="Размечать дикторов при расшифровке загруженных материалов" />
+            </div>
+        </section>
+
+        @if (!readOnly && Changed)
+        {
+            <div class="settings-savebar" role="region" aria-label="Несохранённые изменения">
+                <div class="savebar-text">
+                    <MudIcon Icon="@Icons.Material.Outlined.EditNote" Size="Size.Small" />
+                    <span>Есть изменения: @string.Join(", ", ChangedItems)</span>
+                </div>
+                <div class="savebar-actions">
+                    <MudButton Variant="Variant.Text" OnClick="Discard" Disabled="_busy">Отменить</MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                               OnClick="SaveAsync" Disabled="@(_busy || ValidationError is not null)">
+                        @(_busy ? "Сохраняем…" : "Сохранить")
+                    </MudButton>
+                </div>
+            </div>
+        }
+    }
+</div>
 
 @code {
+    private sealed record ModeOption(ConfirmationMode Mode, string Icon, string Title, string Text);
+
+    private static readonly ModeOption[] ModeOptions =
+    [
+        new(ConfirmationMode.SingleOperator, Icons.Material.Outlined.Person, "Один оператор",
+            "Решение сотрудника с правом «Верификация — первая подпись» окончательное. Быстрее — для потока материалов."),
+        new(ConfirmationMode.TwoPerson, Icons.Material.Outlined.Groups, "Два лица",
+            "Эксперт и слепой верификатор; при расхождении итог выносит руководитель. Строже — для ответственных решений."),
+    ];
+
     private MediaSettingsView? _view;
     private ConfirmationMode _mode = MediaSettings.DefaultMode;
     private int _threshold = MediaSettings.DefaultThresholdPercent;
     private int _minThreshold = MediaSettings.DefaultMinThresholdPercent;
     private bool _busy;
-    private string? _error;
-    private string? _saved;
+    private string? _loadError;
 
     // Подсказка формы — тем же правилом, что проверяет сервер (MediaSettings.Validate).
     private string? ValidationError => MediaSettings.Validate(_mode, _threshold, _minThreshold);
 
-    private bool Changed => _view is { } view
-        && (view.Mode != _mode || view.ThresholdPercent != _threshold || view.MinThresholdPercent != _minThreshold);
+    private bool Changed => ChangedItems.Count > 0;
+
+    // Что именно поменяли — для панели «Есть изменения».
+    private List<string> ChangedItems
+    {
+        get
+        {
+            var items = new List<string>();
+            if (_view is not { } view)
+            {
+                return items;
+            }
+
+            if (view.Mode != _mode) { items.Add("режим подтверждения"); }
+            if (view.ThresholdPercent != _threshold) { items.Add("рабочий порог"); }
+            if (view.MinThresholdPercent != _minThreshold) { items.Add("нижняя граница"); }
+            return items;
+        }
+    }
+
+    private static string Percent(int value) => value.ToString(CultureInfo.InvariantCulture) + "%";
+
+    private static string ChangedText(MediaSettingsView view) =>
+        view.UpdatedAtUtc is { } at
+            ? $"Изменено {at.ToLocalTime():dd.MM.yyyy HH:mm}" + (view.UpdatedByName is { } name ? $" · {name}" : string.Empty)
+            : "Не менялись — действуют значения поставки";
+
+    private static string ChangedHint(MediaSettingsView view) =>
+        view.UpdatedAtUtc is null
+            ? "Один оператор, рабочий порог 70 %, без нижней границы, дикторы размечаются — или значения конфигурации."
+            : "Последнее сохранение любой из настроек этой страницы.";
 
     protected override async Task OnInitializedAsync()
     {
@@ -140,6 +285,7 @@ else
 
     private async Task LoadAsync()
     {
+        _loadError = null;
         var response = await Dispatcher.Send(new GetMediaSettingsQuery());
         if (response is { Status: true, Data: { } view })
         {
@@ -148,30 +294,32 @@ else
         }
         else
         {
-            _error = response.StatusMessage;
+            _loadError = response.StatusMessage;
         }
     }
 
-    // Разметка дикторов (ADR-0062 v0.3) — отдельной командой, без кнопки «Сохранить»: переключатель сохраняется сразу.
-    private async Task SetSpeakersAsync(bool enabled)
+    private void Discard()
+    {
+        if (_view is { } view)
+        {
+            (_mode, _threshold, _minThreshold) = (view.Mode, view.ThresholdPercent, view.MinThresholdPercent);
+        }
+    }
+
+    private async Task SaveAsync()
     {
         _busy = true;
-        _error = null;
-        _saved = null;
         try
         {
-            var response = await Dispatcher.Send(new SetTranscriptSpeakersCommand(enabled));
+            var response = await Dispatcher.Send(new SetMediaSettingsCommand(_mode, _threshold, _minThreshold));
             if (response is { Status: true })
             {
-                // Несохранённые правки порогов и режима не теряются: перечитывается только сохранённое.
-                var form = (_mode, _threshold, _minThreshold);
-                _saved = response.StatusMessage;
+                Snackbar.Add(response.StatusMessage ?? "Настройки сохранены.", Severity.Success);
                 await LoadAsync();
-                (_mode, _threshold, _minThreshold) = form;
             }
             else
             {
-                _error = response.StatusMessage;
+                Snackbar.Add(response.StatusMessage ?? "Настройки не сохранены.", Severity.Error);
             }
         }
         finally
@@ -180,22 +328,24 @@ else
         }
     }
 
-    private async Task SaveAsync()
+    // Разметка дикторов (ADR-0062 v0.3) — отдельной командой, без панели сохранения: переключатель сохраняется сразу.
+    // Черновик режима и порогов при этом не теряется: перечитывается только сохранённое.
+    private async Task SetSpeakersAsync(bool enabled)
     {
         _busy = true;
-        _error = null;
-        _saved = null;
         try
         {
-            var response = await Dispatcher.Send(new SetMediaSettingsCommand(_mode, _threshold, _minThreshold));
+            var response = await Dispatcher.Send(new SetTranscriptSpeakersCommand(enabled));
             if (response is { Status: true })
             {
-                _saved = response.StatusMessage;
+                var draft = (_mode, _threshold, _minThreshold);
+                Snackbar.Add(response.StatusMessage ?? "Сохранено.", Severity.Success);
                 await LoadAsync();
+                (_mode, _threshold, _minThreshold) = draft;
             }
             else
             {
-                _error = response.StatusMessage;
+                Snackbar.Add(response.StatusMessage ?? "Не сохранено.", Severity.Error);
             }
         }
         finally
