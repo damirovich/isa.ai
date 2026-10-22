@@ -17,6 +17,9 @@ public enum PermissionSection
 
     /// <summary>Администрирование.</summary>
     Administration = 4,
+
+    /// <summary>Отчётность: статистические отчётные формы (ADR-0061).</summary>
+    Reports = 5,
 }
 
 /// <summary>
@@ -143,6 +146,9 @@ public static class InvestigationPermissions
     /// <summary>Активные сеансы: кто в системе, завершение сеанса (ТФ-АДМ-09, ADR-0060).</summary>
     public const string AdminSessions = "admin.sessions";
 
+    /// <summary>Статистические отчёты [АИС 6]: результативность распознавания и другие сводные формы (ADR-0061).</summary>
+    public const string ReportsStatistics = "reports.statistics";
+
     private static readonly InvestigationRole[] AllRoles = Enum.GetValues<InvestigationRole>();
 
     /// <summary>Все права профиля в порядке показа на экране.</summary>
@@ -231,6 +237,10 @@ public static class InvestigationPermissions
         new(AdminSessions, PermissionSection.Administration, "Активные сеансы",
             "Кто сейчас работает в системе; завершение чужого сеанса с причиной",
             Roles(InvestigationRole.Administrator, InvestigationRole.SecurityOfficer), OpenDuringInitialSetup: true),
+
+        new(ReportsStatistics, PermissionSection.Reports, "Статистические отчёты",
+            "Результативность распознавания лиц и другие сводные формы по подразделениям в пределах допуска; выгрузка с грифом",
+            Roles(InvestigationRole.Head, InvestigationRole.Administrator, InvestigationRole.SecurityOfficer)),
     ];
 
     /// <summary>
@@ -255,6 +265,7 @@ public static class InvestigationPermissions
         new("admin-access-matrix", "Матрица доступа", [AdminMatrix]),
         new("admin-audit", "Журнал аудита", [AdminAudit]),
         new("admin-sessions", "Активные сеансы", [AdminSessions]),
+        new("reports-recognition", "Результативность распознавания", [ReportsStatistics]),
         new("admin-divisions", "Подразделения", [AdminDirectories]),
         new("admin-references", "Справочники", [AdminDirectories]),
         new("admin-access-import", "Перенос из Access", [CasesImport]),
