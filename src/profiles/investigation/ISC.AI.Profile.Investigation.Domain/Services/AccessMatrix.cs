@@ -239,7 +239,7 @@ public static class InvestigationPermissions
             Roles(InvestigationRole.Administrator, InvestigationRole.SecurityOfficer), OpenDuringInitialSetup: true),
 
         new(ReportsStatistics, PermissionSection.Reports, "Статистические отчёты",
-            "Результативность распознавания лиц и другие сводные формы по подразделениям в пределах допуска; выгрузка с грифом",
+            "Результативность распознавания, журнал суточной активности, статистика карточек объектов — в пределах допуска; выгрузка с грифом",
             Roles(InvestigationRole.Head, InvestigationRole.Administrator, InvestigationRole.SecurityOfficer)),
     ];
 
@@ -266,6 +266,8 @@ public static class InvestigationPermissions
         new("admin-audit", "Журнал аудита", [AdminAudit]),
         new("admin-sessions", "Активные сеансы", [AdminSessions]),
         new("reports-recognition", "Результативность распознавания", [ReportsStatistics]),
+        new("reports-activity", "Журнал суточной активности", [ReportsStatistics]),
+        new("reports-object-cards", "Статистика карточек объектов", [ReportsStatistics]),
         new("admin-divisions", "Подразделения", [AdminDirectories]),
         new("admin-references", "Справочники", [AdminDirectories]),
         new("admin-access-import", "Перенос из Access", [CasesImport]),

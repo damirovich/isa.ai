@@ -1,0 +1,200 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@page "/reports/activity"
+@rendermode InteractiveServer
+@inject TimeProvider Clock
+@using System.Globalization
+@using System.IO
+@using ISC.AI.Modules.DocFlow.Domain.Services
+@using ISC.AI.Profile.Investigation.Application.Features.Statistics
+@using ISC.AI.Profile.Investigation.Domain.Enums
+
+@* Журнал суточной оперативной активности (ТФ-ОТЧ-05, [АИС 6.3], ADR-0061 ч. 2): материалы, введённые в дела за период, —
+   носители, документы, сводки и справки; колонки формы Заказчика (№ п/п, дата и время, группа, сотрудник, № задания,
+   объект (псевдоним), вид материала, статус). Отбор — период (по умолчанию — сегодня) и группа ОН/ОУ/ОТМ в пределах
+   допуска. Строки, носители и документы — под решёткой своих пакетов; невидимое не показывается. Построение и выгрузка
+   пишутся в журнал аудита. Право — «Статистические отчёты». *@
+
+<PageHeader Title="Журнал суточной активности" Subtitle="Материалы, введённые в дела за период, — по сотрудникам и группам"
+            Icon="@Icons.Material.Filled.EventNote">
+    @if (_journal is { } shown)
+    {
+        <ClassificationChip Value="@shown.MaxClassification" Prefix="гриф журнала " />
+    }
+</PageHeader>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+<MudPaper Outlined="true" Class="pa-3 mb-3">
+    <div class="d-flex gap-3 align-center flex-wrap">
+        @* Ширина календарей — обёрткой, не Style: MudBlazor копирует Style пикера на раскрытый календарь. *@
+        <div style="width:160px;">
+            <MudDatePicker @bind-Date="_from" Label="С" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="dd.MM.yyyy" />
+        </div>
+        <div style="width:160px;">
+            <MudDatePicker @bind-Date="_to" Label="По" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="dd.MM.yyyy" />
+        </div>
+        <div style="width:260px;">
+            <MudSelect T="CaseDirection?" @bind-Value="_direction" Label="Группа" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem T="CaseDirection?" Value="@((CaseDirection?)null)">Все в пределах допуска</MudSelectItem>
+                @foreach (var direction in _directions)
+                {
+                    <MudSelectItem T="CaseDirection?" Value="@((CaseDirection?)direction)">@direction.ShortLabel() — @direction.Label()</MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow"
+                   Disabled="@(_busy || !PeriodValid)" OnClick="LoadAsync">Сформировать</MudButton>
+        <MudSpacer />
+        @foreach (var (format, label) in Formats)
+        {
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" Disabled="@(_busy || _journal is null)"
+                       OnClick="@(() => ExportAsync(format))">@label</MudButton>
+        }
+    </div>
+    @if (!PeriodValid)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Error" Class="d-block mt-1">Укажите период: дата «с» не позже даты «по».</MudText>
+    }
+</MudPaper>
+
+@if (_busy && _journal is null)
+{
+    <MudProgressLinear Indeterminate="true" Class="my-3" />
+}
+else if (_journal is { } journal)
+{
+    @if (journal.Truncated)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-2">
+            Записей больше @ActivityJournalSource.MaxRows — показаны первые по времени. Сузьте период или выберите группу.
+        </MudAlert>
+    }
+    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2">
+        Период: @Date(journal.From) — @Date(journal.To) · записей: @journal.Rows.Count. Учтены только дела и материалы в пределах
+        вашего допуска.
+    </MudText>
+    <MudSimpleTable Dense="true" Hover="true" Bordered="true" Style="overflow-x:auto;">
+        <thead>
+            <tr>
+                @foreach (var column in ActivityJournalBuilder.Columns)
+                {
+                    <th>@column</th>
+                }
+            </tr>
+        </thead>
+        <tbody>
+            @if (journal.Rows.Count == 0)
+            {
+                <tr>
+                    @* Пусто — не «ничего не вводили»: материалы могут быть вне допуска (ТБ-020/021). *@
+                    <td colspan="@ActivityJournalBuilder.Columns.Count" class="mud-text-secondary">
+                        За период в пределах вашего допуска материалов не вводили.
+                    </td>
+                </tr>
+            }
+            @foreach (var row in journal.Rows)
+            {
+                <tr>
+                    @foreach (var cell in ActivityJournalBuilder.Cells(row))
+                    {
+                        <td>@cell</td>
+                    }
+                </tr>
+            }
+        </tbody>
+    </MudSimpleTable>
+    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+        Статус сводки и справки: в окне редактирования — «черновик», после окна — «архивный»; носители и документы —
+        «действующий». «Объект» — псевдоним, а без него — ФИО: у сводки — её фигурант, у носителя и документа — объекты дела.
+    </MudText>
+}
+
+@code {
+    private static readonly (ReportFormat Format, string Label)[] Formats =
+        [(ReportFormat.Excel, "Excel"), (ReportFormat.Word, "Word"), (ReportFormat.Pdf, "PDF")];
+
+    private DateTime? _from;
+    private DateTime? _to;
+    private CaseDirection? _direction;
+    private IReadOnlyList<CaseDirection> _directions = [];
+    private ActivityJournal? _journal;
+    private bool _busy = true; // «загрузка…» до первой интерактивной загрузки
+    private string? _error;
+
+    private bool PeriodValid => _from is { } from && _to is { } to && from.Date <= to.Date;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // По умолчанию — отчётные сутки: сегодня по местному времени.
+        var today = TimeZoneInfo.ConvertTime(Clock.GetUtcNow(), Clock.LocalTimeZone).Date;
+        _from = today;
+        _to = today;
+
+        // ТБ-030 «одно открытие — одна запись»: на предрендере журнал не строится.
+        if (!RendererInfo.IsInteractive) { return; }
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (_from is not { } from || _to is not { } to)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ActivityJournalQuery(DateOnly.FromDateTime(from), DateOnly.FromDateTime(to), _direction));
+            if (response is { Status: true, Data: { } journal })
+            {
+                _journal = journal;
+                _directions = journal.Directions;
+                _error = null;
+            }
+            else
+            {
+                _journal = null;
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ExportAsync(ReportFormat format)
+    {
+        if (_journal is not { } journal)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            // Выгружается ровно построенный журнал (его период и группа): сервер собирает заново и пишет запись в журнал.
+            var response = await Dispatcher.Send(new ExportActivityJournalCommand(journal.From, journal.To, journal.Direction, format));
+            if (response is not { Status: true, Data: { } file })
+            {
+                _error = response.StatusMessage;
+                return;
+            }
+
+            using var stream = new DotNetStreamReference(new MemoryStream(file.Content));
+            await JS.InvokeVoidAsync("downloadFileFromStream", file.FileName, stream);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string Date(DateOnly date) => date.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture);
+}
