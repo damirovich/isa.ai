@@ -13,10 +13,18 @@ public abstract record SpeechWorkerMessage;
 /// <param name="Text">Дословный текст модели (может быть пустым — такой фрагмент пропускается).</param>
 public sealed record SpeechWorkerSegment(int Index, long StartMs, long EndMs, string Text) : SpeechWorkerMessage;
 
+/// <summary>Реплика говорящего (ADR-0062): <c>{"type":"turn","startMs":0,"endMs":4560,"speaker":0}</c>.</summary>
+/// <param name="StartMs">Начало, мс.</param>
+/// <param name="EndMs">Конец, мс.</param>
+/// <param name="Speaker">Номер диктора модели, с нуля.</param>
+public sealed record SpeechWorkerTurn(long StartMs, long EndMs, int Speaker) : SpeechWorkerMessage;
+
 /// <summary>Итог успешного прогона: <c>{"type":"done","durationMs":123456,"segments":N}</c>.</summary>
 /// <param name="DurationMs">Длительность записи, мс.</param>
 /// <param name="Segments">Сколько строк-фрагментов выведено до итога.</param>
-public sealed record SpeechWorkerDone(long DurationMs, int Segments) : SpeechWorkerMessage;
+/// <param name="Diarization">Исход разметки дикторов (ADR-0062): <c>done</c>, <c>skipped</c>, <c>failed</c>; не включалась — <see langword="null"/>.</param>
+/// <param name="DiarizationNote">Причина пропуска или сбоя разметки — без содержимого записи.</param>
+public sealed record SpeechWorkerDone(long DurationMs, int Segments, string? Diarization = null, string? DiarizationNote = null) : SpeechWorkerMessage;
 
 /// <summary>
 /// Разбор протокола процесса-распознавателя <c>ISC.AI.Speech.Worker</c> (ADR-0026): одна строка stdout —
@@ -34,6 +42,12 @@ public static class SpeechWorkerProtocol
 
     /// <summary>Значение поля <c>type</c> итоговой строки.</summary>
     public const string DoneType = "done";
+
+    /// <summary>Значение поля <c>type</c> строки реплики говорящего (ADR-0062).</summary>
+    public const string TurnType = "turn";
+
+    /// <summary>Исход разметки дикторов: выполнена.</summary>
+    public const string DiarizationDone = "done";
 
     /// <summary>
     /// Разбирает строку. Пустая строка (или из одних пробелов) — <see langword="null"/>: переводы строк
@@ -95,7 +109,22 @@ public static class SpeechWorkerProtocol
                             $"итоговая строка с отрицательными значениями: durationMs={duration}, segments={segments}."));
                     }
 
-                    return new SpeechWorkerDone(duration, segments);
+                    return new SpeechWorkerDone(
+                        duration, segments, OptionalString(root, "diarization"), OptionalString(root, "diarizationNote"));
+                }
+
+                case TurnType:
+                {
+                    var start = ReadInt64(root, "startMs");
+                    var end = ReadInt64(root, "endMs");
+                    var speaker = ReadInt32(root, "speaker");
+                    if (start < 0 || end < start || speaker < 0)
+                    {
+                        throw new FormatException(string.Create(CultureInfo.InvariantCulture,
+                            $"реплика с неверными границами или номером: startMs={start}, endMs={end}, speaker={speaker}."));
+                    }
+
+                    return new SpeechWorkerTurn(start, end, speaker);
                 }
 
                 default:
@@ -108,6 +137,10 @@ public static class SpeechWorkerProtocol
         root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()!
             : throw new FormatException($"нет строкового поля «{name}».");
+
+    // Необязательное строковое поле (новые поля протокола — без поломки старых утилит, ADR-0062).
+    private static string? OptionalString(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     private static int ReadInt32(JsonElement root, string name) =>
         root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number)

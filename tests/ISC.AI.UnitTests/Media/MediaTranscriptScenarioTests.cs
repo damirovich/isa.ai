@@ -10,6 +10,7 @@ using ISC.AI.Modules.Media.Application.Features.Assets;
 using ISC.AI.Modules.Media.Application.Features.Transcripts;
 using ISC.AI.Modules.Media.Domain.Model;
 using ISC.AI.Modules.Media.Domain.Services;
+using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 using Shouldly;
 using Xunit;
@@ -198,6 +199,28 @@ public sealed class MediaTranscriptScenarioTests
         command.AuditSummary.ShouldBe("media:retranscribe:asset=50");
     }
 
+    [Fact(DisplayName = "ADR-0062 v0.2: число говорящих уходит с задачей в конвейер и в журнал запуска; вне 1–20 — отказ до чтения носителя")]
+    public async Task Retranscribe_passes_speaker_count()
+    {
+        (await RetranscribeAsync(new RetranscribeMediaCommand(50, 2))).Status.ShouldBeTrue();
+
+        var pipeline = Substitute.For<IMediaTranscriptionPipeline>();
+        using var services = new ServiceCollection().AddSingleton(pipeline).BuildServiceProvider();
+        await _queue.Works.ShouldHaveSingleItem()(services, CancellationToken.None);
+        await pipeline.Received(1).TranscribeAsync(50, 2, Arg.Any<CancellationToken>());
+
+        new RetranscribeMediaCommand(50, 2).AuditSummary.ShouldBe("media:retranscribe:asset=50:speakers=2");
+
+        foreach (var wrong in new[] { 0, RetranscribeMediaCommand.MaxSpeakers + 1 })
+        {
+            var response = await RetranscribeAsync(new RetranscribeMediaCommand(50, wrong));
+            response.StatusCode.ShouldBe(ResponseStatusCode.BadRequest);
+            response.StatusMessage.ShouldContain("Число говорящих");
+        }
+
+        _queue.Works.Count.ShouldBe(1);
+    }
+
     [Fact(DisplayName = "Расшифровка уже в очереди или идёт (условная постановка в БД не прошла) → BadRequest «уже выполняется — нажмите «Обновить»», второй прогон не ставится")]
     public async Task Retranscribe_while_in_progress_is_bad_request()
     {
@@ -300,12 +323,15 @@ public sealed class MediaTranscriptScenarioTests
     {
         public List<string> Kinds { get; } = [];
 
+        public List<Func<IServiceProvider, CancellationToken, Task>> Works { get; } = [];
+
         public Guid LastId { get; private set; }
 
         public ValueTask<Guid> EnqueueAsync(
             string kind, Func<IServiceProvider, CancellationToken, Task> work, CancellationToken cancellationToken = default)
         {
             Kinds.Add(kind);
+            Works.Add(work);
             LastId = Guid.NewGuid();
             return ValueTask.FromResult(LastId);
         }

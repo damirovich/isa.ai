@@ -45,6 +45,9 @@ public static class MediaApplicationServiceCollectionExtensions
         // ТФ-ПЛ-02: когда, откуда и где снят материал кандидата — для очереди, страницы решения и сессии поиска.
         services.AddScoped<Features.Verification.IMaterialContextReader, Features.Verification.MaterialContextReader>();
         services.AddScoped<IMediaTranscriptionPipeline, MediaTranscriptionPipeline>();
+
+        // Правки дикторов расшифровки (ADR-0062): общая проверка права, решётки и дел субъекта.
+        services.AddScoped<Features.Transcripts.TranscriptSpeakerGuard>();
         services.AddHostedService<MediaStartupMaintenance>();
 
         // Пакетный импорт архива с описью (ADR-0041): разрешённые каталоги и порции обработки — из настройки;

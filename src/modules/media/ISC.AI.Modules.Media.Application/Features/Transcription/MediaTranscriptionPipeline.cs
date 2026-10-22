@@ -66,7 +66,7 @@ public sealed class MediaTranscriptionPipeline(
     public const string CancelledReason = "расшифровка отменена";
 
     /// <inheritdoc />
-    public async Task<MediaTranscriptionResult> TranscribeAsync(int assetId, CancellationToken cancellationToken = default)
+    public async Task<MediaTranscriptionResult> TranscribeAsync(int assetId, int? speakerCount = null, CancellationToken cancellationToken = default)
     {
         var info = await store.GetForTranscriptionAsync(assetId, cancellationToken);
         if (info is null)
@@ -89,10 +89,10 @@ public sealed class MediaTranscriptionPipeline(
 
             // Длительность ЗАПИСИ (длина подготовленного звука) сообщает распознаватель — не конец последней
             // речи: у диктофона на 45 минут с последней фразой на 12-й минуте длительность — 45 минут.
-            var durationMs = await TranscribeSourceAsync(info, segments, cancellationToken);
+            var (durationMs, speakers) = await TranscribeSourceAsync(info, segments, speakerCount, cancellationToken);
             var modelVersion = transcriber.ModelVersion;
 
-            await store.CompleteTranscriptionAsync(assetId, segments, modelVersion, durationMs, cancellationToken);
+            await store.CompleteTranscriptionAsync(assetId, segments, modelVersion, durationMs, speakers, cancellationToken);
 
             // ТБ-030: новый материал, порождённый моделью, — в неизменяемый журнал с режимом носителя.
             await auditWriter.WriteAsync(
@@ -104,6 +104,7 @@ public sealed class MediaTranscriptionPipeline(
                     DivisionId: info.DivisionId,
                     PayloadSensitive:
                         $"расшифровка речи: фрагментов {segments.Count}, модель {modelVersion}; "
+                        + (speakerCount is { } count ? $"говорящих задано {count}; " : string.Empty)
                         + "автоматическая расшифровка, требует проверки, не является протоколом (ТЭ-002, ADR-0026)"),
                 cancellationToken);
 
@@ -156,10 +157,12 @@ public sealed class MediaTranscriptionPipeline(
     /// Копирует исходник во временный файл (распознаватель — внешний процесс — работает с путём, а не потоком)
     /// и собирает фрагменты. Пустые фрагменты (детектор услышал звук, модель слов не нашла) не сохраняются:
     /// в них нет ни текста для чтения, ни слов для поиска. Текст непустых — ДОСЛОВНО, без правок. Временный
-    /// файл удаляется в любом исходе. Возвращает длительность записи от распознавателя.
+    /// файл удаляется в любом исходе. Возвращает длительность записи от распознавателя и разметку дикторов (ADR-0062):
+    /// номера дикторов уплотняются по первому появлению среди сохранённых фрагментов — «Диктор 1» тот, кто заговорил
+    /// первым, без пропусков номеров из-за отброшенных пустых фрагментов.
     /// </summary>
-    private async Task<long?> TranscribeSourceAsync(
-        MediaAssetTranscriptionInfo info, List<TranscriptSegmentDraft> segments, CancellationToken cancellationToken)
+    private async Task<(long? DurationMs, TranscriptSpeakerMarkup Speakers)> TranscribeSourceAsync(
+        MediaAssetTranscriptionInfo info, List<TranscriptSegmentDraft> segments, int? speakerCount, CancellationToken cancellationToken)
     {
         // Копия — в управляемом каталоге (ТБ-064): переживи она аварийную остановку, её удалит уборка при старте
         // хоста. Расширение — через фильтр: путь уходит ffmpeg/ffprobe текстом командной строки, а носители,
@@ -177,16 +180,31 @@ public sealed class MediaTranscriptionPipeline(
                 await source.CopyToAsync(target, cancellationToken);
             }
 
-            var transcription = await transcriber.TranscribeAsync(tempPath, cancellationToken);
+            var transcription = await transcriber.TranscribeAsync(tempPath, speakerCount, cancellationToken);
+            var numbers = new Dictionary<int, int>();
             foreach (var segment in transcription.Segments)
             {
-                if (!string.IsNullOrWhiteSpace(segment?.Text))
+                if (string.IsNullOrWhiteSpace(segment?.Text))
                 {
-                    segments.Add(segment);
+                    continue;
                 }
+
+                int? speaker = null;
+                if (segment.Speaker is { } raw)
+                {
+                    if (!numbers.TryGetValue(raw, out var compact))
+                    {
+                        compact = numbers.Count + 1;
+                        numbers[raw] = compact;
+                    }
+
+                    speaker = compact;
+                }
+
+                segments.Add(segment with { Speaker = speaker });
             }
 
-            return transcription.DurationMs;
+            return (transcription.DurationMs, new TranscriptSpeakerMarkup(transcription.SpeakerSource, transcription.SpeakerNote));
         }
         finally
         {

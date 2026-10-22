@@ -1,0 +1,30 @@
+/* Полоса «Дикторы» (ADR-0062): дикторы — кнопками-«фишками» с цветной точкой и рамкой их цвета. */
+.speaker-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 10px;
+    border: 1px solid;
+    border-radius: 12px;
+    background: none;
+    font: inherit;
+    font-size: 0.8125rem;
+    color: inherit;
+    cursor: pointer;
+}
+
+.speaker-chip:disabled {
+    cursor: default;
+}
+
+.speaker-chip:not(:disabled):hover,
+.speaker-chip:focus-visible {
+    background: var(--mud-palette-action-default-hover);
+}
+
+.speaker-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}

@@ -127,7 +127,7 @@ public sealed class SpeechEvalRunner
             var started = _time.GetTimestamp();
             try
             {
-                var transcription = await _transcriber!.TranscribeAsync(recording.AudioPath, cancellationToken) // задан конструктором
+                var transcription = await _transcriber!.TranscribeAsync(recording.AudioPath, cancellationToken: cancellationToken) // задан конструктором
                     .ConfigureAwait(false);
                 segments.AddRange(transcription.Segments);
                 reportedDurationMs = transcription.DurationMs;

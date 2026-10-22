@@ -191,7 +191,7 @@ public sealed class SpeechWorkerTranscriberTests : IAsyncLifetime
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(1500));
         await Should.ThrowAsync<OperationCanceledException>(async () =>
         {
-            await transcriber.TranscribeAsync(wav, cts.Token);
+            await transcriber.TranscribeAsync(wav, cancellationToken: cts.Token);
         });
 
         WorkDirs().Except(before).ShouldBeEmpty("временный каталог прогона удалён после отмены");

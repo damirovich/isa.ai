@@ -208,9 +208,23 @@ public static class TranscriptExportText
         body.Append('\n');
         body.Append(CultureInfo.InvariantCulture, $"Выгружено: {exportedAt:dd.MM.yyyy HH:mm}").Append('\n');
         body.Append('\n');
-        foreach (var segment in transcript.Segments.OrderBy(s => s.StartMs).ThenBy(s => s.Index))
+        var ordered = transcript.Segments.OrderBy(s => s.StartMs).ThenBy(s => s.Index).ToList();
+        if (ordered.Any(s => s.SpeakerLabel is not null))
         {
-            body.Append('[').Append(Clock(segment.StartMs)).Append("] ").Append(OneLine(segment.Text)).Append('\n');
+            // По репликам (ADR-0062): подряд идущие фрагменты одного диктора — одна реплика с его подписью и таймкодом
+            // начала; текст — дословно (ТЭ-007).
+            foreach (var replica in Replicas(ordered))
+            {
+                body.Append(replica.Label ?? "Диктор не определён").Append(" [").Append(Clock(replica.StartMs)).Append("]: ")
+                    .Append(string.Join(" ", replica.Texts.Select(OneLine))).Append('\n');
+            }
+        }
+        else
+        {
+            foreach (var segment in ordered)
+            {
+                body.Append('[').Append(Clock(segment.StartMs)).Append("] ").Append(OneLine(segment.Text)).Append('\n');
+            }
         }
 
         var marking = ClassificationLevels.Marking(asset.Classification);
@@ -230,6 +244,32 @@ public static class TranscriptExportText
         lines.Add("Исполнитель: " + document.Executor);
         lines.Add(document.Marking);
         return string.Join("\r\n", lines);
+    }
+
+    /// <summary>Реплика выгрузки: подпись диктора, начало и тексты подряд идущих фрагментов.</summary>
+    /// <param name="Label">Подпись диктора; <see langword="null"/> — фрагмент без диктора.</param>
+    /// <param name="StartMs">Начало реплики.</param>
+    /// <param name="Texts">Тексты фрагментов по порядку.</param>
+    public sealed record Replica(string? Label, long StartMs, IReadOnlyList<string> Texts);
+
+    /// <summary>Склейка фрагментов в реплики: подряд идущие фрагменты одного действующего диктора (ADR-0062).</summary>
+    public static IReadOnlyList<Replica> Replicas(IReadOnlyList<TranscriptSegmentRow> ordered)
+    {
+        ArgumentNullException.ThrowIfNull(ordered);
+        var result = new List<Replica>();
+        foreach (var segment in ordered)
+        {
+            if (result.Count > 0 && result[^1].Label == segment.SpeakerLabel && segment.SpeakerLabel is not null)
+            {
+                var last = result[^1];
+                result[^1] = last with { Texts = [.. last.Texts, segment.Text] };
+                continue;
+            }
+
+            result.Add(new Replica(segment.SpeakerLabel, segment.StartMs, [segment.Text]));
+        }
+
+        return result;
     }
 
     /// <summary>Таймкод «мм:сс» (от часа — «ч:мм:сс»), как в карточке носителя.</summary>

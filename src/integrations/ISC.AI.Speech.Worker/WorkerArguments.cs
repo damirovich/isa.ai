@@ -20,6 +20,11 @@ namespace ISC.AI.Speech.Worker;
 /// синтетическом звуке без записей людей: тишину и тон детектор речи до модели не пропускает. Адаптер этот
 /// ключ не передаёт.
 /// </param>
+/// <param name="SpeakerSegmentationPath">ONNX сегментации говорящих (pyannote, ADR-0062); не задан — без разметки дикторов.</param>
+/// <param name="SpeakerEmbeddingPath">ONNX «голосовых отпечатков» (CAM++ 3D-Speaker); задаётся вместе с сегментацией.</param>
+/// <param name="Speakers">Число дикторов; 0 — определить по порогу <paramref name="SpeakerThreshold"/>.</param>
+/// <param name="SpeakerThreshold">Порог кластеризации отпечатков, когда число дикторов неизвестно.</param>
+/// <param name="SpeakerMaxMinutes">Длиннее — дикторы не размечаются (модели нужна вся запись в памяти).</param>
 internal sealed record WorkerArguments(
     string ModelPath,
     string TokensPath,
@@ -28,8 +33,22 @@ internal sealed record WorkerArguments(
     int Threads = WorkerArguments.DefaultThreads,
     double MaxSegmentSeconds = WorkerArguments.DefaultMaxSegmentSeconds,
     int FeatureDim = WorkerArguments.DefaultFeatureDim,
-    bool DecodeWhole = false)
+    bool DecodeWhole = false,
+    string? SpeakerSegmentationPath = null,
+    string? SpeakerEmbeddingPath = null,
+    int Speakers = 0,
+    double SpeakerThreshold = WorkerArguments.DefaultSpeakerThreshold,
+    int SpeakerMaxMinutes = WorkerArguments.DefaultSpeakerMaxMinutes)
 {
+    /// <summary>Порог кластеризации по умолчанию (как в примерах sherpa-onnx; калибруется на пилоте, ADR-0062).</summary>
+    public const double DefaultSpeakerThreshold = 0.5;
+
+    /// <summary>Длина записи по умолчанию, до которой размечаются дикторы, минут (~1,7 ГБ отсчётов на 2 часа — нет; 120 мин ≈ 460 МБ).</summary>
+    public const int DefaultSpeakerMaxMinutes = 120;
+
+    /// <summary>Разметка дикторов включена: заданы обе модели говорящих.</summary>
+    public bool Diarize => SpeakerSegmentationPath is not null && SpeakerEmbeddingPath is not null;
+
     /// <summary>Ключ диагностического режима (переключатель без значения); на это имя опираются интеграционные тесты.</summary>
     public const string DecodeWholeKey = "--decode-whole";
 
@@ -54,7 +73,9 @@ internal sealed record WorkerArguments(
     /// <summary>Строка помощи — печатается в stderr при ошибке аргументов.</summary>
     public const string Usage =
         "ISC.AI.Speech.Worker --model <model.onnx> --tokens <tokens.txt> --vad <silero_vad.onnx> --input <wav 16 кГц моно>"
-        + " [--threads N] [--max-segment-seconds 20] [--feature-dim 64] [" + DecodeWholeKey + "]\n"
+        + " [--threads N] [--max-segment-seconds 20] [--feature-dim 64] [" + DecodeWholeKey + "]"
+        + " [--speaker-segmentation <pyannote.onnx> --speaker-embedding <campplus.onnx> [--speakers N] [--speaker-threshold 0.5]"
+        + " [--speaker-max-minutes 120]]\n"
         + "  " + DecodeWholeKey + " — диагностика: вся запись без детектора речи кусками до --max-segment-seconds"
         + " (проверка декодирования на синтетическом звуке; в работе не используется).";
 
@@ -86,7 +107,8 @@ internal sealed record WorkerArguments(
                 continue;
             }
 
-            if (key is not ("--model" or "--tokens" or "--vad" or "--input" or "--threads" or "--max-segment-seconds" or "--feature-dim"))
+            if (key is not ("--model" or "--tokens" or "--vad" or "--input" or "--threads" or "--max-segment-seconds" or "--feature-dim"
+                or "--speaker-segmentation" or "--speaker-embedding" or "--speakers" or "--speaker-threshold" or "--speaker-max-minutes"))
             {
                 throw new WorkerUsageException($"Неизвестный аргумент «{key}».");
             }
@@ -102,6 +124,15 @@ internal sealed record WorkerArguments(
             }
         }
 
+        // Модели говорящих — только парой: одна без другой разметку не даст, а молча выключенная разметка скрыла бы
+        // ошибку настройки (ADR-0062).
+        var segmentation = values.GetValueOrDefault("--speaker-segmentation");
+        var embedding = values.GetValueOrDefault("--speaker-embedding");
+        if ((segmentation is null) != (embedding is null))
+        {
+            throw new WorkerUsageException("Модели говорящих задаются парой: --speaker-segmentation и --speaker-embedding.");
+        }
+
         return new WorkerArguments(
             ModelPath: Required(values, "--model"),
             TokensPath: Required(values, "--tokens"),
@@ -112,7 +143,16 @@ internal sealed record WorkerArguments(
                 ? ParseDouble(max, "--max-segment-seconds", MinAllowedSegmentSeconds, MaxAllowedSegmentSeconds)
                 : DefaultMaxSegmentSeconds,
             FeatureDim: values.TryGetValue("--feature-dim", out var dim) ? ParseInt(dim, "--feature-dim", 1, 512) : DefaultFeatureDim,
-            DecodeWhole: decodeWhole);
+            DecodeWhole: decodeWhole,
+            SpeakerSegmentationPath: segmentation,
+            SpeakerEmbeddingPath: embedding,
+            Speakers: values.TryGetValue("--speakers", out var speakers) ? ParseInt(speakers, "--speakers", 0, 20) : 0,
+            SpeakerThreshold: values.TryGetValue("--speaker-threshold", out var threshold)
+                ? ParseDouble(threshold, "--speaker-threshold", 0.05, 2)
+                : DefaultSpeakerThreshold,
+            SpeakerMaxMinutes: values.TryGetValue("--speaker-max-minutes", out var minutes)
+                ? ParseInt(minutes, "--speaker-max-minutes", 1, 360)
+                : DefaultSpeakerMaxMinutes);
     }
 
     /// <summary>Возвращает описания отсутствующих файлов (пусто — все на месте). Пути — полные.</summary>
@@ -121,7 +161,18 @@ internal sealed record WorkerArguments(
         ArgumentNullException.ThrowIfNull(fileExists);
 
         var missing = new List<string>();
-        foreach (var (key, path) in new[] { ("--model", ModelPath), ("--tokens", TokensPath), ("--vad", VadPath), ("--input", InputPath) })
+        var files = new List<(string Key, string Path)> { ("--model", ModelPath), ("--tokens", TokensPath), ("--vad", VadPath), ("--input", InputPath) };
+        if (SpeakerSegmentationPath is { } segmentation)
+        {
+            files.Add(("--speaker-segmentation", segmentation));
+        }
+
+        if (SpeakerEmbeddingPath is { } embedding)
+        {
+            files.Add(("--speaker-embedding", embedding));
+        }
+
+        foreach (var (key, path) in files)
         {
             if (!fileExists(path))
             {

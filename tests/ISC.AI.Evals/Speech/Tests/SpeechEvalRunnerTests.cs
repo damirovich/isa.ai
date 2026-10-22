@@ -367,7 +367,7 @@ public sealed class SpeechEvalRunnerTests
             set => _scripts[file] = value;
         }
 
-        public async Task<AudioTranscription> TranscribeAsync(string sourcePath, CancellationToken cancellationToken = default)
+        public async Task<AudioTranscription> TranscribeAsync(string sourcePath, int? speakerCount = null, CancellationToken cancellationToken = default)
         {
             onStart?.Invoke();
             cancellationToken.ThrowIfCancellationRequested();

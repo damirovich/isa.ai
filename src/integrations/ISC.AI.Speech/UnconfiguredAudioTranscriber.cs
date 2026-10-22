@@ -38,7 +38,7 @@ public sealed class UnconfiguredAudioTranscriber : IAudioTranscriber
 
     /// <inheritdoc />
     /// <exception cref="InvalidOperationException">Всегда: расшифровка не настроена (в задаче, а не при вызове).</exception>
-    public Task<AudioTranscription> TranscribeAsync(string sourcePath, CancellationToken cancellationToken = default) =>
+    public Task<AudioTranscription> TranscribeAsync(string sourcePath, int? speakerCount = null, CancellationToken cancellationToken = default) =>
         cancellationToken.IsCancellationRequested
             ? Task.FromCanceled<AudioTranscription>(cancellationToken)
             // Отказ — в возвращённой задаче, как у рабочей реализации (async-метод бросает при ожидании):

@@ -129,12 +129,36 @@ public interface IMediaStore
     /// прежнего значения: другого измерителя у аудио нет, и повторная расшифровка исправляет старую оценку. У видео
     /// длительность даёт раскадровка, и значение распознавателя записывается, только если её ещё нет.
     /// </summary>
+    /// <param name="speakers">Разметка дикторов прогона (ADR-0062): источник и причина, если не размечены.</param>
     Task CompleteTranscriptionAsync(
         int assetId,
         IReadOnlyList<TranscriptSegmentDraft> segments,
         string modelVersion,
         long? durationMs = null,
+        TranscriptSpeakerMarkup? speakers = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Переименовать диктора расшифровки (ADR-0062): имя — слой поверх номера; пустое имя возвращает подпись «Диктор N».
+    /// Дословный текст не меняется (ТЭ-007).
+    /// </summary>
+    Task<TranscriptSpeakerEditResult> RenameTranscriptSpeakerAsync(
+        int assetId, int number, string? name, int editedByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Объединить диктора <paramref name="number"/> с диктором <paramref name="into"/> (ADR-0062): реплики первого
+    /// показываются репликами второго. Объединение с самим собой и по кругу — <see cref="TranscriptSpeakerEditResult.Invalid"/>.
+    /// </summary>
+    Task<TranscriptSpeakerEditResult> MergeTranscriptSpeakersAsync(
+        int assetId, int number, int into, int editedByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Перенести реплику (фрагмент <paramref name="segmentIndex"/>) к диктору <paramref name="speaker"/> (ADR-0062);
+    /// <see langword="null"/> — вернуть автоматическую разметку. Перенос к слитому диктору —
+    /// <see cref="TranscriptSpeakerEditResult.Invalid"/>.
+    /// </summary>
+    Task<TranscriptSpeakerEditResult> MoveTranscriptSegmentAsync(
+        int assetId, int segmentIndex, int? speaker, int editedByUserId, CancellationToken cancellationToken = default);
 
     /// <summary>Фиксирует неудачу расшифровки с причиной (статус <see cref="TranscriptStatus.Failed"/>).</summary>
     Task FailTranscriptionAsync(int assetId, string reason, CancellationToken cancellationToken = default);

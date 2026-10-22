@@ -26,8 +26,15 @@ namespace ISC.AI.Modules.Media.Application.Features.Transcripts;
 /// целиком (её заменяет только успешный прогон).
 /// </remarks>
 /// <param name="AssetId">Носитель (аудио или видео).</param>
-public sealed record RetranscribeMediaCommand(int AssetId) : IRequest<ResponseDto<Guid>>, IAuditableRequest
+/// <param name="Speakers">
+/// Сколько говорящих (ADR-0062 v0.2): модель по порогу может разделить одного человека на нескольких (шум, эхо, короткие
+/// реплики), а сотрудник обычно знает, сколько людей говорит. <see langword="null"/> — по настройке разметки.
+/// </param>
+public sealed record RetranscribeMediaCommand(int AssetId, int? Speakers = null) : IRequest<ResponseDto<Guid>>, IAuditableRequest
 {
+    /// <summary>Наибольшее число говорящих, которое можно задать.</summary>
+    public const int MaxSpeakers = 20;
+
     /// <summary>Вид фоновой задачи (показывается в списке задач).</summary>
     public const string TaskKind = "Повторная расшифровка речи носителя";
 
@@ -38,7 +45,8 @@ public sealed record RetranscribeMediaCommand(int AssetId) : IRequest<ResponseDt
     public AuditAction AuditAction => AuditAction.Modify;
 
     /// <inheritdoc />
-    public string? AuditSummary => "media:retranscribe:asset=" + AssetId.ToString(CultureInfo.InvariantCulture);
+    public string? AuditSummary => "media:retranscribe:asset=" + AssetId.ToString(CultureInfo.InvariantCulture)
+        + (Speakers is { } speakers ? ":speakers=" + speakers.ToString(CultureInfo.InvariantCulture) : string.Empty);
 
     /// <inheritdoc cref="RetranscribeMediaCommand" />
     public sealed class Handler(
@@ -54,6 +62,11 @@ public sealed record RetranscribeMediaCommand(int AssetId) : IRequest<ResponseDt
         public async ValueTask<ResponseDto<Guid>> Handle(RetranscribeMediaCommand command, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(command);
+
+            if (command.Speakers is < 1 or > MaxSpeakers)
+            {
+                return ResponseDto<Guid>.BadRequest($"Число говорящих — от 1 до {MaxSpeakers}.");
+            }
 
             if (!await administration.CanUploadAsync(cancellationToken))
             {
@@ -83,7 +96,8 @@ public sealed record RetranscribeMediaCommand(int AssetId) : IRequest<ResponseDt
             // одним UPDATE в БД: пока расшифровка в очереди или идёт, второй полный прогон той же записи в общую
             // последовательную очередь не ставится (он задержал бы и чужие задачи); два параллельных нажатия не
             // пройдут оба. Носитель уже найден выше — ноль строк означает «уже выполняется».
-            var assetId = asset.Id; // захватываем только примитив — scope запроса к моменту выполнения уже закрыт
+            var assetId = asset.Id; // захватываем только примитивы — scope запроса к моменту выполнения уже закрыт
+            var speakers = command.Speakers;
             if (!await store.TryMarkTranscriptionPendingAsync(assetId, cancellationToken))
             {
                 return ResponseDto<Guid>.BadRequest(AlreadyInProgressMessage);
@@ -91,7 +105,7 @@ public sealed record RetranscribeMediaCommand(int AssetId) : IRequest<ResponseDt
 
             var taskId = await queue.EnqueueAsync(
                 TaskKind,
-                async (sp, ct) => await sp.GetRequiredService<IMediaTranscriptionPipeline>().TranscribeAsync(assetId, ct),
+                async (sp, ct) => await sp.GetRequiredService<IMediaTranscriptionPipeline>().TranscribeAsync(assetId, speakers, ct),
                 cancellationToken);
 
             return ResponseDto<Guid>.Ok(taskId);

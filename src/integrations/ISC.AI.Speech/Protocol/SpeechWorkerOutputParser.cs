@@ -1,5 +1,6 @@
 using System.Globalization;
 using ISC.AI.Modules.Media.Domain.Model;
+using ISC.AI.Speech.Speakers;
 
 namespace ISC.AI.Speech.Protocol;
 
@@ -23,6 +24,9 @@ public sealed class SpeechWorkerOutputParser
 
     /// <summary>Итог прогона; <see langword="null"/>, пока строка <c>done</c> не получена.</summary>
     public SpeechWorkerDone? Done { get; private set; }
+
+    /// <summary>Реплики говорящих от модели (ADR-0062) — по порядку вывода.</summary>
+    public List<SpeakerTurnSpan> Turns { get; } = [];
 
     /// <summary>Сколько строк обработано (для номера строки в сообщении об ошибке).</summary>
     public int LinesRead { get; private set; }
@@ -70,6 +74,10 @@ public sealed class SpeechWorkerOutputParser
                 return text.Length == 0
                     ? null
                     : new TranscriptSegmentDraft(_accepted++, segment.StartMs, segment.EndMs, text);
+
+            case SpeechWorkerTurn turn:
+                Turns.Add(new SpeakerTurnSpan(turn.StartMs, turn.EndMs, turn.Speaker));
+                return null;
 
             case SpeechWorkerDone done:
                 if (done.Segments != _segmentLines)

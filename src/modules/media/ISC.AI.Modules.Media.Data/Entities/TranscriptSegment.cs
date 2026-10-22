@@ -40,6 +40,21 @@ public class TranscriptSegment : BaseEntity, IClassified
     /// </summary>
     public required string ModelVersion { get; set; }
 
+    /// <summary>
+    /// Диктор автоматической разметки (ADR-0062): номер с 1 по первому появлению; <see langword="null"/> — не размечен.
+    /// Неизменяемый слой прогона — правка сотрудника идёт в <see cref="SpeakerOverride"/>.
+    /// </summary>
+    public short? Speaker { get; set; }
+
+    /// <summary>Перенос реплики сотрудником к другому диктору; <see langword="null"/> — не переносилась.</summary>
+    public short? SpeakerOverride { get; set; }
+
+    /// <summary>Кто перенёс реплику.</summary>
+    public int? SpeakerEditedByUserId { get; set; }
+
+    /// <summary>Когда перенесли (UTC).</summary>
+    public DateTime? SpeakerEditedAt { get; set; }
+
     /// <summary>Гриф (денормализован с носителя, ТБ-020). NOT NULL.</summary>
     public short Classification { get; set; }
 

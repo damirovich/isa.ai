@@ -110,7 +110,7 @@ public sealed class SpeechEvalPilotTests : IDisposable
 
         public string ModelVersion => Version;
 
-        public async Task<AudioTranscription> TranscribeAsync(string sourcePath, CancellationToken cancellationToken = default)
+        public async Task<AudioTranscription> TranscribeAsync(string sourcePath, int? speakerCount = null, CancellationToken cancellationToken = default)
         {
             Calls++;
             await Task.Yield();

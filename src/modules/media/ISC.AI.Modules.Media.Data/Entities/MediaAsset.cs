@@ -81,6 +81,12 @@ public class MediaAsset : AuditableEntity, IClassified
     /// <summary>Когда записана текущая расшифровка (UTC).</summary>
     public DateTime? TranscribedAt { get; set; }
 
+    /// <summary>Чем размечены дикторы текущей расшифровки (ADR-0062).</summary>
+    public TranscriptSpeakerSource TranscriptSpeakerSource { get; set; }
+
+    /// <summary>Почему дикторы не размечены, если разметка была включена (без содержимого записи).</summary>
+    public string? TranscriptSpeakerNote { get; set; }
+
     /// <summary>
     /// НАТИВНАЯ частота кадров видео, к/с (проба ffprobe при индексации, ADR-0028) — по ней считается номер кадра
     /// и шаг покадрового просмотра. <see langword="null"/> — не видео либо проба ещё не выполнялась (носители до

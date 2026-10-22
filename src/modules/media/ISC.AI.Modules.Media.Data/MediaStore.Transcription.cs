@@ -76,6 +76,7 @@ public sealed partial class MediaStore
         IReadOnlyList<TranscriptSegmentDraft> segments,
         string modelVersion,
         long? durationMs = null,
+        TranscriptSpeakerMarkup? speakers = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(segments);
@@ -95,6 +96,19 @@ public sealed partial class MediaStore
 
         await db.TranscriptSegments.Where(s => s.AssetId == assetId).ExecuteDeleteAsync(cancellationToken);
 
+        // Дикторы и их правки относятся к фрагментам прежнего прогона — заменяются вместе с ними (ADR-0062).
+        await db.TranscriptSpeakers.Where(s => s.AssetId == assetId).ExecuteDeleteAsync(cancellationToken);
+        foreach (var number in segments.Where(s => s.Speaker is > 0).Select(s => s.Speaker!.Value).Distinct().Order())
+        {
+            db.TranscriptSpeakers.Add(new TranscriptSpeaker
+            {
+                AssetId = assetId,
+                Number = (short)number,
+                Classification = asset.Classification,
+                DivisionId = asset.DivisionId,
+            });
+        }
+
         foreach (var segment in segments)
         {
             db.TranscriptSegments.Add(new TranscriptSegment
@@ -107,6 +121,7 @@ public sealed partial class MediaStore
                 // ДОСЛОВНО (ADR-0026): первичный слой не нормализуется и не обрезается.
                 Text = segment.Text,
                 ModelVersion = modelVersion,
+                Speaker = segment.Speaker is > 0 ? (short)segment.Speaker.Value : null,
 
                 // Денормализация режимных полей С НОСИТЕЛЯ (ТБ-020): строка самодостаточна для решётки.
                 Classification = asset.Classification,
@@ -118,6 +133,8 @@ public sealed partial class MediaStore
         asset.TranscriptError = null;
         asset.TranscriberVersion = modelVersion;
         asset.TranscribedAt = DateTime.UtcNow;
+        asset.TranscriptSpeakerSource = speakers?.Source ?? TranscriptSpeakerSource.None;
+        asset.TranscriptSpeakerNote = speakers?.Note is { Length: > 0 } note ? (note.Length > 200 ? note[..200] : note) : null;
 
         // Длительность ЗАПИСИ от распознавателя (длина подготовленного звука, не конец последней речи). У аудио
         // другого измерителя нет — пишется всегда, когда известна, поверх прежнего значения: повторная

@@ -149,6 +149,13 @@
                 }
             </div>
 
+            @* Дикторы (ТФ-МЕД-19, ADR-0062): полоса — если разметка есть или была включена, но не выполнена. *@
+            @if (transcript.Speakers is { Count: > 0 } || transcript.SpeakerNote is not null)
+            {
+                <TranscriptSpeakersBar Transcript="@transcript" ActiveSegment="@ActiveSegmentRow" ReadOnly="@ReadOnly" OnChanged="LoadAsync"
+                                       OnRetranscribe="RetranscribeWithSpeakersAsync" />
+            }
+
             @if (PlayerElementId is null)
             {
                 @if (OnSeekRequested.HasDelegate)
@@ -191,7 +198,8 @@
                         <TranscriptSegmentItem Index="@segment.Index" ElementId="@SegmentElementId(segment.Index)"
                                                StartMs="@segment.StartMs" Text="@segment.Text" IsActive="@(_activeIndex == segment.Index)"
                                                Clickable="@CanSeek" Title="@SegmentTitle" OnPlay="@_onPlay"
-                                               Query="@_query" IsCurrentMatch="@(CurrentMatchIndex == segment.Index)" />
+                                               Query="@_query" IsCurrentMatch="@(CurrentMatchIndex == segment.Index)"
+                                               Speaker="@segment.Speaker" SpeakerLabel="@segment.SpeakerLabel" SpeakerMoved="@segment.SpeakerMoved" />
                     }
                 }
             </div>
@@ -262,6 +270,10 @@
 
     // Работа с текстом (ADR-0047).
     private TranscriptView _view = TranscriptView.Segments;
+
+    // Выбранная реплика для переноса к другому диктору (ADR-0062) — последняя, по которой щёлкнули.
+    private TranscriptSegmentRow? ActiveSegmentRow =>
+        _activeIndex is { } index ? _transcript?.Segments.FirstOrDefault(s => s.Index == index) : null;
     private IReadOnlyList<TranscriptParagraph> _paragraphs = [];
     private bool _follow = true;
     private string? _query;
@@ -722,17 +734,22 @@
     /// «Расшифровать (заново)»: поставить носитель в очередь (RetranscribeMediaCommand — право, решётка и
     /// сужение по делам проверяет сервер, запуск аудируется). Прежняя расшифровка остаётся видна до успеха новой.
     /// </summary>
-    private async Task RetranscribeAsync()
+    private Task RetranscribeAsync() => RetranscribeWithSpeakersAsync(null);
+
+    /// <summary>То же с числом говорящих из полосы «Дикторы» (ADR-0062 v0.2); <see langword="null"/> — авто.</summary>
+    private async Task RetranscribeWithSpeakersAsync(int? speakers)
     {
         _busy = true;
         _error = null;
         _notice = null;
         try
         {
-            var response = await Dispatcher.Send(new RetranscribeMediaCommand(AssetId));
+            var response = await Dispatcher.Send(new RetranscribeMediaCommand(AssetId, speakers));
             if (response.Status)
             {
-                _notice = "Носитель поставлен в очередь на расшифровку. Нажмите «Обновить», чтобы увидеть результат.";
+                _notice = "Носитель поставлен в очередь на расшифровку"
+                    + (speakers is { } count ? $" (говорящих: {count})" : string.Empty)
+                    + ". Нажмите «Обновить», чтобы увидеть результат.";
                 await LoadAsync();
             }
             else

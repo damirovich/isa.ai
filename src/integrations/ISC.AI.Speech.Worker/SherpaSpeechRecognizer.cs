@@ -370,7 +370,7 @@ internal sealed class SherpaSpeechRecognizer : IDisposable
     /// объяснений. Поэтому указатель проверяется сразу (закрытое поле <c>_handle</c> обёртки; версия пакета
     /// закреплена в Directory.Packages.props — при обновлении проверить, что поле на месте).
     /// </summary>
-    private static void EnsureNativeHandle(object wrapper, string purpose, string path)
+    internal static void EnsureNativeHandle(object wrapper, string purpose, string path)
     {
         var field = wrapper.GetType().GetField("_handle", BindingFlags.Instance | BindingFlags.NonPublic);
         if (field?.GetValue(wrapper) is HandleRef handle && handle.Handle == IntPtr.Zero)

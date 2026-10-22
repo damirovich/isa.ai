@@ -136,6 +136,38 @@ public sealed class ExportTranscriptQueryTests
         (await HandleAsync(TranscriptExportFormat.Docx)).StatusMessage.ShouldBe(ExportTranscriptQuery.NotFoundMessage);
     }
 
+    [Fact(DisplayName = "ADR-0062: с дикторами — выгрузка по репликам «Диктор [таймкод]: текст», подряд идущие фрагменты одного диктора склеены")]
+    public async Task Speakers_export_by_replicas()
+    {
+        _catalog.GetTranscriptAsync(AssetId, Access, Arg.Any<CancellationToken>()).Returns(Transcript(
+            new TranscriptSegmentRow(0, 1_000, 2_000, "салам", Speaker: 1, SpeakerLabel: "объект"),
+            new TranscriptSegmentRow(1, 2_000, 3_000, "кандайсың", Speaker: 1, SpeakerLabel: "объект"),
+            new TranscriptSegmentRow(2, 65_000, 70_000, "жакшы", Speaker: 2, SpeakerLabel: "Диктор 2"),
+            new TranscriptSegmentRow(3, 71_000, 72_000, "шум")));
+
+        var lines = (await HandleAsync(TranscriptExportFormat.Text)).Data.ShouldNotBeNull().Text.ShouldNotBeNull().Split("\r\n");
+
+        lines.ShouldContain("объект [00:01]: салам кандайсың");
+        lines.ShouldContain("Диктор 2 [01:05]: жакшы");
+        lines.ShouldContain("Диктор не определён [01:11]: шум");
+    }
+
+    [Fact(DisplayName = "ADR-0062: склейка реплик — только подряд идущие фрагменты одного диктора; без диктора — каждый фрагмент отдельно")]
+    public void Replicas_join_only_consecutive_same_speaker()
+    {
+        var replicas = TranscriptExportText.Replicas(
+        [
+            new TranscriptSegmentRow(0, 0, 1, "а", Speaker: 1, SpeakerLabel: "Диктор 1"),
+            new TranscriptSegmentRow(1, 1, 2, "б", Speaker: 2, SpeakerLabel: "Диктор 2"),
+            new TranscriptSegmentRow(2, 2, 3, "в", Speaker: 1, SpeakerLabel: "Диктор 1"),
+            new TranscriptSegmentRow(3, 3, 4, "г"),
+            new TranscriptSegmentRow(4, 4, 5, "д"),
+        ]);
+
+        replicas.Select(r => (r.Label, string.Join(" ", r.Texts))).ShouldBe(
+            [("Диктор 1", "а"), ("Диктор 2", "б"), ("Диктор 1", "в"), (null, "г"), (null, "д")]);
+    }
+
     [Theory(DisplayName = "Таймкод выгрузки: мм:сс, с часа — ч:мм:сс (как в карточке)")]
     [InlineData(0L, "00:00")]
     [InlineData(65_000L, "01:05")]

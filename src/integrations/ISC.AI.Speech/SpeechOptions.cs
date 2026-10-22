@@ -1,3 +1,5 @@
+using ISC.AI.Speech.Speakers;
+
 namespace ISC.AI.Speech;
 
 /// <summary>
@@ -31,7 +33,8 @@ public sealed record SpeechOptions(
     double MaxSegmentSeconds = SpeechOptions.DefaultMaxSegmentSeconds,
     string ModelName = SpeechOptions.DefaultModelName,
     double MaxDurationHours = SpeechOptions.DefaultMaxDurationHours,
-    double TimeoutFactor = SpeechOptions.DefaultTimeoutFactor)
+    double TimeoutFactor = SpeechOptions.DefaultTimeoutFactor,
+    SpeakerOptions? Speakers = null)
 {
     /// <summary>Имя модели по умолчанию (ADR-0026).</summary>
     public const string DefaultModelName = "gigaam-multilingual-ctc";

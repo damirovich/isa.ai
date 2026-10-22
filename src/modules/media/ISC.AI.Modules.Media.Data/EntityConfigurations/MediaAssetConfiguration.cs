@@ -27,6 +27,8 @@ public sealed class MediaAssetConfiguration : IEntityTypeConfiguration<MediaAsse
         // «неприменима») совпало бы со «сторожем» EF, и явная запись NotApplicable подменялась бы умолчанием
         // БД. Существующим строкам 0 проставляет сама миграция (см. AudioTranscripts).
         builder.Property(a => a.TranscriptError).HasMaxLength(2000);
+        builder.Property(a => a.TranscriptSpeakerSource).HasConversion<short>();
+        builder.Property(a => a.TranscriptSpeakerNote).HasMaxLength(200);
         builder.Property(a => a.TranscriberVersion).HasMaxLength(TranscriptSegmentConfiguration.ModelVersionMaxLength);
 
         // Режимные поля обязательны (ТБ-020): носитель без грифа в схему не попадает.
