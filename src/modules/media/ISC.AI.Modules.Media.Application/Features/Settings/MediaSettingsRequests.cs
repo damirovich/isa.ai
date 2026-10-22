@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentValidation;
@@ -23,6 +24,9 @@ namespace ISC.AI.Modules.Media.Application.Features.Settings;
 /// <param name="CanManage">Текущий субъект вправе менять настройки (экран Администратора).</param>
 /// <param name="ScaleDescription">Шкала процентов словами: «балл 0,363 = 70 %».</param>
 /// <param name="TranscriptSpeakers">Размечать дикторов при расшифровке загруженных материалов (ADR-0062 v0.3).</param>
+/// <param name="UpdatedByName">
+/// Кто менял последним — отображаемое имя (иначе имя входа); <see langword="null"/> — не меняли или учётной записи нет.
+/// </param>
 public sealed record MediaSettingsView(
     ConfirmationMode Mode,
     int ThresholdPercent,
@@ -31,7 +35,8 @@ public sealed record MediaSettingsView(
     int? UpdatedByUserId,
     bool CanManage,
     string ScaleDescription,
-    bool TranscriptSpeakers = true);
+    bool TranscriptSpeakers = true,
+    string? UpdatedByName = null);
 
 /// <summary>
 /// Прочитать настройки поиска и верификации (ADR-0054). Значения не секретны — их видит каждый вошедший: оператору
@@ -41,7 +46,11 @@ public sealed record GetMediaSettingsQuery : IRequest<ResponseDto<MediaSettingsV
 {
     /// <inheritdoc cref="GetMediaSettingsQuery" />
     public sealed class Handler(
-        IMediaSettingsStore store, IMediaAdministration administration, ISubjectProvider subjectProvider, MediaSearchOptions options)
+        IMediaSettingsStore store,
+        IMediaAdministration administration,
+        ISubjectProvider subjectProvider,
+        MediaSearchOptions options,
+        IUserAccountStore accounts)
         : IRequestHandler<GetMediaSettingsQuery, ResponseDto<MediaSettingsView>>
     {
         /// <inheritdoc />
@@ -54,9 +63,19 @@ public sealed record GetMediaSettingsQuery : IRequest<ResponseDto<MediaSettingsV
 
             var settings = await store.GetAsync(cancellationToken);
             var canManage = await administration.CanManageSettingsAsync(cancellationToken);
+
+            // Кто менял — именем, а не номером учётной записи: экран показывает «Изменено … · Петров П.П.».
+            string? changedBy = null;
+            if (settings.UpdatedByUserId is { } userId)
+            {
+                var account = (await accounts.ListAsync(cancellationToken)).FirstOrDefault(a => a.UserId == userId);
+                changedBy = account is null ? null : string.IsNullOrWhiteSpace(account.DisplayName) ? account.UserName : account.DisplayName;
+            }
+
             return ResponseDto<MediaSettingsView>.Ok(new MediaSettingsView(
                 settings.Mode, settings.ThresholdPercent, settings.MinThresholdPercent,
-                settings.UpdatedAtUtc, settings.UpdatedByUserId, canManage, options.Scale.Describe(), settings.TranscriptSpeakers));
+                settings.UpdatedAtUtc, settings.UpdatedByUserId, canManage, options.Scale.Describe(), settings.TranscriptSpeakers,
+                changedBy));
         }
     }
 }

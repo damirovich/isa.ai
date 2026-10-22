@@ -1,0 +1,372 @@
+/* Настройки поиска и верификации: разделы-карточки, плитки режима, шкала порога, прилипающая панель сохранения.
+   Цвета — только переменные темы MudBlazor: страница одинаково читается в тёмной и светлой теме. */
+
+.settings {
+    max-width: 960px;
+    padding-bottom: 8px;
+}
+
+.settings-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px 24px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+
+.settings-meta {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: 999px;
+    color: var(--mud-palette-text-secondary);
+    font-size: .8125rem;
+    white-space: nowrap;
+}
+
+.settings ::deep .settings-skeleton {
+    border-radius: 12px;
+    margin-bottom: 16px;
+}
+
+.settings-readonly {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    border-radius: 10px;
+    border: 1px solid rgba(var(--mud-palette-info-rgb), .35);
+    background: rgba(var(--mud-palette-info-rgb), .08);
+    color: var(--mud-palette-text-primary);
+    font-size: .875rem;
+}
+
+/* ---- Раздел ---- */
+
+.settings-section {
+    background: var(--mud-palette-surface);
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: 12px;
+    padding: 20px 22px;
+    margin-bottom: 16px;
+}
+
+.section-head {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    margin-bottom: 16px;
+}
+
+.section-icon {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    color: var(--mud-palette-primary);
+    background: rgba(var(--mud-palette-primary-rgb), .12);
+}
+
+.settings ::deep .section-title {
+    font-weight: 600;
+    line-height: 1.3;
+    margin-bottom: 2px;
+}
+
+.section-note {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    margin-top: 14px;
+    color: var(--mud-palette-text-secondary);
+    font-size: .8125rem;
+    line-height: 1.45;
+}
+
+/* ---- Режим подтверждения: плитки ---- */
+
+.mode-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px;
+}
+
+.mode-tile {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    width: 100%;
+    padding: 14px 16px;
+    text-align: left;
+    font: inherit;
+    color: var(--mud-palette-text-primary);
+    background: transparent;
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
+}
+
+.mode-tile:hover:not(:disabled) {
+    border-color: rgba(var(--mud-palette-primary-rgb), .6);
+}
+
+.mode-tile:focus-visible {
+    outline: 2px solid var(--mud-palette-primary);
+    outline-offset: 2px;
+}
+
+.mode-tile.selected {
+    border-color: var(--mud-palette-primary);
+    background: rgba(var(--mud-palette-primary-rgb), .08);
+    box-shadow: 0 0 0 1px var(--mud-palette-primary) inset;
+}
+
+.mode-tile:disabled {
+    cursor: default;
+    opacity: .75;
+}
+
+.tile-icon {
+    flex: 0 0 auto;
+    display: inline-flex;
+    color: var(--mud-palette-text-secondary);
+}
+
+.mode-tile.selected .tile-icon {
+    color: var(--mud-palette-primary);
+}
+
+.tile-body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.tile-title {
+    font-weight: 600;
+    font-size: .9375rem;
+}
+
+.tile-text {
+    color: var(--mud-palette-text-secondary);
+    font-size: .8125rem;
+    line-height: 1.45;
+}
+
+.mode-tile ::deep .tile-check {
+    flex: 0 0 auto;
+    color: var(--mud-palette-text-disabled);
+}
+
+.mode-tile.selected ::deep .tile-check {
+    color: var(--mud-palette-primary);
+}
+
+/* ---- Порог: два поля и шкала ---- */
+
+.threshold-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 8px 28px;
+}
+
+.field-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.field-label {
+    font-weight: 500;
+    font-size: .875rem;
+}
+
+.field-value {
+    font-size: 1.25rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--mud-palette-primary);
+}
+
+.field-foot {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.field-foot ::deep .field-number {
+    flex: 0 0 132px;
+    max-width: 132px;
+}
+
+.field-hint {
+    color: var(--mud-palette-text-secondary);
+    font-size: .75rem;
+    line-height: 1.35;
+}
+
+.scale {
+    margin-top: 22px;
+}
+
+.scale-track {
+    position: relative;
+    height: 10px;
+    border-radius: 999px;
+    background: linear-gradient(90deg,
+        rgba(var(--mud-palette-primary-rgb), .10) 0%,
+        rgba(var(--mud-palette-primary-rgb), .35) 100%);
+}
+
+/* Ниже границы — зона, недоступная оператору: штриховка. */
+.scale-blocked {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: 999px 0 0 999px;
+    background: repeating-linear-gradient(135deg,
+        rgba(var(--mud-palette-error-rgb), .28) 0 4px,
+        transparent 4px 8px);
+    border-right: 2px solid rgba(var(--mud-palette-error-rgb), .7);
+}
+
+.scale-marker {
+    position: absolute;
+    top: -4px;
+    width: 2px;
+    height: 18px;
+    margin-left: -1px;
+    background: var(--mud-palette-primary);
+    border-radius: 1px;
+    transition: left .12s ease;
+}
+
+.scale-marker span {
+    position: absolute;
+    top: -22px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 0 6px;
+    border-radius: 6px;
+    font-size: .75rem;
+    font-weight: 600;
+    white-space: nowrap;
+    color: var(--mud-palette-primary-text);
+    background: var(--mud-palette-primary);
+}
+
+.scale-marker.invalid,
+.scale-marker.invalid span {
+    background: var(--mud-palette-error);
+}
+
+.scale-legend {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 6px;
+    color: var(--mud-palette-text-secondary);
+    font-size: .75rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.scale-model {
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.field-error {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 14px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    color: var(--mud-palette-error);
+    background: rgba(var(--mud-palette-error-rgb), .08);
+    font-size: .8125rem;
+}
+
+/* ---- Строка настройки с переключателем ---- */
+
+.setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 12px 14px;
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: 10px;
+}
+
+.row-title {
+    font-weight: 500;
+    font-size: .9375rem;
+    margin-bottom: 2px;
+}
+
+.row-text {
+    color: var(--mud-palette-text-secondary);
+    font-size: .8125rem;
+    line-height: 1.45;
+    max-width: 640px;
+}
+
+/* ---- Панель сохранения: прилипает к низу окна, пока есть несохранённые правки ---- */
+
+.settings-savebar {
+    position: sticky;
+    bottom: 16px;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 20px;
+    flex-wrap: wrap;
+    padding: 10px 12px 10px 16px;
+    border-radius: 12px;
+    border: 1px solid rgba(var(--mud-palette-primary-rgb), .45);
+    background: var(--mud-palette-surface);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .35);
+    animation: savebar-in .18s ease-out;
+}
+
+.savebar-text {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: .875rem;
+}
+
+.savebar-actions {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+}
+
+@keyframes savebar-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .settings-savebar { animation: none; }
+    .scale-marker, .mode-tile { transition: none; }
+}
+
+@media (max-width: 600px) {
+    .settings-section { padding: 16px; }
+    .setting-row { align-items: flex-start; }
+}
