@@ -18,7 +18,11 @@ public sealed record TimelineSpan(long StartMs, long EndMs, string Tooltip);
 /// <param name="Title">Подпись: имя фигуранта.</param>
 /// <param name="Color">Цвет отметок (#rrggbb).</param>
 /// <param name="Spans">Отрезки по времени.</param>
-public sealed record TimelineLane(string Key, string Title, string Color, IReadOnlyList<TimelineSpan> Spans);
+/// <param name="Href">
+/// Карточка фигуранта (ADR-0059): имя в легенде — ссылка; <see langword="null"/> — без ссылки. Отметки на ленте остаются
+/// переходом к моменту записи.
+/// </param>
+public sealed record TimelineLane(string Key, string Title, string Color, IReadOnlyList<TimelineSpan> Spans, string? Href = null);
 
 /// <summary>Деление шкалы: момент и подпись.</summary>
 /// <param name="Ms">Момент, мс.</param>

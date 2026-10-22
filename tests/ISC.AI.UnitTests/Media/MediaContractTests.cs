@@ -125,6 +125,29 @@ public sealed class MediaContractTests
         MediaModule.ConfigurationKeys.ShouldBeUnique();
     }
 
+    [Fact(DisplayName = "ADR-0059: порт переходов к карточкам профиля закрыт пакетом поставкой «без ссылок» (TryAdd) — профиль может заменить")]
+    public void Media_links_port_has_a_neutral_default()
+    {
+        var services = new ServiceCollection();
+        MediaModule.RegisterServices(services, Configuration());
+
+        var descriptor = services.Where(d => d.ServiceType == typeof(IMediaLinks)).ShouldHaveSingleItem();
+        descriptor.ImplementationType.ShouldBe(typeof(ISC.AI.Modules.Media.Application.Features.Navigation.NoMediaLinks));
+        MediaModule.RequiredServices.ShouldNotContain(typeof(IMediaLinks));
+
+        // Пакет маршрутов профиля не знает: без профиля переходов нет.
+        var links = new ISC.AI.Modules.Media.Application.Features.Navigation.NoMediaLinks();
+        links.CaseCard(3).ShouldBeNull();
+        links.PersonCard(7).ShouldBeNull();
+
+        // Профиль, зарегистрировавший порт РАНЬШЕ пакета, не перекрывается его поставкой.
+        var withProfile = new ServiceCollection();
+        withProfile.AddSingleton<IMediaLinks, ISC.AI.Profile.Investigation.Application.Features.Navigation.InvestigationMediaLinks>();
+        MediaModule.RegisterServices(withProfile, Configuration());
+        withProfile.Where(d => d.ServiceType == typeof(IMediaLinks)).ShouldHaveSingleItem().ImplementationType
+            .ShouldBe(typeof(ISC.AI.Profile.Investigation.Application.Features.Navigation.InvestigationMediaLinks));
+    }
+
     [Fact(DisplayName = "ADR-0026: порты расшифровки закрыты пакетом — распознаватель регистрирует интеграция (без модели — явный отказ), конвейер — сценарии")]
     public void Transcription_ports_are_registered_by_the_package()
     {

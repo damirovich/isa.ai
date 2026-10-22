@@ -144,6 +144,14 @@ public sealed class InvestigationProfileTests
         services.Last(d => d.ServiceType == typeof(IChatProfile)).ImplementationType.ShouldBe(
             typeof(ISC.AI.Profile.Investigation.Application.Features.CaseChat.InvestigationChatProfile));
         registered.ShouldContain(typeof(ChatSettings));
+
+        // Переходы со страниц «Медиа» к карточкам дела и фигуранта (ADR-0059): реализация профиля, поставка пакета
+        // «без ссылок» (TryAdd) поверх неё не добавилась.
+        services.Where(d => d.ServiceType == typeof(ISC.AI.Modules.Media.Domain.Services.IMediaLinks)).ShouldHaveSingleItem()
+            .ImplementationType.ShouldBe(typeof(ISC.AI.Profile.Investigation.Application.Features.Navigation.InvestigationMediaLinks));
+        var links = new ISC.AI.Profile.Investigation.Application.Features.Navigation.InvestigationMediaLinks();
+        links.CaseCard(5).ShouldBe("/cases/5");
+        links.PersonCard(7).ShouldBe("/persons/7");
     }
 
     /// <summary>

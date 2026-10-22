@@ -32,6 +32,7 @@ public sealed class VideoTimelineComponentTests : BunitContext, IAsyncLifetime
     private const string ModulePath = "./_content/ISC.AI.Modules.Media.UI/js/media.js";
     private const string Strip = "0123456789abcdef0123456789abcdef.jpg";
     private readonly IMediator _mediator = Substitute.For<IMediator>();
+    private readonly IMediaLinks _links = Substitute.For<IMediaLinks>();
     private readonly BunitJSModuleInterop _module;
 
     public VideoTimelineComponentTests()
@@ -43,6 +44,7 @@ public sealed class VideoTimelineComponentTests : BunitContext, IAsyncLifetime
         _module.Setup<bool>("updateTimeline", _ => true).SetResult(true);
         Services.AddMudServices();
         Services.AddSingleton(_mediator);
+        Services.AddSingleton(_links);
         Services.AddSingleton(new ISC.AI.Modules.Media.Application.MediaSearchOptions());
         SetRendererInfo(new RendererInfo("Server", true));
 
@@ -234,6 +236,43 @@ public sealed class VideoTimelineComponentTests : BunitContext, IAsyncLifetime
         // Щелчок по отметке фигуранта — кадр с сервера в начале отрезка (MKV показывается кадрами).
         marks[0].Click();
         cut.Find("img#media-frame-5").GetAttribute("src").ShouldBe("/media/frames/5?t=1000");
+    }
+
+    [Fact(DisplayName = "ADR-0059: карточка носителя — «К карточке дела» рядом с «К медиатеке дела», имя фигуранта в легенде — ссылка на его карточку")]
+    public void Asset_card_links_case_and_person_cards()
+    {
+        _links.CaseCard(3).Returns("/profile/cases/3");
+        _links.PersonCard(7).Returns("/profile/persons/7");
+
+        var cut = RenderCard(
+            Video(capturedAt: null, recordedAt: null),
+            [TrackFace(11, 1_000, 1)],
+            [new AssetPersonSpan(7, "Иванов И.И.", 1_000, 3_000), new AssetPersonSpan(8, "Петров П.П.", 5_000, 6_000)]);
+
+        var anchors = cut.FindAll("a").ToList();
+        anchors.Single(a => a.TextContent.Contains("К карточке дела", StringComparison.Ordinal)).GetAttribute("href").ShouldBe("/profile/cases/3");
+        anchors.ShouldContain(a => a.TextContent.Contains("К медиатеке дела", StringComparison.Ordinal) && a.GetAttribute("href") == "/media/cases/3");
+
+        // Профиль дал адрес только фигуранту 7: у него имя — ссылка, у 8 — просто подпись.
+        var person = cut.FindAll(".vt-legend-link").ShouldHaveSingleItem();
+        person.TextContent.ShouldBe("Иванов И.И.");
+        person.GetAttribute("href").ShouldBe("/profile/persons/7");
+        cut.Find(".vt-legend").TextContent.ShouldContain("Петров П.П.");
+
+        // Отметка на ленте по-прежнему ведёт к моменту записи, а не к карточке.
+        cut.FindAll("[data-vt-mark]")[0].Click();
+        cut.Find("img#media-frame-5").GetAttribute("src").ShouldBe("/media/frames/5?t=1000");
+    }
+
+    [Fact(DisplayName = "ADR-0059 + ADR-0044: носитель-кандидат из чужого дела — ссылки на карточку дела нет (дело не раскрывается)")]
+    public void View_only_asset_card_has_no_case_card_link()
+    {
+        _links.CaseCard(Arg.Any<int>()).Returns("/profile/cases/x");
+
+        var cut = RenderCard(Video(capturedAt: null, recordedAt: null), [TrackFace(11, 1_000, 1)], [], viewOnly: true);
+
+        cut.Markup.ShouldNotContain("К карточке дела");
+        _links.DidNotReceive().CaseCard(Arg.Any<int>());
     }
 
     [Fact(DisplayName = "Время записи из файла: показано в реквизитах; даты съёмки нет — «применить» записывает её аудируемой командой")]

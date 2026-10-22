@@ -54,6 +54,9 @@ public static class MediaApplicationServiceCollectionExtensions
 
         // Документы архива (ADR-0042) кладёт профиль со своим документооборотом; без него — явный отказ по строке.
         services.TryAddScoped<IArchiveDocumentSink, Features.Import.UnsupportedArchiveDocumentSink>();
+
+        // Адреса карточек профиля для переходов со страниц пакета (ADR-0059); профиль без своих карточек — переходов нет.
+        services.TryAddSingleton<IMediaLinks, Features.Navigation.NoMediaLinks>();
         services.AddScoped<Features.Import.MediaImportPlanner>();
         services.AddScoped<Features.Import.MediaImportRunner>();
         services.AddScoped<Features.Import.MediaImportFeeder>();

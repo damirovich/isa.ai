@@ -38,6 +38,10 @@ public static class InvestigationApplicationServiceCollectionExtensions
         // Заменяет поставку пакета «Медиа» по умолчанию («документы не принимаются»): регистрация пакета — TryAdd.
         services.AddScoped<ISC.AI.Modules.Media.Domain.Services.IArchiveDocumentSink, Features.CaseDocuments.ArchiveDocumentSink>();
 
+        // Переходы со страниц пакета «Медиа» к карточкам дела и фигуранта (ADR-0059). Заменяет поставку пакета «без
+        // ссылок» по тому же правилу: регистрация пакета — TryAdd и идёт после профиля.
+        services.AddSingleton<ISC.AI.Modules.Media.Domain.Services.IMediaLinks, Features.Navigation.InvestigationMediaLinks>();
+
         // Перенос баз Access (ADR-0043): файл базы в хранилище со сверкой SHA-256 и сам перенос — теми же
         // хранилищами, что ручной ввод (чтение базы драйвером ACE регистрирует слой данных).
         services.AddScoped<Features.AccessImport.AccessImportFiles>();
