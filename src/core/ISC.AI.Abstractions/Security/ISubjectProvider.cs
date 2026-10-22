@@ -25,4 +25,10 @@ public interface ISubjectProvider
     /// (например dev-заглушка). Ноль и отрицательные значения не возвращаются.
     /// </summary>
     Task<int?> GetCurrentUserIdAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Сеанс входа текущего субъекта (ТФ-АДМ-09, ADR-0060) — чтобы экран «Активные сеансы» пометил свой сеанс и не
+    /// дал завершить его вместо «Выхода». <see langword="null"/> — сеанса нет (dev-заглушка входа, фоновая работа).
+    /// </summary>
+    Task<Guid?> GetCurrentSessionIdAsync(CancellationToken cancellationToken = default) => Task.FromResult<Guid?>(null);
 }

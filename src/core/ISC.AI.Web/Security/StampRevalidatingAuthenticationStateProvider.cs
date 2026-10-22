@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Security.Claims;
+using ISC.AI.Abstractions.Security;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components.Server;
 
@@ -24,8 +25,16 @@ namespace ISC.AI.Web.Security;
 public sealed class StampRevalidatingAuthenticationStateProvider(
     ILoggerFactory loggerFactory,
     IServiceScopeFactory scopeFactory,
-    IConfiguration configuration) : RevalidatingServerAuthenticationStateProvider(loggerFactory)
+    IConfiguration configuration,
+    UserSessionTracker sessions) : RevalidatingServerAuthenticationStateProvider(loggerFactory)
 {
+    /// <summary>
+    /// Немедленно перевести соединение в «не вошёл» (сеанс завершён, ADR-0060): страница уходит на форму входа.
+    /// Вызывается реестром сеансов с любого потока — так же, как базовый класс гасит сеанс из своего цикла ревалидации.
+    /// </summary>
+    public void SignOutNow() =>
+        SetAuthenticationState(Task.FromResult(new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity()))));
+
     /// <inheritdoc />
     protected override TimeSpan RevalidationInterval =>
         TimeSpan.FromMinutes(
@@ -50,12 +59,27 @@ public sealed class StampRevalidatingAuthenticationStateProvider(
             return false;
         }
 
+        // Сеанс завершён (ADR-0060) — страховка к мгновенному выходу реестра: если хостов несколько, завершение в
+        // другом процессе доходит до этого соединения не позже окна ревалидации.
+        if (UserSessionTracker.SessionIdOf(principal) is not { } sessionId
+            || !await sessions.IsActiveAsync(sessionId, cancellationToken))
+        {
+            return false;
+        }
+
         await using var scope = scopeFactory.CreateAsyncScope();
         var revalidator = scope.ServiceProvider.GetRequiredService<ExternalIdentityRevalidator>();
         var outcome = await revalidator.RevalidateAsync(userId, externalId, stamp, cancellationToken);
 
+        if (outcome == RevalidationOutcome.Invalid)
+        {
+            // Учётка отключена или штамп разошёлся — сеанс закрывается как «доступ отозван» (виден в истории).
+            await sessions.EndAsync(sessionId, UserSessionEndReason.Revoked, cancellationToken);
+            return false;
+        }
+
         // Unavailable ≠ Invalid: транзиентный сбой внешней системы НЕ обязан гасить живые сессии
         // (см. XML-doc RevalidationOutcome.Unavailable) — считаем сессию действующей до следующего тика.
-        return outcome != RevalidationOutcome.Invalid;
+        return true;
     }
 }

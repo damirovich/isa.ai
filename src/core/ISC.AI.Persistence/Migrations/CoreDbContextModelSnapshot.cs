@@ -620,6 +620,64 @@ namespace ISC.AI.Persistence.Migrations
                     b.ToTable("indexing_job", "core");
                 });
 
+            modelBuilder.Entity("ISC.AI.Persistence.Entities.UserSessionEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ClientAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("client_address");
+
+                    b.Property<string>("EndComment")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("end_comment");
+
+                    b.Property<short?>("EndReason")
+                        .HasColumnType("smallint")
+                        .HasColumnName("end_reason");
+
+                    b.Property<DateTime?>("EndedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("ended_at");
+
+                    b.Property<int?>("EndedByUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("ended_by_user_id");
+
+                    b.Property<DateTime>("LastActivityAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_activity_at");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at");
+
+                    b.Property<string>("UserAgent")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("user_agent");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_user_session");
+
+                    b.HasIndex("LastActivityAt")
+                        .HasDatabaseName("ix_user_session_last_activity_at")
+                        .HasFilter("ended_at IS NULL");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_user_session_user_id");
+
+                    b.ToTable("user_session", "core");
+                });
+
             modelBuilder.Entity("ISC.AI.Persistence.Entities.ChunkEntity", b =>
                 {
                     b.HasOne("ISC.AI.Persistence.Entities.DocumentEntity", "Document")
@@ -666,6 +724,16 @@ namespace ISC.AI.Persistence.Migrations
                         .HasConstraintName("fk_embedding_chunk_chunk_id");
 
                     b.Navigation("Chunk");
+                });
+
+            modelBuilder.Entity("ISC.AI.Persistence.Entities.UserSessionEntity", b =>
+                {
+                    b.HasOne("ISC.AI.Persistence.Entities.AppUserEntity", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_user_session_app_user_user_id");
                 });
 
             modelBuilder.Entity("ISC.AI.Persistence.Entities.AppUserEntity", b =>

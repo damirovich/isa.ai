@@ -26,4 +26,10 @@ public static class AuthClaims
     /// (ТБ-014/016), а раз в окно <c>Auth:RevalidationMinutes</c>.
     /// </summary>
     public const string ValidatedAt = "iscai:validated";
+
+    /// <summary>
+    /// Номер сеанса входа (<c>core.user_session</c>, ТФ-АДМ-09, ADR-0060): по нему проверка на каждом запросе узнаёт,
+    /// не завершён ли сеанс. Имя общее с пакетами — <see cref="ISC.AI.Abstractions.Security.UserSessionClaims"/>.
+    /// </summary>
+    public const string SessionId = ISC.AI.Abstractions.Security.UserSessionClaims.SessionId;
 }

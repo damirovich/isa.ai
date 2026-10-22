@@ -24,6 +24,7 @@ public static class AuthEndpoints
                 [FromForm(Name = "password")] string password,
                 [FromForm(Name = "returnUrl")] string? returnUrl,
                 LoginService loginService,
+                UserSessionTracker sessions,
                 ILogger<LoginService> logger,
                 CancellationToken cancellationToken) =>
             {
@@ -48,6 +49,19 @@ public static class AuthEndpoints
                     return Results.Redirect($"/login?error=1&returnUrl={Uri.EscapeDataString(SafeLocalUrl(returnUrl))}");
                 }
 
+                // Сеанс входа (ТФ-АДМ-09, ADR-0060): заводится до выдачи cookie, номер — в cookie. Откуда вошли — IP
+                // (с учётом доверенного прокси, UseForwardedHeaders) и строка браузера; пароль и логин сюда не идут.
+                var userId = int.Parse(
+                    principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value,
+                    System.Globalization.CultureInfo.InvariantCulture);
+                var sessionId = await sessions.StartAsync(
+                    userId,
+                    http.Connection.RemoteIpAddress?.ToString(),
+                    http.Request.Headers.UserAgent.ToString(),
+                    cancellationToken);
+                ((System.Security.Claims.ClaimsIdentity)principal.Identity!).AddClaim(
+                    new System.Security.Claims.Claim(AuthClaims.SessionId, sessionId.ToString("D")));
+
                 await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
                 return Results.Redirect(SafeLocalUrl(returnUrl));
             })
@@ -57,8 +71,15 @@ public static class AuthEndpoints
         // IFormCollection форсирует ту же антифорджери-метадату, что уже действует на /auth/login
         // (minimal API включает проверку токена автоматически только для form-bound эндпоинтов) —
         // без параметра формы форма выхода отправлялась бы БЕЗ проверки антифорджери-токена.
-        endpoints.MapPost("/auth/logout", async (HttpContext http, IFormCollection _) =>
+        endpoints.MapPost("/auth/logout", async (HttpContext http, IFormCollection _, UserSessionTracker sessions) =>
         {
+            // «Выход» закрывает сеанс (ADR-0060) до снятия cookie: в списке активных его больше нет, а другие вкладки
+            // этого сеанса уходят на форму входа сразу.
+            if (UserSessionTracker.SessionIdOf(http.User) is { } sessionId)
+            {
+                await sessions.EndAsync(sessionId, ISC.AI.Abstractions.Security.UserSessionEndReason.SignedOut, http.RequestAborted);
+            }
+
             await http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
             return Results.Redirect("/login");
         });

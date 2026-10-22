@@ -140,6 +140,9 @@ public static class InvestigationPermissions
     /// <summary>Журнал аудита.</summary>
     public const string AdminAudit = "admin.audit";
 
+    /// <summary>Активные сеансы: кто в системе, завершение сеанса (ТФ-АДМ-09, ADR-0060).</summary>
+    public const string AdminSessions = "admin.sessions";
+
     private static readonly InvestigationRole[] AllRoles = Enum.GetValues<InvestigationRole>();
 
     /// <summary>Все права профиля в порядке показа на экране.</summary>
@@ -225,6 +228,9 @@ public static class InvestigationPermissions
         new(AdminAudit, PermissionSection.Administration, "Журнал аудита",
             "Чтение журнала в пределах допуска",
             Roles(InvestigationRole.Administrator, InvestigationRole.SecurityOfficer), OpenDuringInitialSetup: true),
+        new(AdminSessions, PermissionSection.Administration, "Активные сеансы",
+            "Кто сейчас работает в системе; завершение чужого сеанса с причиной",
+            Roles(InvestigationRole.Administrator, InvestigationRole.SecurityOfficer), OpenDuringInitialSetup: true),
     ];
 
     /// <summary>
@@ -248,6 +254,7 @@ public static class InvestigationPermissions
         new("admin-users", "Пользователи", [AdminUsers]),
         new("admin-access-matrix", "Матрица доступа", [AdminMatrix]),
         new("admin-audit", "Журнал аудита", [AdminAudit]),
+        new("admin-sessions", "Активные сеансы", [AdminSessions]),
         new("admin-divisions", "Подразделения", [AdminDirectories]),
         new("admin-references", "Справочники", [AdminDirectories]),
         new("admin-access-import", "Перенос из Access", [CasesImport]),

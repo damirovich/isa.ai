@@ -41,6 +41,7 @@ public static class AdminModule
     /// подразделение только номером);</item>
     /// <item><c>IUserRoleCatalog</c> — роли и назначения для колонки и фильтра на экране учётных
     /// записей (пакет роли только показывает, назначает их страница профиля).</item>
+    /// <item>право на «Активные сеансы» — тоже вопрос <c>IPlatformAdministration</c> (ADR-0060), нового порта нет.</item>
     /// </list>
     /// Список закреплён тестом <c>AdminContractTests</c>: он не должен разрастаться незаметно.
     /// </remarks>
@@ -53,7 +54,8 @@ public static class AdminModule
 
     /// <summary>
     /// Нейтральные службы ядра, которыми пакет пользуется и которые даёт хост: реестр учётных записей,
-    /// допуски, чтение журнала, субъект и контекст доступа, писатель журнала.
+    /// допуски, чтение журнала, субъект и контекст доступа, писатель журнала, учёт сеансов входа и реестр живых
+    /// сеансов процесса (ADR-0060).
     /// </summary>
     public static IReadOnlyList<Type> RequiredCoreServices { get; } =
     [
@@ -63,6 +65,8 @@ public static class AdminModule
         typeof(Abstractions.Security.IAccessContextProvider),
         typeof(Abstractions.Audit.IAuditReader),
         typeof(Abstractions.Audit.IAuditWriter),
+        typeof(Abstractions.Security.IUserSessionStore),
+        typeof(Abstractions.Security.IUserSessionMonitor),
     ];
 
     /// <summary>
@@ -78,6 +82,10 @@ public static class AdminModule
             Icons.Material.Filled.People, typeof(UserAccounts), ReadPolicy, MenuGroup),
         new ModuleDescriptor("admin-audit", "/admin/audit", "Журнал аудита",
             Icons.Material.Filled.History, typeof(AuditJournal), ReadPolicy, MenuGroup),
+
+        // «Активные сеансы» (ТФ-АДМ-09, ADR-0060): кто сейчас в системе, завершение сеанса с причиной.
+        new ModuleDescriptor("admin-sessions", "/admin/sessions", "Активные сеансы",
+            Icons.Material.Filled.Devices, typeof(ActiveSessions), ReadPolicy, MenuGroup),
     ];
 
     /// <summary>Виджеты оболочки: кнопка смены пароля в шапке (диалог с любого экрана).</summary>

@@ -38,6 +38,14 @@ public sealed class InvestigationPlatformAdministration(IUserRoleStore roles, IS
         PermissionRule.CallerHasAsync(roles, subjectProvider, InvestigationPermissions.AdminAudit, cancellationToken);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ИНВАРИАНТ (ТФ-АДМ-09, ТБ-012): строка матрицы «Активные сеансы» (ADR-0060) — по умолчанию Администратор и Офицер
+    /// ИБ, как журнал: контроль того, кто в системе, — задача безопасности, а не ведения учёток.
+    /// </remarks>
+    public Task<bool> CanManageSessionsAsync(CancellationToken cancellationToken = default) =>
+        PermissionRule.CallerHasAsync(roles, subjectProvider, InvestigationPermissions.AdminSessions, cancellationToken);
+
+    /// <inheritdoc />
     /// <remarks>Тот же признак, что открывает <see cref="AdministrationRule"/> любому вошедшему: Администратора нет ни одного.</remarks>
     public async Task<bool> IsInitialSetupAsync(CancellationToken cancellationToken = default) =>
         !await roles.AnyAdministratorAsync(cancellationToken);

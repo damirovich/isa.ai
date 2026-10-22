@@ -58,13 +58,15 @@ public sealed class AccessMatrixTests
         [InvestigationPermissions.AdminMatrix] = [InvestigationRole.Administrator],
         [InvestigationPermissions.AdminDirectories] = [InvestigationRole.Administrator],
         [InvestigationPermissions.AdminAudit] = [InvestigationRole.Administrator, InvestigationRole.SecurityOfficer],
+        // Новое право (ADR-0060): экрана сеансов прежде не было; по умолчанию — как журнал, Администратор и Офицер ИБ.
+        [InvestigationPermissions.AdminSessions] = [InvestigationRole.Administrator, InvestigationRole.SecurityOfficer],
     };
 
     /// <summary>Права, которые прежде открывались любому вошедшему, пока Администратора нет.</summary>
     private static readonly string[] LegacyInitialSetup =
     [
         InvestigationPermissions.DocFlowSettings, InvestigationPermissions.AdminUsers, InvestigationPermissions.AdminMatrix,
-        InvestigationPermissions.AdminDirectories, InvestigationPermissions.AdminAudit,
+        InvestigationPermissions.AdminDirectories, InvestigationPermissions.AdminAudit, InvestigationPermissions.AdminSessions,
     ];
 
     private readonly IUserRoleStore _roles = Substitute.For<IUserRoleStore>();
