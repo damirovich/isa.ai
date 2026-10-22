@@ -80,6 +80,10 @@ public sealed record FaceTrackSpan(int FaceId, int TrackId, long StartMs, long E
 public sealed record FaceTrackRequest(int FaceId, int AssetId, long? FrameTimestampMs);
 
 /// <summary>Лицо на носителе для чтения (рамки на фото, шкала лиц видео, вырезки).</summary>
+/// <remarks>
+/// <c>Frame</c> — оценки кадра для подсказки эталона (ТФ-МЕД-21, ADR-0058); <see langword="null"/> — лицо
+/// проиндексировано раньше, оценок нет (их даёт переиндексация).
+/// </remarks>
 public sealed record FaceRow(
     int Id,
     int AssetId,
@@ -96,7 +100,8 @@ public sealed record FaceRow(
     string? CropStoredFileName,
     int? TrackId,
     short Classification,
-    int DivisionId);
+    int DivisionId,
+    FrameMetrics? Frame = null);
 
 /// <summary>
 /// Порт чтения пакета «Медиа» (ТФ-МЕД-03, ТФ-ПЛ-03). Каждый метод применяет floor ядра и политику

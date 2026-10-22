@@ -1,0 +1,75 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@using System.Globalization
+@using ISC.AI.Modules.Media.Domain.Model
+@using ISC.AI.Modules.Media.Domain.Services
+@using ISC.AI.Profile.Investigation.Application.Features.Persons
+
+@* Подсказка лучшего кадра для эталона (ТФ-МЕД-21, ADR-0058 п. 4): из подтверждённых появлений фигуранта на материалах
+   его дела — лучший кадр по оценке (резкость, поворот головы, освещённость, размер), с оценками и сравнением с лучшим
+   действующим эталоном. «Сделать эталоном…» открывает окно «Новый эталон» с выбранным кадром: эталоном он станет
+   только по «Добавить» (ТБ-077). Оценка — пригодность кадра, не вероятность тождества (ТЭ-006). *@
+
+@if (_suggestion is { Suggested: { } best } suggestion)
+{
+    <MudPaper Outlined="true" Class="pa-3 mb-3" Style="border-color:var(--mud-palette-info);">
+        <div class="d-flex align-center gap-2 mb-2">
+            <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Color="Color.Info" Size="Size.Small" />
+            <MudText Typo="Typo.subtitle2">Подсказка: лучший кадр для эталона</MudText>
+        </div>
+        <div class="d-flex gap-3 align-start flex-wrap">
+            @if (best.CropStoredFileName is { } crop)
+            {
+                <img src="@MediaFileRoutes.Build(MediaFileCategories.FaceCrops, best.AssetId, crop)" alt="лучший кадр"
+                     style="width:96px;height:96px;object-fit:cover;border-radius:6px;flex:0 0 auto;" />
+            }
+            <div class="d-flex flex-column gap-1" style="min-width:0;">
+                <MudText Typo="Typo.body2">
+                    Носитель № @best.AssetId «@best.AssetFileName»@(best.FrameTimestampMs is { } ms ? " · кадр " + Clock(ms) : string.Empty)
+                </MudText>
+                <MudText Typo="Typo.caption"><b>@FrameLabels.Score(best.Metrics)</b></MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">@FrameLabels.Details(best.Metrics)</MudText>
+                <MudText Typo="Typo.caption" Color="@(suggestion.SuggestedIsBetter ? Color.Success : Color.Default)">@Comparison(suggestion)</MudText>
+                <div>
+                    <MudButton Variant="@(suggestion.SuggestedIsBetter ? Variant.Filled : Variant.Outlined)" Color="Color.Primary" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.AddPhotoAlternate" Class="mt-1" OnClick="@(() => Use.InvokeAsync(best))">Сделать эталоном…</MudButton>
+                </div>
+            </div>
+        </div>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+            Кадр выбран из подтверждённых появлений на материалах дела (у видео — среди всех кадров трека, сравнено: @suggestion.FramesConsidered).
+            Оценка — пригодность кадра для эталона, а не вероятность тождества.
+        </MudText>
+    </MudPaper>
+}
+
+@code {
+    /// <summary>Фигурант.</summary>
+    [Parameter, EditorRequired] public int PersonId { get; set; }
+
+    /// <summary>«Сделать эталоном…» — открыть окно эталона с этим кадром.</summary>
+    [Parameter] public EventCallback<ReferenceFrameCandidate> Use { get; set; }
+
+    private ReferenceFrameSuggestion? _suggestion;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере подсказка не читается.
+        if (!RendererInfo.IsInteractive)
+        {
+            return;
+        }
+
+        var response = await Dispatcher.Send(new SuggestReferenceFrameQuery(PersonId));
+        _suggestion = response is { Status: true, Data: { } data } ? data : null;
+    }
+
+    private static string Comparison(ReferenceFrameSuggestion suggestion) => suggestion switch
+    {
+        { Current: null } => "Эталона с лицом ещё нет — этот кадр подойдёт для первого.",
+        { Current.Metrics: null } => "У действующего эталона оценок кадра нет (проиндексирован раньше) — сравните сами.",
+        { SuggestedIsBetter: true } => "Лучше действующего эталона (" + FrameLabels.Score(suggestion.Current!.Metrics) + ").",
+        _ => "Действующий эталон не хуже (" + FrameLabels.Score(suggestion.Current!.Metrics) + ") — замена не нужна.",
+    };
+
+    private static string Clock(long ms) => TimeSpan.FromMilliseconds(ms).ToString(ms >= 3_600_000 ? @"h\:mm\:ss" : @"mm\:ss", CultureInfo.InvariantCulture);
+}

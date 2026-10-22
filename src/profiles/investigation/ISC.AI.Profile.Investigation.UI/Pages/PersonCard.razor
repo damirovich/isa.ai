@@ -485,6 +485,8 @@ else
             {
                 <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">@_photosError</MudAlert>
             }
+            @* Подсказка лучшего кадра (ТФ-МЕД-21, ADR-0058): перечитывается, когда меняется набор эталонов. *@
+            <ReferenceFrameHint @key="PhotosKey" PersonId="Id" Use="UseSuggestedFrame" />
             <MudTable T="ReferencePhotoRow" Items="_photos" Hover="true" Dense="true" Outlined="true" Loading="_busy">
                 <HeaderContent>
                     <MudTh>№</MudTh>
@@ -643,7 +645,7 @@ else
         @if (_photoOpen && _person is { } owner)
         {
             <ReferencePhotoPicker CaseId="owner.CaseId" UploadSource="@_photoSource" StartWithUpload="_photoStartUpload"
-                                  SelectionChanged="@(pick => _photoPick = pick)" />
+                                  Initial="@_photoInitial" SelectionChanged="@(pick => _photoPick = pick)" />
         }
         <MudGrid Spacing="2">
             <MudItem xs="12" sm="6">
@@ -1408,9 +1410,24 @@ else
         await ReloadAsync();
     }
 
+    // Набор действующих и заменённых эталонов — ключ подсказки лучшего кадра.
+    private string PhotosKey => string.Join(',', _photos.Select(p => $"{p.Id}:{p.SupersededById}"));
+
+    /// <summary>Подсказанный кадр для окна «Новый эталон» (ADR-0058); <see langword="null"/> — выбор мышкой.</summary>
+    private ReferencePick? _photoInitial;
+
+    // «Сделать эталоном» из подсказки: окно эталона с уже выбранными носителем и лицом; решает человек (ТБ-077).
+    private void UseSuggestedFrame(ReferenceFrameCandidate candidate)
+    {
+        OpenAddPhoto();
+        _photoInitial = new ReferencePick(candidate.AssetId, candidate.FaceId);
+        _photoSource = string.Create(CultureInfo.InvariantCulture, $"Лучший кадр носителя № {candidate.AssetId}");
+    }
+
     private void OpenAddPhoto()
     {
         _photoError = null;
+        _photoInitial = null;
         _photoPick = null;
         _photoSource = null;
         _photoLegalBasis = null;

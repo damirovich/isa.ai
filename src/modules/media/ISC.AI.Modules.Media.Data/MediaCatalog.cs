@@ -367,5 +367,10 @@ public sealed class MediaCatalog(
             f.CropStoredFileName,
             f.TrackId,
             f.Classification,
-            f.DivisionId));
+            f.DivisionId,
+            f.FrameScore != null
+                ? new FrameMetrics(
+                    f.FrameSharpness ?? 0, f.FrameLighting ?? 0, f.FrameYaw ?? 0, f.FramePitch ?? 0, f.FrameRoll ?? 0,
+                    f.FrameEyeDistance ?? 0, f.FrameScore.Value)
+                : null));
 }

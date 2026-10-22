@@ -75,9 +75,37 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("division_id");
 
+                    b.Property<float?>("FrameEyeDistance")
+                        .HasColumnType("real")
+                        .HasColumnName("frame_eye_distance");
+
                     b.Property<int?>("FrameId")
                         .HasColumnType("integer")
                         .HasColumnName("frame_id");
+
+                    b.Property<float?>("FrameLighting")
+                        .HasColumnType("real")
+                        .HasColumnName("frame_lighting");
+
+                    b.Property<float?>("FramePitch")
+                        .HasColumnType("real")
+                        .HasColumnName("frame_pitch");
+
+                    b.Property<float?>("FrameRoll")
+                        .HasColumnType("real")
+                        .HasColumnName("frame_roll");
+
+                    b.Property<float?>("FrameScore")
+                        .HasColumnType("real")
+                        .HasColumnName("frame_score");
+
+                    b.Property<float?>("FrameSharpness")
+                        .HasColumnType("real")
+                        .HasColumnName("frame_sharpness");
+
+                    b.Property<float?>("FrameYaw")
+                        .HasColumnType("real")
+                        .HasColumnName("frame_yaw");
 
                     b.PrimitiveCollection<float[]>("Landmarks")
                         .IsRequired()

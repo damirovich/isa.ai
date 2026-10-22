@@ -19,6 +19,15 @@ public interface IImageTools
     byte[] CropJpeg(byte[] imageBytes, BoundingBox box, float marginRatio = 0.25f, int maxSide = 256, int quality = 85);
 
     /// <summary>
+    /// Измерения области лица <paramref name="box"/> для оценки кадра (ТФ-МЕД-21, ADR-0058): дисперсия лапласиана
+    /// яркости (резкость) на области, приведённой к 96 пикселям по ширине, средняя яркость и её разброс. Только
+    /// измерение — изображение не меняется (ТЭ-007).
+    /// </summary>
+    /// <exception cref="ArgumentException">Рамка не пересекается с изображением.</exception>
+    /// <exception cref="InvalidOperationException">Изображение не распознано.</exception>
+    FaceImageStats MeasureFace(byte[] imageBytes, BoundingBox box);
+
+    /// <summary>
     /// Кадр, уменьшенный ровно до <paramref name="width"/>×<paramref name="height"/> (JPEG), — плитка ленты кадров
     /// (ADR-0038). Размер плитки задаёт вызывающий по пропорциям кадра, поэтому искажения нет; только масштаб (ТЭ-007).
     /// </summary>

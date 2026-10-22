@@ -468,6 +468,18 @@ public sealed class MediaIndexer(
                 progress.Rejected++;
             }
 
+            // Оценки кадра для подсказки эталона (ТФ-МЕД-21, ADR-0058): только измерение; сбой оценки не роняет
+            // индексацию — лицо пишется без оценок, как проиндексированное раньше.
+            FrameMetrics? metrics = null;
+            try
+            {
+                metrics = FrameQuality.Evaluate(face.Landmarks, imageTools.MeasureFace(imageBytes, face.Box), quality.Acceptable);
+            }
+            catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+            {
+                logger.LogWarning(exception, "Оценка кадра лица не выполнена — лицо сохраняется без оценок.");
+            }
+
             var crop = imageTools.CropJpeg(imageBytes, face.Box);
             string cropName;
             using (var cropStream = new MemoryStream(crop))
@@ -476,7 +488,7 @@ public sealed class MediaIndexer(
                     cropStream, ".jpg", MediaFileCategories.FaceCrops, subPath, cancellationToken);
             }
 
-            progress.Faces.Add(new IndexedFace(frameIndex, frameTimestampMs, face, quality, template, cropName, TrackId: null));
+            progress.Faces.Add(new IndexedFace(frameIndex, frameTimestampMs, face, quality, template, cropName, TrackId: null, metrics));
         }
     }
 
