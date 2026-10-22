@@ -50,6 +50,9 @@ public sealed class InvestigationProfile : IProfile
 {
     private const string GroupCases = "Дела";
 
+    // Отчётные формы [АИС 6] (ADR-0061) — своим разделом: «Отчёты» документооборота — это отчёты по документам.
+    private const string GroupReports = "Отчётность";
+
     // Секция меню администрирования — ОБЩАЯ с пакетом: страницы пакета и страницы профиля стоят в
     // одном разделе, иначе в меню было бы два «Администрирования» подряд.
     private const string GroupAdmin = AdminModule.MenuGroup;
@@ -95,6 +98,11 @@ public sealed class InvestigationProfile : IProfile
 
         // --- Секция «Документооборот»: «Документы дела» и остальные страницы пакета docflow.
         .. DocFlowModule.Modules,
+
+        // --- Секция «Отчётность» [АИС 6] (ADR-0061): сводный отчёт результативности распознавания лиц (ТФ-ОТЧ-07); право
+        // «Статистические отчёты» матрицы доступа, счёт — под решёткой допуска.
+        new ModuleDescriptor("reports-recognition", "/reports/recognition", "Результативность распознавания",
+            Icons.Material.Filled.QueryStats, typeof(RecognitionReportPage), ReadPolicy, GroupReports),
 
         // --- Секция «Администрирование» (ТФ-АДМ-01..03, 07). «Пользователи» (учётная запись, роль, допуск в карточке
         // сотрудника) и журнал аудита даёт ПАКЕТ (ADR-0023) — те же экраны, что у «ИнспекторAI»; роли пакет назначает

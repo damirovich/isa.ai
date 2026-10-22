@@ -59,6 +59,9 @@ public static class MediaPersistenceServiceCollectionExtensions
         // RateLimiterOptions хоста, middleware UseRateLimiter — за хостом.
         services.AddMediaFrameRateLimiting();
         services.AddScoped<IMediaCatalog, MediaCatalog>();
+
+        // Статистика распознавания для отчётности (ТФ-ОТЧ-07, ADR-0061): счёт записей под той же решёткой, что каталог.
+        services.AddScoped<IMediaStatistics, MediaStatistics>();
         services.AddScoped<ISearchSessionStore, SearchSessionStore>();
         services.AddScoped<ISuggestionRunStore, SuggestionRunStore>();
 

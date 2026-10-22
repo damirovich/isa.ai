@@ -61,6 +61,9 @@ public static class InvestigationApplicationServiceCollectionExtensions
         // модель; отрисовку .docx регистрирует слой данных (OpenXml).
         services.AddScoped<Features.Briefs.BriefCollector>();
 
+        // Отчётность [АИС 6] (ADR-0061): общая часть показа и выгрузки отчёта результативности распознавания.
+        services.AddScoped<Features.Statistics.RecognitionReportSource>();
+
         services.AddValidatorsFromAssembly(typeof(InvestigationApplicationServiceCollectionExtensions).Assembly);
         return services;
     }

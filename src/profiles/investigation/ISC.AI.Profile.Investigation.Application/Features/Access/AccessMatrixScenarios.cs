@@ -63,6 +63,7 @@ public static class PermissionSectionLabels
         PermissionSection.Media => "Медиа",
         PermissionSection.DocFlow => "Документооборот и сводки",
         PermissionSection.Administration => "Администрирование",
+        PermissionSection.Reports => "Отчётность",
         _ => section.ToString(),
     };
 }
