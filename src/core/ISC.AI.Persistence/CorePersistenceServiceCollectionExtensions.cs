@@ -71,6 +71,10 @@ public static class CorePersistenceServiceCollectionExtensions
         // идентичность это единственное место, где заводят и восстанавливают доступ.
         services.AddScoped<Abstractions.Security.IUserAccountStore, UserAccountStore>();
 
+        // Сеансы входа (ТФ-АДМ-09, ADR-0060): singleton — им пользуются проверка cookie на каждом запросе и реестр
+        // соединений хоста; контекст создаётся фабрикой на вызов.
+        services.AddSingleton<Abstractions.Security.IUserSessionStore, UserSessionStore>();
+
         // Хранилище диалогов чата (сохранение истории общения), разграничение по владельцу-субъекту.
         services.AddScoped<IConversationStore, ConversationStore>();
 

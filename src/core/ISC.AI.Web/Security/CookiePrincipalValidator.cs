@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Security.Claims;
+using ISC.AI.Abstractions.Security;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 
@@ -26,6 +27,21 @@ public static class CookiePrincipalValidator
         {
             return;
         }
+
+        // Сеанс входа (ТФ-АДМ-09, ADR-0060) — на КАЖДЫЙ запрос, до окна ревалидации ниже: завершённый сеанс гасит
+        // cookie сразу (кэш — не дольше 15 с, в своём процессе сбрасывается при завершении). Cookie без номера
+        // сеанса (выдана до учёта сеансов) тоже отклоняется: иначе остался бы сеанс, которого нет в списке и который
+        // нельзя завершить.
+        var sessions = context.HttpContext.RequestServices.GetRequiredService<UserSessionTracker>();
+        if (UserSessionTracker.SessionIdOf(principal) is not { } sessionId
+            || !await sessions.IsActiveAsync(sessionId, context.HttpContext.RequestAborted))
+        {
+            context.RejectPrincipal();
+            await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            return;
+        }
+
+        await sessions.NoteActivityAsync(sessionId, context.HttpContext.RequestAborted);
 
         var configuration = context.HttpContext.RequestServices.GetRequiredService<IConfiguration>();
         var intervalMinutes = int.TryParse(configuration["Auth:RevalidationMinutes"], out var minutes) && minutes > 0
@@ -62,6 +78,8 @@ public static class CookiePrincipalValidator
         {
             // Учётка заблокирована/штамп разошёлся/деактивирована — гасим САМУ cookie, не только
             // текущий circuit: следующая перезагрузка страницы уже не восстановит сессию (ТБ-016).
+            // Сеанс закрывается как «доступ отозван» — и его открытые вкладки уходят на форму входа сразу.
+            await sessions.EndAsync(sessionId, UserSessionEndReason.Revoked, context.HttpContext.RequestAborted);
             context.RejectPrincipal();
             await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
             return;

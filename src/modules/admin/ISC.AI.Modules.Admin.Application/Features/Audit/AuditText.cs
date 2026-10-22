@@ -30,6 +30,7 @@ public static class AuditText
         ["documents"] = "документы", ["assignment"] = "поручение", ["norm"] = "норма", ["violation"] = "нарушение",
         ["method"] = "методика", ["decision"] = "решение", ["authorization"] = "основание поиска",
         ["password"] = "пароль", ["transcript"] = "расшифровка", ["snapshot"] = "снимок кадра",
+        ["user-session"] = "сеанс входа", ["user-sessions"] = "сеансы входа",
 
         // Действия.
         ["view"] = "просмотр", ["list"] = "список", ["create"] = "создание", ["update"] = "правка",
@@ -37,7 +38,7 @@ public static class AuditText
         ["reject"] = "отказано", ["set"] = "изменение", ["reset"] = "сброс", ["export"] = "выгрузка",
         ["upload"] = "загрузка", ["search"] = "поиск", ["login"] = "вход", ["logout"] = "выход", ["link"] = "привязка",
         ["unlink"] = "отвязка", ["activate"] = "включение", ["deactivate"] = "отключение", ["revoke"] = "отзыв",
-        ["from"] = "от редакции", ["снята"] = "снята",
+        ["from"] = "от редакции", ["снята"] = "снята", ["terminate"] = "завершение",
     };
 
     /// <summary>Подпись действия журнала.</summary>

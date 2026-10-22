@@ -38,6 +38,14 @@ public sealed class InspectorPlatformAdministration(IUserRoleStore roles, ISubje
         PermissionRule.CallerHasAsync(roles, subjectProvider, InspectorPermissions.AdminAudit, cancellationToken);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Строка матрицы «Активные сеансы» (ТФ-АДМ-09, ADR-0060): по умолчанию Администратор — отдельной роли офицера ИБ у
+    /// «ИнспекторAI» нет; Администратор может открыть право другой роли.
+    /// </remarks>
+    public Task<bool> CanManageSessionsAsync(CancellationToken cancellationToken = default) =>
+        PermissionRule.CallerHasAsync(roles, subjectProvider, InspectorPermissions.AdminSessions, cancellationToken);
+
+    /// <inheritdoc />
     /// <remarks>Тот же признак, что открывает <see cref="AdministrationRule"/> любому вошедшему: Администратора нет ни одного.</remarks>
     public async Task<bool> IsInitialSetupAsync(CancellationToken cancellationToken = default) =>
         !await roles.AnyAdministratorAsync(cancellationToken);

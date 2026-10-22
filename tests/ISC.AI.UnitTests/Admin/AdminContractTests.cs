@@ -73,7 +73,9 @@ public sealed class AdminContractTests
         AdminModule.RequiredCoreServices.ShouldContain(typeof(Abstractions.Security.IAccessContextProvider));
         AdminModule.RequiredCoreServices.ShouldContain(typeof(Abstractions.Audit.IAuditReader));
         AdminModule.RequiredCoreServices.ShouldContain(typeof(Abstractions.Audit.IAuditWriter));
-        AdminModule.RequiredCoreServices.Count.ShouldBe(6);
+        AdminModule.RequiredCoreServices.ShouldContain(typeof(Abstractions.Security.IUserSessionStore));
+        AdminModule.RequiredCoreServices.ShouldContain(typeof(Abstractions.Security.IUserSessionMonitor));
+        AdminModule.RequiredCoreServices.Count.ShouldBe(8);
 
         // Порт либо нейтрален и живёт в ядре, либо зависит от модели ролей — и его даёт профиль.
         // Пересечение списков означало бы двоякое толкование ответственности при подключении.

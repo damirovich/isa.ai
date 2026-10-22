@@ -1,0 +1,213 @@
+@namespace ISC.AI.Modules.Admin.UI
+@* «Активные сеансы» (ТФ-АДМ-09, ADR-0060): кто сейчас работает в системе — сотрудник, IP-адрес, рабочее место
+   (браузер и система по строке браузера, полная строка — в подсказке), вход, последняя активность, «на связи»
+   (открыта вкладка). «Завершить…» — с обязательной причиной: открытые вкладки сеанса сразу уходят на форму входа.
+   Свой текущий сеанс помечен и не завершается отсюда — для этого «Выход». Право смотреть и завершать проверяет
+   обработчик (IPlatformAdministration.CanManageSessionsAsync), отказ показывается текстом. Открытие списка и каждое
+   завершение пишутся в журнал аудита (ТБ-030). Автообновления нет намеренно: каждое открытие списка — запись
+   журнала, и опрос забил бы журнал; список обновляется кнопкой. *@
+@page "/admin/sessions"
+@rendermode InteractiveServer
+@inject ISnackbar Snackbar
+@inject TimeProvider Clock
+@using System.Globalization
+@using ISC.AI.Modules.Admin.Application.Features.Sessions
+
+<PageHeader Title="Активные сеансы" Subtitle="Кто сейчас работает в системе · сеанс можно завершить с указанием причины"
+            Icon="@Icons.Material.Filled.Devices">
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" Disabled="_busy" OnClick="LoadAsync">Обновить</MudButton>
+</PageHeader>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+<MudPaper Outlined="true" Class="pa-3 my-3">
+    <div class="d-flex gap-2 align-center flex-wrap">
+        <div style="width:340px;max-width:100%;">
+            <MudTextField T="string" @bind-Value="_text" Label="Сотрудник или IP-адрес" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Clearable="true" OnKeyDown="OnSearchKeyAsync" />
+        </div>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Search"
+                   Disabled="_busy" OnClick="LoadAsync">Найти</MudButton>
+        <MudSpacer />
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">@CountText</MudText>
+    </div>
+    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
+        Активным считается сеанс с открытой вкладкой («на связи») или с действиями за последние @_idleMinutes мин.
+        Браузер, закрытый без «Выхода», пропадает из списка по истечении этого времени.
+    </MudText>
+</MudPaper>
+
+<MudTable T="ActiveSessionRow" Items="_rows" Dense="true" Hover="true" Outlined="true" Loading="_busy"
+          LoadingProgressColor="Color.Primary">
+    <HeaderContent>
+        <MudTh>Сотрудник</MudTh>
+        <MudTh>IP-адрес</MudTh>
+        <MudTh>Рабочее место</MudTh>
+        <MudTh Style="width:140px;">Вход</MudTh>
+        <MudTh>Последняя активность</MudTh>
+        <MudTh>Состояние</MudTh>
+        <MudTh Style="width:150px;"></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Сотрудник">
+            <MudText Typo="Typo.body2">@(context.DisplayName ?? context.UserName)</MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                @context.UserName@(context.IsCurrent ? " · ваш текущий сеанс" : string.Empty)
+            </MudText>
+        </MudTd>
+        <MudTd DataLabel="IP-адрес">@(context.ClientAddress ?? "—")</MudTd>
+        <MudTd DataLabel="Рабочее место"><span title="@context.UserAgent">@context.Workstation</span></MudTd>
+        <MudTd DataLabel="Вход">@Time(context.StartedAtUtc)</MudTd>
+        <MudTd DataLabel="Последняя активность"><span title="@Time(context.LastActivityAtUtc)">@Ago(context.LastActivityAtUtc)</span></MudTd>
+        <MudTd DataLabel="Состояние">
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Class="ma-0"
+                     Color="@(context.Connected ? Color.Success : Color.Default)">@(context.Connected ? "на связи" : "без связи")</MudChip>
+        </MudTd>
+        <MudTd>
+            @if (context.IsCurrent)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">закрыть — «Выход»</MudText>
+            }
+            else
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.Logout"
+                           Disabled="_busy" OnClick="@(() => OpenTerminate(context))">Завершить…</MudButton>
+            }
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Активных сеансов по этому отбору нет.</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@* --- Завершение с причиной --- *@
+<MudDialog @bind-Visible="_terminateOpen" Options="FormOptions">
+    <TitleContent><MudText Typo="Typo.h6">Завершить сеанс?</MudText></TitleContent>
+    <DialogContent>
+        @if (_target is { } target)
+        {
+            <MudText Typo="Typo.body2" Class="mb-3">
+                <b>@(target.DisplayName ?? target.UserName)</b> (@(target.ClientAddress ?? "адрес неизвестен"), @target.Workstation)
+                сразу перейдёт на форму входа; несохранённый ввод на его экране пропадёт. Войти снова сотрудник сможет —
+                чтобы не пускать совсем, отключите учётную запись в «Пользователях».
+            </MudText>
+        }
+        <MudTextField @bind-Value="_reason" Label="Причина" Variant="Variant.Outlined" Lines="2" Immediate="true"
+                      MaxLength="@TerminateUserSessionCommand.MaxReasonLength"
+                      HelperText="@($"Обязательно, от {TerminateUserSessionCommand.MinReasonLength} символов. Сохраняется в истории сеанса; завершение пишется в журнал аудита.")" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _terminateOpen = false)">Отмена</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Filled" Disabled="@(_busy || !ReasonValid)" OnClick="TerminateAsync">Завершить</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly DialogOptions FormOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true };
+
+    private IReadOnlyList<ActiveSessionRow> _rows = [];
+    private int _idleMinutes = 30;
+    private bool _busy = true; // «загрузка…» до первой интерактивной загрузки
+    private string? _error;
+    private string? _text;
+
+    private bool _terminateOpen;
+    private ActiveSessionRow? _target;
+    private string? _reason;
+
+    private bool ReasonValid => (_reason?.Trim().Length ?? 0) >= TerminateUserSessionCommand.MinReasonLength;
+
+    private string CountText => _busy ? string.Empty
+        : $"Сеансов: {_rows.Count.ToString(CultureInfo.InvariantCulture)} · на связи: {_rows.Count(r => r.Connected).ToString(CultureInfo.InvariantCulture)}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере список не читается.
+        if (!RendererInfo.IsInteractive) { return; }
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new ListActiveSessionsQuery(string.IsNullOrWhiteSpace(_text) ? null : _text.Trim()));
+            if (response is { Status: true, Data: { } view })
+            {
+                _rows = view.Rows;
+                _idleMinutes = view.IdleMinutes;
+            }
+            else
+            {
+                _rows = [];
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task OnSearchKeyAsync(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await LoadAsync();
+        }
+    }
+
+    private void OpenTerminate(ActiveSessionRow row)
+    {
+        _target = row;
+        _reason = null;
+        _terminateOpen = true;
+    }
+
+    private async Task TerminateAsync()
+    {
+        if (_target is not { } target || !ReasonValid)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var response = await Dispatcher.Send(new TerminateUserSessionCommand(target.SessionId, _reason!.Trim()));
+            _terminateOpen = false;
+            if (response.Status)
+            {
+                Snackbar.Add($"Сеанс завершён: {target.DisplayName ?? target.UserName}.", Severity.Success);
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await LoadAsync();
+    }
+
+    private static string Time(DateTime utc) =>
+        DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture);
+
+    private string Ago(DateTime utc)
+    {
+        var span = Clock.GetUtcNow().UtcDateTime - DateTime.SpecifyKind(utc, DateTimeKind.Utc);
+        return span.TotalMinutes < 1 ? "только что"
+            : span.TotalMinutes < 60 ? $"{((int)span.TotalMinutes).ToString(CultureInfo.InvariantCulture)} мин назад"
+            : span.TotalHours < 24 ? $"{((int)span.TotalHours).ToString(CultureInfo.InvariantCulture)} ч {span.Minutes.ToString(CultureInfo.InvariantCulture)} мин назад"
+            : Time(utc);
+    }
+}

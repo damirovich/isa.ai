@@ -156,6 +156,12 @@ try
 
     builder.Services.AddCascadingAuthenticationState();
 
+    // Сеансы входа (ТФ-АДМ-09, ADR-0060): учёт, проверка и реестр живых соединений — один на процесс. Регистрируется
+    // и в dev-режиме без входа: экран «Активные сеансы» работает (список просто пуст).
+    builder.Services.TryAddSingleton(TimeProvider.System);
+    builder.Services.AddSingleton<UserSessionTracker>();
+    builder.Services.AddSingleton<IUserSessionMonitor>(sp => sp.GetRequiredService<UserSessionTracker>());
+
     if (devAuth)
     {
         builder.Services.AddScoped<IAccessContextProvider, DevAccessContextProvider>();
@@ -199,6 +205,11 @@ try
         builder.Services.AddScoped<LoginService>();
         builder.Services.AddScoped<ExternalIdentityRevalidator>();
         builder.Services.AddScoped<AuthenticationStateProvider, StampRevalidatingAuthenticationStateProvider>();
+
+        // Соединение Blazor ↔ сеанс входа (ADR-0060): активность по действиям в соединении и мгновенный выход
+        // завершённого сеанса в уже открытой вкладке.
+        builder.Services.TryAddEnumerable(ServiceDescriptor.Scoped<
+            Microsoft.AspNetCore.Components.Server.Circuits.CircuitHandler, SessionCircuitHandler>());
 
         // За обратным прокси/TLS-терминатором внутри контура RemoteIpAddress иначе указывал бы на сам
         // прокси для ВСЕХ запросов — троттлинг входа (ниже) делил бы один лимит на всю организацию.

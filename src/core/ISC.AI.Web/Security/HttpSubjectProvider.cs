@@ -37,6 +37,13 @@ public sealed class HttpSubjectProvider(
                 : null;
     }
 
+    /// <inheritdoc />
+    public async Task<Guid?> GetCurrentSessionIdAsync(CancellationToken cancellationToken = default)
+    {
+        var principal = await ResolvePrincipalAsync();
+        return principal?.Identity?.IsAuthenticated == true ? UserSessionTracker.SessionIdOf(principal) : null;
+    }
+
     private async Task<ClaimsPrincipal?> ResolvePrincipalAsync()
     {
         try

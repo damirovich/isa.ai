@@ -113,6 +113,9 @@ public static class InspectorPermissions
     /// <summary>Журнал аудита.</summary>
     public const string AdminAudit = "admin.audit";
 
+    /// <summary>Активные сеансы: кто в системе, завершение сеанса (ТФ-АДМ-09, ADR-0060).</summary>
+    public const string AdminSessions = "admin.sessions";
+
     private static readonly UserRole[] AllRoles = Enum.GetValues<UserRole>();
 
     /// <summary>Все права профиля в порядке показа на экране.</summary>
@@ -162,6 +165,9 @@ public static class InspectorPermissions
         new(AdminAudit, PermissionSection.Administration, "Журнал аудита",
             "Чтение журнала в пределах допуска",
             Roles(UserRole.Administrator), OpenDuringInitialSetup: true),
+        new(AdminSessions, PermissionSection.Administration, "Активные сеансы",
+            "Кто сейчас работает в системе; завершение чужого сеанса с причиной",
+            Roles(UserRole.Administrator), OpenDuringInitialSetup: true),
     ];
 
     /// <summary>
@@ -195,6 +201,7 @@ public static class InspectorPermissions
         new("admin-users", "Пользователи", [AdminUsers]),
         new("admin-access-matrix", "Матрица доступа", [AdminMatrix]),
         new("admin-audit", "Журнал аудита", [AdminAudit]),
+        new("admin-sessions", "Активные сеансы", [AdminSessions]),
         new("admin-violation-categories", "Виды нарушений", [AdminDirectories]),
     ];
 
