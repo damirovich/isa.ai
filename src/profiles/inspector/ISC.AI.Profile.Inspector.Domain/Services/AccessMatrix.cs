@@ -116,6 +116,9 @@ public static class InspectorPermissions
     /// <summary>Активные сеансы: кто в системе, завершение сеанса (ТФ-АДМ-09, ADR-0060).</summary>
     public const string AdminSessions = "admin.sessions";
 
+    /// <summary>Резервные копии: зашифрованная копия на носитель и проверка манифеста (ТФ-АДМ-04, ADR-0063).</summary>
+    public const string AdminBackups = "admin.backups";
+
     private static readonly UserRole[] AllRoles = Enum.GetValues<UserRole>();
 
     /// <summary>Все права профиля в порядке показа на экране.</summary>
@@ -168,6 +171,9 @@ public static class InspectorPermissions
         new(AdminSessions, PermissionSection.Administration, "Активные сеансы",
             "Кто сейчас работает в системе; завершение чужого сеанса с причиной",
             Roles(UserRole.Administrator), OpenDuringInitialSetup: true),
+        new(AdminBackups, PermissionSection.Administration, "Резервные копии",
+            "Зашифрованная копия баз и хранилища на носитель, проверка манифеста; содержимого копии право не открывает",
+            Roles(UserRole.Administrator), OpenDuringInitialSetup: true),
     ];
 
     /// <summary>
@@ -202,6 +208,7 @@ public static class InspectorPermissions
         new("admin-access-matrix", "Матрица доступа", [AdminMatrix]),
         new("admin-audit", "Журнал аудита", [AdminAudit]),
         new("admin-sessions", "Активные сеансы", [AdminSessions]),
+        new("admin-backups", "Резервные копии", [AdminBackups]),
         new("admin-violation-categories", "Виды нарушений", [AdminDirectories]),
     ];
 

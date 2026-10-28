@@ -40,6 +40,9 @@ public static class CorePersistenceServiceCollectionExtensions
                 })
                 .UseSnakeCaseNamingConvention());
 
+        // База ядра — в резервную копию (ADR-0063): копируется то, чем пользуется поставка, а не все строки из настроек.
+        services.AddSingleton(new Abstractions.Backup.BackupDatabase("core", connectionString));
+
         // Неизменяемый журнал аудита (ТБ-030/031), append-only с хеш-цепочкой.
         services.AddScoped<IAuditWriter, AuditWriter>();
 
@@ -90,6 +93,15 @@ public static class CorePersistenceServiceCollectionExtensions
         // те же границы корня; хранилище без локальных путей этот порт просто не регистрирует.
         services.AddSingleton<Abstractions.Storage.ILocalFileLocator>(
             sp => sp.GetRequiredService<Storage.LocalFileStorage>());
+
+        // Резервные копии (ТФ-АДМ-04, ТБ-082, ADR-0063): настройки читаются один раз, очередь копий — своя (общая фоновая
+        // выполняет задачи по одной, многочасовая копия задержала бы обработку носителей); выполняет её исполнитель хоста.
+        // Каталоги файлов пакетов — их регистрации BackupFileRoot (ядро о пакетах не знает).
+        services.AddSingleton(sp => Backup.BackupSettings.From(
+            configuration, sp.GetServices<Abstractions.Backup.BackupDatabase>(), sp.GetServices<Abstractions.Backup.BackupFileRoot>()));
+        services.AddSingleton<Backup.BackupJobChannel>();
+        services.AddScoped<Backup.BackupService>();
+        services.AddScoped<Abstractions.Backup.IBackupService>(sp => sp.GetRequiredService<Backup.BackupService>());
 
         return services;
     }

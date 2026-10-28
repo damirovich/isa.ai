@@ -46,6 +46,14 @@ public sealed class InvestigationPlatformAdministration(IUserRoleStore roles, IS
         PermissionRule.CallerHasAsync(roles, subjectProvider, InvestigationPermissions.AdminSessions, cancellationToken);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ИНВАРИАНТ (ТФ-АДМ-04, ТБ-079): строка матрицы «Резервные копии» (ADR-0063) — по умолчанию Администратор. Копия
+    /// зашифрована открытым ключом Заказчика, закрытого ключа в системе нет — право не открывает содержимого.
+    /// </remarks>
+    public Task<bool> CanManageBackupsAsync(CancellationToken cancellationToken = default) =>
+        PermissionRule.CallerHasAsync(roles, subjectProvider, InvestigationPermissions.AdminBackups, cancellationToken);
+
+    /// <inheritdoc />
     /// <remarks>Тот же признак, что открывает <see cref="AdministrationRule"/> любому вошедшему: Администратора нет ни одного.</remarks>
     public async Task<bool> IsInitialSetupAsync(CancellationToken cancellationToken = default) =>
         !await roles.AnyAdministratorAsync(cancellationToken);

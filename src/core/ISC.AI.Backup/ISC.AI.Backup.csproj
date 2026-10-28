@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Резервные копии (ТФ-АДМ-04, ТБ-082, ADR-0063): формат каталога копии и манифест, шифрование открытым ключом
+       Заказчика (RSA-OAEP + AES-256-GCM средствами .NET), архив файлового хранилища, запуск pg_dump/pg_restore.
+       Общая для хоста (создание и проверка копии) и программы восстановления ISC.AI.Backup.Restore — формат один. -->
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ISC.AI.UnitTests" />
+    <InternalsVisibleTo Include="ISC.AI.IntegrationTests" />
+  </ItemGroup>
+
+</Project>

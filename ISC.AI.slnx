@@ -3,6 +3,7 @@
   <Folder Name="/src/core/">
     <Project Path="src/core/ISC.AI.Abstractions/ISC.AI.Abstractions.csproj" Id="1cfeaa43-4084-486c-b6d2-65829027f0f0" />
     <Project Path="src/core/ISC.AI.AI/ISC.AI.AI.csproj" Id="f18df91e-0467-4aa8-8c5f-a7316030f4bc" />
+    <Project Path="src/core/ISC.AI.Backup/ISC.AI.Backup.csproj" Id="623d6c73-1b39-496f-86cb-46a5673db744" />
     <Project Path="src/core/ISC.AI.Documents/ISC.AI.Documents.csproj" Id="25800578-8fad-40b0-b61b-dbc55ad16c39" />
     <Project Path="src/core/ISC.AI.Ingestion/ISC.AI.Ingestion.csproj" Id="8fd6b9fc-ed43-4abe-ac88-334d90e67d71" />
     <Project Path="src/core/ISC.AI.Persistence/ISC.AI.Persistence.csproj" Id="065788bd-f3d2-4fe1-be00-2b9e7033131c" />
@@ -56,6 +57,7 @@
     <Project Path="src/profiles/inspector/ISC.AI.Profile.Inspector/ISC.AI.Profile.Inspector.csproj" Id="47a6e48b-dbf4-456b-9bdd-752e97d848b7" />
   </Folder>
   <Folder Name="/src/tools/">
+    <Project Path="src/tools/ISC.AI.Backup.Restore/ISC.AI.Backup.Restore.csproj" />
     <Project Path="src/tools/ISC.AI.Harvester.Web/ISC.AI.Harvester.Web.csproj" />
     <Project Path="src/tools/ISC.AI.Harvester/ISC.AI.Harvester.csproj" />
   </Folder>

@@ -1,0 +1,45 @@
+/* «Резервные копии»: три карточки состояния, строка хода копии, длинные пояснения в таблице. */
+
+.backup-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
+}
+
+.backup-grid ::deep .backup-card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    color: var(--mud-palette-text-secondary);
+    font-size: .8125rem;
+    font-weight: 500;
+}
+
+.backup-grid ::deep .backup-path {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.backup-running {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--mud-palette-text-secondary);
+    font-size: .875rem;
+}
+
+.backup-problems {
+    margin: 0 0 6px 18px;
+    padding: 0;
+    font-size: .875rem;
+}
+
+::deep .backup-note {
+    max-width: 420px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

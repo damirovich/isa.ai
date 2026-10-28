@@ -22,6 +22,9 @@
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.9" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.2" />
+    <!-- Npgsql напрямую — резервные копии (ADR-0063): служебные запросы программы восстановления без EF. Та же версия,
+         что приходит транзитивно с провайдером EF; лицензия PostgreSQL (разрешительная). -->
+    <PackageVersion Include="Npgsql" Version="10.0.3" />
     <PackageVersion Include="Pgvector" Version="0.3.2" />
     <PackageVersion Include="Pgvector.EntityFrameworkCore" Version="0.3.0" />
     <PackageVersion Include="EFCore.NamingConventions" Version="10.0.1" />

@@ -25,6 +25,9 @@ public static class InspectorPersistenceServiceCollectionExtensions
                     npg.MigrationsHistoryTable("__ef_migrations_history", InspectorDbContext.Schema))
                 .UseSnakeCaseNamingConvention());
 
+        // Эта база — в резервную копию (ADR-0063): копируется то, чем пользуется поставка, а не все строки из настроек.
+        services.AddSingleton(new ISC.AI.Abstractions.Backup.BackupDatabase("inspector", connectionString));
+
         // Материализация статуса редакции НПА → флаг годности ядра по связкам (Э4-02, ADR-0013).
         services.AddScoped<IRevisionStatusMaterializer, RevisionStatusMaterializer>();
 

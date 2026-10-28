@@ -211,6 +211,88 @@ namespace ISC.AI.Persistence.Migrations
                     b.ToTable("background_task", "core");
                 });
 
+            modelBuilder.Entity("ISC.AI.Persistence.Entities.BackupRunEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<long>("BytesWritten")
+                        .HasColumnType("bigint")
+                        .HasColumnName("bytes_written");
+
+                    b.Property<int>("Databases")
+                        .HasColumnType("integer")
+                        .HasColumnName("databases");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("error");
+
+                    b.Property<DateTime?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("finished_at");
+
+                    b.Property<string>("FolderName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("folder_name");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at");
+
+                    b.Property<int?>("StartedByUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("started_by_user_id");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint")
+                        .HasColumnName("status");
+
+                    b.Property<long?>("StorageBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("storage_bytes");
+
+                    b.Property<int?>("StorageFiles")
+                        .HasColumnType("integer")
+                        .HasColumnName("storage_files");
+
+                    b.Property<DateTime?>("VerifiedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("verified_at");
+
+                    b.Property<int?>("VerifiedByUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("verified_by_user_id");
+
+                    b.Property<string>("VerifyNote")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("verify_note");
+
+                    b.Property<short?>("VerifyStatus")
+                        .HasColumnType("smallint")
+                        .HasColumnName("verify_status");
+
+                    b.HasKey("Id")
+                        .HasName("pk_backup_run");
+
+                    b.HasIndex("StartedAt")
+                        .HasDatabaseName("ix_backup_run_started_at");
+
+                    b.HasIndex("Status")
+                        .IsUnique()
+                        .HasDatabaseName("ux_backup_run_single_running")
+                        .HasFilter("status = 1");
+
+                    b.ToTable("backup_run", "core");
+                });
+
             modelBuilder.Entity("ISC.AI.Persistence.Entities.ChunkEntity", b =>
                 {
                     b.Property<int>("Id")

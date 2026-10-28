@@ -255,7 +255,8 @@ Generated_Code/
 # to a newer Visual Studio version. Backup files are not needed,
 # because we have git ;-)
 _UpgradeReport_Files/
-Backup*/
+# Только в корне: без «/» правило прятало исходники резервных копий (ADR-0063) — папки Backup/ и Features/Backups/.
+/Backup*/
 UpgradeLog*.XML
 UpgradeLog*.htm
 ServiceFabricBackup/

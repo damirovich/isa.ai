@@ -24,6 +24,9 @@ public static class DocFlowPersistenceServiceCollectionExtensions
                     npg.MigrationsHistoryTable("__ef_migrations_history", DocFlowDbContext.Schema))
                 .UseSnakeCaseNamingConvention());
 
+        // Эта база — в резервную копию (ADR-0063): копируется то, чем пользуется поставка, а не все строки из настроек.
+        services.AddSingleton(new ISC.AI.Abstractions.Backup.BackupDatabase("docflow", connectionString));
+
         // Порты домена модуля → реализации слоя данных (та же слоистость, что у профиля).
         services.AddScoped<Domain.Services.IDocumentTypeStore, DocumentTypeStore>();
         services.AddScoped<Domain.Services.IDocumentStore, DocumentStore>();
@@ -51,6 +54,10 @@ public static class DocFlowPersistenceServiceCollectionExtensions
 
         // Файловое хранилище модуля (этап 4.2, §3.3): локальная ФС контура, путь — DocFlow:Storage:BasePath.
         services.AddSingleton<Domain.Services.IDocFlowFileStorage, LocalDocFlowFileStorage>();
+
+        // Его каталог — в резервную копию (ТБ-082, ADR-0063): строки docflow ссылаются на эти файлы, без них копия неполна.
+        services.AddSingleton(new ISC.AI.Abstractions.Backup.BackupFileRoot(
+            LocalDocFlowFileStorage.BackupName, LocalDocFlowFileStorage.ResolveBasePath(configuration)));
 
         // Просмотр файлов без скачивания (этап 4.3, §3.3): резолвинг для эндпоинта раздачи.
         services.AddScoped<Domain.Services.IDocumentFileAccess, DocumentFileAccessResolver>();

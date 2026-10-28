@@ -60,6 +60,8 @@ public sealed class AccessMatrixTests
         [InvestigationPermissions.AdminAudit] = [InvestigationRole.Administrator, InvestigationRole.SecurityOfficer],
         // Новое право (ADR-0060): экрана сеансов прежде не было; по умолчанию — как журнал, Администратор и Офицер ИБ.
         [InvestigationPermissions.AdminSessions] = [InvestigationRole.Administrator, InvestigationRole.SecurityOfficer],
+        // Новое право (ADR-0063): экрана резервных копий прежде не было; по умолчанию — Администратор.
+        [InvestigationPermissions.AdminBackups] = [InvestigationRole.Administrator],
         // Новое право (ADR-0061): статистических отчётов [АИС 6] прежде не было; по умолчанию — Руководитель,
         // Администратор и Офицер ИБ (аудит работы распознавания).
         [InvestigationPermissions.ReportsStatistics] = [InvestigationRole.Head, InvestigationRole.Administrator, InvestigationRole.SecurityOfficer],
@@ -70,6 +72,7 @@ public sealed class AccessMatrixTests
     [
         InvestigationPermissions.DocFlowSettings, InvestigationPermissions.AdminUsers, InvestigationPermissions.AdminMatrix,
         InvestigationPermissions.AdminDirectories, InvestigationPermissions.AdminAudit, InvestigationPermissions.AdminSessions,
+        InvestigationPermissions.AdminBackups,
     ];
 
     private readonly IUserRoleStore _roles = Substitute.For<IUserRoleStore>();

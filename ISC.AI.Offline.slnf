@@ -4,6 +4,7 @@
     "projects": [
       "src\\core\\ISC.AI.Abstractions\\ISC.AI.Abstractions.csproj",
       "src\\core\\ISC.AI.AI\\ISC.AI.AI.csproj",
+      "src\\core\\ISC.AI.Backup\\ISC.AI.Backup.csproj",
       "src\\core\\ISC.AI.Documents\\ISC.AI.Documents.csproj",
       "src\\core\\ISC.AI.Ingestion\\ISC.AI.Ingestion.csproj",
       "src\\core\\ISC.AI.Persistence\\ISC.AI.Persistence.csproj",
@@ -38,6 +39,7 @@
       "src\\profiles\\inspector\\ISC.AI.Profile.Inspector.Domain\\ISC.AI.Profile.Inspector.Domain.csproj",
       "src\\profiles\\inspector\\ISC.AI.Profile.Inspector.UI\\ISC.AI.Profile.Inspector.UI.csproj",
       "src\\profiles\\inspector\\ISC.AI.Profile.Inspector\\ISC.AI.Profile.Inspector.csproj",
+      "src\\tools\\ISC.AI.Backup.Restore\\ISC.AI.Backup.Restore.csproj",
       "src\\tools\\ISC.AI.Harvester.Web\\ISC.AI.Harvester.Web.csproj",
       "src\\tools\\ISC.AI.Harvester\\ISC.AI.Harvester.csproj",
       "tests\\ISC.AI.Evals\\ISC.AI.Evals.csproj",
