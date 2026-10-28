@@ -2,6 +2,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ISC.AI.Abstractions\ISC.AI.Abstractions.csproj" />
+    <!-- Резервные копии (ADR-0063): формат, шифрование и pg_dump — общие с программой восстановления. -->
+    <ProjectReference Include="..\ISC.AI.Backup\ISC.AI.Backup.csproj" />
   </ItemGroup>
 
   <!-- Инфраструктура данных ядра: CoreDbContext (схема core), pgvector, аудит, миграции. -->

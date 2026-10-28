@@ -146,6 +146,9 @@ public static class InvestigationPermissions
     /// <summary>Активные сеансы: кто в системе, завершение сеанса (ТФ-АДМ-09, ADR-0060).</summary>
     public const string AdminSessions = "admin.sessions";
 
+    /// <summary>Резервные копии: зашифрованная копия на носитель и проверка манифеста (ТФ-АДМ-04, ADR-0063).</summary>
+    public const string AdminBackups = "admin.backups";
+
     /// <summary>Статистические отчёты [АИС 6]: результативность распознавания и другие сводные формы (ADR-0061).</summary>
     public const string ReportsStatistics = "reports.statistics";
 
@@ -237,6 +240,9 @@ public static class InvestigationPermissions
         new(AdminSessions, PermissionSection.Administration, "Активные сеансы",
             "Кто сейчас работает в системе; завершение чужого сеанса с причиной",
             Roles(InvestigationRole.Administrator, InvestigationRole.SecurityOfficer), OpenDuringInitialSetup: true),
+        new(AdminBackups, PermissionSection.Administration, "Резервные копии",
+            "Зашифрованная копия баз и хранилища на носитель, проверка манифеста; содержимого копии право не открывает",
+            Roles(InvestigationRole.Administrator), OpenDuringInitialSetup: true),
 
         new(ReportsStatistics, PermissionSection.Reports, "Статистические отчёты",
             "Результативность распознавания, журнал суточной активности, статистика карточек объектов — в пределах допуска; выгрузка с грифом",
@@ -265,6 +271,7 @@ public static class InvestigationPermissions
         new("admin-access-matrix", "Матрица доступа", [AdminMatrix]),
         new("admin-audit", "Журнал аудита", [AdminAudit]),
         new("admin-sessions", "Активные сеансы", [AdminSessions]),
+        new("admin-backups", "Резервные копии", [AdminBackups]),
         new("reports-recognition", "Результативность распознавания", [ReportsStatistics]),
         new("reports-activity", "Журнал суточной активности", [ReportsStatistics]),
         new("reports-object-cards", "Статистика карточек объектов", [ReportsStatistics]),

@@ -67,6 +67,9 @@ public static class AdminModule
         typeof(Abstractions.Audit.IAuditWriter),
         typeof(Abstractions.Security.IUserSessionStore),
         typeof(Abstractions.Security.IUserSessionMonitor),
+
+        // Резервные копии (ТФ-АДМ-04, ADR-0063) — порт ядра: копия, проверка, журнал прогонов.
+        typeof(Abstractions.Backup.IBackupService),
     ];
 
     /// <summary>
@@ -86,6 +89,10 @@ public static class AdminModule
         // «Активные сеансы» (ТФ-АДМ-09, ADR-0060): кто сейчас в системе, завершение сеанса с причиной.
         new ModuleDescriptor("admin-sessions", "/admin/sessions", "Активные сеансы",
             Icons.Material.Filled.Devices, typeof(ActiveSessions), ReadPolicy, MenuGroup),
+
+        // «Резервные копии» (ТФ-АДМ-04, ТБ-082, ADR-0063): зашифрованная копия на носитель, проверка манифеста.
+        new ModuleDescriptor("admin-backups", "/admin/backups", "Резервные копии",
+            Icons.Material.Filled.Backup, typeof(Backups), ReadPolicy, MenuGroup),
     ];
 
     /// <summary>Виджеты оболочки: кнопка смены пароля в шапке (диалог с любого экрана).</summary>

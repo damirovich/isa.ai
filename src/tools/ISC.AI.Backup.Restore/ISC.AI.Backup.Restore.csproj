@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Программа восстановления из резервной копии (ТФ-АДМ-04, ТБ-082, ADR-0063): запускается на сервере ВНУТРИ контура
+       при остановленном хосте, двумя лицами — Администратор и хранитель ключа. Команды: keygen (пара ключей для
+       хранителя), verify (манифест копии), restore (восстановление баз и хранилища без уничтожения прежних).
+       Ссылается только на ISC.AI.Backup — формат копии общий с хостом; ни EF, ни хоста, ни профилей. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\core\ISC.AI.Backup\ISC.AI.Backup.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ISC.AI.UnitTests" />
+    <InternalsVisibleTo Include="ISC.AI.IntegrationTests" />
+  </ItemGroup>
+
+</Project>

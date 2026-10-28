@@ -1,0 +1,329 @@
+@namespace ISC.AI.Modules.Admin.UI
+@* «Резервные копии» (ТФ-АДМ-04, ТБ-082, ADR-0063): полная копия баз и всех каталогов файлов, зашифрованная открытым
+   ключом Заказчика, на подключённый изолированный носитель. Состояние: носитель, свободное место и оценка объёма копии,
+   ключ (отпечаток), что не настроено; напоминание, если последней успешной копии больше 30 дней. «Сделать копию» и
+   «Проверить» (манифест последней копии) — в фоне; пока идёт копия или проверка, экран обновляется сам каждые 3 с —
+   состояние копий материалов не содержит и не аудируется, аудируются запуск, проверка и итоги. Восстановление —
+   офлайн программой ISC.AI.Backup.Restore двумя лицами (не отсюда). Право проверяет обработчик. *@
+@page "/admin/backups"
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@inject ISnackbar Snackbar
+@inject TimeProvider Clock
+@using System.Globalization
+@using System.Threading
+@using ISC.AI.Abstractions.Backup
+@using ISC.AI.Modules.Admin.Application.Features.Backups
+
+<PageHeader Title="Резервные копии"
+            Subtitle="Полная зашифрованная копия баз и файлов на изолированный носитель · не реже раза в месяц"
+            Icon="@Icons.Material.Filled.Backup">
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" Disabled="_loading" OnClick="LoadAsync">Обновить</MudButton>
+</PageHeader>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3">@_error</MudAlert>
+}
+else if (_view is null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-4" />
+}
+else
+{
+    var view = _view;
+    var overview = view.Overview;
+    var running = overview.Runs.FirstOrDefault(r => r.Status == BackupRunStatus.Running);
+
+    @if (view.ReminderDue)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="my-3">
+            @(view.LastSuccessAtUtc is { } last
+                ? $"Последняя успешная копия — {Local(last)}, {DaysAgo(last)}. По ТБ-082 копию делают не реже раза в {overview.ReminderDays} дн."
+                : "Успешных копий ещё не было. По ТБ-082 полную копию делают не реже раза в месяц.")
+        </MudAlert>
+    }
+
+    @if (overview.Problems.Count > 0)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="my-3">
+            <MudText Typo="Typo.body2" Class="mb-1"><b>Копию сделать нельзя — не настроено:</b></MudText>
+            <ul class="backup-problems">
+                @foreach (var problem in overview.Problems)
+                {
+                    <li>@problem</li>
+                }
+            </ul>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">Ключи секции Backup — в конфигурации хоста (руководство по развёртыванию).</MudText>
+        </MudAlert>
+    }
+
+    <div class="backup-grid my-3">
+        <MudPaper Outlined="true" Class="pa-4">
+            <div class="backup-card-head">
+                <MudIcon Icon="@Icons.Material.Outlined.Usb" Size="Size.Small" />
+                <span>Носитель</span>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Class="ma-0 ml-auto"
+                         Color="@(overview.TargetAvailable ? Color.Success : Color.Default)">@(overview.TargetAvailable ? "подключён" : "не подключён")</MudChip>
+            </div>
+            <MudText Typo="Typo.body2" Class="backup-path" title="@overview.TargetFolder">@(overview.TargetFolder ?? "каталог не задан")</MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                @(overview.TargetFreeBytes is { } free ? $"Свободно {Bytes(free)}" : overview.TargetAvailable ? "Свободное место не определить" : "Подключите носитель, чтобы сделать копию")
+            </MudText>
+        </MudPaper>
+
+        <MudPaper Outlined="true" Class="pa-4">
+            <div class="backup-card-head">
+                <MudIcon Icon="@Icons.Material.Outlined.Storage" Size="Size.Small" />
+                <span>Объём копии</span>
+            </div>
+            <MudText Typo="Typo.h6">@(overview.EstimatedBytes is { } estimate ? "≈ " + Bytes(estimate) : "—")</MudText>
+            <MudText Typo="Typo.caption" Class="@(NotEnoughSpace(overview) ? "mud-error-text" : "mud-text-secondary")">
+                @(NotEnoughSpace(overview) ? "На носителе может не хватить места." : "Базы и все каталоги файлов, до шифрования.")
+            </MudText>
+        </MudPaper>
+
+        <MudPaper Outlined="true" Class="pa-4">
+            <div class="backup-card-head">
+                <MudIcon Icon="@Icons.Material.Outlined.Key" Size="Size.Small" />
+                <span>Ключ Заказчика</span>
+            </div>
+            <MudText Typo="Typo.body2" Class="backup-path" title="@overview.KeyFingerprint">
+                @(overview.KeyFingerprint is { Length: > 16 } key ? key[..16] + "…" : overview.KeyFingerprint ?? "не задан")
+            </MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">Отпечаток открытого ключа; закрытый — у хранителя, в системе его нет.</MudText>
+        </MudPaper>
+    </div>
+
+    <div class="d-flex align-center gap-2 flex-wrap my-3">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Backup"
+                   Disabled="@(_busy || view.Busy || !overview.Ready)" OnClick="StartAsync">Сделать копию</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FactCheck"
+                   Disabled="@(_busy || view.Busy || !overview.TargetAvailable)" OnClick="VerifyAsync">Проверить последнюю копию</MudButton>
+        @if (running is not null)
+        {
+            <div class="backup-running">
+                <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary" />
+                <span>Копия пишется: записано @Bytes(running.BytesWritten). Не отключайте носитель.</span>
+            </div>
+        }
+    </div>
+
+    <MudTable T="BackupRunRow" Items="overview.Runs" Dense="true" Hover="true" Outlined="true">
+        <HeaderContent>
+            <MudTh>Начало</MudTh>
+            <MudTh>Кто</MudTh>
+            <MudTh>Итог</MudTh>
+            <MudTh>Состав</MudTh>
+            <MudTh>На носителе</MudTh>
+            <MudTh>Проверка манифеста</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Начало">
+                <MudText Typo="Typo.body2">@Local(context.StartedAtUtc)</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">@(context.FolderName ?? string.Empty)</MudText>
+            </MudTd>
+            <MudTd DataLabel="Кто">@Who(view, context.StartedByUserId)</MudTd>
+            <MudTd DataLabel="Итог">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Class="ma-0" Color="@StatusColor(context.Status)">@StatusText(context.Status)</MudChip>
+                @if (context.FinishedAtUtc is { } finished)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">за @Duration(finished - context.StartedAtUtc)</MudText>
+                }
+                @if (context.Error is { } error)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-error-text d-block backup-note" title="@error">@error</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Состав">
+                @(context.StorageFiles is { } files
+                    ? $"баз {context.Databases} · файлов {files.ToString("N0", Ru)} · {Bytes(context.StorageBytes ?? 0)}"
+                    : $"баз {context.Databases}")
+            </MudTd>
+            <MudTd DataLabel="На носителе">@(context.BytesWritten > 0 ? Bytes(context.BytesWritten) : "—")</MudTd>
+            <MudTd DataLabel="Проверка манифеста">
+                @if (context.VerifyStatus is { } verify)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Class="ma-0" Color="@VerifyColor(verify)">@VerifyText(verify)</MudChip>
+                    @if (context.VerifiedAtUtc is { } verifiedAt)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">@Local(verifiedAt)</MudText>
+                    }
+                    @if (context.VerifyNote is { } note)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-error-text d-block backup-note" title="@note">@note</MudText>
+                    }
+                }
+                else
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">не проверялась</MudText>
+                }
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Копий ещё не делали.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+
+    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-3">
+        Восстановление — офлайн, при остановленном хосте: на сервере запускают программу ISC.AI.Backup.Restore, хранитель
+        ключа вводит закрытый ключ, Администратор и хранитель указывают себя — оба попадут в журнал аудита. Прежние база и
+        файлы при этом сохраняются для отката.
+    </MudText>
+}
+
+@code {
+    private static readonly CultureInfo Ru = CultureInfo.GetCultureInfo("ru-RU");
+
+    private BackupOverviewView? _view;
+    private string? _error;
+    private bool _loading;
+    private bool _busy;
+    private readonly CancellationTokenSource _disposed = new();
+    private Task? _refreshLoop;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!RendererInfo.IsInteractive) { return; }
+
+        await LoadAsync();
+        _refreshLoop = RefreshWhileBusyAsync(_disposed.Token);
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var response = await Dispatcher.Send(new GetBackupOverviewQuery());
+            if (response is { Status: true, Data: { } view })
+            {
+                (_view, _error) = (view, null);
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    // Пока идёт копия или проверка — перечитывать каждые 3 с (ход и итог); иначе — ждать, ничего не запрашивая.
+    private async Task RefreshWhileBusyAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                if (_view is { Busy: true } && !_busy)
+                {
+                    await InvokeAsync(async () =>
+                    {
+                        await LoadAsync();
+                        StateHasChanged();
+                    });
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Страница закрыта.
+        }
+    }
+
+    private Task StartAsync() => RunAsync(() => Dispatcher.Send(new StartBackupCommand()));
+
+    private Task VerifyAsync() => RunAsync(() => Dispatcher.Send(new VerifyBackupCommand()));
+
+    private async Task RunAsync(Func<ValueTask<ISC.AI.Abstractions.Application.ResponseDto<int>>> send)
+    {
+        _busy = true;
+        try
+        {
+            var response = await send();
+            Snackbar.Add(response.StatusMessage ?? (response.Status ? "Запущено." : "Не запущено."),
+                response.Status ? Severity.Success : Severity.Error);
+            await LoadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static bool NotEnoughSpace(BackupOverview overview) =>
+        overview is { TargetFreeBytes: { } free, EstimatedBytes: { } estimate } && free < estimate;
+
+    private static string Who(BackupOverviewView view, int? userId) =>
+        userId is { } id ? view.UserNames.TryGetValue(id, out var name) ? name : $"учётная запись № {id}" : "—";
+
+    private static string Local(DateTime utc) => DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime().ToString("dd.MM.yyyy HH:mm", Ru);
+
+    private string DaysAgo(DateTime utc)
+    {
+        var days = (int)Math.Floor((Clock.GetUtcNow().UtcDateTime - utc).TotalDays);
+        return days <= 0 ? "сегодня" : $"{days} дн. назад";
+    }
+
+    private static string Duration(TimeSpan span) =>
+        span.TotalHours >= 1 ? $"{(int)span.TotalHours} ч {span.Minutes} мин" : span.TotalMinutes >= 1 ? $"{(int)span.TotalMinutes} мин" : $"{Math.Max(1, (int)span.TotalSeconds)} с";
+
+    private static string Bytes(long bytes)
+    {
+        string[] units = ["Б", "КБ", "МБ", "ГБ", "ТБ"];
+        double value = bytes;
+        var unit = 0;
+        while (value >= 1024 && unit < units.Length - 1)
+        {
+            value /= 1024;
+            unit++;
+        }
+
+        return value.ToString(unit == 0 ? "0" : "0.0", Ru) + " " + units[unit];
+    }
+
+    private static string StatusText(BackupRunStatus status) => status switch
+    {
+        BackupRunStatus.Running => "пишется",
+        BackupRunStatus.Succeeded => "готова",
+        BackupRunStatus.Failed => "не удалась",
+        _ => "прервана",
+    };
+
+    private static Color StatusColor(BackupRunStatus status) => status switch
+    {
+        BackupRunStatus.Running => Color.Info,
+        BackupRunStatus.Succeeded => Color.Success,
+        BackupRunStatus.Failed => Color.Error,
+        _ => Color.Warning,
+    };
+
+    private static string VerifyText(BackupVerifyStatus status) => status switch
+    {
+        BackupVerifyStatus.Running => "проверяется",
+        BackupVerifyStatus.Ok => "цела",
+        _ => "расхождения",
+    };
+
+    private static Color VerifyColor(BackupVerifyStatus status) => status switch
+    {
+        BackupVerifyStatus.Running => Color.Info,
+        BackupVerifyStatus.Ok => Color.Success,
+        _ => Color.Error,
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        await _disposed.CancelAsync();
+        if (_refreshLoop is not null)
+        {
+            await _refreshLoop;
+        }
+
+        _disposed.Dispose();
+    }
+}

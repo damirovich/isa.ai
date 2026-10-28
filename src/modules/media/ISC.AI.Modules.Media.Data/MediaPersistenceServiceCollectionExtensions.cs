@@ -37,6 +37,9 @@ public static class MediaPersistenceServiceCollectionExtensions
                 })
                 .UseSnakeCaseNamingConvention());
 
+        // Эта база — в резервную копию (ADR-0063): копируется то, чем пользуется поставка, а не все строки из настроек.
+        services.AddSingleton(new ISC.AI.Abstractions.Backup.BackupDatabase("media", connectionString));
+
         var efSearch = int.TryParse(configuration[EfSearchKey], out var parsed)
             ? parsed
             : PgVectorFaceSearch.DefaultEfSearch;

@@ -51,6 +51,8 @@ public sealed class InspectorAccessMatrixTests
         [InspectorPermissions.AdminAudit] = [UserRole.Administrator],
         // Новое право (ADR-0060): экрана сеансов прежде не было; по умолчанию — Администратор.
         [InspectorPermissions.AdminSessions] = [UserRole.Administrator],
+        // Новое право (ADR-0063): экрана резервных копий прежде не было; по умолчанию — Администратор.
+        [InspectorPermissions.AdminBackups] = [UserRole.Administrator],
     };
 
     private readonly IUserRoleStore _roles = Substitute.For<IUserRoleStore>();

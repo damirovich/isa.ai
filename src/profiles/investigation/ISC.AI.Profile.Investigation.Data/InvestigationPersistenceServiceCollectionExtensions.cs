@@ -31,6 +31,9 @@ public static class InvestigationPersistenceServiceCollectionExtensions
                     npg.MigrationsHistoryTable("__ef_migrations_history", InvestigationDbContext.Schema))
                 .UseSnakeCaseNamingConvention());
 
+        // Эта база — в резервную копию (ADR-0063): копируется то, чем пользуется поставка, а не все строки из настроек.
+        services.AddSingleton(new ISC.AI.Abstractions.Backup.BackupDatabase("investigation", connectionString));
+
         // Роли (ТП-004) и справочник подразделений (ТФ-АДМ-01) — основа всех остальных проверок.
         services.AddScoped<IUserRoleStore, UserRoleStore>();
         services.AddScoped<IDivisionAdminStore, DivisionAdminStore>();

@@ -11,19 +11,29 @@ namespace ISC.AI.Modules.DocFlow.Data;
 /// </summary>
 public sealed class LocalDocFlowFileStorage : IDocFlowFileStorage
 {
+    /// <summary>Имя каталога файлов документооборота в резервной копии (ADR-0063).</summary>
+    public const string BackupName = "docflow";
+
     private readonly string _basePath;
 
     /// <summary>Читает корень хранилища из конфигурации и создаёт его при отсутствии.</summary>
     public LocalDocFlowFileStorage(IConfiguration configuration)
+    {
+        _basePath = ResolveBasePath(configuration);
+        Directory.CreateDirectory(_basePath);
+    }
+
+    /// <summary>
+    /// Корень хранилища из конфигурации — полный путь (один источник для хранилища и резервной копии, ADR-0063).
+    /// </summary>
+    public static string ResolveBasePath(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
 
         // Пустая строка приравнена к «не задано»: в appsettings ключ лежит пустым как документация,
         // а Path.GetFullPath("") бросает — хост не поднялся бы вовсе из-за пустого значения в файле.
         var configured = configuration["DocFlow:Storage:BasePath"];
-        _basePath = Path.GetFullPath(
-            string.IsNullOrWhiteSpace(configured) ? "docflow-files" : configured);
-        Directory.CreateDirectory(_basePath);
+        return Path.GetFullPath(string.IsNullOrWhiteSpace(configured) ? "docflow-files" : configured);
     }
 
     /// <inheritdoc />

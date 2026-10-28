@@ -30,6 +30,12 @@ public interface IPlatformAdministration
     Task<bool> CanManageSessionsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Текущий субъект вправе делать и проверять резервные копии (ТФ-АДМ-04, ТБ-082, ADR-0063). Копия зашифрована
+    /// открытым ключом Заказчика — право не даёт доступа к содержимому (ТБ-079).
+    /// </summary>
+    Task<bool> CanManageBackupsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Идёт ли режим первичной настройки: в контуре нет ни одного Администратора, и настройки открыты любому
     /// вошедшему. Экран «Пользователи» показывает это баннером, чтобы первый вошедший назначил себе
     /// Администратора и закрыл окно.

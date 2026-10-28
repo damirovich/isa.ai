@@ -132,6 +132,9 @@ try
     // управляемой деградацией; при старте — восстановление осиротевших задач. Store — из AddCorePersistence.
     builder.Services.AddCoreBackgroundTasks();
 
+    // Резервные копии (ТФ-АДМ-04, ADR-0063): свой исполнитель — копия идёт часами и не должна занимать общую очередь.
+    builder.Services.AddHostedService<ISC.AI.Web.Common.BackupJobWorker>();
+
     // --- Точка композиции профиля (ТО-прог-05/06). Только хост знает о конкретном профиле. ---
     // Сам объект профиля создан выше, при настройке конфигурации; здесь — регистрация и порядок ТО-прог-05.
     builder.Services.AddSingleton<IProfile>(profile);
