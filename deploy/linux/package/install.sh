@@ -161,10 +161,10 @@ if [[ $start_after -eq 1 || $stopped_same -eq 1 ]]; then
     fi
 elif [[ $was_active -eq 1 ]]; then
     echo "   служба продолжает работать на прежней версии. Переход: systemctl stop isc-ai → bash migrate.sh … →"
-    echo "   systemctl start isc-ai (ДОК-15 §7)"
+    echo "   systemctl start isc-ai (docs/INSTALL.ru.md, раздел 6)"
 else
     echo "   служба не запускалась. Дальше: заполнить настройки → bash migrate.sh … → systemctl start isc-ai →"
-    echo "   sudo bash account.sh <логин> (ДОК-15 §5)"
+    echo "   sudo bash account.sh <логин> (docs/INSTALL.ru.md, раздел 4.5)"
 fi
 
 say "Готово ($warnings предупрежд.)"
