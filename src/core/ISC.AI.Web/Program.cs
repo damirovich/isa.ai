@@ -14,6 +14,7 @@ using ISC.AI.Documents;
 using ISC.AI.Ingestion;
 using ISC.AI.Persistence;
 using ISC.AI.Persistence.Security;
+using ISC.AI.Web.Common;
 using ISC.AI.Web.Common.Behaviors;
 using ISC.AI.Web.Security;
 using ISC.AI.Web;
@@ -38,6 +39,10 @@ Log.Logger = new LoggerConfiguration()
 try
 {
     var builder = WebApplication.CreateBuilder(args);
+
+    // Не называть веб-сервер в ответах (заголовок «Server: Kestrel»): постороннему незачем знать, на чём работает
+    // система (ТБ-010). В коде, а не в настройках: ключ Kestrel:AddServerHeader из конфигурации хост не применяет.
+    builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
 
     // Профиль поставки выбран при СБОРКЕ (свойство IscProfile, ADR-0021). Здесь он только СОЗДАЁТСЯ —
     // чтобы подхватить его собственный файл настроек ДО регистраций, читающих конфигурацию (строки
@@ -74,9 +79,13 @@ try
         });
 
     // Логирование — Serilog (в изолированном контуре пишем в консоль/журнал, без внешних приёмников).
+    // Текст каждого SQL-запроса EF Core пишется на уровне Information — на дев-машине это полезно, а на сервере
+    // забивает журнал службы (journald) и раскрывает в нём устройство схемы (ТБ-010); вне Development — только ошибки.
+    var sqlCommandLevel = builder.Environment.IsDevelopment() ? LogEventLevel.Information : LogEventLevel.Warning;
     builder.Services.AddSerilog((_, cfg) => cfg
         .MinimumLevel.Information()
         .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
+        .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", sqlCommandLevel)
         .Enrich.FromLogContext()
         .WriteTo.Console(formatProvider: CultureInfo.InvariantCulture));
 
@@ -158,6 +167,10 @@ try
         && string.Equals(builder.Configuration["Auth:Mode"], "Dev", StringComparison.OrdinalIgnoreCase);
 
     builder.Services.AddCascadingAuthenticationState();
+
+    // Ключи шифрования cookie входа и антифорджери — в постоянный каталог DataProtection:KeysPath (сервер Linux):
+    // без него перезапуск или обновление хоста обрывает все сеансы (ТБ-014). Пусто — по умолчанию ASP.NET Core.
+    builder.Services.AddPersistentDataProtectionKeys(builder.Configuration);
 
     // Сеансы входа (ТФ-АДМ-09, ADR-0060): учёт, проверка и реестр живых соединений — один на процесс. Регистрируется
     // и в dev-режиме без входа: экран «Активные сеансы» работает (список просто пуст).

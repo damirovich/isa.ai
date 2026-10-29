@@ -51,6 +51,11 @@
          для штампа печати, PDF-ветка отчётов переписывается на него (см. реестр лицензионных замен).
          ClosedXML — Excel-ветка, переносится как есть. -->
     <PackageVersion Include="PDFsharp" Version="6.2.4" />
+    <!-- Транзитивный пин (CentralPackageTransitivePinningEnabled): PDFsharp 6.2.4 тянет System.Security.Cryptography.Pkcs
+         8.0.1 с уязвимостями отказа в обслуживании GHSA-846f-f764-76mx (High) и GHSA-2fmv-rv2c-59x7 (Moderate);
+         исправлено в 10.0.13. Обновлением PDFsharp не закрыть: 6.5.0 тянет тот же 8.0.1, и его лицензия уже
+         AGPL-3.0-only — у нас запрещена (ТСТ-001), выше 6.2.4 не поднимать. Pkcs — MIT (dotnet/runtime). -->
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.14" />
     <PackageVersion Include="ClosedXML" Version="0.105.0" />
     <!-- Парсинг HTML для сборщика вне контура (Harvester, Э4-08). MIT. (≥1.4.0 — требование bunit). -->
     <PackageVersion Include="AngleSharp" Version="1.5.2" />
@@ -95,7 +100,9 @@
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
     <PackageVersion Include="NSubstitute" Version="5.3.0" />
     <PackageVersion Include="Shouldly" Version="4.3.0" />
-    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.12.0" />
+    <!-- ≥4.16.0: с ним приходит SSH.NET 2026.0.0; 4.12.0 тянул SSH.NET 2025.1.0 с уязвимостями ScpClient
+         GHSA-q939-rpr3-3284 и GHSA-mggc-4xg6-vcxf (обе High). MIT. -->
+    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.16.0" />
     <PackageVersion Include="bunit" Version="2.7.2" />
   </ItemGroup>
 </Project>

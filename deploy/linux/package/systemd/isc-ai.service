@@ -1,0 +1,50 @@
+# Служба веб-хоста ISC.AI («ИнспекторAI») — автозапуск и перезапуск после сбоя (ТНД-005).
+# Ставится install.sh в /etc/systemd/system/. Свои изменения (другой каталог носителя резервных копий, зависимость от
+# локального PostgreSQL и т. п.) — ТОЛЬКО через «systemctl edit isc-ai»: этот файл install.sh перезаписывает при обновлении.
+[Unit]
+Description=ISC.AI «ИнспекторAI» — веб-хост
+Wants=network-online.target
+After=network-online.target
+# Если PostgreSQL на этом же сервере — в «systemctl edit isc-ai» добавить: After=postgresql.service
+
+[Service]
+Type=exec
+User=iscai
+Group=iscai
+WorkingDirectory=/opt/isc-ai/current/app
+ExecStart=/opt/isc-ai/current/app/ISC.AI.Web
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=DOTNET_NOLOGO=1
+# Секреты (пароль БД и т. п.) — только здесь, файл root:root 0600 (ТБ-013, Э4-10).
+EnvironmentFile=/etc/isc-ai/isc-ai.env
+
+Restart=on-failure
+RestartSec=10
+# Хост штатно завершает фоновые задачи (в т. ч. резервное копирование) по SIGTERM — даём на это время.
+TimeoutStopSec=90
+
+# HTTPS на 443 без прав root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# Песочница: программа и системные каталоги — только чтение; писать можно лишь в каталог данных и на носитель
+# резервных копий (приставка «-» — каталога может не быть, пока носитель не подключён). MemoryDenyWriteExecute
+# не включать: .NET компилирует код на лету (JIT).
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/isc-ai
+ReadWritePaths=-/mnt/isc-backup
+UMask=0077
+LimitNOFILE=65536
+SyslogIdentifier=isc-ai
+
+[Install]
+WantedBy=multi-user.target
