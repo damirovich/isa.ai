@@ -18,6 +18,9 @@ public static class AdminUi
         return account switch
         {
             { IsActive: false } => ("отключена", Color.Error),
+
+            // ТБ-081, ADR-0065: блокировку после подбора пароля видно сразу в списке — снимает её только Администратор.
+            { IsLockedOut: true } => ("заблокирована", Color.Error),
             { HasLocalPassword: false } => ("без локального пароля", Color.Warning),
             { MustChangePassword: true } => ("временный пароль", Color.Info),
             _ => ("активна", Color.Success),

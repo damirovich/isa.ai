@@ -6,6 +6,10 @@ namespace ISC.AI.Abstractions.Security;
 /// перенесена из внешней системы, либо создана без пароля.
 /// </param>
 /// <param name="MustChangePassword">Пароль временный: выдан администратором и ему известен.</param>
+/// <param name="LockedOutAt">
+/// Когда учётная запись заблокирована после неудачных входов подряд (UTC, ТБ-081, ADR-0065); <see langword="null"/> — не
+/// заблокирована. Снимает только Администратор.
+/// </param>
 public sealed record UserAccountRow(
     int UserId,
     string UserName,
@@ -16,7 +20,12 @@ public sealed record UserAccountRow(
     string? Position = null,
     string? DeactivationReason = null,
     short? MaxClassification = null,
-    IReadOnlyList<int>? Divisions = null);
+    IReadOnlyList<int>? Divisions = null,
+    DateTime? LockedOutAt = null)
+{
+    /// <summary>Учётная запись заблокирована после неудачных входов подряд.</summary>
+    public bool IsLockedOut => LockedOutAt is not null;
+}
 
 /// <summary>
 /// Отбор списка учётных записей.
@@ -112,7 +121,8 @@ public interface IUserAccountStore
 
     /// <summary>
     /// Сбрасывает пароль на временный: помечает учётку как требующую смены и меняет штамп —
-    /// живые сессии владельца обрываются немедленно (ТБ-016).
+    /// живые сессии владельца обрываются немедленно (ТБ-016). Сброс — восстановление доступа, поэтому он же снимает
+    /// блокировку после неудачных входов (ТБ-081, ADR-0065).
     /// </summary>
     Task<bool> ResetPasswordAsync(
         int userId, string temporaryPassword, CancellationToken cancellationToken = default);
@@ -127,6 +137,13 @@ public interface IUserAccountStore
     /// </param>
     Task<bool> SetActiveAsync(
         int userId, bool isActive, string? reason = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Снимает блокировку после неудачных входов подряд (ТБ-081, ADR-0065): счётчик в ноль, отметка снята. Штамп НЕ
+    /// меняется — блокировка сеансы не обрывала, и снятие их не трогает. Идемпотентно: незаблокированную учётку не меняет.
+    /// </summary>
+    /// <returns><see langword="false"/> — учётной записи нет.</returns>
+    Task<bool> UnlockAsync(int userId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Смена СОБСТВЕННОГО пароля: обязательна проверка текущего (владение сессией не заменяет знание

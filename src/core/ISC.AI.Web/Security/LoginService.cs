@@ -4,6 +4,7 @@ using ISC.AI.Abstractions.Audit;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Persistence;
 using ISC.AI.Persistence.Entities;
+using ISC.AI.Persistence.Security;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
 
@@ -25,13 +26,29 @@ namespace ISC.AI.Web.Security;
 /// прежнего владельца логина в обход default-deny (ТБ-012). Если ExternalId не найден, а UserName уже
 /// занят другой локальной учёткой — вход отклоняется явным конфликтом; переподключение выполняет
 /// администратор, а не логика входа.
+///
+/// БЛОКИРОВКА ПОСЛЕ НЕУДАЧНЫХ ВХОДОВ (ТБ-081, ADR-0065). Неудача считается по учётке с этим именем входа
+/// (<see cref="LoginLockout"/>); на пороге (5 подряд) учётка блокируется до снятия Администратором. Заблокированная
+/// не входит и с ВЕРНЫМ паролем, а отказ тот же, что при неверном: пароль проверяется в любом случае, поэтому ни текст,
+/// ни время ответа не выдают подборщику, что он нашёл пароль. Успешный вход обнуляет счётчик («подряд»). Здесь — для
+/// любого порта идентичности: локального и адаптера внешней системы.
 /// </remarks>
 public sealed class LoginService(
     IExternalIdentityProvider identityProvider,
     IDbContextFactory<CoreDbContext> contextFactory,
     IAuditWriter auditWriter,
+    LoginLockout lockout,
     ILogger<LoginService> logger)
 {
+    /// <summary>Исход попытки в журнале: вход разрешён.</summary>
+    public const string GrantedResult = "granted";
+
+    /// <summary>Исход попытки в журнале: отказ (неверные данные, отключённая учётка, конфликт имени).</summary>
+    public const string DeniedResult = "denied";
+
+    /// <summary>Исход попытки в журнале: отказ потому, что учётка заблокирована после неудачных входов (ТБ-081).</summary>
+    public const string LockedResult = "locked";
+
     /// <summary>
     /// Аутентифицирует пару логин/пароль. Возвращает принципала для cookie-сессии либо <c>null</c>
     /// при отказе (без различения причин наружу — кроме отдельно обрабатываемой недоступности внешней
@@ -43,7 +60,14 @@ public sealed class LoginService(
         var external = await identityProvider.VerifyCredentialsAsync(login, password, cancellationToken);
         if (external is null)
         {
-            await WriteLoginAuditAsync(subjectId: null, login, granted: false, cancellationToken);
+            // ТБ-081: неудача — в счётчик учётки с этим именем входа; на пороге учётка блокируется, и запись о блокировке
+            // ложится в журнал до её фиксации. Попытка на уже заблокированной учётке помечается в журнале «locked».
+            var failure = await lockout.RegisterFailureAsync(login, cancellationToken);
+            await WriteLoginAuditAsync(
+                subjectId: null,
+                login,
+                failure.Outcome == FailedLoginOutcome.AlreadyLocked ? LockedResult : DeniedResult,
+                cancellationToken);
             return null;
         }
 
@@ -61,7 +85,7 @@ public sealed class LoginService(
                 // системе) — автопривязка небезопасна (унаследовала бы чужой допуск). Единый отказ +
                 // аудит конфликта для разбора администратором.
                 LoginServiceLog.UserNameConflict(logger, external.Login);
-                await WriteLoginAuditAsync(subjectId: null, login, granted: false, cancellationToken);
+                await WriteLoginAuditAsync(subjectId: null, login, DeniedResult, cancellationToken);
                 return null;
             }
 
@@ -76,9 +100,21 @@ public sealed class LoginService(
         if (!user.IsActive)
         {
             await db.SaveChangesAsync(cancellationToken);
-            await WriteLoginAuditAsync(user.Id, login, granted: false, cancellationToken);
+            await WriteLoginAuditAsync(user.Id, login, DeniedResult, cancellationToken);
             return null;
         }
+
+        // ТБ-081, ADR-0065: учётка заблокирована после неудачных входов подряд — не входит и с верным паролем; ответ тот же,
+        // что при неверном (см. remarks). Снять блокировку может только Администратор.
+        if (user.LockedOutAt is not null)
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            await WriteLoginAuditAsync(user.Id, login, LockedResult, cancellationToken);
+            return null;
+        }
+
+        // «Подряд»: успешный вход обнуляет счётчик неудач.
+        user.FailedLoginCount = 0;
 
         try
         {
@@ -91,15 +127,16 @@ public sealed class LoginService(
             LoginServiceLog.ConcurrentJitInsertLost(logger, ex);
             db.ChangeTracker.Clear();
             user = await db.Users.SingleOrDefaultAsync(u => u.ExternalId == external.ExternalId, cancellationToken);
-            if (user is null || !user.IsActive)
+            if (user is null || !user.IsActive || user.LockedOutAt is not null)
             {
-                await WriteLoginAuditAsync(user?.Id, login, granted: false, cancellationToken);
+                await WriteLoginAuditAsync(
+                    user?.Id, login, user?.LockedOutAt is not null ? LockedResult : DeniedResult, cancellationToken);
                 return null;
             }
         }
 
         // Аудит успешного входа — ДО выдачи сессии (fail-closed: нет записи — нет входа).
-        await WriteLoginAuditAsync(user.Id, login, granted: true, cancellationToken);
+        await WriteLoginAuditAsync(user.Id, login, GrantedResult, cancellationToken);
 
         var identity = new ClaimsIdentity(
             [
@@ -123,12 +160,12 @@ public sealed class LoginService(
     }
 
     // Гриф записи — 0: событие входа не несёт содержимого документов, только метаданные (ТБ-032).
-    private Task WriteLoginAuditAsync(int? subjectId, string login, bool granted, CancellationToken cancellationToken) =>
+    private Task WriteLoginAuditAsync(int? subjectId, string login, string result, CancellationToken cancellationToken) =>
         auditWriter.WriteAsync(
             new AuditEntry(
                 AuditAction.Login,
                 Classification: 0,
                 SubjectId: subjectId,
-                ObjectRef: $"login={login};result={(granted ? "granted" : "denied")}"),
+                ObjectRef: $"login={login};result={result}"),
             cancellationToken);
 }

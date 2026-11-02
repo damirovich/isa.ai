@@ -74,6 +74,12 @@ public static class CorePersistenceServiceCollectionExtensions
         // идентичность это единственное место, где заводят и восстанавливают доступ.
         services.AddScoped<Abstractions.Security.IUserAccountStore, UserAccountStore>();
 
+        // Блокировка после неудачных входов подряд (ТБ-081, ADR-0065): на операцию, как и журнал, которым она пишет
+        // факт блокировки; порог — параметр Заказчика, выключить его настройкой нельзя.
+        var lockoutThreshold = LoginLockout.ReadThreshold(configuration);
+        services.AddScoped(sp => new LoginLockout(
+            sp.GetRequiredService<IDbContextFactory<CoreDbContext>>(), sp.GetRequiredService<IAuditWriter>(), lockoutThreshold));
+
         // Сеансы входа (ТФ-АДМ-09, ADR-0060): singleton — им пользуются проверка cookie на каждом запросе и реестр
         // соединений хоста; контекст создаётся фабрикой на вызов.
         services.AddSingleton<Abstractions.Security.IUserSessionStore, UserSessionStore>();

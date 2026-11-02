@@ -72,6 +72,22 @@ public class AppUserEntity : SoftDeletableEntity
     /// <summary>Когда учётная запись была отключена в последний раз (UTC).</summary>
     public DateTime? DeactivatedAt { get; set; }
 
+    /// <summary>
+    /// Неудачных входов подряд — с последнего успешного входа, снятия блокировки или сброса пароля (ТБ-081, ADR-0065).
+    /// </summary>
+    public int FailedLoginCount { get; set; }
+
+    /// <summary>
+    /// Когда учётная запись заблокирована после неудачных входов подряд (UTC); <see langword="null"/> — не заблокирована.
+    /// Снимает только Администратор (ТБ-081).
+    /// </summary>
+    /// <remarks>
+    /// Не путать с отключением (<see cref="IsActive"/>): отключение — решение Администратора с причиной, блокировка —
+    /// автоматическая реакция системы на подбор пароля. Живые сеансы блокировка не обрывает (ADR-0065 п. 8): иначе пятью
+    /// ошибками в чужом имени входа можно было бы выкинуть работающего сотрудника.
+    /// </remarks>
+    public DateTime? LockedOutAt { get; set; }
+
     /// <summary>Допуск пользователя.</summary>
     public ClearanceEntity? Clearance { get; set; }
 }

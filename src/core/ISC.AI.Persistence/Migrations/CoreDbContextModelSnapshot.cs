@@ -57,6 +57,10 @@ namespace ISC.AI.Persistence.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("external_id");
 
+                    b.Property<int>("FailedLoginCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("failed_login_count");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean")
                         .HasColumnName("is_active");
@@ -64,6 +68,10 @@ namespace ISC.AI.Persistence.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean")
                         .HasColumnName("is_deleted");
+
+                    b.Property<DateTime?>("LockedOutAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("locked_out_at");
 
                     b.Property<bool>("MustChangePassword")
                         .HasColumnType("boolean")

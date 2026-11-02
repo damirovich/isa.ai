@@ -54,6 +54,11 @@ else
         </div>
         <MudSpacer />
         <div class="d-flex gap-2 flex-wrap">
+            @if (account.IsLockedOut)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.LockOpen" Disabled="_busy"
+                           OnClick="UnlockAsync">Снять блокировку</MudButton>
+            }
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" Disabled="_busy" OnClick="OpenEdit">Изменить данные</MudButton>
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Key" Disabled="_busy" OnClick="ResetPasswordAsync">Сбросить пароль…</MudButton>
             @if (!account.IsActive)
@@ -79,6 +84,16 @@ else
         <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-3">
             Учётная запись отключена@(string.IsNullOrWhiteSpace(account.DeactivationReason) ? "" : $": {account.DeactivationReason}").
             Войти по ней нельзя; роль и допуск не меняются, пока её не включат.
+        </MudAlert>
+    }
+    @if (account.LockedOutAt is { } lockedAt)
+    {
+        @* ТБ-081, ADR-0065: блокировка после неудачных входов подряд — до снятия Администратором; открытые раньше сеансы
+           она не обрывала. *@
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+            Учётная запись заблокирована @lockedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.CurrentCulture)
+            после неудачных входов подряд. Войти по ней нельзя даже с верным паролем, пока блокировку не снимет администратор;
+            сеансы, открытые раньше, продолжают работать. Если пароль могли подобрать — сбросьте его: сброс снимает и блокировку.
         </MudAlert>
     }
 
@@ -649,6 +664,24 @@ else
             var response = await Dispatcher.Send(new SetUserAccountActiveCommand(UserId, true));
             return (response.Status, response.StatusMessage);
         }, "Учётная запись включена");
+    }
+
+    // ТБ-081, ADR-0065: снять блокировку после неудачных входов — только Администратор, с записью в журнале.
+    private async Task UnlockAsync()
+    {
+        if (_card is null
+            || !await ConfirmAsync("Снять блокировку?",
+                $"<b>{Html(AdminUi.NameOf(_card.Account.Account))}</b> снова сможет войти с прежним паролем. "
+                + "Если пароль могли подобрать, лучше сбросить его — сброс снимает и блокировку.", "Снять блокировку"))
+        {
+            return;
+        }
+
+        await RunAsync(async () =>
+        {
+            var response = await Dispatcher.Send(new UnlockUserAccountCommand(UserId));
+            return (response.Status, response.StatusMessage);
+        }, "Блокировка снята");
     }
 
     private void OpenEdit()

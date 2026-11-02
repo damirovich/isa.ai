@@ -26,13 +26,14 @@ public sealed class UserAccountStore(IDbContextFactory<CoreDbContext> contextFac
                 // можно ли этой учёткой войти, а хеш в разметке — лишняя поверхность утечки.
                 HasPassword = u.PasswordHash != null,
                 u.MustChangePassword,
+                u.LockedOutAt,
             })
             .ToListAsync(cancellationToken);
 
         return rows
             .OrderBy(u => u.DisplayName ?? u.UserName, StringComparer.CurrentCultureIgnoreCase)
             .Select(u => new UserAccountRow(
-                u.Id, u.UserName, u.DisplayName, u.IsActive, u.HasPassword, u.MustChangePassword))
+                u.Id, u.UserName, u.DisplayName, u.IsActive, u.HasPassword, u.MustChangePassword, LockedOutAt: u.LockedOutAt))
             .ToList();
     }
 
@@ -99,7 +100,8 @@ public sealed class UserAccountStore(IDbContextFactory<CoreDbContext> contextFac
                 u.Position,
                 u.DeactivationReason,
                 u.Clearance == null ? null : u.Clearance.MaxClassification,
-                u.Clearance == null ? null : u.Clearance.DivisionScope))
+                u.Clearance == null ? null : u.Clearance.DivisionScope,
+                u.LockedOutAt))
             .ToListAsync(cancellationToken);
 
         return new UserAccountPage(rows, total);
@@ -185,7 +187,31 @@ public sealed class UserAccountStore(IDbContextFactory<CoreDbContext> contextFac
         // уже вошёл (иначе захваченная сессия переживает сброс — а его затем и делают).
         user.SecurityStamp = PasswordHashing.NewSecurityStamp();
 
+        // Сброс — восстановление доступа Администратором (ТБ-081, ADR-0065 п. 7): с новым паролем человек должен войти, и
+        // блокировка после подбора старого пароля снимается тем же действием. Запись сброса в журнале — от сценария.
+        user.FailedLoginCount = 0;
+        user.LockedOutAt = null;
+
         await db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> UnlockAsync(int userId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Одним UPDATE двух полей, без чтения строки в память: снятие не перезапишет устаревшей копией другие поля учётки
+        // (ФИО, штамп), изменённые параллельно. Штамп не трогаем — блокировка сеансы не обрывала (ADR-0065 п. 8).
+        if (!await db.Users.AnyAsync(u => u.Id == userId, cancellationToken))
+        {
+            return false;
+        }
+
+        await db.Users.Where(u => u.Id == userId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(u => u.FailedLoginCount, 0)
+                .SetProperty(u => u.LockedOutAt, (DateTime?)null), cancellationToken);
         return true;
     }
 

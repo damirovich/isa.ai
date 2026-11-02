@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Linq;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.Admin.Application.Features.Roles;
 
@@ -33,7 +34,8 @@ public sealed record UserHistoryEntry(DateTime OccurredAt, string? Who, string W
 /// </summary>
 /// <remarks>
 /// Разбираются сводки сценариев пакета: <c>admin:account:{id}:…</c>, <c>admin:clearance:{id}:…</c>,
-/// <c>admin:role:{id}:{ключ}</c>, <c>admin:account:create:{логин}</c>, смена собственного пароля; и прежние экраны
+/// <c>admin:role:{id}:{ключ}</c>, <c>admin:account:create:{логин}</c>, смена собственного пароля; блокировка после
+/// неудачных входов, которую ставит ядро, — <c>auth:account:{id}:lockout:attempts=N</c> (ТБ-081); и прежние экраны
 /// ролей профилей <c>{профиль}:user-role:{id}:{ключ}</c> — чтобы история не обрывалась на переходе к карточке.
 /// Чужая или непонятная сводка — <see langword="null"/>: в историю не попадает.
 /// </remarks>
@@ -84,8 +86,21 @@ public static class UserHistoryText
                 "reset-password" => ("Сброшен пароль, выдан временный", UserHistoryKind.Warning),
                 "enable" => ("Учётная запись включена", UserHistoryKind.Success),
                 "disable" => ("Учётная запись отключена", UserHistoryKind.Danger),
+                "unlock" => ("Снята блокировка после неудачных входов", UserHistoryKind.Success),
                 _ => null,
             };
+        }
+
+        // ТБ-081, ADR-0065: блокировку ставит система, а не человек, — сводка «auth:account:{id}:lockout:attempts=N».
+        if (TryTail(objectRef, $"auth:account:{id}:", out var auth) && auth.StartsWith("lockout", StringComparison.Ordinal))
+        {
+            var attempts = auth.Split(':')
+                .Where(p => p.StartsWith("attempts=", StringComparison.Ordinal))
+                .Select(p => p["attempts=".Length..])
+                .FirstOrDefault();
+            return (attempts is null
+                    ? "Заблокирована после неудачных входов подряд"
+                    : $"Заблокирована после {attempts} неудачных входов подряд", UserHistoryKind.Danger);
         }
 
         if (TryTail(objectRef, $"admin:clearance:{id}:", out var clearance))
