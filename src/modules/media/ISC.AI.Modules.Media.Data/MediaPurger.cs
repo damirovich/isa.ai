@@ -98,6 +98,12 @@ public sealed class MediaPurger(
         var segmentCount = await db.TranscriptSegments.CountAsync(s => s.AssetId == assetId, cancellationToken);
         var annotationCount = await db.Annotations.CountAsync(a => a.AssetId == assetId, cancellationToken);
 
+        // Части незавершённой индексации (ADR-0064) — шаблоны, ещё не попавшие в поиск, — уходят тем же каскадом; их лица
+        // тоже в акт: акт совпадает с уничтоженным.
+        var pendingFaces = await db.IndexCheckpoints
+            .Where(c => c.AssetId == assetId)
+            .SumAsync(c => (int?)c.FaceCount, cancellationToken) ?? 0;
+
         // FAIL-CLOSED (ТБ-064): аудит ДО уничтожения данных. Недоступен журнал — WriteAsync бросит, транзакция
         // откатится при выходе и удаление НЕ произойдёт.
         await auditWriter.WriteAsync(
@@ -112,7 +118,8 @@ public sealed class MediaPurger(
                     + $"фрагментов расшифровки {segmentCount}"
                     + (annotationCount == 0 ? string.Empty : $", пометок {annotationCount}")
                     + (asset.FilmstripStoredFileName is null ? string.Empty : ", ленты кадров")
-                    + " (ТБ-064/075, ADR-0026, ADR-0038, ADR-0050)."),
+                    + (pendingFaces == 0 ? string.Empty : $", лиц незавершённой индексации {pendingFaces}")
+                    + " (ТБ-064/075, ADR-0026, ADR-0038, ADR-0050, ADR-0064)."),
             cancellationToken);
 
         // Атомарно и в той же транзакции под блокировкой: носитель → кадры/лица/шаблоны/фрагменты расшифровки
@@ -168,10 +175,20 @@ public sealed class MediaPurger(
 
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
 
+        // Транзакция — ДО подсчёта, и первым делом блокировка строк носителей (ADR-0064 п. 7) — та же, что берут
+        // публикация результата индексации и запись части прогона. Индексация, взявшая блокировку раньше регламента,
+        // фиксируется раньше — её шаблоны и части попадают и в подсчёт, и в удаление; взявшая позже — ждёт и перед
+        // публикацией видит закрытое дело. Без блокировки публикация между подсчётом и удалением вернула бы шаблоны в
+        // поиск, а акт назвал бы не то число. Порядок по идентификатору — два регламента не блокируют друг друга навечно.
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var ids = assetIds.Distinct().Order().ToArray();
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT 1 FROM media.asset WHERE id = ANY({ids}) ORDER BY id FOR UPDATE", cancellationToken);
+
         // Что именно снимаем — считаем ДО удаления: после каскада ни чисел, ни имён файлов не останется,
-        // а они идут в акт (ТБ-074) и в журнал.
+        // а они идут в акт (ТБ-074) и в журнал. Части незавершённой индексации (ADR-0064) — тоже шаблоны, хоть и вне поиска.
         var targets = await db.Assets
-            .Where(a => assetIds.Contains(a.Id))
+            .Where(a => ids.Contains(a.Id))
             .Select(a => new
             {
                 a.Id,
@@ -182,8 +199,9 @@ public sealed class MediaPurger(
                     .Where(f => f.AssetId == a.Id && f.CropStoredFileName != null)
                     .Select(f => f.CropStoredFileName!)
                     .ToList(),
+                PendingFaces = db.IndexCheckpoints.Where(c => c.AssetId == a.Id).Sum(c => (int?)c.FaceCount) ?? 0,
             })
-            .Where(a => a.Templates > 0 || a.Crops.Count > 0)
+            .Where(a => a.Templates > 0 || a.Crops.Count > 0 || a.PendingFaces > 0)
             .ToListAsync(cancellationToken);
 
         if (targets.Count == 0)
@@ -205,22 +223,27 @@ public sealed class MediaPurger(
                     DivisionId: target.DivisionId,
                     PayloadSensitive:
                         $"Удаление биометрических шаблонов носителя ({reason}): шаблонов {target.Templates}, "
-                        + $"вырезок {target.Crops.Count}. Носитель, кадры и лица сохранены (ТБ-074, ТФ-ДЕЛ-04)."),
+                        + $"вырезок {target.Crops.Count}"
+                        + (target.PendingFaces == 0 ? string.Empty : $", лиц незавершённой индексации {target.PendingFaces}")
+                        + ". Носитель, кадры и лица сохранены (ТБ-074, ТФ-ДЕЛ-04)."),
                 cancellationToken);
         }
 
-        var ids = targets.Select(t => t.Id).ToList();
+        var affected = targets.Select(t => t.Id).ToList();
 
-        // Атомарно: шаблоны снимаются целиком (вектор уходит из индекса вместе со строкой), у лиц
-        // обнуляется ссылка на вырезку — сама строка лица остаётся: это «появление» фигуранта,
-        // результат работы по делу (ТФ-ПЕР-02), а не биометрический материал поиска.
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        // Атомарно (та же транзакция, что держит блокировку): шаблоны снимаются целиком (вектор уходит из индекса вместе
+        // со строкой), у лиц обнуляется ссылка на вырезку — сама строка лица остаётся: это «появление» фигуранта,
+        // результат работы по делу (ТФ-ПЕР-02), а не биометрический материал поиска. Части незавершённой индексации
+        // (ADR-0064) уходят целиком: повтор у закрытого дела запрещён, и шаблонам в них больше незачем лежать.
         var templatesRemoved = await db.Templates
-            .Where(t => ids.Contains(t.AssetId))
+            .Where(t => affected.Contains(t.AssetId))
             .ExecuteDeleteAsync(cancellationToken);
         await db.Faces
-            .Where(f => ids.Contains(f.AssetId) && f.CropStoredFileName != null)
+            .Where(f => affected.Contains(f.AssetId) && f.CropStoredFileName != null)
             .ExecuteUpdateAsync(set => set.SetProperty(f => f.CropStoredFileName, (string?)null), cancellationToken);
+        await db.IndexCheckpoints
+            .Where(c => affected.Contains(c.AssetId))
+            .ExecuteDeleteAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         // Файлы — после фиксации: осиротевший файл без строки безвреден, строка без файла — дефект.

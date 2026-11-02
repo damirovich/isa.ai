@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using ISC.AI.Modules.Media.Domain.Model;
 using Microsoft.Extensions.Configuration;
 
@@ -28,6 +30,10 @@ namespace ISC.AI.Modules.Media.Application;
 /// Предел точного перебора, с которым ищет слой данных (ADR-0019 v0.2): до скольких шаблонов-кандидатов поиск идёт без
 /// индекса; <c>0</c> — только индекс. Параметр воспроизводимости — пишется в аудит поиска рядом с <c>ef_search</c> (ТБ-072).
 /// </param>
+/// <param name="CheckpointFrames">
+/// Через сколько кадров раскадровки индексатор сохраняет часть прогона (ТНД-007, ADR-0064): столько кадров — наибольшая
+/// потеря при аварии процесса; при обработанном сбое и отмене потерь нет.
+/// </param>
 public sealed record MediaSearchOptions(
     int CandidateListSize = MediaSearchOptions.DefaultCandidateListSize,
     int MinCandidateListSize = MediaSearchOptions.DefaultMinCandidateListSize,
@@ -41,8 +47,35 @@ public sealed record MediaSearchOptions(
     int AutoSuggestCandidatesPerReference = MediaSearchOptions.DefaultAutoSuggestCandidatesPerReference,
     double TrackMinSimilarity = MediaSearchOptions.DefaultTrackMinSimilarity,
     double TrackMaxGapSeconds = MediaSearchOptions.DefaultTrackMaxGapSeconds,
-    int ExactScanLimit = MediaSearchOptions.DefaultExactScanLimit)
+    int ExactScanLimit = MediaSearchOptions.DefaultExactScanLimit,
+    int CheckpointFrames = MediaSearchOptions.DefaultCheckpointFrames)
 {
+    /// <summary>Ключ конфигурации: через сколько кадров раскадровки сохраняется часть индексации (ADR-0064).</summary>
+    public const string CheckpointFramesKey = "Media:Video:CheckpointFrames";
+
+    /// <summary>Часть — каждые 30 кадров: при выборке 1 кадр/с это полминуты видео и несколько секунд работы моделей.</summary>
+    public const int DefaultCheckpointFrames = 30;
+
+    /// <summary>
+    /// Настройки, от которых зависит результат распознавания кадра: пути и пины SHA-256 моделей (пин обязан совпасть с
+    /// файлом, иначе модель не загружается, — значит, другой файл модели даёт другой ключ), пороги детекции и качества,
+    /// папка ffmpeg (раскадровка) и частота выборки. Их значения входят в ключ прогона индексации (ADR-0064 п. 2): части,
+    /// снятые при других значениях, не продолжаются — смешивать в одном видео лица разных моделей и порогов нельзя.
+    /// </summary>
+    public static IReadOnlyList<string> PipelineKeys { get; } =
+    [
+        "Vision:Detector:Path", "Vision:Detector:Sha256", "Vision:Embedder:Path", "Vision:Embedder:Sha256",
+        "Vision:Detection:ScoreThreshold", "Vision:Detection:NmsIou", "Vision:Detection:MaxInputSide",
+        "Vision:Quality:MinInterocular", "Vision:Quality:MinDetectionScore",
+        "Vision:Ffmpeg:Folder", SampleFpsKey,
+    ];
+
+    /// <summary>
+    /// Отпечаток настроек конвейера — значения <see cref="PipelineKeys"/> как есть («ключ=значение» через «;»), часть ключа
+    /// прогона индексации (ADR-0064). Пусто — настройки не читались (тесты): части тогда различает только ключ моделей и исходника.
+    /// </summary>
+    public string PipelineFingerprint { get; init; } = string.Empty;
+
     /// <summary>Ключ конфигурации: порог схожести шаблонов для продолжения трека лица в видео.</summary>
     public const string TrackMinSimilarityKey = "Media:Video:TrackMinSimilarity";
 
@@ -183,9 +216,11 @@ public sealed record MediaSearchOptions(
             TrackMaxGapSeconds: ReadDouble(configuration, TrackMaxGapSecondsKey) is { } gap && gap > 0 ? gap : DefaultTrackMaxGapSeconds,
             // Ноль допустим (только индекс) — то же правило, что у слоя данных, иначе аудит расходился бы с поиском.
             ExactScanLimit: int.TryParse(configuration[ExactScanLimitKey], NumberStyles.Integer, CultureInfo.InvariantCulture, out var limit)
-                && limit >= 0 ? limit : DefaultExactScanLimit)
+                && limit >= 0 ? limit : DefaultExactScanLimit,
+            CheckpointFrames: ReadInt(configuration, CheckpointFramesKey, DefaultCheckpointFrames))
         {
             Scale = scale,
+            PipelineFingerprint = string.Join(';', PipelineKeys.Select(key => key + "=" + configuration[key])),
         };
     }
 

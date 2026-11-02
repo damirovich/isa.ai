@@ -58,7 +58,7 @@ public sealed class MediaIndexerTests : IDisposable
         _caseScope.IsBiometricIndexingAllowedAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(true);
 
         _store.GetForIndexingAsync(AssetId, Arg.Any<CancellationToken>())
-            .Returns(new MediaAssetIndexingInfo(AssetId, MediaKind.Video, "src.mp4", "video/mp4", Classification: 2, DivisionId: 7, ["old.jpg"]));
+            .Returns(new MediaAssetIndexingInfo(AssetId, MediaKind.Video, "src.mp4", "video/mp4", Classification: 2, DivisionId: 7, ["old.jpg"], ContentHash: "AA"));
         _store.When(s => s.CompleteIndexingAsync(Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<long?>(), Arg.Any<VideoProbe?>(), Arg.Any<FilmstripDraft?>(), Arg.Any<CancellationToken>()))
             .Do(_ => _calls.Add("complete"));
 
@@ -240,7 +240,7 @@ public sealed class MediaIndexerTests : IDisposable
         await _files.DidNotReceive().DeleteAsync("oldstrip.jpg", Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
-    [Fact(DisplayName = "Сбой детектора: FailIndexingAsync с причиной, новые вырезки сняты, старые остались, аудита нет")]
+    [Fact(DisplayName = "Сбой детектора: кадры до сбоя — в часть прогона (ADR-0064), «ошибка» с подсказкой продолжения, новые вырезки сняты, старые остались, аудита нет")]
     public async Task Detector_failure_marks_failed_and_removes_new_crops()
     {
         _detector.DetectAsync(Arg.Is<byte[]>(b => b[0] == 10), Arg.Any<CancellationToken>())
@@ -251,7 +251,17 @@ public sealed class MediaIndexerTests : IDisposable
         result.Success.ShouldBeFalse();
         result.Error.ShouldBe("модель не загружена");
         result.Frames.ShouldBe(3);
-        await _store.Received(1).FailIndexingAsync(AssetId, "модель не загружена", Arg.Any<CancellationToken>());
+
+        // ТНД-007: кадры 0 и 5 обработаны целиком — их лица (A и B) сохранены частью ДО «ошибки»; кадр 10, на котором
+        // случился сбой, в часть не попал. Причина в карточке говорит, до какого места распознано и что повтор продолжит.
+        await _store.Received(1).SaveIndexCheckpointAsync(
+            AssetId, Arg.Any<string>(), 0, 5, Arg.Is<IReadOnlyList<IndexedFace>>(f => f.Count == 2 && f.All(x => x.FrameIndex == 5)),
+            Arg.Any<CancellationToken>());
+        await _store.Received(1).FailIndexingAsync(
+            AssetId,
+            Arg.Is<string>(r => r.StartsWith("модель не загружена", StringComparison.Ordinal)
+                && r.Contains("0:00:05", StringComparison.Ordinal) && r.Contains("продолжит", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
         await _store.DidNotReceive().CompleteIndexingAsync(
             Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<long?>(), Arg.Any<VideoProbe?>(), Arg.Any<FilmstripDraft?>(), Arg.Any<CancellationToken>());
         await _files.Received(1).DeleteAsync("new1.jpg", MediaFileCategories.FaceCrops, "9", Arg.Any<CancellationToken>());
@@ -260,7 +270,7 @@ public sealed class MediaIndexerTests : IDisposable
         await _audit.DidNotReceive().WriteAsync(Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>());
     }
 
-    [Fact(DisplayName = "Отмена: пробрасывается, носитель переведён в «индексация отменена», строки не записаны")]
+    [Fact(DisplayName = "Отмена: пробрасывается, кадры до остановки — в часть прогона (ADR-0064), носитель — «индексация отменена» с подсказкой, строки не опубликованы")]
     public async Task Cancellation_is_rethrown_and_marked()
     {
         _detector.DetectAsync(Arg.Is<byte[]>(b => b[0] == 10), Arg.Any<CancellationToken>())
@@ -268,7 +278,13 @@ public sealed class MediaIndexerTests : IDisposable
 
         await Should.ThrowAsync<OperationCanceledException>(() => Indexer().IndexAsync(AssetId));
 
-        await _store.Received(1).FailIndexingAsync(AssetId, "индексация отменена", Arg.Any<CancellationToken>());
+        // Остановка хоста не теряет обработанное: часть пишется без отмены, до статуса.
+        await _store.Received(1).SaveIndexCheckpointAsync(
+            AssetId, Arg.Any<string>(), 0, 5, Arg.Is<IReadOnlyList<IndexedFace>>(f => f.Count == 2), CancellationToken.None);
+        await _store.Received(1).FailIndexingAsync(
+            AssetId,
+            Arg.Is<string>(r => r.StartsWith("индексация отменена", StringComparison.Ordinal) && r.Contains("продолжит", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
         await _store.DidNotReceive().CompleteIndexingAsync(
             Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<long?>(), Arg.Any<VideoProbe?>(), Arg.Any<FilmstripDraft?>(), Arg.Any<CancellationToken>());
         await _files.DidNotReceive().DeleteAsync("old.jpg", Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
@@ -321,6 +337,10 @@ public sealed class MediaIndexerTests : IDisposable
         // Проба видеопотока (ADR-0028) — только для видео: у изображения ни частоты кадров, ни длительности нет.
         await _frames.DidNotReceive().ProbeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
         await _files.DidNotReceive().DeleteAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+
+        // ADR-0064: у фото кадр один — частей прогона нет.
+        await _store.DidNotReceiveWithAnyArgs().LoadIndexCheckpointAsync(default, default!, default);
+        await _store.DidNotReceiveWithAnyArgs().SaveIndexCheckpointAsync(default, default!, default, default, default!, default);
     }
 
     [Fact(DisplayName = "Носитель не найден: конвейер не запускается, статус не меняется")]
@@ -352,6 +372,10 @@ public sealed class MediaIndexerTests : IDisposable
             Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<long?>(), Arg.Any<VideoProbe?>(), Arg.Any<FilmstripDraft?>(), Arg.Any<CancellationToken>());
         await _audit.DidNotReceive().WriteAsync(Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>());
+
+        // ADR-0064 п. 7: шаблонам закрытого дела негде оставаться — части незавершённой индексации сняты, новые не пишутся.
+        await _store.Received(1).DiscardIndexCheckpointAsync(AssetId, Arg.Any<CancellationToken>());
+        await _store.DidNotReceiveWithAnyArgs().SaveIndexCheckpointAsync(default, default!, default, default, default!, default);
     }
 
     [Fact(DisplayName = "ADR-0026: аудиозапись — немедленный выход без изменений: ни статуса, ни чтения исходника, ни лиц, ни журнала")]
@@ -478,6 +502,145 @@ public sealed class MediaIndexerTests : IDisposable
         await _audit.Received(1).WriteAsync(Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact(DisplayName = "ADR-0064: видео пишется частями каждые CheckpointFrames кадров и хвостом ДО публикации; прошлые части другого прогона сняты до распознавания")]
+    public async Task Video_is_saved_in_parts_before_publication()
+    {
+        _store.When(s => s.SaveIndexCheckpointAsync(
+                Arg.Any<int>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<CancellationToken>()))
+            .Do(ci => _calls.Add($"part:{ci.ArgAt<int>(2)}-{ci.ArgAt<int>(3)}:{ci.ArgAt<IReadOnlyList<IndexedFace>>(4).Count}"));
+        _store.When(s => s.DiscardIndexCheckpointAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())).Do(_ => _calls.Add("discard"));
+        _detector.When(d => d.DetectAsync(Arg.Any<byte[]>(), Arg.Any<CancellationToken>())).Do(_ => _calls.Add("detect"));
+
+        (await Indexer(new MediaSearchOptions(CheckpointFrames: 2)).IndexAsync(AssetId)).Success.ShouldBeTrue();
+
+        // Кадры 0 и 5 (два лица) — первая часть, кадр 10 (одно лицо) — хвост; публикация — после обеих.
+        _calls.Where(c => c.StartsWith("part:", StringComparison.Ordinal)).ShouldBe(["part:0-5:2", "part:10-10:1"]);
+        _calls.IndexOf("complete").ShouldBeGreaterThan(_calls.IndexOf("part:10-10:1"));
+
+        // Частей прошлого прогона с тем же ключом нет — снятие (части другого прогона) идёт ДО первого распознавания.
+        _calls.IndexOf("discard").ShouldBeLessThan(_calls.IndexOf("detect"));
+    }
+
+    [Fact(DisplayName = "ADR-0064: повтор с места остановки — сохранённые кадры не распознаются заново, их лица с шаблонами идут в публикацию с новыми вырезками; треки — по всем лицам")]
+    public async Task Resume_skips_saved_frames_and_publishes_all_faces()
+    {
+        // Прошлый прогон сохранил кадры 0..5: на кадре 5 — A (шаблон) и B (непригодно, без шаблона).
+        var savedA = new IndexedFace(5, 5000, FaceA, new FaceQuality(0.9f, true, null), SameFace);
+        var savedB = new IndexedFace(5, 5000, FaceB, new FaceQuality(0.1f, false, "мало пикселей"), Template: null);
+        _store.LoadIndexCheckpointAsync(AssetId, Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new IndexCheckpoint(5, [savedA, savedB]));
+
+        var result = await Indexer().IndexAsync(AssetId);
+
+        result.Success.ShouldBeTrue();
+        result.Frames.ShouldBe(3);
+        result.Faces.ShouldBe(3);
+        result.Rejected.ShouldBe(1);
+
+        // Модели работали только на кадре 10: ни детекции, ни оценки, ни векторизации сохранённых лиц.
+        await _detector.Received(1).DetectAsync(Arg.Any<byte[]>(), Arg.Any<CancellationToken>());
+        await _detector.Received(1).DetectAsync(Arg.Is<byte[]>(b => b[0] == 10), Arg.Any<CancellationToken>());
+        await _embedder.Received(1).EmbedAsync(Arg.Any<byte[]>(), Arg.Any<DetectedFace>(), Arg.Any<CancellationToken>());
+        _quality.DidNotReceive().Assess(FaceA, Arg.Any<int>(), Arg.Any<int>());
+
+        // Вырезки — для всех трёх лиц: у сохранённых — заново из того же кадра (части имён файлов не хранят).
+        await _files.Received(3).SaveAsync(Arg.Any<Stream>(), ".jpg", MediaFileCategories.FaceCrops, "9", Arg.Any<CancellationToken>());
+
+        // Новая часть — только кадр 10; публикация — все лица в порядке кадров, шаблон сохранённого лица прежний.
+        await _store.Received(1).SaveIndexCheckpointAsync(
+            AssetId, Arg.Any<string>(), 10, 10, Arg.Is<IReadOnlyList<IndexedFace>>(f => f.Count == 1), Arg.Any<CancellationToken>());
+        await _store.DidNotReceive().SaveIndexCheckpointAsync(
+            Arg.Is(AssetId), Arg.Any<string>(), Arg.Is(0), Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<CancellationToken>());
+        await _store.Received(1).CompleteIndexingAsync(
+            AssetId,
+            Arg.Is<IReadOnlyList<IndexedFace>>(faces => faces.Count == 3
+                && faces.Select(f => f.FrameIndex).SequenceEqual(new int?[] { 5, 5, 10 })
+                && faces[0].Template != null && faces[0].Template!.SequenceEqual(SameFace)
+                && faces[1].Template == null && !faces[1].Quality.Acceptable
+                && faces.All(f => f.CropStoredFileName != null && f.TrackId != null)),
+            "yunet-1", "sface-1", 10000L, Arg.Any<VideoProbe?>(), Arg.Any<FilmstripDraft?>(), Arg.Any<CancellationToken>());
+        await _store.DidNotReceive().DiscardIndexCheckpointAsync(AssetId, Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "ADR-0064: ключ прогона — тот же для того же входа и другой при смене исходника, модели или настроек конвейера")]
+    public async Task Run_key_depends_on_source_models_and_pipeline()
+    {
+        var keys = new List<string>();
+        _store.LoadIndexCheckpointAsync(AssetId, Arg.Do<string>(keys.Add), Arg.Any<CancellationToken>()).Returns((IndexCheckpoint?)null);
+
+        await Indexer().IndexAsync(AssetId);
+        await Indexer().IndexAsync(AssetId);
+
+        _embedder.ModelVersion.Returns("sface-2");
+        await Indexer().IndexAsync(AssetId);
+        _embedder.ModelVersion.Returns("sface-1");
+
+        await Indexer(new MediaSearchOptions { PipelineFingerprint = "Vision:Detection:ScoreThreshold=0.7" }).IndexAsync(AssetId);
+
+        _store.GetForIndexingAsync(AssetId, Arg.Any<CancellationToken>())
+            .Returns(new MediaAssetIndexingInfo(AssetId, MediaKind.Video, "src.mp4", "video/mp4", 2, 7, [], ContentHash: "BB"));
+        await Indexer().IndexAsync(AssetId);
+
+        keys.Count.ShouldBe(5);
+        keys[1].ShouldBe(keys[0]);
+        keys.Distinct().Count().ShouldBe(4);
+        keys.ShouldAllBe(k => k.Length == 64);
+    }
+
+    [Fact(DisplayName = "ADR-0064: нечитаемые части (повреждены, другая версия формата) — сняты, прогон с начала и успешен")]
+    public async Task Unreadable_checkpoint_is_discarded_and_run_starts_over()
+    {
+        _store.LoadIndexCheckpointAsync(AssetId, Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns<IndexCheckpoint?>(_ => throw new FormatException("часть другой версии формата"));
+
+        var result = await Indexer().IndexAsync(AssetId);
+
+        result.Success.ShouldBeTrue();
+        result.Faces.ShouldBe(3);
+        await _store.Received(1).DiscardIndexCheckpointAsync(AssetId, Arg.Any<CancellationToken>());
+        await _detector.Received(3).DetectAsync(Arg.Any<byte[]>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "ТБ-074, ADR-0064: дело закрыли во время обработки — перед публикацией повторная проверка: шаблоны не записаны, части сняты, «ошибка» без подсказки продолжения")]
+    public async Task Case_closed_during_indexing_is_not_published()
+    {
+        // Первая проверка (до обработки) — дело открыто; вторая (перед публикацией) — уже закрыто.
+        _caseScope.IsBiometricIndexingAllowedAsync(AssetId, Arg.Any<CancellationToken>()).Returns(true, false);
+        _store.When(s => s.SaveIndexCheckpointAsync(
+                Arg.Any<int>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<CancellationToken>()))
+            .Do(_ => _calls.Add("part"));
+        _store.When(s => s.DiscardIndexCheckpointAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())).Do(_ => _calls.Add("discard"));
+
+        var result = await Indexer().IndexAsync(AssetId);
+
+        result.Success.ShouldBeFalse();
+        result.Error.ShouldBe(MediaIndexer.CaseClosedDuringIndexingError);
+        await _store.DidNotReceive().CompleteIndexingAsync(
+            Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<long?>(), Arg.Any<VideoProbe?>(), Arg.Any<FilmstripDraft?>(), Arg.Any<CancellationToken>());
+
+        // Части сняты ПОСЛЕ последней записанной — шаблонам закрытого дела в них не остаться.
+        _calls.LastIndexOf("discard").ShouldBeGreaterThan(_calls.LastIndexOf("part"));
+        await _store.Received(1).FailIndexingAsync(AssetId, MediaIndexer.CaseClosedDuringIndexingError, Arg.Any<CancellationToken>());
+        await _files.Received(1).DeleteAsync("new1.jpg", MediaFileCategories.FaceCrops, "9", Arg.Any<CancellationToken>());
+        await _files.Received(1).DeleteAsync("new3.jpg", MediaFileCategories.FaceCrops, "9", Arg.Any<CancellationToken>());
+        await _audit.DidNotReceive().WriteAsync(Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "ADR-0064: сбой записи части — «ошибка» с исходной причиной, без ложной подсказки «продолжит»")]
+    public async Task Checkpoint_failure_fails_without_resume_hint()
+    {
+        _store.SaveIndexCheckpointAsync(
+                Arg.Any<int>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<IReadOnlyList<IndexedFace>>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException(new InvalidOperationException("БД недоступна")));
+
+        var result = await Indexer(new MediaSearchOptions(CheckpointFrames: 1)).IndexAsync(AssetId);
+
+        result.Success.ShouldBeFalse();
+        result.Error.ShouldBe("БД недоступна");
+        await _store.Received(1).FailIndexingAsync(AssetId, "БД недоступна", Arg.Any<CancellationToken>());
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
@@ -494,9 +657,9 @@ public sealed class MediaIndexerTests : IDisposable
         }
     }
 
-    private MediaIndexer Indexer() =>
+    private MediaIndexer Indexer(MediaSearchOptions? options = null) =>
         new(_store, _files, _detector, _embedder, _quality, _imageTools, _frames, _audit, _caseScope,
-            new MediaSearchOptions(), _tempFiles, _suggester, NullLogger<MediaIndexer>.Instance);
+            options ?? new MediaSearchOptions(), _tempFiles, _suggester, NullLogger<MediaIndexer>.Instance);
 
     private static async IAsyncEnumerable<VideoFrame> Frames(params VideoFrame[] frames)
     {

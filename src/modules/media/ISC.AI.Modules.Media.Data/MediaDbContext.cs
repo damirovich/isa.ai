@@ -34,6 +34,9 @@ public class MediaDbContext(DbContextOptions<MediaDbContext> options) : AuditedD
     /// <summary>Шаблоны лиц (векторы).</summary>
     public DbSet<FaceTemplate> Templates { get; set; } = null!;
 
+    /// <summary>Части незавершённой индексации видео (ТНД-007, ADR-0064) — служебные, ни поиск, ни карточки их не читают.</summary>
+    public DbSet<MediaIndexCheckpoint> IndexCheckpoints { get; set; } = null!;
+
     /// <summary>Поисковые сессии (ТО-инф-12).</summary>
     public DbSet<SearchSession> SearchSessions { get; set; } = null!;
 

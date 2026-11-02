@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using ISC.AI.Abstractions.Audit;
@@ -22,6 +25,9 @@ namespace ISC.AI.Modules.Media.Application.Features.Indexing;
 /// индексацию не валит. Исполняется фоновой очередью ядра из
 /// per-operation scope; повторный запуск идемпотентен — шаблоны перезаписываются хранилищем одной
 /// транзакцией, прежние вырезки снимаются ПОСЛЕ её фиксации (половинчатого состояния нет, ТП-005).
+/// ВОЗОБНОВЛЯЕМОСТЬ (ТНД-007, ADR-0064): лица видео по ходу раскадровки сохраняются частями прогона
+/// (<see cref="IMediaStore.SaveIndexCheckpointAsync"/>); повтор с тем же ключом прогона распознаёт только кадры после
+/// последней части, а лица сохранённых кадров берёт из частей. В поиск части не попадают — публикация прежняя.
 /// </summary>
 /// <remarks>
 /// Ошибка любого шага НЕ пробрасывается: фиксируется в статусе носителя (<see cref="IMediaStore.FailIndexingAsync"/>)
@@ -57,6 +63,15 @@ public sealed class MediaIndexer(
     public const string NoVideoStreamError =
         "Видеопотока в файле нет (только звук): носитель переведён в аудиозаписи, поиск по лицу неприменим.";
 
+    /// <summary>
+    /// Причина сбоя, если дело закрыли, пока шла обработка (ТБ-074, ADR-0064 п. 7): шаблоны не записаны, части прогона сняты.
+    /// </summary>
+    public const string CaseClosedDuringIndexingError =
+        "Дело носителя закрыто во время обработки: шаблоны удалены регламентом (ТБ-074) и не записываются.";
+
+    /// <summary>Версия состава ключа прогона (ADR-0064 п. 2): меняется, если в ключ входит что-то новое.</summary>
+    private const string RunKeyVersion = "1";
+
     /// <inheritdoc />
     public async Task<MediaIndexResult> IndexAsync(int assetId, CancellationToken cancellationToken = default)
     {
@@ -84,6 +99,9 @@ public sealed class MediaIndexer(
         if (!await caseScope.IsBiometricIndexingAllowedAsync(assetId, cancellationToken))
         {
             MediaIndexerLog.IndexingForbiddenByClosedCase(logger, assetId);
+
+            // ADR-0064 п. 7: шаблонам закрытого дела негде оставаться — и в частях незавершённой индексации тоже.
+            await store.DiscardIndexCheckpointAsync(assetId, cancellationToken);
             return new MediaIndexResult(
                 false, 0, 0, 0,
                 "Дело носителя закрыто: шаблоны удалены регламентом (ТБ-074) и заново не строятся.");
@@ -119,6 +137,14 @@ public sealed class MediaIndexer(
             // индексацию НЕ валит: поля носителя остаются прежними, длительность возьмётся из раскадровки.
             var probe = info.Kind == MediaKind.Video ? await TryProbeAsync(assetId, tempPath, cancellationToken) : null;
 
+            // ADR-0064: у видео лица сохраняются частями прогона; части с тем же ключом — повтор с места остановки.
+            // У фото кадр один — сохранять по ходу нечего.
+            if (info.Kind == MediaKind.Video)
+            {
+                progress.RunKey = RunKey(info);
+                progress.Checkpoint = await LoadCheckpointAsync(assetId, progress.RunKey, cancellationToken);
+            }
+
             long? durationMs = await ProcessSourceAsync(info, tempPath, subPath, progress, cancellationToken);
 
             // ADR-0038: лента кадров — до фиксации строк (имя файла пишется той же транзакцией); сбой — без ленты.
@@ -126,11 +152,22 @@ public sealed class MediaIndexer(
                 ? await TrySaveFilmstripAsync(assetId, subPath, progress, cancellationToken)
                 : null;
 
+            // ТБ-074, ADR-0064 п. 7: за время обработки (у видео — часы) дело могли закрыть — разрешение проверяется ещё
+            // раз прямо перед публикацией. Закрыли — шаблоны не пишутся, части прогона снимаются, носитель — «ошибка».
+            // Регламент держит ту же блокировку носителя, что и публикация, поэтому закрытие ПОСЛЕ этой проверки снимет
+            // уже опубликованные шаблоны своим актом.
+            if (!await caseScope.IsBiometricIndexingAllowedAsync(assetId, cancellationToken))
+            {
+                await store.DiscardIndexCheckpointAsync(assetId, CancellationToken.None);
+                progress.SavedThroughMs = null;
+                throw new InvalidOperationException(CaseClosedDuringIndexingError);
+            }
+
             // Строки лиц/шаблонов заменяются одной транзакцией; ТОЛЬКО после её фиксации снимаем вырезки
             // прежнего прогона (ТП-005: файл без строки безвреден, строка без файла — нет; при сбое до этой
             // точки старые лица остаются с файлами, а новые вырезки — сироты — удаляются в catch).
             // Длительность по раскадровке — запасной источник (пишется, только если у носителя её ещё нет);
-            // проба — поверх прежних значений (переиндексация обновляет их).
+            // проба — поверх прежних значений (переиндексация обновляет их). Части прогона снимаются той же транзакцией.
             await store.CompleteIndexingAsync(
                 assetId, progress.Faces, detector.ModelVersion, embedder.ModelVersion, durationMs, probe, filmstrip, cancellationToken);
             await DeleteCropsAsync(assetId, subPath, info.ExistingCropFileNames);
@@ -170,18 +207,22 @@ public sealed class MediaIndexer(
         {
             // Отмена: носитель не должен зависнуть в «в обработке» — фиксируем «отменено» (повтор — вручную,
             // ТФ-МЕД-02), снимаем новые вырезки-сироты и пробрасываем, чтобы воркер остановился штатно.
+            // ADR-0064 п. 3: полностью обработанные кадры — сначала в часть прогона: остановка хоста их не теряет.
             MediaIndexerLog.Cancelled(logger, assetId, progress.Frames);
+            await TrySavePendingPartAsync(assetId, progress);
             await DeleteCropsAsync(assetId, subPath, NewCropNames(progress));
             await DeleteNewFilmstripAsync(assetId, subPath, progress);
-            await store.FailIndexingAsync(assetId, "индексация отменена", CancellationToken.None);
+            await store.FailIndexingAsync(assetId, WithResumeHint("индексация отменена", progress), CancellationToken.None);
             throw;
         }
         catch (Exception exception)
         {
+            // ADR-0064 п. 3: кадры, обработанные до сбоя, — в часть прогона; кадр, на котором случился сбой, в неё не попадает.
             MediaIndexerLog.Failed(logger, exception, assetId, progress.Frames);
+            await TrySavePendingPartAsync(assetId, progress);
             await DeleteCropsAsync(assetId, subPath, NewCropNames(progress));
             await DeleteNewFilmstripAsync(assetId, subPath, progress);
-            await store.FailIndexingAsync(assetId, exception.Message, cancellationToken);
+            await store.FailIndexingAsync(assetId, WithResumeHint(exception.Message, progress), cancellationToken);
             return new MediaIndexResult(false, progress.Frames, progress.Faces.Count, progress.Rejected, exception.Message);
         }
         finally
@@ -310,14 +351,46 @@ public sealed class MediaIndexer(
 
         long? durationMs = null;
         var sampling = new FrameSamplingOptions(options.SampleFps);
+
+        // ADR-0064 п. 4: кадры до последней сохранённой части распознаны прошлым прогоном — их лица берутся из частей.
+        var resumeAfter = progress.Checkpoint?.LastFrameIndex;
+        var savedFaces = (progress.Checkpoint?.Faces ?? [])
+            .GroupBy(f => f.FrameIndex!.Value)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
         await foreach (var frame in frameExtractor.ExtractAsync(tempPath, sampling, cancellationToken))
         {
             progress.Frames++;
             var timestampMs = (long)frame.Timestamp.TotalMilliseconds;
             durationMs = timestampMs;
+
+            // Раскадровка идёт с начала и при повторе: из тех же кадров собирается лента (ADR-0038) и строятся вырезки.
             OfferFilmstripFrame(info.AssetId, frame.JpegBytes, timestampMs, progress);
+
+            if (resumeAfter is { } last && frame.Index <= last)
+            {
+                if (savedFaces.TryGetValue(frame.Index, out var faces))
+                {
+                    await RestoreFacesAsync(frame.JpegBytes, faces, subPath, progress, cancellationToken);
+                }
+
+                progress.SavedThroughMs = timestampMs;
+                continue;
+            }
+
+            // Лица кадра попадают в часть только после того, как кадр обработан ЦЕЛИКОМ: сбой на середине кадра не
+            // оставит в части его половину.
+            var before = progress.Faces.Count;
             await ProcessImageAsync(frame.JpegBytes, frame.Index, timestampMs, subPath, progress, cancellationToken);
+            progress.AddPending(frame.Index, timestampMs, progress.Faces.Skip(before));
+            if (progress.PendingFrames >= options.CheckpointFrames)
+            {
+                await SavePendingPartAsync(info.AssetId, progress, cancellationToken);
+            }
         }
+
+        // Хвост — в часть до публикации: сбой самой публикации не отправит повтор к началу видео.
+        await SavePendingPartAsync(info.AssetId, progress, cancellationToken);
 
         // ТФ-ПЕР-02, ADR-0037: одно лицо на соседних кадрах — один трек; по нему появление показывается отрезком.
         var tracked = FaceTracker.Assign(progress.Faces, options.TrackMinSimilarity, options.TrackMaxGapMs);
@@ -480,17 +553,129 @@ public sealed class MediaIndexer(
                 logger.LogWarning(exception, "Оценка кадра лица не выполнена — лицо сохраняется без оценок.");
             }
 
-            var crop = imageTools.CropJpeg(imageBytes, face.Box);
-            string cropName;
-            using (var cropStream = new MemoryStream(crop))
-            {
-                cropName = await fileStorage.SaveAsync(
-                    cropStream, ".jpg", MediaFileCategories.FaceCrops, subPath, cancellationToken);
-            }
-
+            var cropName = await SaveCropAsync(imageBytes, face.Box, subPath, cancellationToken);
             progress.Faces.Add(new IndexedFace(frameIndex, frameTimestampMs, face, quality, template, cropName, TrackId: null, metrics));
         }
     }
+
+    /// <summary>Вырезка лица по рамке — в хранилище (категория вырезок, подкаталог носителя); возвращает имя файла.</summary>
+    private async Task<string> SaveCropAsync(byte[] imageBytes, BoundingBox box, string subPath, CancellationToken cancellationToken)
+    {
+        var crop = imageTools.CropJpeg(imageBytes, box);
+        using var cropStream = new MemoryStream(crop);
+        return await fileStorage.SaveAsync(cropStream, ".jpg", MediaFileCategories.FaceCrops, subPath, cancellationToken);
+    }
+
+    /// <summary>
+    /// Лица кадра из сохранённой части (ADR-0064 п. 4): детекция, качество и шаблон — как в прошлом прогоне, а вырезка
+    /// строится заново из того же кадра: части имён файлов не хранят (п. 6). Счётчик отклонённых — как при распознавании.
+    /// </summary>
+    private async Task RestoreFacesAsync(
+        byte[] imageBytes, IReadOnlyList<IndexedFace> faces, string subPath, Progress progress, CancellationToken cancellationToken)
+    {
+        foreach (var face in faces)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!face.Quality.Acceptable)
+            {
+                progress.Rejected++;
+            }
+
+            var cropName = await SaveCropAsync(imageBytes, face.Face.Box, subPath, cancellationToken);
+            progress.Faces.Add(face with { CropStoredFileName = cropName, TrackId = null });
+        }
+    }
+
+    /// <summary>
+    /// Ключ прогона (ADR-0064 п. 2): SHA-256 от версии ключа, хеша исходника, версий моделей, частоты выборки и отпечатка
+    /// настроек конвейера. Совпал — части прошлого прогона дают те же лица, что дал бы этот прогон.
+    /// </summary>
+    private string RunKey(MediaAssetIndexingInfo info)
+    {
+        var material = string.Join(
+            '\n',
+            RunKeyVersion,
+            info.ContentHash ?? info.StoredFileName,
+            detector.ModelVersion,
+            embedder.ModelVersion,
+            options.SampleFps.ToString("R", CultureInfo.InvariantCulture),
+            options.PipelineFingerprint);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material)));
+    }
+
+    /// <summary>
+    /// Части прошлого прогона с тем же ключом либо <see langword="null"/>. Частей другого прогона или нечитаемых частей
+    /// (повреждены, другая версия формата) повтор не продолжает: они снимаются, и прогон идёт с начала — иначе первая же
+    /// новая часть упёрлась бы в чужие кадры.
+    /// </summary>
+    private async Task<IndexCheckpoint?> LoadCheckpointAsync(int assetId, string runKey, CancellationToken cancellationToken)
+    {
+        IndexCheckpoint? checkpoint;
+        try
+        {
+            checkpoint = await store.LoadIndexCheckpointAsync(assetId, runKey, cancellationToken);
+        }
+        catch (FormatException exception)
+        {
+            MediaIndexerLog.CheckpointUnreadable(logger, exception, assetId);
+            checkpoint = null;
+        }
+
+        if (checkpoint is null)
+        {
+            var discarded = await store.DiscardIndexCheckpointAsync(assetId, cancellationToken);
+            if (discarded > 0)
+            {
+                MediaIndexerLog.CheckpointDiscarded(logger, assetId, discarded);
+            }
+
+            return null;
+        }
+
+        MediaIndexerLog.Resumed(logger, assetId, checkpoint.LastFrameIndex, checkpoint.Faces.Count);
+        return checkpoint;
+    }
+
+    /// <summary>Пишет накопленные кадры частью прогона (ADR-0064 п. 3); накоплено ничего — ничего не делает.</summary>
+    private async Task SavePendingPartAsync(int assetId, Progress progress, CancellationToken cancellationToken)
+    {
+        if (progress.RunKey is not { } runKey || progress.PendingFirstFrame is not { } first)
+        {
+            return;
+        }
+
+        // Снимок, а не сам накопитель: список очищается сразу после записи и не должен меняться под хранилищем.
+        await store.SaveIndexCheckpointAsync(
+            assetId, runKey, first, progress.PendingLastFrame, progress.PendingFaces.ToArray(), cancellationToken);
+        progress.SavedThroughMs = progress.PendingLastMs;
+        progress.ClearPending();
+    }
+
+    /// <summary>
+    /// То же при сбое и отмене — без отмены и без проброса: часть спасает уже сделанную работу, а её неудача (БД
+    /// недоступна) не должна скрыть исходную причину сбоя.
+    /// </summary>
+    private async Task TrySavePendingPartAsync(int assetId, Progress progress)
+    {
+        try
+        {
+            await SavePendingPartAsync(assetId, progress, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            MediaIndexerLog.CheckpointNotSaved(logger, exception, assetId);
+        }
+    }
+
+    /// <summary>
+    /// Причина сбоя для карточки носителя: если часть прогона сохранена — до какого момента записи распознано и что повтор
+    /// продолжит с этого места (ADR-0064); иначе причина как есть.
+    /// </summary>
+    private static string WithResumeHint(string reason, Progress progress) =>
+        progress.SavedThroughMs is { } savedMs
+            ? reason + " — распознано до " + TimeSpan.FromMilliseconds(savedMs).ToString(@"h\:mm\:ss", CultureInfo.InvariantCulture)
+                + " записи, «Переиндексировать» продолжит с этого места"
+            : reason;
 
     /// <summary>Счётчики прогона — доступны и в ветке ошибки, чтобы отчёт о сбое нёс, сколько успели обработать.</summary>
     private sealed class Progress
@@ -512,5 +697,47 @@ public sealed class MediaIndexer(
 
         /// <summary>Записанная этим прогоном лента — для компенсации при сбое до фиксации строк.</summary>
         public string? FilmstripFileName { get; set; }
+
+        /// <summary>Ключ прогона (ADR-0064); <see langword="null"/> — не видео, части не пишутся.</summary>
+        public string? RunKey { get; set; }
+
+        /// <summary>Части прошлого прогона с тем же ключом — повтор с места остановки; <see langword="null"/> — с начала.</summary>
+        public IndexCheckpoint? Checkpoint { get; set; }
+
+        /// <summary>Лица полностью обработанных кадров, ещё не записанные частью.</summary>
+        public List<IndexedFace> PendingFaces { get; } = [];
+
+        /// <summary>Первый кадр накопленной части; <see langword="null"/> — накопленного нет.</summary>
+        public int? PendingFirstFrame { get; private set; }
+
+        /// <summary>Последний кадр накопленной части.</summary>
+        public int PendingLastFrame { get; private set; }
+
+        /// <summary>Таймкод последнего кадра накопленной части, мс.</summary>
+        public long PendingLastMs { get; private set; }
+
+        /// <summary>Сколько кадров накоплено.</summary>
+        public int PendingFrames { get; private set; }
+
+        /// <summary>Таймкод последнего кадра в сохранённых частях, мс; <see langword="null"/> — сохранённого нет.</summary>
+        public long? SavedThroughMs { get; set; }
+
+        /// <summary>Кадр обработан целиком — его лица (возможно, ни одного) в накопленную часть.</summary>
+        public void AddPending(int frameIndex, long timestampMs, IEnumerable<IndexedFace> faces)
+        {
+            PendingFirstFrame ??= frameIndex;
+            PendingLastFrame = frameIndex;
+            PendingLastMs = timestampMs;
+            PendingFrames++;
+            PendingFaces.AddRange(faces);
+        }
+
+        /// <summary>Накопленная часть записана.</summary>
+        public void ClearPending()
+        {
+            PendingFaces.Clear();
+            PendingFirstFrame = null;
+            PendingFrames = 0;
+        }
     }
 }

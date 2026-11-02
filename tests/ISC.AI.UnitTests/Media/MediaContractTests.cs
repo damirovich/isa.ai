@@ -107,6 +107,7 @@ public sealed class MediaContractTests
         MediaModule.ConfigurationKeys.ShouldContain("Media:Search:MinThresholdPercent");
         MediaModule.ConfigurationKeys.ShouldContain("Media:Search:MaxAllowedCosineDistance");
         MediaModule.ConfigurationKeys.ShouldContain("Media:Video:SampleFps");
+        MediaModule.ConfigurationKeys.ShouldContain("Media:Video:CheckpointFrames"); // ADR-0064
         MediaModule.ConfigurationKeys.ShouldContain("Media:Search:ProbeCopyMaxBytes");
         MediaModule.ConfigurationKeys.ShouldContain(MediaUploadOptions.MaxStreamedFileBytesKey);
         MediaModule.ConfigurationKeys.ShouldContain(MediaImportOptions.RootsKey);
@@ -216,6 +217,32 @@ public sealed class MediaContractTests
         // Умолчания слоя данных и сценария совпадают — иначе аудит поиска описывал бы не тот поиск (ТБ-072).
         MediaSearchOptions.DefaultExactScanLimit.ShouldBe(PgVectorFaceSearch.DefaultExactScanLimit);
         MediaSearchOptions.ExactScanLimitKey.ShouldBe(MediaPersistenceServiceCollectionExtensions.ExactScanLimitKey);
+    }
+
+    [Fact(DisplayName = "ADR-0064: часть индексации — каждые 30 кадров по умолчанию (мусор, ноль и минус — умолчание); отпечаток конвейера меняется с любой его настройкой и все его ключи — в манифесте")]
+    public void Checkpoint_frames_and_pipeline_fingerprint_are_read_from_configuration()
+    {
+        static MediaSearchOptions Read(Dictionary<string, string?> values) =>
+            MediaSearchOptions.Read(new ConfigurationBuilder().AddInMemoryCollection(values).Build());
+
+        Read(new()).CheckpointFrames.ShouldBe(30);
+        Read(new() { ["Media:Video:CheckpointFrames"] = "5" }).CheckpointFrames.ShouldBe(5);
+        Read(new() { ["Media:Video:CheckpointFrames"] = "0" }).CheckpointFrames.ShouldBe(30);
+        Read(new() { ["Media:Video:CheckpointFrames"] = "-3" }).CheckpointFrames.ShouldBe(30);
+        Read(new() { ["Media:Video:CheckpointFrames"] = "часто" }).CheckpointFrames.ShouldBe(30);
+
+        // Отпечаток — от значений настроек, влияющих на распознавание кадра: та же настройка — тот же отпечаток.
+        var baseline = Read(new() { ["Vision:Detection:ScoreThreshold"] = "0.6" }).PipelineFingerprint;
+        Read(new() { ["Vision:Detection:ScoreThreshold"] = "0.6" }).PipelineFingerprint.ShouldBe(baseline);
+        foreach (var key in MediaSearchOptions.PipelineKeys)
+        {
+            Read(new() { ["Vision:Detection:ScoreThreshold"] = "0.6", [key] = "другое" }).PipelineFingerprint.ShouldNotBe(baseline, key);
+            MediaModule.ConfigurationKeys.ShouldContain(key);
+        }
+
+        // Настройки, не влияющие на распознавание (ширина кандидат-листа), отпечаток не меняют — повтор продолжается.
+        Read(new() { ["Vision:Detection:ScoreThreshold"] = "0.6", ["Media:Search:CandidateListSize"] = "30" })
+            .PipelineFingerprint.ShouldBe(baseline);
     }
 
     [Fact(DisplayName = "Раздача файлов: описание файла — режимный ресурс, floor ядра применим к нему напрямую")]
