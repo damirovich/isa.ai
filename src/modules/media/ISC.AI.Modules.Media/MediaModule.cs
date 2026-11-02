@@ -73,6 +73,7 @@ public static class MediaModule
         .. SpeechConfigurationKeys.All,
         "ConnectionStrings:Media",
         MediaPersistenceServiceCollectionExtensions.EfSearchKey,
+        MediaPersistenceServiceCollectionExtensions.ExactScanLimitKey,
         "Vision:Detector:Path", "Vision:Detector:Sha256",
         "Vision:Embedder:Path", "Vision:Embedder:Sha256",
         "Vision:Ffmpeg:Folder", "Vision:Ffmpeg:MaxConcurrentFrameExtractions",

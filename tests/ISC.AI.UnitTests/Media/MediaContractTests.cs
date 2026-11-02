@@ -96,6 +96,7 @@ public sealed class MediaContractTests
         MediaModule.ConfigurationKeys.ShouldContain("Vision:Detector:Sha256");
         MediaModule.ConfigurationKeys.ShouldContain("Vision:Embedder:Sha256");
         MediaModule.ConfigurationKeys.ShouldContain(MediaPersistenceServiceCollectionExtensions.EfSearchKey);
+        MediaModule.ConfigurationKeys.ShouldContain("Media:Search:ExactScanLimit"); // ADR-0019 v0.2
         MediaModule.ConfigurationKeys.ShouldContain("Media:Search:CandidateListSize");
         MediaModule.ConfigurationKeys.ShouldContain("Media:Search:MinCandidateListSize");
         MediaModule.ConfigurationKeys.ShouldContain("Media:Search:MaxCandidateListSize");
@@ -198,6 +199,23 @@ public sealed class MediaContractTests
     {
         Should.Throw<FormatException>(() => MediaSearchOptions.Read(new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?> { ["Media:Search:SimilarityScale"] = "0.7:50; 0.3:70" }).Build()));
+    }
+
+    [Fact(DisplayName = "ADR-0019 v0.2: предел точного перебора — 1 000 000 по умолчанию; ноль допустим (только индекс); мусор и минус — умолчание")]
+    public void Exact_scan_limit_reads_like_data_layer()
+    {
+        static int Read(string? value) => MediaSearchOptions.Read(new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { ["Media:Search:ExactScanLimit"] = value }).Build()).ExactScanLimit;
+
+        Read(null).ShouldBe(1_000_000);
+        Read("250000").ShouldBe(250_000);
+        Read("0").ShouldBe(0);
+        Read("-5").ShouldBe(1_000_000);
+        Read("много").ShouldBe(1_000_000);
+
+        // Умолчания слоя данных и сценария совпадают — иначе аудит поиска описывал бы не тот поиск (ТБ-072).
+        MediaSearchOptions.DefaultExactScanLimit.ShouldBe(PgVectorFaceSearch.DefaultExactScanLimit);
+        MediaSearchOptions.ExactScanLimitKey.ShouldBe(MediaPersistenceServiceCollectionExtensions.ExactScanLimitKey);
     }
 
     [Fact(DisplayName = "Раздача файлов: описание файла — режимный ресурс, floor ядра применим к нему напрямую")]

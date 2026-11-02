@@ -24,6 +24,10 @@ namespace ISC.AI.Modules.Media.Application;
 /// <param name="AutoSuggestCandidatesPerReference">Сколько ближайших лиц носителя предлагается на один эталон фигуранта.</param>
 /// <param name="TrackMinSimilarity">Схожесть шаблонов, с которой лицо соседнего кадра продолжает трек (ТФ-ПЕР-02, ADR-0037).</param>
 /// <param name="TrackMaxGapSeconds">Наибольший разрыв между кадрами одного трека, секунд (лицо пропало из кадра дольше — новый трек).</param>
+/// <param name="ExactScanLimit">
+/// Предел точного перебора, с которым ищет слой данных (ADR-0019 v0.2): до скольких шаблонов-кандидатов поиск идёт без
+/// индекса; <c>0</c> — только индекс. Параметр воспроизводимости — пишется в аудит поиска рядом с <c>ef_search</c> (ТБ-072).
+/// </param>
 public sealed record MediaSearchOptions(
     int CandidateListSize = MediaSearchOptions.DefaultCandidateListSize,
     int MinCandidateListSize = MediaSearchOptions.DefaultMinCandidateListSize,
@@ -36,7 +40,8 @@ public sealed record MediaSearchOptions(
     double AutoSuggestMaxCosineDistance = MediaSearchOptions.DefaultAutoSuggestMaxCosineDistance,
     int AutoSuggestCandidatesPerReference = MediaSearchOptions.DefaultAutoSuggestCandidatesPerReference,
     double TrackMinSimilarity = MediaSearchOptions.DefaultTrackMinSimilarity,
-    double TrackMaxGapSeconds = MediaSearchOptions.DefaultTrackMaxGapSeconds)
+    double TrackMaxGapSeconds = MediaSearchOptions.DefaultTrackMaxGapSeconds,
+    int ExactScanLimit = MediaSearchOptions.DefaultExactScanLimit)
 {
     /// <summary>Ключ конфигурации: порог схожести шаблонов для продолжения трека лица в видео.</summary>
     public const string TrackMinSimilarityKey = "Media:Video:TrackMinSimilarity";
@@ -112,6 +117,12 @@ public sealed record MediaSearchOptions(
     /// <summary>Ширина обхода HNSW по умолчанию (совпадает с умолчанием слоя данных).</summary>
     public const int DefaultHnswEfSearch = 200;
 
+    /// <summary>Ключ предела точного перебора — тот же, что читает слой данных (<c>Media:Search:ExactScanLimit</c>).</summary>
+    public const string ExactScanLimitKey = "Media:Search:ExactScanLimit";
+
+    /// <summary>Предел точного перебора по умолчанию — объём эталонной базы по ТН-005 (совпадает с умолчанием слоя данных).</summary>
+    public const int DefaultExactScanLimit = 1_000_000;
+
     /// <summary>Ключ конфигурации: включены ли предложения связей с фигурантами (ТФ-ПЕР-09).</summary>
     public const string AutoSuggestEnabledKey = "Media:Search:AutoSuggest:Enabled";
 
@@ -169,7 +180,10 @@ public sealed record MediaSearchOptions(
             AutoSuggestMaxCosineDistance: suggestThreshold,
             AutoSuggestCandidatesPerReference: perReference,
             TrackMinSimilarity: Math.Clamp(ReadDouble(configuration, TrackMinSimilarityKey) ?? DefaultTrackMinSimilarity, 0, 1),
-            TrackMaxGapSeconds: ReadDouble(configuration, TrackMaxGapSecondsKey) is { } gap && gap > 0 ? gap : DefaultTrackMaxGapSeconds)
+            TrackMaxGapSeconds: ReadDouble(configuration, TrackMaxGapSecondsKey) is { } gap && gap > 0 ? gap : DefaultTrackMaxGapSeconds,
+            // Ноль допустим (только индекс) — то же правило, что у слоя данных, иначе аудит расходился бы с поиском.
+            ExactScanLimit: int.TryParse(configuration[ExactScanLimitKey], NumberStyles.Integer, CultureInfo.InvariantCulture, out var limit)
+                && limit >= 0 ? limit : DefaultExactScanLimit)
         {
             Scale = scale,
         };
