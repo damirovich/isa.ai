@@ -1,3 +1,4 @@
+using System.Globalization;
 using ISC.AI.Abstractions.Security;
 using ISC.AI.Modules.Media.Domain.Services;
 using ISC.AI.Persistence;
@@ -13,6 +14,12 @@ public static class MediaPersistenceServiceCollectionExtensions
 {
     /// <summary>Ключ конфигурации широты обхода HNSW при поиске по лицу (<c>hnsw.ef_search</c>).</summary>
     public const string EfSearchKey = "Media:Search:HnswEfSearch";
+
+    /// <summary>
+    /// Ключ конфигурации предела точного перебора при поиске по лицу (ADR-0019 v0.2): до скольких шаблонов-кандидатов
+    /// поиск идёт без индекса; <c>0</c> — только индекс.
+    /// </summary>
+    public const string ExactScanLimitKey = "Media:Search:ExactScanLimit";
 
     /// <summary>
     /// Регистрирует <see cref="MediaDbContext"/> через фабрику (ТС-008) с провайдером Npgsql и pgvector.
@@ -44,11 +51,18 @@ public static class MediaPersistenceServiceCollectionExtensions
             ? parsed
             : PgVectorFaceSearch.DefaultEfSearch;
 
+        // Мусор или отрицательное число — умолчание: предел решает полноту поиска (ЦС-02), молча снимать его нельзя.
+        var exactScanLimit = int.TryParse(
+                configuration[ExactScanLimitKey], NumberStyles.Integer, CultureInfo.InvariantCulture, out var limit) && limit >= 0
+            ? limit
+            : PgVectorFaceSearch.DefaultExactScanLimit;
+
         // Порты домена пакета → реализации слоя данных (та же слоистость, что у профиля и документооборота).
         services.AddScoped<IFaceSearch>(sp => new PgVectorFaceSearch(
             sp.GetRequiredService<IDbContextFactory<MediaDbContext>>(),
             sp.GetRequiredService<IAccessPolicy>(),
-            efSearch));
+            efSearch,
+            exactScanLimit));
         services.AddScoped<IMediaStore, MediaStore>();
         services.AddScoped<IMediaPurger, MediaPurger>();
         services.AddScoped<IMediaFileAccess, MediaFileAccessResolver>();

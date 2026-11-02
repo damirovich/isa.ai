@@ -618,7 +618,11 @@ public sealed record SearchByFaceQuery(
               .Append("; нижняя граница=").Append(threshold.MinPercent.ToString(inv)).Append(" %")
               .Append("; шкала: ").Append(options.Scale.Describe())
               .Append("; порог(cos-dist)=").Append(maxDistance?.ToString("F4", inv) ?? "нет")
-              .Append("; ef_search=").AppendLine(options.HnswEfSearch.ToString(inv));
+              .Append("; ef_search=").Append(options.HnswEfSearch.ToString(inv))
+              // ADR-0019 v0.2: до предела слой данных ищет точным перебором, выше — индексом; без предела выдачу не воспроизвести.
+              .Append("; точный перебор: ").AppendLine(options.ExactScanLimit > 0
+                  ? "до " + options.ExactScanLimit.ToString(inv) + " шаблонов"
+                  : "выключен");
 
             sb.Append("кандидаты (").Append(candidates.Count.ToString(inv)).Append("): ");
             sb.AppendJoin("; ", candidates.Select((c, i) =>
