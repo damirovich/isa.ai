@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,9 +18,12 @@ public sealed partial class MediaStore
     public const string InterruptedTranscriptionReason =
         "прервано перезапуском системы — нажмите «Расшифровать заново»";
 
-    /// <summary>Причина, записываемая индексации лиц, прерванной перезапуском системы.</summary>
+    /// <summary>
+    /// Причина, записываемая индексации лиц, прерванной перезапуском системы. Видео продолжит с последней сохранённой
+    /// части (ADR-0064): распознанное до перезапуска не теряется.
+    /// </summary>
     public const string InterruptedIndexingReason =
-        "прервано перезапуском системы — нажмите «Переиндексировать»";
+        "прервано перезапуском системы — нажмите «Переиндексировать»: видео продолжит с последнего сохранённого кадра";
 
     /// <inheritdoc />
     /// <remarks>
@@ -52,5 +56,24 @@ public sealed partial class MediaStore
                 .SetProperty(a => a.IndexError, InterruptedIndexingReason), cancellationToken);
 
         return new InterruptedWorkRecovery(transcriptions, indexings);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Исключены носители импорта, которые задание ещё подаст или уже подало и ждёт (ADR-0041: «ждёт подачи», «подан»,
+    /// строка в приёме): после перезапуска их подаёт само задание, «ошибка» на них была бы ложной.
+    /// </remarks>
+    public async Task<IReadOnlyList<int>> ListUnqueuedUploadsAsync(CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        return await db.Assets.AsNoTracking()
+            .Where(a => a.IndexStatus == MediaIndexStatus.Uploaded && (a.Kind == MediaKind.Image || a.Kind == MediaKind.Video))
+            .Where(a => a.ImportItemId == null || !db.ImportItems.Any(i => i.Id == a.ImportItemId
+                && (i.Processing == MediaImportProcessingState.Waiting
+                    || i.Processing == MediaImportProcessingState.Queued
+                    || i.Status == MediaImportItemStatus.InProgress)))
+            .OrderBy(a => a.Id)
+            .Select(a => a.Id)
+            .ToListAsync(cancellationToken);
     }
 }

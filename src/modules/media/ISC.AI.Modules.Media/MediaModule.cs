@@ -94,6 +94,7 @@ public static class MediaModule
         MediaSearchOptions.AutoSuggestCandidatesPerReferenceKey,
         MediaSearchOptions.TrackMinSimilarityKey,
         MediaSearchOptions.TrackMaxGapSecondsKey,
+        MediaSearchOptions.CheckpointFramesKey,
         MediaUploadOptions.MaxStreamedFileBytesKey,
         MediaImportOptions.RootsKey,
         MediaImportOptions.ProcessingSlotsKey,

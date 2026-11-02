@@ -34,7 +34,8 @@ public interface IMediaStore
     /// <summary>
     /// Записывает результат конвейера ОДНОЙ транзакцией: кадры, лица, шаблоны, версии моделей,
     /// длительность (видео) и статус <see cref="MediaIndexStatus.Indexed"/>. Прежние лица/шаблоны
-    /// носителя (переиндексация) снимаются в той же транзакции — половинчатого состояния нет.
+    /// носителя (переиндексация) снимаются в той же транзакции — половинчатого состояния нет. Той же транзакцией
+    /// снимаются сохранённые части прогона (ADR-0064).
     /// </summary>
     /// <param name="assetId">Носитель.</param>
     /// <param name="faces">Найденные лица с шаблонами.</param>
@@ -64,6 +65,47 @@ public interface IMediaStore
 
     /// <summary>Фиксирует неудачу индексации с причиной (статус <see cref="MediaIndexStatus.Failed"/>).</summary>
     Task FailIndexingAsync(int assetId, string reason, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Сохранённые части незавершённой индексации видео (ТНД-007, ADR-0064), снятые ТЕМ ЖЕ прогоном: ключ
+    /// <paramref name="runKey"/> покрывает исходник, модели и настройки конвейера. <see langword="null"/> — частей нет
+    /// либо среди них есть часть другого прогона: такие части для повтора не годятся (их снимает
+    /// <see cref="DiscardIndexCheckpointAsync"/>), смешивать в одном видео лица с разными моделями и порогами нельзя.
+    /// </summary>
+    Task<IndexCheckpoint?> LoadIndexCheckpointAsync(int assetId, string runKey, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Дописывает часть прогона — лица полностью обработанных кадров <paramref name="firstFrameIndex"/>..
+    /// <paramref name="lastFrameIndex"/> — одной транзакцией под блокировкой строки носителя (той же, что у публикации и
+    /// уничтожения). Часть, кадры которой перекрываются с уже сохранёнными, часть другого прогона и часть к уничтоженному
+    /// носителю — <see cref="InvalidOperationException"/>: дублей лиц не бывает (ТНД-002).
+    /// </summary>
+    Task SaveIndexCheckpointAsync(
+        int assetId,
+        string runKey,
+        int firstFrameIndex,
+        int lastFrameIndex,
+        IReadOnlyList<IndexedFace> faces,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Снимает все сохранённые части индексации носителя (другой прогон, закрытое дело). Идемпотентно.
+    /// </summary>
+    /// <returns>Сколько частей снято.</returns>
+    Task<int> DiscardIndexCheckpointAsync(int assetId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Носители, у которых есть сохранённые части индексации (ADR-0064), — для проверки при старте хоста: части носителя,
+    /// индексация которого запрещена регламентом закрытого дела (ТБ-074), снимаются.
+    /// </summary>
+    Task<IReadOnlyList<int>> ListIndexCheckpointAssetsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Носители «загружен, ждёт обработки» (фото и видео), которых не подаст в обработку задание импорта (ADR-0041), —
+    /// для старта хоста: очередь в памяти пропала, и без подсказки оператору они ждали бы вечно (ТНД-007). Отказ по
+    /// закрытому делу оставляет носитель в том же статусе — отличать его должен вызывающий (ADR-0064 п. 9).
+    /// </summary>
+    Task<IReadOnlyList<int>> ListUnqueuedUploadsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Переводит носитель вида <see cref="MediaKind.Video"/>, в файле которого не оказалось видеопотока (голосовое

@@ -179,6 +179,10 @@ public sealed record CaseSearchPurgeResult(int SessionsRemoved, int CandidatesRe
 /// <param name="ExistingFilmstripFileName">
 /// Лента кадров прежней индексации (ADR-0038) — удаляется с диска, когда новая записана; <see langword="null"/> — её не было.
 /// </param>
+/// <param name="ContentHash">
+/// SHA-256 исходника (hex) — входит в ключ прогона индексации (ADR-0064): сохранённые части прогона годятся для повтора,
+/// только если сняты с тех же байтов.
+/// </param>
 public sealed record MediaAssetIndexingInfo(
     int AssetId,
     MediaKind Kind,
@@ -187,4 +191,14 @@ public sealed record MediaAssetIndexingInfo(
     short Classification,
     int DivisionId,
     IReadOnlyList<string> ExistingCropFileNames,
-    string? ExistingFilmstripFileName = null);
+    string? ExistingFilmstripFileName = null,
+    string? ContentHash = null);
+
+/// <summary>
+/// Сохранённые части незавершённой индексации видео (ТНД-007, ADR-0064): лица полностью обработанных кадров раскадровки
+/// с номерами не больше <paramref name="LastFrameIndex"/>. Служебные данные конвейера: ни поиск, ни карточки их не видят;
+/// при повторе индексатор берёт эти лица вместо детекции и векторизации.
+/// </summary>
+/// <param name="LastFrameIndex">Номер последнего сохранённого кадра раскадровки.</param>
+/// <param name="Faces">Лица сохранённых кадров в порядке обработки; вырезок у них нет — они строятся заново из кадров.</param>
+public sealed record IndexCheckpoint(int LastFrameIndex, IReadOnlyList<IndexedFace> Faces);

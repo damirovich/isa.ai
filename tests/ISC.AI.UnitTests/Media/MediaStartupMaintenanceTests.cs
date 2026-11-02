@@ -28,6 +28,7 @@ public sealed class MediaStartupMaintenanceTests : IDisposable
     private readonly string _testRoot = Path.Combine(Path.GetTempPath(), "iscai-media-unit-tests", Guid.NewGuid().ToString("N"));
     private readonly MediaTempFiles _tempFiles;
     private readonly IMediaStore _store = Substitute.For<IMediaStore>();
+    private readonly ICaseScope _caseScope = Substitute.For<ICaseScope>();
 
     public MediaStartupMaintenanceTests()
     {
@@ -154,6 +155,48 @@ public sealed class MediaStartupMaintenanceTests : IDisposable
         File.Exists(leftover).ShouldBeFalse();
     }
 
+    [Fact(DisplayName = "ТНД-007, ADR-0064: «ждёт обработки» без задачи → «ошибка» с подсказкой, регламентный отказ (закрытое дело) не тронут; части незавершённой индексации закрытых дел сняты")]
+    public async Task Start_fails_unqueued_uploads_and_discards_forbidden_checkpoints()
+    {
+        _store.ListUnqueuedUploadsAsync(Arg.Any<CancellationToken>()).Returns([11, 12]);
+        _store.ListIndexCheckpointAssetsAsync(Arg.Any<CancellationToken>()).Returns([21, 22]);
+        _caseScope.IsBiometricIndexingAllowedAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(true);
+        _caseScope.IsBiometricIndexingAllowedAsync(12, Arg.Any<CancellationToken>()).Returns(false);
+        _caseScope.IsBiometricIndexingAllowedAsync(22, Arg.Any<CancellationToken>()).Returns(false);
+
+        await Service(withCaseScope: true).StartAsync(CancellationToken.None);
+
+        // 11 — задача пропала с очередью; 12 — отказ регламента, это не сбой: статус «ждёт обработки» остаётся.
+        await _store.Received(1).FailIndexingAsync(11, MediaStartupMaintenance.UnqueuedUploadReason, Arg.Any<CancellationToken>());
+        await _store.DidNotReceive().FailIndexingAsync(12, Arg.Any<string>(), Arg.Any<CancellationToken>());
+        MediaStartupMaintenance.UnqueuedUploadReason.ShouldContain("Переиндексировать");
+
+        // 22 — дело закрыто: шаблонам в частях не место; 21 — повтор разрешён, части ждут его.
+        await _store.Received(1).DiscardIndexCheckpointAsync(22, Arg.Any<CancellationToken>());
+        await _store.DidNotReceive().DiscardIndexCheckpointAsync(21, Arg.Any<CancellationToken>());
+    }
+
+    [Fact(DisplayName = "ADR-0064: без области дел профиля сбой от регламентного отказа не отличить — «ждёт обработки» и части не трогаются")]
+    public async Task Start_without_case_scope_leaves_uploads_and_checkpoints()
+    {
+        _store.ListUnqueuedUploadsAsync(Arg.Any<CancellationToken>()).Returns([11]);
+        _store.ListIndexCheckpointAssetsAsync(Arg.Any<CancellationToken>()).Returns([21]);
+
+        await Service().StartAsync(CancellationToken.None);
+
+        await _store.DidNotReceiveWithAnyArgs().FailIndexingAsync(default, default!, default);
+        await _store.DidNotReceiveWithAnyArgs().DiscardIndexCheckpointAsync(default, default);
+    }
+
+    [Fact(DisplayName = "ADR-0064: сбой БД при проверке «ждёт обработки» — только журнал, старт хоста не прерывается")]
+    public async Task Start_survives_unqueued_check_failure()
+    {
+        _store.ListUnqueuedUploadsAsync(Arg.Any<CancellationToken>())
+            .Returns<IReadOnlyList<int>>(_ => throw new InvalidOperationException("БД недоступна"));
+
+        await Should.NotThrowAsync(() => Service(withCaseScope: true).StartAsync(CancellationToken.None));
+    }
+
     [Fact(DisplayName = "Регистрация: обслуживание при старте — IHostedService пакета; каталог временных копий — один на процесс")]
     public void Maintenance_is_registered_as_hosted_service()
     {
@@ -177,11 +220,16 @@ public sealed class MediaStartupMaintenanceTests : IDisposable
         }
     }
 
-    private MediaStartupMaintenance Service()
+    private MediaStartupMaintenance Service(bool withCaseScope = false)
     {
-        var provider = new ServiceCollection().AddScoped(_ => _store).BuildServiceProvider();
+        var services = new ServiceCollection().AddScoped(_ => _store);
+        if (withCaseScope)
+        {
+            services.AddScoped(_ => _caseScope);
+        }
+
         return new MediaStartupMaintenance(
-            provider.GetRequiredService<IServiceScopeFactory>(), _tempFiles, NullLogger<MediaStartupMaintenance>.Instance);
+            services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), _tempFiles, NullLogger<MediaStartupMaintenance>.Instance);
     }
 
     private static string Touch(string folder, string name, DateTime lastWriteUtc)

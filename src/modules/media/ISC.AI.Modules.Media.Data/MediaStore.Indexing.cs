@@ -41,6 +41,10 @@ public sealed partial class MediaStore
         await db.Faces.Where(f => f.AssetId == assetId).ExecuteDeleteAsync(cancellationToken);
         await db.Frames.Where(f => f.AssetId == assetId).ExecuteDeleteAsync(cancellationToken);
 
+        // Части прогона (ADR-0064) своё отслужили: результат публикуется целиком, и в той же транзакции они снимаются —
+        // шаблоны не остаются лежать вне поиска, а повтор после успеха начнётся заново, а не с «готовых» частей.
+        await db.IndexCheckpoints.Where(c => c.AssetId == assetId).ExecuteDeleteAsync(cancellationToken);
+
         // Кадры — по одному на уникальный индекс; лица ссылаются на них.
         var frames = new Dictionary<int, MediaFrame>();
         foreach (var indexed in faces.Where(f => f.FrameIndex is not null))

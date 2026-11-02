@@ -819,6 +819,60 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                     b.ToTable("import_job", "media");
                 });
 
+            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.MediaIndexCheckpoint", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AssetId")
+                        .HasColumnType("integer")
+                        .HasColumnName("asset_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("FaceCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("face_count");
+
+                    b.Property<string>("Faces")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("faces");
+
+                    b.Property<int>("FirstFrameIndex")
+                        .HasColumnType("integer")
+                        .HasColumnName("first_frame_index");
+
+                    b.Property<int>("LastFrameIndex")
+                        .HasColumnType("integer")
+                        .HasColumnName("last_frame_index");
+
+                    b.Property<string>("RunKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("run_key");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_index_checkpoint");
+
+                    b.HasIndex("AssetId", "FirstFrameIndex")
+                        .IsUnique()
+                        .HasDatabaseName("ix_index_checkpoint_asset_id_first_frame_index");
+
+                    b.ToTable("index_checkpoint", "media");
+                });
+
             modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.MediaSetting", b =>
                 {
                     b.Property<string>("Key")
@@ -1453,6 +1507,18 @@ namespace ISC.AI.Modules.Media.Data.Migrations
                     b.Navigation("Asset");
 
                     b.Navigation("Job");
+                });
+
+            modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.MediaIndexCheckpoint", b =>
+                {
+                    b.HasOne("ISC.AI.Modules.Media.Data.Entities.MediaAsset", "Asset")
+                        .WithMany()
+                        .HasForeignKey("AssetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_index_checkpoint_asset_asset_id");
+
+                    b.Navigation("Asset");
                 });
 
             modelBuilder.Entity("ISC.AI.Modules.Media.Data.Entities.SearchCandidate", b =>

@@ -53,4 +53,20 @@ internal static partial class MediaIndexerLog
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Индексация носителя {AssetId}: лента кадров не собрана — поиск лиц продолжается, у видео останется прежняя лента либо её не будет (ADR-0038).")]
     public static partial void FilmstripFailed(ILogger logger, Exception exception, int assetId);
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Индексация носителя {AssetId} продолжается с места остановки: кадры до {LastFrameIndex} раскадровки распознаны прошлым прогоном, лиц в сохранённых частях {Faces} (ADR-0064).")]
+    public static partial void Resumed(ILogger logger, int assetId, int lastFrameIndex, int faces);
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Индексация носителя {AssetId}: сняты части прошлого прогона ({Parts}) — другие модели или настройки, прогон идёт с начала (ADR-0064).")]
+    public static partial void CheckpointDiscarded(ILogger logger, int assetId, int parts);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Индексация носителя {AssetId}: сохранённые части не читаются (повреждены или другой версии формата) — они снимаются, прогон идёт с начала (ADR-0064).")]
+    public static partial void CheckpointUnreadable(ILogger logger, Exception exception, int assetId);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Индексация носителя {AssetId}: часть прогона при сбое не сохранена — повтор распознает эти кадры заново (ADR-0064).")]
+    public static partial void CheckpointNotSaved(ILogger logger, Exception exception, int assetId);
 }

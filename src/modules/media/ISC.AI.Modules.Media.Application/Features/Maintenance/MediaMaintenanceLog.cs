@@ -36,4 +36,12 @@ internal static partial class MediaMaintenanceLog
     [LoggerMessage(Level = LogLevel.Error,
         Message = "Дозаполнение поиска ИИ расшифровками (корпус ядра, ADR-0051) при старте не поставлено — старт не прерван; повтор при следующем старте.")]
     public static partial void CorpusBackfillFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "При старте носители «ждёт обработки», чья задача пропала вместе с очередью, переведены в «ошибка»: {Failed}; сняты части незавершённой индексации носителей закрытых дел: {Discarded} (ADR-0064). Повтор — кнопкой «Переиндексировать».")]
+    public static partial void UnqueuedRecovered(ILogger logger, int failed, int discarded);
+
+    [LoggerMessage(Level = LogLevel.Error,
+        Message = "Проверка носителей «ждёт обработки» и частей незавершённой индексации при старте не выполнена (БД недоступна?) — старт не прерван; повтор при следующем старте.")]
+    public static partial void UnqueuedRecoveryFailed(ILogger logger, Exception exception);
 }
