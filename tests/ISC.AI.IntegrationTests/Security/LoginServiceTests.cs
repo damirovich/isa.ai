@@ -3,6 +3,7 @@ using ISC.AI.Abstractions.Security;
 using ISC.AI.IntegrationTests.Persistence;
 using ISC.AI.Persistence;
 using ISC.AI.Persistence.Entities;
+using ISC.AI.Persistence.Security;
 using ISC.AI.Web.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -55,7 +56,7 @@ public sealed class LoginServiceTests : IAsyncLifetime
 
         var auditWriter = Substitute.For<IAuditWriter>();
         var service = new LoginService(
-            identityProvider, factory, auditWriter, NullLogger<LoginService>.Instance);
+            identityProvider, factory, auditWriter, new LoginLockout(factory, auditWriter), NullLogger<LoginService>.Instance);
 
         var principal = await service.AuthenticateAsync("ivanov", "any-password");
 
@@ -88,7 +89,7 @@ public sealed class LoginServiceTests : IAsyncLifetime
 
         var auditWriter = Substitute.For<IAuditWriter>();
         var service = new LoginService(
-            identityProvider, factory, auditWriter, NullLogger<LoginService>.Instance);
+            identityProvider, factory, auditWriter, new LoginLockout(factory, auditWriter), NullLogger<LoginService>.Instance);
 
         var principal = await service.AuthenticateAsync("petrov", "any-password");
 

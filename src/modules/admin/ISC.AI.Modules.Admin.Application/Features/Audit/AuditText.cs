@@ -39,6 +39,9 @@ public static class AuditText
         ["upload"] = "загрузка", ["search"] = "поиск", ["login"] = "вход", ["logout"] = "выход", ["link"] = "привязка",
         ["unlink"] = "отвязка", ["activate"] = "включение", ["deactivate"] = "отключение", ["revoke"] = "отзыв",
         ["from"] = "от редакции", ["снята"] = "снята", ["terminate"] = "завершение",
+
+        // Блокировка после неудачных входов (ТБ-081, ADR-0065).
+        ["lockout"] = "блокировка после неудачных входов", ["unlock"] = "снятие блокировки",
     };
 
     /// <summary>Подпись действия журнала.</summary>
@@ -84,6 +87,12 @@ public static class AuditText
         if (int.TryParse(part, NumberStyles.None, CultureInfo.InvariantCulture, out _))
         {
             return "№ " + part;
+        }
+
+        // Число неудачных входов в записи о блокировке (ТБ-081): «attempts=5» → «неудачных входов подряд: 5».
+        if (part.StartsWith("attempts=", StringComparison.Ordinal))
+        {
+            return "неудачных входов подряд: " + part["attempts=".Length..];
         }
 
         return Words.TryGetValue(part, out var word) ? word : part;

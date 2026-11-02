@@ -68,6 +68,9 @@ public sealed record GetUserHistoryQuery(int UserId) : IRequest<ResponseDto<IRea
             AuditFilter[] needles =
             [
                 new(Action: AuditAction.Modify, ObjectRef: $"admin:account:{id}:"),
+
+                // ТБ-081, ADR-0065: блокировка после неудачных входов — её ставит ядро при входе, а не экран администрирования.
+                new(Action: AuditAction.Modify, ObjectRef: $"auth:account:{id}:"),
                 new(Action: AuditAction.Modify, ObjectRef: $"admin:clearance:{id}:"),
                 new(Action: AuditAction.Modify, ObjectRef: $"admin:role:{id}:"),
                 new(Action: AuditAction.Modify, ObjectRef: $":user-role:{id}:"),
