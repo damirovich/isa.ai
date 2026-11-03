@@ -1,8 +1,9 @@
-# Служба веб-хоста ISC.AI («ИнспекторAI») — автозапуск и перезапуск после сбоя (ТНД-005).
-# Ставится install.sh в /etc/systemd/system/. Свои изменения (другой каталог носителя резервных копий, зависимость от
-# локального PostgreSQL и т. п.) — ТОЛЬКО через «systemctl edit isc-ai»: этот файл install.sh перезаписывает при обновлении.
+# Служба веб-хоста ISC.AI («ИнспекторAI» или «Следствие AI» — профиль в /opt/isc-ai/current/VERSION) — автозапуск и
+# перезапуск после сбоя (ТНД-005). Ставится install.sh в /etc/systemd/system/. Свои изменения (другой каталог носителя
+# резервных копий, каталог архива, зависимость от локального PostgreSQL и т. п.) — ТОЛЬКО через «systemctl edit isc-ai»:
+# этот файл install.sh перезаписывает при обновлении.
 [Unit]
-Description=ISC.AI «ИнспекторAI» — веб-хост
+Description=ISC.AI — веб-хост
 Wants=network-online.target
 After=network-online.target
 # Если PostgreSQL на этом же сервере — в «systemctl edit isc-ai» добавить: After=postgresql.service
@@ -15,6 +16,13 @@ WorkingDirectory=/opt/isc-ai/current/app
 ExecStart=/opt/isc-ai/current/app/ISC.AI.Web
 Environment=ASPNETCORE_ENVIRONMENT=Production
 Environment=DOTNET_NOLOGO=1
+# Временные копии материалов (видео, звук, сканы) — на томе данных: видео в гигабайты не помещается в /tmp системного
+# раздела. Каталог создаёт install.sh; его же видят распознаватель речи и ffmpeg (наследуют окружение службы).
+Environment=TMPDIR=/var/lib/isc-ai/tmp
+# Телеметрия ONNX Runtime (распознавание лиц) выключена: с версии 1.30 библиотека под Linux сама обращается к серверу
+# Microsoft (ТБ-043, ТБ-052). Читается только из окружения процесса, из программы её не выключить; без переменной
+# программа модели лиц не загружает. Не удалять через systemctl edit.
+Environment=ORT_DISABLE_TELEMETRY=1
 # Секреты (пароль БД и т. п.) — только здесь, файл root:root 0600 (ТБ-013, Э4-10).
 EnvironmentFile=/etc/isc-ai/isc-ai.env
 

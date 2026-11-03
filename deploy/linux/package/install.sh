@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Установка и обновление «ИнспекторAI» на сервере приложений Linux (изолированный контур, ТИ-003).
+# Установка и обновление ISC.AI на сервере приложений Linux (изолированный контур, ТИ-003): «ИнспекторAI» или
+# «Следствие AI» — по пакету (VERSION, строка profile=). Части, которых в пакете нет (модели, ffmpeg, распознаватель
+# речи — только у «Следствия»), просто пропускаются.
 #
 #   sudo bash install.sh            — установить или обновить; работающая служба НЕ перезапускается (сначала миграции)
 #   sudo bash install.sh --start    — то же и (пере)запустить службу — когда настройки и база уже готовы
@@ -9,12 +11,16 @@
 #
 # Раскладка:
 #   /opt/isc-ai/releases/<версия>/{app,tools}   — программа (каждая версия рядом, для отката)
+#   /opt/isc-ai/releases/<версия>/speech-worker — распознаватель речи той же версии («Следствие»)
 #   /opt/isc-ai/current -> releases/<версия>     — текущая версия (переключается одной ссылкой)
 #   /opt/isc-ai/tessdata                         — языковые файлы OCR (rus, kir)
+#   /opt/isc-ai/models/{vision,speech}           — модели распознавания лиц и речи («Следствие»)
+#   /opt/isc-ai/ffmpeg/{bin,lib}                 — ffmpeg LGPL: видео и звук («Следствие»)
 #   /etc/isc-ai/appsettings.Production.json      — настройки (root:iscai 0640)
 #   /etc/isc-ai/isc-ai.env                       — секреты: пароль БД и т. п. (root:root 0600, читает только systemd)
 #   /etc/isc-ai/tls/                             — сертификат и ключ HTTPS
 #   /var/lib/isc-ai/{storage,docflow-files,keys} — данные службы (iscai 0700)
+#   /var/lib/isc-ai/tmp                          — временные копии (видео, звук, сканы) — на томе данных, не в /tmp
 #   /etc/systemd/system/isc-ai.service           — служба (свои правки — только через systemctl edit isc-ai)
 set -euo pipefail
 
@@ -40,7 +46,9 @@ fi
 say "Проверка целостности пакета (ТБ-051)"
 bash "$PKG/verify.sh"
 VERSION="$(head -n 1 "$PKG/VERSION")"
+PROFILE="$(sed -n 's/^profile=//p' "$PKG/VERSION")"
 RELEASE="$BASE/releases/$VERSION"
+echo "   профиль: ${PROFILE:-inspector}"
 
 say "Учётная запись службы $APP_USER"
 if ! id "$APP_USER" &>/dev/null; then
@@ -55,8 +63,9 @@ say "Каталоги"
 install -d -m 0755 -o root -g root "$BASE" "$BASE/releases"
 install -d -m 0750 -o root -g "$APP_USER" "$ETC" "$ETC/tls"
 # Данные — только у службы: хранилища файлов и ключи шифрования cookie (на Linux ключи лежат на диске без
-# шифрования, их защищают права каталога — ТБ-062).
-install -d -m 0700 -o "$APP_USER" -g "$APP_USER" "$DATA" "$DATA/storage" "$DATA/docflow-files" "$DATA/keys"
+# шифрования, их защищают права каталога — ТБ-062). tmp — временные копии материалов (TMPDIR службы): видео в
+# гигабайты не должно ложиться в /tmp системного раздела, а копия материала дела — вне каталога службы.
+install -d -m 0700 -o "$APP_USER" -g "$APP_USER" "$DATA" "$DATA/storage" "$DATA/docflow-files" "$DATA/keys" "$DATA/tmp"
 
 say "Программа $VERSION → $RELEASE"
 was_active=0
@@ -73,10 +82,13 @@ if [[ -d "$RELEASE" ]]; then
 fi
 install -d -m 0755 "$RELEASE"
 cp -a "$PKG/app" "$PKG/tools" "$PKG/VERSION" "$RELEASE/"
+# Распознаватель речи — той же версии, что программа: они разговаривают своим протоколом, и откат версии откатывает обоих.
+[[ -d "$PKG/speech-worker" ]] && cp -a "$PKG/speech-worker" "$RELEASE/"
 chown -R root:root "$RELEASE"
 # Программа только для чтения: писать в неё службе незачем (ProtectSystem=strict это и закрепляет).
 chmod -R u=rwX,go=rX "$RELEASE"
 chmod 0755 "$RELEASE/app/ISC.AI.Web" "$RELEASE/tools/backup-restore/ISC.AI.Backup.Restore"
+[[ -d "$RELEASE/speech-worker" ]] && chmod 0755 "$RELEASE/speech-worker/ISC.AI.Speech.Worker"
 # Настройки читаются из /etc: ссылка в каталоге программы (хост берёт appsettings.<Окружение>.json из рабочего каталога).
 ln -sfn "$ETC/appsettings.Production.json" "$RELEASE/app/appsettings.Production.json"
 
@@ -103,6 +115,40 @@ fi
 if ! ldconfig -p | grep -q 'libdl\.so '; then
     libdl="$(find_lib '^libdl\.so\.2')"
     [[ -n "$libdl" ]] && ln -sfn "$libdl" "$RELEASE/app/libdl.so"
+fi
+
+# Модели и ffmpeg («Следствие») — общие для версий, как языковые файлы OCR: заменяются целиком новой копией (сначала
+# рядом, потом переименованием), чтобы работающая служба не застала каталог наполовину пустым. Их целостность уже
+# сверил verify.sh по SHA256SUMS, а пины моделей программа проверяет ещё раз при загрузке.
+replace_dir() {
+    local source="$1" target="$2"
+    rm -rf "$target.new" "$target.old"
+    cp -a "$source" "$target.new"
+    chown -R root:root "$target.new"
+    chmod -R u=rwX,go=rX "$target.new"
+    [[ -d "$target" ]] && mv "$target" "$target.old"
+    mv "$target.new" "$target"
+    rm -rf "$target.old"
+}
+if [[ -d "$PKG/models" ]]; then
+    say "Модели распознавания лиц и речи → $BASE/models"
+    replace_dir "$PKG/models" "$BASE/models"
+    find "$BASE/models" -type f -name '*.onnx' -printf '   %P\n'
+fi
+if [[ -d "$PKG/ffmpeg" ]]; then
+    say "ffmpeg (LGPL) → $BASE/ffmpeg"
+    replace_dir "$PKG/ffmpeg" "$BASE/ffmpeg"
+    chmod 0755 "$BASE/ffmpeg/bin/ffmpeg" "$BASE/ffmpeg/bin/ffprobe"
+    # Проверка запуском: библиотеки ищутся рядом ($ORIGIN/../lib), а сборка обязана быть LGPL (ТСТ-001/004).
+    if configuration="$("$BASE/ffmpeg/bin/ffmpeg" -hide_banner -version 2>&1 | grep '^configuration:')"; then
+        if [[ "$configuration" == *--enable-gpl* || "$configuration" == *--enable-nonfree* ]]; then
+            echo "ОТКАЗ: ffmpeg в пакете собран как GPL/nonfree — поставка запрещена (ТСТ-001/004)." >&2
+            exit 1
+        fi
+        echo "   $("$BASE/ffmpeg/bin/ffmpeg" -hide_banner -version | head -n 1)"
+    else
+        warn "ffmpeg не запускается ($BASE/ffmpeg/bin/ffmpeg -version) — видео и звук обрабатываться не будут; причина: ldd $BASE/ffmpeg/bin/ffmpeg"
+    fi
 fi
 
 say "Настройки (только при первой установке; существующие не трогаются)"
@@ -137,6 +183,12 @@ for f in /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf /usr/share/fonts/dejavu
     [[ -f "$f" ]] && fonts_ok=1
 done
 [[ $fonts_ok -eq 1 ]] || warn "нет шрифтов DejaVu/Liberation: PDF-отчёты документооборота не сформируются (или задайте DocFlow:Reports:PdfFont)"
+if [[ "$PROFILE" == "investigation" ]]; then
+    # Нативный Skia (обработка изображений: лица, вырезки, лента кадров, печать фото) загружается вместе с fontconfig —
+    # без него не обработается ни одно фото и видео.
+    ldconfig -p | grep -q 'libfontconfig\.so\.1' \
+        || warn "нет fontconfig (libfontconfig.so.1): распознавание лиц и печать фото не заработают — поставьте пакет fontconfig"
+fi
 command -v pg_dump >/dev/null || ls /usr/lib/postgresql/*/bin/pg_dump &>/dev/null \
     || warn "нет pg_dump (клиент PostgreSQL той же версии, что сервер) — резервные копии работать не будут"
 

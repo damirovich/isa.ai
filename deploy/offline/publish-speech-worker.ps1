@@ -155,7 +155,35 @@ function Test-LicenseText([string]$Path, [string[]]$Markers) {
 # проверяется на eSpeak NG и попадает под «лишнюю нативную», то есть ошибка громкая, а не тихая).
 function Test-ManagedAssembly([IO.FileInfo]$File) {
     if ($File.Extension -ne '.dll') { return $false }
-    try { [void][Reflection.AssemblyName]::GetAssemblyName($File.FullName); return $true }
+
+    # Управляемую сборку узнаём по заголовку CLI в PE-файле (каталог данных № 14), а не попыткой загрузки: сборки среды
+    # .NET для linux-x64 (-SelfContained) скомпилированы заранее (ReadyToRun) с «машиной» Linux в PE-заголовке, и
+    # .NET Framework под Windows PowerShell 5.1 отказывается их читать, хотя это обычные управляемые сборки.
+    try {
+        $stream = [IO.File]::OpenRead($File.FullName)
+        try {
+            $reader = New-Object IO.BinaryReader($stream)
+            if ($stream.Length -lt 0x40 -or $reader.ReadUInt16() -ne 0x5A4D) { return $false }
+            $stream.Position = 0x3C
+            $pe = $reader.ReadInt32()
+            if ($pe -lt 0 -or $pe + 26 -gt $stream.Length) { return $false }
+            $stream.Position = $pe
+            if ($reader.ReadUInt32() -ne 0x00004550) { return $false }
+            $optional = $pe + 24
+            $stream.Position = $optional
+            $magic = $reader.ReadUInt16()
+            if ($magic -eq 0x10B) { $directoryCount = $optional + 92; $directories = $optional + 96 }
+            elseif ($magic -eq 0x20B) { $directoryCount = $optional + 108; $directories = $optional + 112 }
+            else { return $false }
+            $stream.Position = $directoryCount
+            if ($reader.ReadUInt32() -lt 15 -or $directories + 15 * 8 -gt $stream.Length) { return $false }
+            $stream.Position = $directories + 14 * 8
+            $rva = $reader.ReadUInt32()
+            $size = $reader.ReadUInt32()
+            return ($rva -ne 0 -and $size -ne 0)
+        }
+        finally { $stream.Dispose() }
+    }
     catch { return $false }
 }
 
@@ -605,6 +633,11 @@ Write-Host 'там лежит onnxruntime.dll распознавания лиц 
 if ($Runtime -like 'win-*') {
     Write-Host "  Speech:Worker:Path = <каталог поставки>\$($names.AppHost)"
     Write-Host "    (для этой машины: $(Join-Path $workerFull $names.AppHost))"
+}
+elseif ($SelfContained) {
+    # Своя среда .NET: dotnet на сервере нет, запускается сам исполняемый файл (бит исполнения ставит установка).
+    Write-Host "  Speech:Worker:Path = <каталог поставки>/$($names.AppHost)"
+    Write-Host '    (после переноса с Windows — chmod +x; пакет «Следствия» для Linux делает это в install.sh)'
 }
 else {
     Write-Host '  Speech:Worker:Path = <каталог поставки>/ISC.AI.Speech.Worker.dll'

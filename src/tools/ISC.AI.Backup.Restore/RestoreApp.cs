@@ -114,7 +114,7 @@ public static class RestoreApp
         }
 
         using var key = BackupKeys.Generate();
-        await File.WriteAllTextAsync(privatePath, BackupKeys.ExportPrivatePem(key, password), cancellationToken);
+        await WritePrivateKeyAsync(privatePath, BackupKeys.ExportPrivatePem(key, password), cancellationToken);
         await File.WriteAllTextAsync(publicPath, BackupKeys.ExportPublicPem(key), cancellationToken);
         console.WriteLine($"Ключи созданы в {Path.GetFullPath(folder)}:");
         console.WriteLine($"  {PublicKeyFile} — открытый: передать Администратору (Backup:PublicKey:Path);");
@@ -122,6 +122,22 @@ public static class RestoreApp
         console.WriteLine("Отпечаток для Backup:PublicKey:Sha256:");
         console.WriteLine("  " + BackupKeys.FingerprintHex(key));
         return 0;
+    }
+
+    // Закрытый ключ хранителя (ADR-0063) — только его владельцу: под Linux файл сразу создаётся с правами 0600, без
+    // промежутка, когда его прочитал бы любой пользователь машины (umask 022 дал бы 0644). Под паролем он и так, но
+    // копия зашифрованного ключа — это перебор пароля вне контроля хранителя. Под Windows права наследуются от каталога.
+    private static async Task WritePrivateKeyAsync(string path, string pem, CancellationToken cancellationToken)
+    {
+        var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
+        if (!OperatingSystem.IsWindows())
+        {
+            options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        }
+
+        await using var stream = new FileStream(path, options);
+        await using var writer = new StreamWriter(stream);
+        await writer.WriteAsync(pem.AsMemory(), cancellationToken);
     }
 
     private static async Task<int> VerifyAsync(Dictionary<string, string> options, IRestoreConsole console, CancellationToken cancellationToken)

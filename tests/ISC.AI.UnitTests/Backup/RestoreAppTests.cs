@@ -59,6 +59,12 @@ public sealed class RestoreAppTests : IDisposable
         created.Output.ShouldContain(BackupKeys.FingerprintHex(key));
         using var publicKey = BackupKeys.LoadPublicKey(Path.Combine(folder, RestoreApp.PublicKeyFile));
         BackupKeys.FingerprintHex(publicKey).ShouldBe(BackupKeys.FingerprintHex(key));
+        if (!OperatingSystem.IsWindows())
+        {
+            // Под Linux закрытый ключ — только владельцу (0600), а не по umask.
+            File.GetUnixFileMode(Path.Combine(folder, RestoreApp.PrivateKeyFile))
+                .ShouldBe(UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
 
         (await RunAsync(["keygen", "--out", folder], "пароль хранителя ключа", "пароль хранителя ключа")).Code.ShouldBe(1);
     }
