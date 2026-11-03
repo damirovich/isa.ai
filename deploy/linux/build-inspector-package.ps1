@@ -53,6 +53,43 @@ function Copy-LinuxText([string]$Source, [string]$Destination) {
     Write-LinuxText $Destination ([System.IO.File]::ReadAllText($Source, [System.Text.Encoding]::UTF8))
 }
 
+# Архив с правами Linux. С диска Windows tar берёт для всех файлов 0644, и программы в распакованном архиве не
+# запустились бы, а ключи резервных копий создают программой прямо из него, до установки. Поэтому записи архива
+# перечисляются спецификацией mtree с явными правами и владельцем root: 0755 — каталоги, скрипты .sh и программы
+# (файлы ELF, кроме библиотек .so), остальное — 0644.
+function New-LinuxArchive([string]$Root, [string]$Name, [string]$Archive) {
+    $epoch = New-Object DateTime 1970, 1, 1, 0, 0, 0, ([DateTimeKind]::Utc)
+    $base = Join-Path $Root $Name
+    $spec = New-Object System.Collections.Generic.List[string]
+    $spec.Add('#mtree')
+    foreach ($item in @(Get-Item -LiteralPath $base) + @(Get-ChildItem -LiteralPath $base -Recurse)) {
+        $path = $Name + $item.FullName.Substring($base.Length).Replace('\', '/')
+        $owner = 'uid=0 gid=0 uname=root gname=root time={0}.0' -f [long][Math]::Floor(($item.LastWriteTimeUtc - $epoch).TotalSeconds)
+        if ($item.PSIsContainer) {
+            $spec.Add("./$path type=dir mode=0755 $owner")
+            continue
+        }
+        $mode = '0644'
+        if ($item.Extension -eq '.sh') { $mode = '0755' }
+        elseif ($item.Name -notmatch '\.so(\.|$)' -and $item.Length -ge 4) {
+            $magic = New-Object byte[] 4
+            $stream = [System.IO.File]::OpenRead($item.FullName)
+            try { [void]$stream.Read($magic, 0, 4) } finally { $stream.Dispose() }
+            if ($magic[0] -eq 0x7F -and $magic[1] -eq 0x45 -and $magic[2] -eq 0x4C -and $magic[3] -eq 0x46) { $mode = '0755' }
+        }
+        $spec.Add("./$path type=file mode=$mode $owner contents=$path")
+    }
+    # Спецификация лежит рядом с каталогом пакета, не в нём: tar читает её и файлы по путям от -C.
+    $specPath = Join-Path $Root "$Name.mtree"
+    Write-LinuxText $specPath (($spec -join "`n") + "`n")
+    try {
+        Invoke-Native 'Упаковка tar.gz' { & "$env:SystemRoot\System32\tar.exe" -czf $Archive -C $Root "@$Name.mtree" }
+    }
+    finally {
+        Remove-Item -LiteralPath $specPath -ErrorAction SilentlyContinue
+    }
+}
+
 # --- Версия пакета: дата + коммит; незакоммиченные правки помечаются «-dirty» (такой пакет в контур не везут).
 $commit = (git -C $repoRoot rev-parse HEAD).Trim()
 $dirty = [bool](git -C $repoRoot status --porcelain)
@@ -167,7 +204,7 @@ try {
         Write-Host '== Архив для носителя'
         $archive = Join-Path $OutputRoot "$name.tar.gz"
         if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
-        Invoke-Native 'Упаковка tar.gz' { & "$env:SystemRoot\System32\tar.exe" -czf $archive -C $OutputRoot $name }
+        New-LinuxArchive $OutputRoot $name $archive
         $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
         Write-LinuxText "$archive.sha256" "$hash  $name.tar.gz`n"
         Write-Host "   $archive"

@@ -57,6 +57,19 @@ public sealed class VisionPipelineUnitTests
         }
     }
 
+    [Fact(DisplayName = "ТБ-043/052: под Linux без ORT_DISABLE_TELEMETRY=1 модель не загружается; под Windows проверки нет")]
+    public void Onnx_telemetry_must_be_disabled_on_linux()
+    {
+        foreach (var optOut in new[] { null, "", "0", "true" })
+        {
+            Should.Throw<InvalidOperationException>(() => OnnxSessions.EnsureTelemetryDisabled(isWindows: false, optOut))
+                .Message.ShouldContain(OnnxSessions.TelemetryOptOutVariable + "=1");
+        }
+
+        Should.NotThrow(() => OnnxSessions.EnsureTelemetryDisabled(isWindows: false, "1"));
+        Should.NotThrow(() => OnnxSessions.EnsureTelemetryDisabled(isWindows: true, null));
+    }
+
     [Fact(DisplayName = "MJPEG: два кадра в одном куске, третий — разорванный между кусками")]
     public void Mjpeg_splitter_extracts_frames_across_chunks()
     {

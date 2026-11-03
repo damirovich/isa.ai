@@ -69,6 +69,12 @@
          deploy/offline/models, поставляются с пинами SHA-256 (export-vision-models.ps1). -->
     <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.30.0" />
     <PackageVersion Include="SkiaSharp" Version="4.152.0" />
+    <!-- Нативный Skia для Linux (MIT; нативная часть BSD-3): основной пакет SkiaSharp везёт его только для Windows и
+         macOS, а без него на Linux не работает вся обработка изображений «Следствия» — детекция и векторизация лиц,
+         вырезки, лента кадров, печать фото. Версия — та же, что у SkiaSharp. Вариант с fontconfig (не NoDependencies):
+         печать фото в PDF ищет системный шрифт по имени. Подключается только к публикации под Linux (хост, профиль
+         investigation) — сборкам для Windows не нужен. -->
+    <PackageVersion Include="SkiaSharp.NativeAssets.Linux" Version="4.152.0" />
     <PackageVersion Include="FFMpegCore" Version="5.4.0" />
     <!-- Распознавание речи для профиля «Следствие» (ADR-0026): sherpa-onnx — Apache-2.0 (k2-fsa), только в
          отдельном процессе ISC.AI.Speech.Worker (свой нативный onnxruntime не встречается с

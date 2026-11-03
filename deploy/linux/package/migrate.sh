@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Применение миграций базы «ИнспекторAI» (ТО-прог-08, ДОК-07 §6): идемпотентные SQL-скрипты пакета (sql/) в порядке
-# core → docflow → inspector. Повторный запуск безопасен: каждая миграция применяется, только если её ещё нет в журнале
-# миграций своей схемы (__ef_migrations_history), и каждая — в своей транзакции.
+# Применение миграций базы ISC.AI (ТО-прог-08, ДОК-07 §6): идемпотентные SQL-скрипты пакета (sql/) в порядке из
+# sql/ORDER — у «ИнспектораAI» core → docflow → inspector, у «Следствия AI» core → docflow → media → investigation.
+# Повторный запуск безопасен: каждая миграция применяется, только если её ещё нет в журнале миграций своей схемы
+# (__ef_migrations_history), и каждая — в своей транзакции.
 #
 #   bash migrate.sh --host <сервер БД> --db <база> --user <владелец базы> [--port 5432] [--sslmode require]
 #                   [--admin-user postgres] [--yes]
@@ -36,12 +37,30 @@ export PGHOST="$host" PGPORT="$port" PGDATABASE="$db" PGSSLMODE="$sslmode" PGCLI
 export PGOPTIONS='--client-min-messages=warning'
 q() { psql -X -q -t -A -v ON_ERROR_STOP=1 -U "$1" -c "$2"; }
 
+# Скрипты пакета и их схемы: строки «файл схема» из sql/ORDER. Пакеты «ИнспектораAI» до появления ORDER — прежний порядок.
+specs=()
+if [[ -f "$PKG/sql/ORDER" ]]; then
+    while read -r file schema; do
+        [[ -n "$file" ]] && specs+=("$file $schema")
+    done < "$PKG/sql/ORDER"
+else
+    specs=("10-core.sql core" "20-docflow.sql docflow" "30-inspector.sql inspector")
+fi
+
 echo "== Подключение: $user@$host:$port/$db (sslmode=$sslmode)"
 server="$(q "$user" 'SHOW server_version')"
 echo "   PostgreSQL $server"
 if [[ "$(q "$user" "SELECT count(*) FROM pg_available_extensions WHERE name = 'vector'")" != "1" ]]; then
     echo "ОТКАЗ: на сервере нет расширения pgvector (vector) — поставьте пакет pgvector под эту версию PostgreSQL." >&2
     exit 1
+fi
+# pgvector не ниже 0.8.4 (ADR-0019 v0.2): в 0.8.3 ложная ошибка VACUUM «hnsw graph not repaired», а итеративный обход
+# индекса, которым поиск по лицу идёт сверх миллиона шаблонов, появился в 0.8. Старее — предупреждение, не отказ:
+# до миллиона шаблонов поиск идёт точным перебором и от версии не зависит.
+vector_version="$(q "$user" "SELECT coalesce((SELECT extversion FROM pg_extension WHERE extname = 'vector'), default_version) FROM pg_available_extensions WHERE name = 'vector'")"
+echo "   pgvector $vector_version"
+if [[ "$(printf '%s\n%s\n' "0.8.4" "$vector_version" | sort -V | head -n 1)" != "0.8.4" ]]; then
+    echo "   ВНИМАНИЕ: pgvector $vector_version старее 0.8.4 — обновите пакет pgvector на сервере БД (docs/INSTALL.ru.md)."
 fi
 
 # Сколько миграций схемы уже в базе. Наличие журнала — отдельным запросом: имя таблицы в подзапросе PostgreSQL
@@ -53,7 +72,10 @@ applied() {
         echo 0
     fi
 }
-already=$(( $(applied core) + $(applied docflow) + $(applied inspector) ))
+already=0
+for spec in "${specs[@]}"; do
+    already=$(( already + $(applied "${spec#* }") ))
+done
 if [[ $already -gt 0 && $yes -eq 0 ]]; then
     echo "   в базе уже применено миграций: $already — это обновление."
     read -r -p "   Резервная копия базы и хранилищ сделана (ДОК-07 §6.1, п. 1)? [y/N] " answer
@@ -76,9 +98,9 @@ else
     echo "   уже есть"
 fi
 
-# Порядок обязателен: ядро первым (ТО-прог-08). Внешних ключей между схемами нет (ТО-инф-06), но профиль и пакет
+# Порядок обязателен: ядро первым (ТО-прог-08). Внешних ключей между схемами нет (ТО-инф-06), но профиль и пакеты
 # опираются на справочники ядра.
-for spec in "10-core.sql core" "20-docflow.sql docflow" "30-inspector.sql inspector"; do
+for spec in "${specs[@]}"; do
     set -- $spec
     file="$PKG/sql/$1"; schema="$2"
     expected="$(grep -c "INSERT INTO $schema.__ef_migrations_history" "$file")"

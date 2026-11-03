@@ -27,6 +27,14 @@
     <ProjectReference Include="..\..\profiles\investigation\ISC.AI.Profile.Investigation\ISC.AI.Profile.Investigation.csproj" />
   </ItemGroup>
 
+  <!-- «Следствие» под Linux (пакет поставки, deploy/linux/build-investigation-package.ps1): нативный Skia для Linux.
+       Основной пакет SkiaSharp его не везёт, а без него на сервере не обрабатывается ни одно изображение (детекция и
+       векторизация лиц, вырезки, печать фото). Здесь, в хосте, а не в библиотеке распознавания: идентификатор среды
+       (-r linux-x64) задаёт публикация хоста, и только в нём условие видно при восстановлении пакетов. -->
+  <ItemGroup Condition="'$(IscProfile)' == 'investigation' and $(RuntimeIdentifier.StartsWith('linux'))">
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" />
+  </ItemGroup>
+
   <!-- Композиция профиля: в сборку попадает ТОЛЬКО каталог Composition/<IscProfile>/ — там лежит
        HostProfile.Create(), единственный код хоста, знающий конкретный тип профиля. Каталоги других
        профилей из компиляции исключены (их типы в этой поставке недоступны). -->
