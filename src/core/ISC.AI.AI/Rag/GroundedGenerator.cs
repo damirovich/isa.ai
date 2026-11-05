@@ -44,8 +44,8 @@ public sealed class GroundedGenerator(
         ArgumentNullException.ThrowIfNull(access);
 
         // 1–3. Извлечение с ОБЯЗАТЕЛЬНЫМ фильтром доступа (ТБ-020, fail-closed) + только актуальные; область запроса
-        //      (Filter, например документы дела — ADR-0051) лишь сужает выдачу.
-        var fragments = await retriever.RetrieveAsync(request.Query, access, request.TopK, request.Filter, cancellationToken);
+        //      (Filter, например документы дела — ADR-0051) лишь сужает выдачу. Поданные материалы — см. FragmentsAsync.
+        var fragments = await FragmentsAsync(request, access, cancellationToken);
 
         // Гвард бюджета токенов: в промпт (и в грунтовку) идут ТОЛЬКО фрагменты, реально уместившиеся в окно.
         var included = SelectWithinBudget(request, fragments);
@@ -88,7 +88,7 @@ public sealed class GroundedGenerator(
         ArgumentNullException.ThrowIfNull(access);
 
         // 1–3. Извлечение с ОБЯЗАТЕЛЬНЫМ фильтром доступа (ТБ-020, fail-closed) — как и в блокирующем пути.
-        var fragments = await retriever.RetrieveAsync(request.Query, access, request.TopK, request.Filter, cancellationToken);
+        var fragments = await FragmentsAsync(request, access, cancellationToken);
 
         // Гвард бюджета токенов — как в блокирующем пути: грунтовка идёт по фактически отправленным фрагментам.
         var included = SelectWithinBudget(request, fragments);
@@ -131,6 +131,27 @@ public sealed class GroundedGenerator(
                 await AuditFailedAttemptAsync(request, included, access, "поток прерван до завершения", AuditOutcome.Cancelled);
             }
         }
+    }
+
+    // Источник фрагментов — ОДНА точка для обоих путей: поиск по корпусу с floor доступа или поданные вызывающим
+    // материалы (ADR-0067). ИНВАРИАНТ (ТБ-020, fail-closed): мимо ретривера проходит только несекретный справочный
+    // материал — фрагмент с грифом выше 0 отбрасывается с предупреждением, а не подаётся модели. Подразделение у
+    // такого материала не проверяется: без грифа он не принадлежит подразделению. Всё с грифом — только поиском.
+    private async Task<IReadOnlyList<RetrievedChunk>> FragmentsAsync(
+        GroundedRequest request, AccessContext access, CancellationToken cancellationToken)
+    {
+        if (request.Materials is not { } supplied)
+        {
+            return await retriever.RetrieveAsync(request.Query, access, request.TopK, request.Filter, cancellationToken);
+        }
+
+        var unclassified = supplied.Where(fragment => fragment.Classification == 0).ToList();
+        if (unclassified.Count < supplied.Count)
+        {
+            GroundedGeneratorLog.ClassifiedMaterialsDropped(logger, supplied.Count - unclassified.Count);
+        }
+
+        return unclassified;
     }
 
     // Параметры генерации из конфига (детерминизм и границы вывода — зрелость ТН-003, аудируемость).

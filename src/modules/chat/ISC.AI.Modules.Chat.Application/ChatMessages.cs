@@ -29,6 +29,9 @@ public static class ChatMessages
 
     /// <summary>Поиск по смыслу профилем не включён.</summary>
     public const string SenseSearchOff = "Поиск по смыслу в этом чате не включён.";
+
+    /// <summary>У области один режим ответа, а запрошен другой или поиск по смыслу (ADR-0067).</summary>
+    public const string ModeNotInArea = "Здесь так не отвечают — выберите подходящего помощника вверху страницы.";
 }
 
 /// <summary>Пределы чата (ADR-0052).</summary>

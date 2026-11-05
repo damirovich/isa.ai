@@ -30,6 +30,13 @@ namespace ISC.AI.Abstractions.Rag;
 /// ответ, пересказывающий сведения подразделения, читали только аудиторы этого подразделения (ТБ-032).
 /// <see langword="null"/> — данных подразделения в промпте нет (запись без подразделения, как раньше).
 /// </param>
+/// <param name="Materials">
+/// Готовые фрагменты ВМЕСТО поиска (ADR-0067): например, разделы справки пользователя для помощника «Как пользоваться
+/// системой». Конвейер тот же — правило грунтовки первым, проверка ссылок по поданным фрагментам, аудит генерации.
+/// ИНВАРИАНТ: мимо ретривера идёт только несекретный справочный материал поставки — фрагменты с грифом выше 0 ядро
+/// отбрасывает; материалы с грифом подаются только поиском с floor доступа (ТБ-020). <see cref="Filter"/> и
+/// <see cref="TopK"/> при этом не действуют. <see langword="null"/> — обычный поиск по корпусу.
+/// </param>
 public sealed record GroundedRequest(
     string Query,
     ModelRole Role = ModelRole.Analysis,
@@ -38,4 +45,5 @@ public sealed record GroundedRequest(
     IReadOnlyList<ChatTurn>? History = null,
     RetrievalFilter? Filter = null,
     short InputClassification = 0,
-    int? InputDivisionId = null);
+    int? InputDivisionId = null,
+    IReadOnlyList<RetrievedChunk>? Materials = null);

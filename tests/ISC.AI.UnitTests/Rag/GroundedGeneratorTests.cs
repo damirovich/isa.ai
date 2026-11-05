@@ -339,6 +339,68 @@ public sealed class GroundedGeneratorTests
         idxHistory.ShouldBeLessThan(idxCurrent);
     }
 
+    [Fact(DisplayName = "Поданные материалы (ADR-0067): поиск не вызывается, модель и проверка ссылок получают только несекретные фрагменты, фрагмент с грифом отброшен; журнал — по поданным")]
+    public async Task Supplied_materials_bypass_retriever_and_keep_only_unclassified()
+    {
+        var retriever = Substitute.For<IRetriever>();
+
+        List<ChatMessage>? sent = null;
+        var chatClient = Substitute.For<IChatClient>();
+        chatClient.GetResponseAsync(
+                Arg.Do<IEnumerable<ChatMessage>>(m => sent = m.ToList()),
+                Arg.Any<ChatOptions?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new ChatResponse(new ChatMessage(ChatRole.Assistant, "Откройте «Генератор» [Фрагмент 1].")));
+        chatClient.GetStreamingResponseAsync(Arg.Any<IEnumerable<ChatMessage>>(), Arg.Any<ChatOptions?>(), Arg.Any<CancellationToken>())
+            .Returns(StreamParts("Откройте ", "«Генератор»."));
+
+        IReadOnlyList<RetrievedChunk>? validated = null;
+        var grounding = Substitute.For<IGroundingValidator>();
+        grounding.Validate(Arg.Any<string>(), Arg.Do<IReadOnlyList<RetrievedChunk>>(f => validated = f))
+            .Returns(new GroundingResult([], AllConfirmed: true));
+
+        var audit = Substitute.For<IAuditWriter>();
+        var provider = new ServiceCollection()
+            .AddKeyedSingleton<IChatClient>(ModelRole.Draft, chatClient)
+            .BuildServiceProvider();
+        var generator = new GroundedGenerator(
+            retriever, grounding, audit, provider, GenerationOptions.Default, NullLogger<GroundedGenerator>.Instance);
+
+        // Допуск субъекта позволил бы гриф 2 — но мимо поиска гриф не проходит вовсе (fail-closed).
+        var access = new AccessContext("42", MaxClassification: 2, AllowedDivisions: [7]);
+        var materials = new List<RetrievedChunk>
+        {
+            new(ChunkId: 1, DocumentId: 0, Text: "Раздел справки: Генератор", Classification: 0, DivisionId: 0, IsCurrent: true, Score: 1),
+            new(ChunkId: 2, DocumentId: 0, Text: "секретный текст", Classification: 2, DivisionId: 7, IsCurrent: true, Score: 1),
+        };
+        var request = new GroundedRequest("Как сделать справку?", ModelRole.Draft, Materials: materials);
+
+        var response = await generator.GenerateAsync(request, access);
+
+        await retriever.DidNotReceiveWithAnyArgs().RetrieveAsync(default!, default!, default, default, default);
+        sent.ShouldNotBeNull();
+        sent![0].Role.ShouldBe(ChatRole.System);
+        sent.ShouldContain(m => (m.Text ?? string.Empty).Contains("Раздел справки: Генератор"));
+        sent.ShouldNotContain(m => (m.Text ?? string.Empty).Contains("секретный текст"));
+        validated.ShouldNotBeNull().ShouldHaveSingleItem().ChunkId.ShouldBe(1);
+        response.UsedFragments.ShouldHaveSingleItem().ChunkId.ShouldBe(1);
+        response.ResultClassification.ShouldBe((short)0);
+        await audit.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.Action == AuditAction.Generate && e.Classification == 0 && e.ObjectRef == "1"),
+            Arg.Any<CancellationToken>());
+
+        // Потоковый путь берёт фрагменты из той же точки: поиска нет, фрагмент с грифом не подаётся.
+        sent = null;
+        var updates = new List<GroundedStreamUpdate>();
+        await foreach (var update in generator.GenerateStreamingAsync(request, access))
+        {
+            updates.Add(update);
+        }
+
+        await retriever.DidNotReceiveWithAnyArgs().RetrieveAsync(default!, default!, default, default, default);
+        updates[^1].Final.ShouldNotBeNull().UsedFragments.ShouldHaveSingleItem().ChunkId.ShouldBe(1);
+    }
+
     private static async IAsyncEnumerable<ChatResponseUpdate> StreamParts(params string[] parts)
     {
         foreach (var part in parts)

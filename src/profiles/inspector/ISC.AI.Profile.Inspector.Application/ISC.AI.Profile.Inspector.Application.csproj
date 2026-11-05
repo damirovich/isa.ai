@@ -23,4 +23,9 @@
     <EmbeddedResource Include="Generation\Prompts\*.scriban" />
   </ItemGroup>
 
+  <!-- Справка пользователя (страница «Помощь») — один текстовый файл; имя ресурса закреплено, чтобы не зависеть от пути. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Features\Guide\user-guide.md" LogicalName="ISC.AI.Profile.Inspector.UserGuide.md" />
+  </ItemGroup>
+
 </Project>

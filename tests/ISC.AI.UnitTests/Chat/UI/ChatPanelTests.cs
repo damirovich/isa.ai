@@ -62,6 +62,26 @@ public sealed class ChatPanelTests : BunitContext, IAsyncLifetime
 
     private static readonly ChatArea AllArea = new(null, "Все мои дела (2)", "всех доступных вам дел (2)", 0, 1, null, "investigation", []);
 
+    // «Помощники» (ADR-0067): области с единственным режимом, выбор карточками, подсказка «вопрос не туда».
+    private static readonly ChatSettings AssistantSettings = new()
+    {
+        AllowFreeMode = true,
+        AreaCards = true,
+        GroundedModeLabel = "По документам",
+        FreeAnswerLabel = "Без документов — проверьте сами",
+    };
+
+    private static readonly ChatRedirect ToDocuments =
+        new(null, "Этот помощник не видит законы и документы.", "Спросить по документам", ["закон"]);
+
+    private static readonly ChatArea DocumentsArea = new(
+        null, "Ответ по документам", "документов", 0, 1, null, "inspector", [],
+        OnlyMode: ChatMode.Grounded, Hint: "Ищет в законах и документах", Icon: ChatAreaIcon.Documents, AnswerLabel: "По документам");
+
+    private static readonly ChatArea TextHelperArea = new(
+        "text", "Помощь с текстом", "помощи с текстом", 0, 1, null, "inspector:text", [],
+        OnlyMode: ChatMode.Free, Hint: "Документы не видит", Icon: ChatAreaIcon.Text, Redirects: [ToDocuments]);
+
     private static readonly ChatSuggestions Suggestions = new()
     {
         Grounded = ["Кратко: о чём это дело?", "Кто фигуранты и что о них известно?"],
@@ -358,6 +378,84 @@ public sealed class ChatPanelTests : BunitContext, IAsyncLifetime
 
         cut.WaitForAssertion(() => cut.Markup.ShouldContain(ChatMessages.NoRight));
         cut.FindComponents<ChatPanel>().ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Помощники карточками (ADR-0067): карточки с назначением вместо списка; выбор карточки меняет область; у помощника один режим — без переключателя")]
+    public void Assistant_cards_choose_area()
+    {
+        _settings = AssistantSettings;
+        Overview(DocumentsArea);
+        Overview(TextHelperArea);
+        Areas([DocumentsArea, TextHelperArea]);
+        EnsurePopover();
+
+        var cut = Render<ChatPage>();
+
+        cut.WaitForAssertion(() => cut.FindAll(".cc-area-card").Count.ShouldBe(2));
+        cut.FindComponents<MudSelect<string>>().ShouldBeEmpty();
+        cut.FindAll(".cc-area-card")[0].TextContent.ShouldContain("Ищет в законах и документах");
+        cut.FindAll(".cc-area-card")[1].TextContent.ShouldContain("Документы не видит");
+
+        cut.FindAll(".cc-area-card")[1].Click();
+
+        cut.WaitForAssertion(() => cut.FindComponent<ChatPanel>().Instance.AreaKey.ShouldBe("text"));
+        cut.WaitForAssertion(() => cut.Find("textarea"));
+        cut.FindAll(".mud-toggle-group").ShouldBeEmpty();
+        cut.Find(".cc-empty").TextContent.ShouldContain("Документы не видит");
+    }
+
+    [Fact(DisplayName = "Вопрос не туда (ADR-0067): до отправки — подсказка; переход передаёт вопрос странице; «Всё равно отправить» отправляет как есть; под свободным ответом — «без документов»")]
+    public void Redirect_warns_before_sending()
+    {
+        _settings = AssistantSettings;
+        Overview(TextHelperArea);
+        var sent = new List<SendChatMessageCommand>();
+        _mediator.CreateStream(Arg.Do<SendChatMessageCommand>(sent.Add), Arg.Any<CancellationToken>()).Returns(
+            _ => Updates(new ChatUpdate(ConversationId: 15), new ChatUpdate(ConversationId: 15, Final: new ChatAnswer("Срок — по закону.", 0, [], null))));
+        ChatAreaSwitch? switched = null;
+        EnsurePopover();
+        var cut = Render<ChatPanel>(p => p
+            .Add(x => x.AreaKey, "text")
+            .Add(x => x.OnSwitchArea, target => switched = target));
+        cut.WaitForAssertion(() => cut.Find("textarea"));
+
+        cut.Find("textarea").Input("Какой срок по закону?");
+        cut.Find("button.cc-ask").Click();
+
+        cut.Find(".cc-redirect").TextContent.ShouldContain("не видит законы");
+        sent.ShouldBeEmpty("подсказка — до отправки");
+        cut.Find("button.cc-redirect-go").Click();
+        switched.ShouldBe(new ChatAreaSwitch(null, "Какой срок по закону?"));
+        cut.FindAll(".cc-redirect").ShouldBeEmpty();
+
+        cut.Find("textarea").Input("Какой срок по закону?");
+        cut.Find("button.cc-ask").Click();
+        cut.Find("button.cc-redirect-send").Click();
+
+        cut.WaitForAssertion(() => sent.ShouldHaveSingleItem().Mode.ShouldBe(ChatMode.Free));
+        sent[0].AreaKey.ShouldBe("text");
+        cut.WaitForAssertion(() => cut.Find(".cc-answer-label").TextContent.ShouldContain("Без документов — проверьте сами"));
+    }
+
+    [Fact(DisplayName = "Перенесённый вопрос задаётся сразу в режиме области; под ответом по материалам — подпись области и число источников")]
+    public void Initial_question_is_asked_and_answer_labelled()
+    {
+        _settings = AssistantSettings;
+        Overview(DocumentsArea);
+        var sent = new List<SendChatMessageCommand>();
+        _mediator.CreateStream(Arg.Do<SendChatMessageCommand>(sent.Add), Arg.Any<CancellationToken>()).Returns(
+            _ => Updates(new ChatUpdate(ConversationId: 15),
+                new ChatUpdate(ConversationId: 15, Final: new ChatAnswer("Срок — шесть месяцев [Фрагмент 1].", 1, [Document, Record], null))));
+        EnsurePopover();
+
+        var cut = Render<ChatPanel>(p => p
+            .Add(x => x.AreaKey, null)
+            .Add(x => x.InitialQuestion, "Какой срок по закону?"));
+
+        cut.WaitForAssertion(() => sent.ShouldHaveSingleItem().Mode.ShouldBe(ChatMode.Grounded));
+        sent[0].Text.ShouldBe("Какой срок по закону?");
+        cut.WaitForAssertion(() => cut.Find(".cc-answer-label").TextContent.ShouldContain("По документам · источников: 2"));
+        cut.FindAll(".cc-redirect").ShouldBeEmpty("перенесённый вопрос не останавливается подсказкой");
     }
 
     // ---------------- обвязка ----------------

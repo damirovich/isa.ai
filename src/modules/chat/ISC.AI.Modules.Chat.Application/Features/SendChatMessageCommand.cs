@@ -79,6 +79,14 @@ public sealed record SendChatMessageCommand(string? AreaKey, int? ConversationId
                 yield break;
             }
 
+            // Единственный режим области (ADR-0067): «Помощь с текстом» не ищет в материалах, помощник по справке не
+            // отвечает свободно — иначе ответ ушёл бы мимо того, что обещает выбранный помощник.
+            if (area.OnlyMode is { } only && command.Mode != only)
+            {
+                yield return new ChatUpdate(Error: ChatMessages.ModeNotInArea);
+                yield break;
+            }
+
             // Материалы области — до диалога: «читать нечего» не должно заводить пустых диалогов.
             ChatScope? scope = null;
             if (command.Mode == ChatMode.Grounded)
@@ -165,13 +173,15 @@ public sealed record SendChatMessageCommand(string? AreaKey, int? ConversationId
 
             yield return new ChatUpdate(ConversationId: conversationId);
 
+            // Поданные профилем материалы (ADR-0067) идут ядру вместо поиска — тем же конвейером грунтовки и аудита.
             var request = new GroundedRequest(
                 text,
                 ModelRole.Draft,
                 ChatGate.Clamp(settings.TopK, ChatLimits.MaxTopK),
                 profile.TaskPrompt(area),
                 history,
-                scope.DocumentIds is null ? null : new RetrievalFilter(DocumentIds: scope.DocumentIds));
+                scope.DocumentIds is null ? null : new RetrievalFilter(DocumentIds: scope.DocumentIds),
+                Materials: scope.Materials);
 
             await using var stream = generator.GenerateStreamingAsync(request, access, cancellationToken).GetAsyncEnumerator(cancellationToken);
             while (true)
@@ -301,9 +311,11 @@ public sealed record SendChatMessageCommand(string? AreaKey, int? ConversationId
                 .ToList();
         }
 
-        private static string Materials(ChatScope scope) => scope.DocumentIds is { } ids
-            ? "материалов в области: " + ids.Count.ToString(CultureInfo.InvariantCulture)
-            : "весь доступный корпус";
+        private static string Materials(ChatScope scope) => scope.Materials is { } supplied
+            ? "справочных материалов профиля: " + supplied.Count.ToString(CultureInfo.InvariantCulture)
+            : scope.DocumentIds is { } ids
+                ? "материалов в области: " + ids.Count.ToString(CultureInfo.InvariantCulture)
+                : "весь доступный корпус";
 
         private static string Clip(string answer) =>
             answer.Length <= ChatLimits.MaxAnswerLength ? answer : answer[..ChatLimits.MaxAnswerLength] + " […ответ обрезан при сохранении]";

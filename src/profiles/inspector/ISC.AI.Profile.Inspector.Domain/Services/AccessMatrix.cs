@@ -210,6 +210,7 @@ public static class InspectorPermissions
         new("admin-sessions", "Активные сеансы", [AdminSessions]),
         new("admin-backups", "Резервные копии", [AdminBackups]),
         new("admin-violation-categories", "Виды нарушений", [AdminDirectories]),
+        new("help", "Помощь", []),
     ];
 
     private static readonly Dictionary<string, PermissionDefinition> ByKey =

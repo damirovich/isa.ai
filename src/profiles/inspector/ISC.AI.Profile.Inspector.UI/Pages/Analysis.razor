@@ -76,6 +76,7 @@
                     <MudTextField @bind-Value="_documentText" Variant="Variant.Outlined" Lines="14"
                                   Immediate="true" Disabled="_busy"
                                   Placeholder="Вставьте текст: проект приказа, положение, справку…" />
+                    @SampleChips(text => _documentText = text)
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Class="mt-3"
                                StartIcon="@Icons.Material.Filled.Plagiarism"
                                OnClick="AnalyzeAsync" Disabled="@(_busy || string.IsNullOrWhiteSpace(_documentText))">
@@ -111,6 +112,7 @@
                     <MudTextField @bind-Value="_draftText" Variant="Variant.Outlined" Lines="14"
                                   Immediate="true" Disabled="_busy"
                                   Placeholder="Вставьте полный текст проекта…" />
+                    @SampleChips(text => _draftText = text)
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Class="mt-3"
                                StartIcon="@Icons.Material.Filled.Rule"
                                OnClick="CheckDraftAsync" Disabled="@(_busy || string.IsNullOrWhiteSpace(_draftText))">
@@ -141,12 +143,34 @@
                          OnRegistered="@(id => _registeredId = id)" />
 
 @code {
-    // Темы-подсказки — обезличенные примеры типовых предметов сравнения (ТД-007).
+    // Темы-подсказки — обезличенные примеры типовых предметов сравнения (ТД-007). Подобраны так, чтобы нормы по
+    // теме были в НЕСКОЛЬКИХ актах корпуса (кодексы, конституционные законы) — иначе сравнивать нечего.
     private static readonly string[] TopicHints =
     [
-        "сроки регистрации документов",
-        "порядок хранения носителей",
-        "контроль исполнения поручений",
+        "ответственность за нарушение налогового законодательства",
+        "испытательный срок и расторжение трудового договора",
+        "государственный язык в делопроизводстве",
+        "ответственность за разглашение государственной тайны",
+    ];
+
+    // Примеры текстов для анализа и сверки: в них нарочно есть положения, расходящиеся с кодексами корпуса
+    // (испытательный срок, отпуск, язык делопроизводства), — чтобы анализ показал замечания со ссылками.
+    private static readonly (string Title, string Text)[] SampleTexts =
+    [
+        ("Проект приказа о приёме на работу",
+            "ПРИКАЗ\nоб условиях приёма на работу\n\n"
+            + "1. Установить всем вновь принимаемым сотрудникам испытательный срок 6 месяцев.\n"
+            + "2. В период испытательного срока ежегодный оплачиваемый отпуск не предоставлять.\n"
+            + "3. Сотрудника, не выдержавшего испытание, увольнять без предупреждения и без указания причин.\n"
+            + "4. Трудовой договор оформлять в течение месяца после фактического допуска к работе.\n"
+            + "5. Контроль за исполнением приказа возложить на начальника отдела кадров."),
+        ("Положение о делопроизводстве",
+            "ПОЛОЖЕНИЕ\nо делопроизводстве в подразделении\n\n"
+            + "1. Делопроизводство ведётся только на русском языке.\n"
+            + "2. Входящие документы регистрируются в течение 10 рабочих дней после поступления.\n"
+            + "3. Документы с грифом «для служебного пользования» хранятся в общих шкафах вместе с прочими документами.\n"
+            + "4. Контроль исполнения поручений осуществляется по мере возможности.\n"
+            + "5. Ответственность за нарушение порядка делопроизводства положением не устанавливается."),
     ];
 
     private string _topic = string.Empty;
@@ -164,6 +188,20 @@
     private GenerateReferenceResult? Result => _response?.Data;
 
     // Панель результата — общая для обеих вкладок (результат один: последний запуск).
+    // Строка «Пример:» под полем текста: щелчок подставляет образец целиком (общая для вкладок анализа и сверки).
+    private RenderFragment SampleChips(Action<string> apply) => __builder =>
+    {
+        <div class="d-flex align-center gap-1 flex-wrap mt-2">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary mr-1">Пример:</MudText>
+            @foreach (var sample in SampleTexts)
+            {
+                var item = sample;
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" Disabled="_busy"
+                         Icon="@Icons.Material.Filled.Lightbulb" OnClick="@(() => apply(item.Text))">@item.Title</MudChip>
+            }
+        </div>
+    };
+
     private RenderFragment ResultPanel((string Line1, string Line2) empty) => __builder =>
     {
         <MudPaper Class="pa-4 h-100" Outlined="true">

@@ -1,0 +1,173 @@
+@namespace ISC.AI.Profile.Inspector.UI
+@page "/help"
+@rendermode InteractiveServer
+@using ISC.AI.Profile.Inspector.Application.Features.Chat
+@using ISC.AI.Profile.Inspector.Application.Features.Guide
+
+@* Модуль «Помощь»: что делает каждый раздел и что нажимать. Текст — ОДИН файл user-guide.md в слое приложения
+   (встроенный ресурс): его правят без программиста, а страница только показывает разобранный текст. Разделы
+   сгруппированы по секциям меню; у раздела со страницей — кнопка «Открыть раздел». Поиск раскрывает совпадения. *@
+
+<PageHeader Title="Помощь"
+            Subtitle="Что делает каждый раздел и что нажимать · примеры запросов"
+            Icon="@Icons.Material.Filled.HelpOutline" />
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true">@_error</MudAlert>
+}
+else if (_guide is not null)
+{
+    <MudPaper Class="pa-4 mb-4" Outlined="true">
+        @foreach (var paragraph in _guide.Intro)
+        {
+            <MudText Typo="Typo.body2" Class="mb-3">@Inline(paragraph)</MudText>
+        }
+        @* ИИ-помощник отвечает по этому же тексту справки (ADR-0067) — область чата «Как пользоваться системой». *@
+        <div class="d-flex align-center gap-2 flex-wrap mb-3">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Forum"
+                       Href="@HelpChatHref">Спросить у ИИ, как пользоваться</MudButton>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                Помощник отвечает только по этой справке и подскажет, что нажать.
+            </MudText>
+        </div>
+        <MudTextField T="string" Value="_filter" ValueChanged="OnFilterChanged" Label="Найти в справке"
+                      Placeholder="напр. пароль, справка, сверка, гриф" Variant="Variant.Outlined" Immediate="true"
+                      DebounceInterval="250" Clearable="true" Adornment="Adornment.Start"
+                      AdornmentIcon="@Icons.Material.Filled.Search" />
+    </MudPaper>
+
+    @if (VisibleSections.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-2">
+            В справке ничего не найдено — попробуйте другое слово или спросите в Чат-ассистенте.
+        </MudText>
+    }
+
+    @foreach (var group in VisibleSections.GroupBy(s => s.Group ?? "Прочее"))
+    {
+        <SectionCaption Text="@group.Key" Class="mt-4 mb-2" />
+        <MudExpansionPanels MultiExpansion="true" Outlined="true" Elevation="0">
+            @foreach (var section in group)
+            {
+                var item = section;
+                <MudExpansionPanel Text="@item.Title" Expanded="@_open.Contains(item.Title)"
+                                   ExpandedChanged="@(expanded => Toggle(item.Title, expanded))">
+                    @if (item.Route is { } route)
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" Class="mb-3"
+                                   StartIcon="@Icons.Material.Filled.OpenInNew" Href="@route">Открыть раздел</MudButton>
+                    }
+                    @foreach (var block in item.Blocks)
+                    {
+                        @switch (block.Kind)
+                        {
+                            case UserGuideBlockKind.Subheading:
+                                <MudText Typo="Typo.subtitle2" Class="mt-3 mb-1">@block.Lines[0]</MudText>
+                                break;
+                            case UserGuideBlockKind.Steps:
+                                <ol class="mb-2" style="padding-left:22px;">
+                                    @foreach (var line in block.Lines)
+                                    {
+                                        <li class="mb-1"><MudText Typo="Typo.body2">@Inline(line)</MudText></li>
+                                    }
+                                </ol>
+                                break;
+                            case UserGuideBlockKind.Bullets:
+                                <ul class="mb-2" style="padding-left:22px;">
+                                    @foreach (var line in block.Lines)
+                                    {
+                                        <li class="mb-1"><MudText Typo="Typo.body2">@Inline(line)</MudText></li>
+                                    }
+                                </ul>
+                                break;
+                            default:
+                                <MudText Typo="Typo.body2" Class="mb-2">@Inline(block.Lines[0])</MudText>
+                                break;
+                        }
+                    }
+                </MudExpansionPanel>
+            }
+        </MudExpansionPanels>
+    }
+}
+
+@code {
+    // Чат пакета в области помощника: ключ области — у порта чата профиля.
+    private static readonly string HelpChatHref = "/chat?area=" + InspectorChatProfile.HelpAreaKey;
+
+    private UserGuide? _guide;
+    private string? _error;
+    private string _filter = string.Empty;
+    private readonly HashSet<string> _open = new(StringComparer.Ordinal);
+
+    // Разделы с учётом поиска: совпадение в названии или в тексте, без учёта регистра.
+    private IReadOnlyList<UserGuideSection> VisibleSections =>
+        _guide is null
+            ? []
+            : string.IsNullOrWhiteSpace(_filter)
+                ? _guide.Sections
+                : [.. _guide.Sections.Where(s => s.PlainText.Contains(_filter.Trim(), StringComparison.CurrentCultureIgnoreCase))];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var response = await Dispatcher.Send(new GetUserGuideQuery());
+        if (response is { Status: true, Data: { } guide })
+        {
+            _guide = guide;
+        }
+        else
+        {
+            _error = response.StatusMessage;
+        }
+    }
+
+    private void OnFilterChanged(string? value)
+    {
+        _filter = value ?? string.Empty;
+
+        // Поиск раскрывает найденные разделы; пустой поиск сворачивает всё обратно.
+        _open.Clear();
+        if (!string.IsNullOrWhiteSpace(_filter))
+        {
+            foreach (var section in VisibleSections)
+            {
+                _open.Add(section.Title);
+            }
+        }
+    }
+
+    private void Toggle(string title, bool expanded)
+    {
+        if (expanded)
+        {
+            _open.Add(title);
+        }
+        else
+        {
+            _open.Remove(title);
+        }
+    }
+
+    // Выделение **жирным** из текста справки: чётные куски — обычный текст, нечётные — жирный.
+    private static RenderFragment Inline(string text) => __builder =>
+    {
+        var parts = text.Split("**");
+        for (var i = 0; i < parts.Length; i++)
+        {
+            if (parts[i].Length == 0)
+            {
+                continue;
+            }
+
+            if (i % 2 == 1)
+            {
+                <b>@parts[i]</b>
+            }
+            else
+            {
+                @parts[i]
+            }
+        }
+    };
+}
