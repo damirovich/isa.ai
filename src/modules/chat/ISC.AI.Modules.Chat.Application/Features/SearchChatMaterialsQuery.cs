@@ -50,6 +50,12 @@ public sealed record SearchChatMaterialsQuery(string? AreaKey, string Text) : IR
                     : ResponseDto<ChatSenseResult>.NotFound(entry.Error ?? ChatMessages.NotFound);
             }
 
+            // Область с единственным режимом (ADR-0067): поиск по корпусу в ней выдал бы чужие для области документы.
+            if (area.OnlyMode is not null)
+            {
+                return ResponseDto<ChatSenseResult>.BadRequest(ChatMessages.ModeNotInArea);
+            }
+
             try
             {
                 var scope = await profile.ResolveScopeAsync(area, access, forQuestion: true, cancellationToken);

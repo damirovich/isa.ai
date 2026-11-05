@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using ISC.AI.Abstractions.Conversations;
 using ISC.AI.Abstractions.Retrieval;
 
 namespace ISC.AI.Modules.Chat.Domain.Services;
@@ -31,6 +35,15 @@ public sealed record ChatSettings
     /// <summary>Подпись выбора области на странице (виден, если областей больше одной).</summary>
     public string AreaLabel { get; init; } = "Где искать";
 
+    /// <summary>
+    /// Выбор области — карточками «помощников» (значок, название, назначение одной строкой) вместо выпадающего списка
+    /// (ADR-0067). Для небольшого постоянного набора областей; у профиля с областями-делами — список, как раньше.
+    /// </summary>
+    public bool AreaCards { get; init; }
+
+    /// <summary>Подпись ответа свободного режима под ответом: ответ не сверялся с материалами.</summary>
+    public string FreeAnswerLabel { get; init; } = "Без проверки по материалам — проверьте сами";
+
     /// <summary>Сколько фрагментов подаётся модели на один вопрос.</summary>
     public int TopK { get; init; } = 10;
 
@@ -56,6 +69,22 @@ public sealed record ChatSettings
 /// <param name="AuditRef">Объект журнала области: к нему пакет добавляет <c>:chat:{диалог}</c>.</param>
 /// <param name="ScopeKeys">Ключи уничтожения области: диалог уйдёт с этим объектом (ТБ-064).</param>
 /// <param name="Link">Ссылка на объект области («Карточка дела»); <see langword="null"/> — нет.</param>
+/// <param name="OnlyMode">
+/// Единственный режим ответа в области (ADR-0067): другой режим и поиск по смыслу сервер отклоняет, панель прячет
+/// переключатель. Так профиль делает из областей «помощников» с одним понятным назначением («Ответ по документам»,
+/// «Помощь с текстом»). Для области с поданными материалами (<see cref="ChatScope.Materials"/>) — обязательно
+/// <see cref="ChatMode.Grounded"/>: поиск по смыслу шёл бы по корпусу, а не по ним. <see langword="null"/> — режимы
+/// решают настройки профиля, как раньше.
+/// </param>
+/// <param name="Hint">Назначение области одной строкой — под названием в выборе и в пустом чате.</param>
+/// <param name="Icon">Значок области в выборе карточками (<see cref="ChatSettings.AreaCards"/>) — смысловой, рисует панель пакета.</param>
+/// <param name="AnswerLabel">
+/// Подпись ответа по материалам этой области («По документам», «По справке»); <see langword="null"/> —
+/// <see cref="ChatSettings.GroundedModeLabel"/>.
+/// </param>
+/// <param name="Redirects">
+/// Подсказки «вопрос не туда»: если вопрос похож на вопрос другой области, панель до отправки предлагает спросить там.
+/// </param>
 public sealed record ChatArea(
     string? Key,
     string Title,
@@ -65,12 +94,80 @@ public sealed record ChatArea(
     int? DivisionId,
     string AuditRef,
     IReadOnlyList<string> ScopeKeys,
-    ChatLink? Link = null);
+    ChatLink? Link = null,
+    ChatMode? OnlyMode = null,
+    string? Hint = null,
+    ChatAreaIcon Icon = ChatAreaIcon.Chat,
+    string? AnswerLabel = null,
+    IReadOnlyList<ChatRedirect>? Redirects = null);
+
+/// <summary>Смысловой значок области (ADR-0067): профиль называет смысл, картинку выбирает панель пакета.</summary>
+public enum ChatAreaIcon
+{
+    /// <summary>Чат вообще.</summary>
+    Chat,
+
+    /// <summary>Ответ по документам и материалам.</summary>
+    Documents,
+
+    /// <summary>Помощь с текстом без документов.</summary>
+    Text,
+
+    /// <summary>Справка о работе с системой.</summary>
+    Help,
+}
 
 /// <summary>Ссылка на объект области.</summary>
 /// <param name="Href">Адрес в интерфейсе.</param>
 /// <param name="Text">Подпись кнопки.</param>
 public sealed record ChatLink(string Href, string Text);
+
+/// <summary>
+/// Подсказка «вопрос задан не туда» (ADR-0067): вопрос похож на вопрос другой области — панель до отправки предлагает
+/// перейти туда с тем же вопросом или отправить как есть. Только подсказка: решает сотрудник, сервер ничего не меняет.
+/// </summary>
+/// <param name="AreaKey">Куда предложить (ключ области; <see langword="null"/> — область по умолчанию).</param>
+/// <param name="Message">Почему: «Этот режим не видит документы — похоже, нужен ответ по документам».</param>
+/// <param name="Button">Подпись кнопки перехода: «Спросить по документам».</param>
+/// <param name="Keywords">
+/// Признаки вопроса без учёта регистра: слово — начало слова вопроса («закон» находит «законом», «законе»); фраза с
+/// пробелом — подстрока вопроса («какой срок»).
+/// </param>
+public sealed record ChatRedirect(string? AreaKey, string Message, string Button, IReadOnlyList<string> Keywords)
+{
+    /// <summary>Похож ли вопрос на вопрос области назначения.</summary>
+    public bool Matches(string question)
+    {
+        if (string.IsNullOrWhiteSpace(question) || Keywords.Count == 0)
+        {
+            return false;
+        }
+
+        var text = question.ToLowerInvariant().Replace('ё', 'е');
+        var words = text.Split(
+            text.Where(c => !char.IsLetterOrDigit(c)).Distinct().ToArray(),
+            StringSplitOptions.RemoveEmptyEntries);
+
+        foreach (var raw in Keywords)
+        {
+            var keyword = raw.Trim().ToLowerInvariant().Replace('ё', 'е');
+            if (keyword.Length == 0)
+            {
+                continue;
+            }
+
+            var found = keyword.Contains(' ', StringComparison.Ordinal)
+                ? text.Contains(keyword, StringComparison.Ordinal)
+                : words.Any(word => word.StartsWith(keyword, StringComparison.Ordinal));
+            if (found)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
 
 /// <summary>
 /// Материалы области (ADR-0052): какие документы корпуса ядра искать и как подписать найденное.
@@ -89,12 +186,19 @@ public sealed record ChatLink(string Href, string Text);
 /// Почему спрашивать нельзя («нет доступных дел», «нечего читать»); <see langword="null"/> — можно. При отказе модель не
 /// вызывается.
 /// </param>
+/// <param name="Materials">
+/// Готовые фрагменты области ВМЕСТО поиска по корпусу (ADR-0067): например, разделы справки пользователя. Пакет подаёт
+/// их ядру в <see cref="ISC.AI.Abstractions.Rag.GroundedRequest.Materials"/>; ядро пропускает только несекретные (гриф 0).
+/// Область с поданными материалами объявляется с <see cref="ChatArea.OnlyMode"/> = <see cref="ChatMode.Grounded"/>. <see langword="null"/> — поиск
+/// по корпусу (<see cref="DocumentIds"/>).
+/// </param>
 public sealed record ChatScope(
     IReadOnlyList<int>? DocumentIds,
     Func<RetrievedChunk, ChatSourceRef?> Describe,
     string? Coverage = null,
     string? CoverageHint = null,
-    string? Unavailable = null);
+    string? Unavailable = null,
+    IReadOnlyList<RetrievedChunk>? Materials = null);
 
 /// <summary>Чем является найденный фрагмент для сотрудника.</summary>
 /// <param name="Kind">Вид словами: «документ», «расшифровка», «сводка/справка».</param>

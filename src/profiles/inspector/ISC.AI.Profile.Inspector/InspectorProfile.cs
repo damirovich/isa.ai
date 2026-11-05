@@ -24,7 +24,7 @@ namespace ISC.AI.Profile.Inspector;
 /// Секции меню объявляет профиль (<c>MenuGroup</c>) — хост лишь группирует; порядок секций —
 /// порядок первого появления в списке. Группировка — по логике рабочего дня (решение заказчика
 /// 2026-08-25): Контроль → ИИ-инструменты → Нормативная база → Организация работы →
-/// Документооборот → Подразделения → Администрирование → Учётная запись.
+/// Документооборот → Подразделения → Администрирование → Справка («Помощь») → Учётная запись.
 /// </remarks>
 public sealed class InspectorProfile : IProfile
 {
@@ -37,6 +37,7 @@ public sealed class InspectorProfile : IProfile
     // его дело), а «Пользователи» (учётная запись, роль, допуск) и журнал даёт пакет; роли пакет назначает через
     // порт профиля. Имя берём у пакета, чтобы переименование не развалило секцию на две.
     private const string GroupAdmin = AdminModule.MenuGroup;
+    private const string GroupHelp = "Справка";
     private const string ReadPolicy = "inspector.read";
 
     /// <inheritdoc />
@@ -134,6 +135,10 @@ public sealed class InspectorProfile : IProfile
         // Классификатор видов нарушений (Э5-01): справочник «сфера → вид», ведёт Администратор.
         new ModuleDescriptor("admin-violation-categories", "/admin/violation-categories", "Виды нарушений",
             Icons.Material.Filled.Category, typeof(ViolationCategories), ReadPolicy, GroupAdmin),
+
+        // --- Секция «Справка»: что делает каждый раздел и что нажимать; текст — user-guide.md слоя приложения ---
+        new ModuleDescriptor("help", "/help", "Помощь", Icons.Material.Filled.HelpOutline,
+            typeof(UserGuidePage), ReadPolicy, GroupHelp),
 
         // Смена пароля из меню убрана (решение заказчика 2026-08-25): она — диалог из шапки
         // (виджет account-password пакета, см. ShellWidgets). Маршрут /account/password при этом ЖИВ

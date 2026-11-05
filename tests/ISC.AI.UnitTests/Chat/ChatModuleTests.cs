@@ -263,6 +263,58 @@ public sealed class ChatModuleTests
         await kit.Audit.DidNotReceiveWithAnyArgs().WriteAsync(default!, default);
     }
 
+    [Fact(DisplayName = "Область с единственным режимом «по материалам» (ADR-0067): поданные профилем материалы уходят ядру вместо поиска, журнал называет их; свободный режим и поиск по смыслу — отказ")]
+    public async Task Questions_only_area_passes_materials_and_refuses_other_modes()
+    {
+        var kit = new Kit();
+        var help = new ChatArea("help", "Как пользоваться системой", "справки по работе с системой", 0, 3, null, "inspector:help", [],
+            OnlyMode: ChatMode.Grounded);
+        kit.Profile.ResolveAreaAsync("help", Access, Arg.Any<CancellationToken>()).Returns(help);
+        var materials = new List<RetrievedChunk> { new(1, 0, "Раздел справки: Генератор", 0, 0, true, 1.0) };
+        kit.Scope = new ChatScope(null, Describe, Materials: materials);
+        GroundedRequest? sent = null;
+        kit.Generator.GenerateStreamingAsync(Arg.Do<GroundedRequest>(r => sent = r), Access, Arg.Any<CancellationToken>())
+            .Returns(Stream(new GroundedStreamUpdate(null, Final("Откройте «Генератор» [Фрагмент 1]."))));
+
+        var updates = await kit.SendAsync(new SendChatMessageCommand("help", null, "Как сделать справку?"));
+
+        updates[^1].Final.ShouldNotBeNull();
+        sent.ShouldNotBeNull().Materials.ShouldBe(materials);
+        sent.Filter.ShouldBeNull();
+        sent.TaskPrompt.ShouldBe("Промпт для справки по работе с системой");
+        await kit.Audit.Received(1).WriteAsync(Arg.Is<AuditEntry>(e =>
+            e.ObjectRef == "inspector:help:chat:15" && e.Classification == 3
+            && e.PayloadSensitive!.Contains("справочных материалов профиля: 1", StringComparison.Ordinal)), Arg.Any<CancellationToken>());
+
+        (await kit.SendAsync(new SendChatMessageCommand("help", null, "Вопрос", ChatMode.Free)))
+            .ShouldHaveSingleItem().Error.ShouldBe(ChatMessages.ModeNotInArea);
+        (await kit.SearchAsync(new SearchChatMaterialsQuery("help", "генератор"))).StatusMessage.ShouldBe(ChatMessages.ModeNotInArea);
+        kit.Free.DidNotReceiveWithAnyArgs().GenerateStreamingAsync(default!, default!, default!, default, default);
+        await kit.Retriever.DidNotReceiveWithAnyArgs().RetrieveAsync(default!, default!, default, default, default);
+    }
+
+    [Fact(DisplayName = "Область только свободного режима (ADR-0067): свободный ассистент без материалов и журнала поиска, диалог в своей области; вопрос по материалам — отказ до модели")]
+    public async Task Free_only_area_answers_freely_and_refuses_grounded()
+    {
+        var kit = new Kit();
+        var text = new ChatArea("text", "Помощь с текстом", "помощи с текстом без документов", 0, 3, null, "inspector:text", [],
+            OnlyMode: ChatMode.Free);
+        kit.Profile.ResolveAreaAsync("text", Access, Arg.Any<CancellationToken>()).Returns(text);
+        kit.Free.GenerateStreamingAsync("Сократи абзац", Arg.Any<IReadOnlyList<ChatTurn>>(), Access, ModelRole.Draft, Arg.Any<CancellationToken>())
+            .Returns(Stream("Короче: ", "готово."));
+
+        var updates = await kit.SendAsync(new SendChatMessageCommand("text", null, "Сократи абзац", ChatMode.Free));
+
+        updates[^1].Final.ShouldNotBeNull().Text.ShouldBe("Короче: готово.");
+        await kit.Conversations.Received(1).CreateAsync(UserId, "Сократи абзац", "text", 0, Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>());
+        await kit.Profile.DidNotReceiveWithAnyArgs().ResolveScopeAsync(default!, default!, default, default);
+
+        (await kit.SendAsync(new SendChatMessageCommand("text", null, "Какой срок по закону?")))
+            .ShouldHaveSingleItem().Error.ShouldBe(ChatMessages.ModeNotInArea);
+        kit.Generator.DidNotReceiveWithAnyArgs().GenerateStreamingAsync(default!, default!, default);
+        await kit.Audit.DidNotReceiveWithAnyArgs().WriteAsync(default!, default);
+    }
+
     // ---------------- чат области и диалоги ----------------
 
     [Fact(DisplayName = "Чат области: свои диалоги этой области, строка готовности без подготовки материалов, подсказки профиля; без права — отказ")]

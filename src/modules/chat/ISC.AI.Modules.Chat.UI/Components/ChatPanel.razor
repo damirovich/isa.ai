@@ -102,9 +102,9 @@ else
                         <div class="cc-empty">
                             <MudIcon Icon="@Icons.Material.Filled.QuestionAnswer" Style="font-size:3rem;" Class="mud-text-secondary" />
                             <MudText Typo="Typo.body1">@EmptyTitle</MudText>
-                            @if (!string.IsNullOrWhiteSpace(Settings.EmptyHint))
+                            @if (EmptyHint is { } emptyHint)
                             {
-                                <MudText Typo="Typo.body2" Class="mud-text-secondary">@Settings.EmptyHint</MudText>
+                                <MudText Typo="Typo.body2" Class="mud-text-secondary">@emptyHint</MudText>
                             }
                             @if (Suggestions.Count > 0)
                             {
@@ -153,6 +153,15 @@ else
                                             </div>
                                         }
                                     </div>
+                                    @if (!message.Pending && message.Text.Length > 0)
+                                    {
+                                        @* Откуда ответ (ADR-0067): видно и в старом диалоге, сверялся ли он с материалами. *@
+                                        <div class="d-flex align-center gap-1 mt-1 cc-answer-label">
+                                            <MudIcon Icon="@(message.Grounded ? Icons.Material.Filled.FactCheck : Icons.Material.Filled.EditNote)"
+                                                     Size="Size.Small" Class="mud-text-secondary" />
+                                            <MudText Typo="Typo.caption" Class="mud-text-secondary">@AnswerLabel(message)</MudText>
+                                        </div>
+                                    }
                                     @if (message.Pending)
                                     {
                                         <div class="d-flex align-center gap-2 mt-1">
@@ -220,6 +229,23 @@ else
                     </div>
                 }
 
+                @if (_redirect is { } redirect)
+                {
+                    @* Вопрос похож на вопрос другой области (ADR-0067): решает сотрудник — перейти с тем же вопросом или
+                       отправить как есть. Без обработчика страницы (вкладка карточки) — только «отправить как есть». *@
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-2 cc-redirect">
+                        <div>@redirect.Message</div>
+                        <div class="d-flex gap-2 mt-1 flex-wrap">
+                            @if (OnSwitchArea.HasDelegate)
+                            {
+                                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" OnClick="SwitchAreaAsync"
+                                           Class="cc-redirect-go">@redirect.Button</MudButton>
+                            }
+                            <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="SendAnywayAsync" Class="cc-redirect-send">Всё равно отправить</MudButton>
+                        </div>
+                    </MudAlert>
+                }
+
                 <div class="d-flex gap-2 align-end">
                     <MudTextField T="string" @bind-Value="_input" Placeholder="@Settings.QuestionPlaceholder" Variant="Variant.Outlined"
                                   Lines="2" Immediate="true" Disabled="_busy" MaxLength="@ChatLimits.MaxQuestionLength" Class="flex-grow-1" />
@@ -229,7 +255,7 @@ else
                     }
                     else
                     {
-                        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SendAsync" StartIcon="@Icons.Material.Filled.Send" Class="cc-ask"
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SendTypedAsync" StartIcon="@Icons.Material.Filled.Send" Class="cc-ask"
                                    Disabled="@string.IsNullOrWhiteSpace(_input)">Отправить</MudButton>
                     }
                 </div>
@@ -336,6 +362,15 @@ else
     /// <summary>Высота чата (CSS): на странице — до низа окна, во вкладке — фиксированная.</summary>
     [Parameter] public string Height { get; set; } = "640px";
 
+    /// <summary>Вопрос, который задать сразу при открытии (переход из подсказки «вопрос не туда», ADR-0067).</summary>
+    [Parameter] public string? InitialQuestion { get; set; }
+
+    /// <summary>
+    /// Перейти в другую область с вопросом (ADR-0067); без обработчика подсказка «вопрос не туда» предлагает только
+    /// отправить как есть.
+    /// </summary>
+    [Parameter] public EventCallback<ChatAreaSwitch> OnSwitchArea { get; set; }
+
     // Сообщение ленты: текст ответа дописывается по мере прихода черновика.
     private sealed class Message(ConversationMessageRole role, string text, bool grounded)
     {
@@ -371,6 +406,12 @@ else
     private bool _senseBusy;
     private ChatSenseResult? _senseResult;
 
+    // Подсказка «вопрос не туда» (ADR-0067): правило области и вопрос, к которому она относится; вопрос, который
+    // сотрудник решил отправить как есть, второй раз не останавливается.
+    private ChatRedirect? _redirect;
+    private string? _redirectQuestion;
+    private string? _redirectDismissedFor;
+
     private bool _renameOpen;
     private string? _renameTitle;
     private int? _renameId;
@@ -378,12 +419,18 @@ else
 
     private string FeedId => "chat-feed-" + (AreaKey ?? "default");
 
-    // Режимы, которые разрешил профиль: по материалам — всегда.
+    // Режимы, которые разрешил профиль: по материалам — всегда; у области с единственным режимом (ADR-0067) — только он.
     private List<ChatPanelMode> Modes
     {
         get
         {
             var modes = new List<ChatPanelMode>();
+            if (_overview?.Area.OnlyMode is { } only)
+            {
+                modes.Add(PanelMode(only));
+                return modes;
+            }
+
             if (Settings.AllowFreeMode)
             {
                 modes.Add(ChatPanelMode.Free);
@@ -398,6 +445,19 @@ else
             return modes;
         }
     }
+
+    private static ChatPanelMode PanelMode(ChatMode mode) => mode == ChatMode.Free ? ChatPanelMode.Free : ChatPanelMode.Grounded;
+
+    // Пустой чат: назначение области (у «помощников», ADR-0067), иначе — общее пояснение профиля.
+    private string? EmptyHint => _overview?.Area.Hint is { Length: > 0 } hint
+        ? hint
+        : string.IsNullOrWhiteSpace(Settings.EmptyHint) ? null : Settings.EmptyHint;
+
+    // Подпись под ответом (ADR-0067): по материалам — чем и сколько источников; свободный — без проверки.
+    private string AnswerLabel(Message message) => message.Grounded
+        ? (_overview?.Area.AnswerLabel ?? Settings.GroundedModeLabel) + " · источников: "
+            + message.Sources.Count.ToString(CultureInfo.InvariantCulture)
+        : Settings.FreeAnswerLabel;
 
     private IReadOnlyList<string> Suggestions => _overview is null
         ? []
@@ -420,6 +480,12 @@ else
         if (RendererInfo.IsInteractive)
         {
             await LoadOverviewAsync();
+
+            // Перенесённый вопрос (ADR-0067) — как подсказка: задаётся сразу, без повторной проверки «не туда».
+            if (_overview is not null && !string.IsNullOrWhiteSpace(InitialQuestion))
+            {
+                await AskAsync(InitialQuestion);
+            }
         }
     }
 
@@ -454,6 +520,13 @@ else
         if (response is { Status: true, Data: { } overview })
         {
             _overview = overview;
+
+            // Единственный режим области (ADR-0067): панель сразу в нём, переключателя нет.
+            if (overview.Area.OnlyMode is { } only)
+            {
+                _mode = PanelMode(only);
+            }
+
             return;
         }
 
@@ -473,6 +546,7 @@ else
         _messages.Clear();
         _hidden = 0;
         _error = null;
+        _redirect = null;
     }
 
     private async Task SelectAsync(int conversationId)
@@ -517,6 +591,47 @@ else
 
         _input = question;
         return SendAsync();
+    }
+
+    // Отправка набранного вопроса: сначала подсказка «вопрос не туда» (ADR-0067). Подсказки-чипы и перенесённый вопрос
+    // идут сразу — они и так заданы для этой области.
+    private Task SendTypedAsync()
+    {
+        var text = (_input ?? string.Empty).Trim();
+        if (text.Length == 0 || _busy)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (text != _redirectDismissedFor
+            && _overview?.Area.Redirects?.FirstOrDefault(r => r.Matches(text)) is { } redirect)
+        {
+            _redirect = redirect;
+            _redirectQuestion = text;
+            return Task.CompletedTask;
+        }
+
+        _redirect = null;
+        return SendAsync();
+    }
+
+    private Task SendAnywayAsync()
+    {
+        _redirectDismissedFor = _redirectQuestion;
+        _redirect = null;
+        return SendAsync();
+    }
+
+    private async Task SwitchAreaAsync()
+    {
+        if (_redirect is not { } redirect || _redirectQuestion is not { } question)
+        {
+            return;
+        }
+
+        _redirect = null;
+        _input = string.Empty;
+        await OnSwitchArea.InvokeAsync(new ChatAreaSwitch(redirect.AreaKey, question));
     }
 
     private async Task SendAsync()

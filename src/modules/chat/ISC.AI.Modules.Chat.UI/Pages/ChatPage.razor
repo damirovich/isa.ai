@@ -13,7 +13,9 @@
 @* Страница чата пакета (ADR-0052). Заголовок и значок — из записи реестра профиля (ChatModule.Page): одно место на
    меню и шапку. Если областей у профиля больше одной («все мои дела» и каждое дело), сверху — выбор «Где искать»,
    выбор хранится в адресе (?area=…), «Назад» возвращает ту же область. Сам чат — ChatPanel. Области и их доступность
-   решает сервер (порт профиля); список здесь — только для выбора. *@
+   решает сервер (порт профиля); список здесь — только для выбора. Профиль с небольшим постоянным набором областей
+   (ChatSettings.AreaCards, ADR-0067) получает выбор карточками «помощников»; подсказка «вопрос не туда» в панели
+   переводит сюда же — в другую область с тем же вопросом. *@
 
 <PageHeader Title="@Title" Subtitle="@Settings.Subtitle" Icon="@Icon" />
 
@@ -27,11 +29,39 @@ else if (_areas is null)
 }
 else
 {
-    @if (_areas.Count > 1)
+    @if (_areas.Count > 1 && Settings.AreaCards)
+    {
+        @* Выбор карточками «помощников» (ADR-0067): значок, название и назначение одной строкой — сразу видно, кто видит
+           документы, а кто нет. Конструкция плиток — как выбор подразделения в Генераторе. *@
+        <div class="d-flex gap-2 flex-wrap mb-3">
+            @foreach (var area in _areas)
+            {
+                var key = area.Key ?? string.Empty;
+                <MudPaper Outlined="true" Class="pa-3 cursor-pointer cc-area-card" Style="@CardStyle(key)"
+                          @onclick="@(() => ChooseAsync(key))">
+                    <div class="d-flex align-center gap-2">
+                        <MudIcon Icon="@IconOf(area.Icon)" Size="Size.Small"
+                                 Color="@(key == _selected ? Color.Primary : Color.Default)" />
+                        <MudText Typo="Typo.subtitle2">@area.Title</MudText>
+                    </div>
+                    @if (area.Hint is { } hint)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">@hint</MudText>
+                    }
+                </MudPaper>
+            }
+            @if (SelectedArea?.Link is { } cardLink)
+            {
+                <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.OpenInNew" Href="@cardLink.Href"
+                           Class="align-self-center">@cardLink.Text</MudButton>
+            }
+        </div>
+    }
+    else if (_areas.Count > 1)
     {
         <MudPaper Outlined="true" Class="pa-3 mb-3">
             <div class="d-flex align-center gap-3 flex-wrap">
-                <MudSelect T="string" Value="_selected" ValueChanged="SelectAsync" Label="@Settings.AreaLabel" Variant="Variant.Outlined" Dense="true"
+                <MudSelect T="string" Value="_selected" ValueChanged="ChooseAsync" Label="@Settings.AreaLabel" Variant="Variant.Outlined" Dense="true"
                            Style="min-width:320px; max-width:640px;" AnchorOrigin="Origin.BottomLeft">
                     @foreach (var area in _areas)
                     {
@@ -48,6 +78,7 @@ else
 
     @* Высота — до низа окна: шапка страницы и выбор области — сверху. *@
     <ChatPanel @key="_selected" AreaKey="@(_selected.Length == 0 ? null : _selected)"
+               InitialQuestion="@_initialQuestion" OnSwitchArea="SwitchAreaAsync"
                Height="@(_areas.Count > 1 ? "calc(100vh - 330px)" : "calc(100vh - 230px)")" />
 }
 
@@ -57,6 +88,9 @@ else
 
     private IReadOnlyList<ChatArea>? _areas;
     private string _selected = string.Empty;
+
+    // Вопрос, с которым панель новой области начнёт: подсказка «вопрос не туда» переносит его одним щелчком.
+    private string? _initialQuestion;
     private string? _error;
     private bool _noRight;
 
@@ -96,8 +130,27 @@ else
         _selected = _areas is not null && _areas.Any(a => (a.Key ?? string.Empty) == requested) ? requested : string.Empty;
     }
 
-    private Task SelectAsync(string key)
+    private static string IconOf(ChatAreaIcon icon) => icon switch
     {
+        ChatAreaIcon.Documents => Icons.Material.Filled.FindInPage,
+        ChatAreaIcon.Text => Icons.Material.Filled.EditNote,
+        ChatAreaIcon.Help => Icons.Material.Filled.HelpOutline,
+        _ => Icons.Material.Filled.Forum,
+    };
+
+    // Выбор сотрудником (список или карточка) — без перенесённого вопроса.
+    private Task ChooseAsync(string key) => SelectAsync(key, question: null);
+
+    // Подсказка «вопрос не туда» (ADR-0067): та же смена области, панель новой области сразу задаёт вопрос.
+    private Task SwitchAreaAsync(ChatAreaSwitch target) => SelectAsync(target.AreaKey ?? string.Empty, target.Question);
+
+    private string CardStyle(string key) =>
+        "min-width:220px; max-width:320px; flex:1 1 220px;"
+        + (key == _selected ? " border-color: var(--mud-palette-primary); border-left: 3px solid var(--mud-palette-primary);" : string.Empty);
+
+    private Task SelectAsync(string key, string? question)
+    {
+        _initialQuestion = question;
         _selected = key ?? string.Empty;
         Navigation.NavigateTo(
             _selected.Length == 0 ? "/chat" : "/chat?area=" + Uri.EscapeDataString(_selected), replace: true);
