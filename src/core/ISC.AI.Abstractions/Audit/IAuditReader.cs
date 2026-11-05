@@ -8,11 +8,14 @@ namespace ISC.AI.Abstractions.Audit;
 /// <param name="SubjectId">Субъект действия; <see langword="null"/> — любой.</param>
 /// <param name="Action">Тип действия; <see langword="null"/> — любой.</param>
 /// <param name="ObjectRef">
-/// Подстрока, которая ищется в ссылке на объект И в сводке действия (<see cref="AuditRecordRow.PayloadSensitive"/>) —
-/// сценарии пишут своё описание именно в сводку; без учёта регистра, символы % и _ буквальные. <see langword="null"/> — любой.
+/// Подстрока, которая ищется в ссылке на объект, в сводке действия (<see cref="AuditRecordRow.PayloadSensitive"/>) —
+/// сценарии пишут своё описание именно в сводку — и в IP-адресе клиента; без учёта регистра, символы % и _ буквальные.
+/// <see langword="null"/> — любой.
 /// </param>
 /// <param name="Page">Номер страницы, с 1.</param>
 /// <param name="PageSize">Размер страницы.</param>
+/// <param name="Outcome">Исход операции (ТБ-080); <see langword="null"/> — любой, включая записи без исхода.</param>
+/// <param name="SessionId">Сеанс входа — «все действия сеанса» (ТБ-080); <see langword="null"/> — любой.</param>
 public sealed record AuditFilter(
     DateTime? From = null,
     DateTime? To = null,
@@ -20,9 +23,14 @@ public sealed record AuditFilter(
     AuditAction? Action = null,
     string? ObjectRef = null,
     int Page = 1,
-    int PageSize = 50);
+    int PageSize = 50,
+    AuditOutcome? Outcome = null,
+    Guid? SessionId = null);
 
 /// <summary>Строка журнала для показа.</summary>
+/// <param name="Outcome">Исход операции (ТБ-080); <see langword="null"/> — запись до ADR-0066, исход не записан.</param>
+/// <param name="ClientAddress">IP-адрес клиента; <see langword="null"/> — не записан (фоновая работа, запись до ADR-0066).</param>
+/// <param name="SessionId">Сеанс входа; <see langword="null"/> — не записан.</param>
 public sealed record AuditRecordRow(
     long Id,
     DateTime OccurredAt,
@@ -32,7 +40,10 @@ public sealed record AuditRecordRow(
     string? ObjectRef,
     short Classification,
     int? DivisionId,
-    string? PayloadSensitive);
+    string? PayloadSensitive,
+    AuditOutcome? Outcome = null,
+    string? ClientAddress = null,
+    Guid? SessionId = null);
 
 /// <summary>Страница журнала: строки и общее число подходящих записей (для постраничной навигации).</summary>
 public sealed record AuditPage(IReadOnlyList<AuditRecordRow> Rows, int TotalCount);

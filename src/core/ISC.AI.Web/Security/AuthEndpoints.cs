@@ -28,10 +28,13 @@ public static class AuthEndpoints
                 ILogger<LoginService> logger,
                 CancellationToken cancellationToken) =>
             {
+                // Номер сеанса выдаётся ЗАРАНЕЕ (ТБ-080, ADR-0066): запись успешного входа пишется в журнал до выдачи
+                // cookie (fail-closed) и уже несёт номер сеанса, который откроется ниже. При отказе он не используется.
+                var plannedSessionId = Guid.NewGuid();
                 System.Security.Claims.ClaimsPrincipal? principal;
                 try
                 {
-                    principal = await loginService.AuthenticateAsync(login, password, cancellationToken);
+                    principal = await loginService.AuthenticateAsync(login, password, plannedSessionId, cancellationToken);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -50,14 +53,16 @@ public static class AuthEndpoints
                 }
 
                 // Сеанс входа (ТФ-АДМ-09, ADR-0060): заводится до выдачи cookie, номер — в cookie. Откуда вошли — IP
-                // (с учётом доверенного прокси, UseForwardedHeaders) и строка браузера; пароль и логин сюда не идут.
+                // (с учётом доверенного прокси, UseForwardedHeaders; в той же форме, что в журнале — ADR-0066) и строка
+                // браузера; пароль и логин сюда не идут.
                 var userId = int.Parse(
                     principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value,
                     System.Globalization.CultureInfo.InvariantCulture);
                 var sessionId = await sessions.StartAsync(
                     userId,
-                    http.Connection.RemoteIpAddress?.ToString(),
+                    ClientAddresses.Format(http.Connection.RemoteIpAddress),
                     http.Request.Headers.UserAgent.ToString(),
+                    plannedSessionId,
                     cancellationToken);
                 ((System.Security.Claims.ClaimsIdentity)principal.Identity!).AddClaim(
                     new System.Security.Claims.Claim(AuthClaims.SessionId, sessionId.ToString("D")));

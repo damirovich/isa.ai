@@ -83,6 +83,47 @@ public sealed class AuditBehaviorTests
         await writer.Received(1).WriteAsync(Arg.Any<AuditEntry>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact(DisplayName = "ТБ-080: исход записи — успех; отказ (нет права, не найдено, проверка, конфликт); ошибка (внутренняя, недоступна зависимость)")]
+    public async Task Outcome_follows_the_response()
+    {
+        var cases = new (ResponseDto<string> Response, AuditOutcome Expected)[]
+        {
+            (ResponseDto<string>.Ok("готово"), AuditOutcome.Success),
+            (ResponseDto<string>.Fail("Нет права"), AuditOutcome.Denied),
+            (ResponseDto<string>.NotFound(), AuditOutcome.Denied),
+            (ResponseDto<string>.BadRequest(), AuditOutcome.Denied),
+            (ResponseDto<string>.Conflict(), AuditOutcome.Denied),
+            (ResponseDto<string>.InternalServerError(), AuditOutcome.Error),
+            (ResponseDto<string>.Fail("сервер инференса не отвечает", ResponseStatusCode.ServiceUnavailable), AuditOutcome.Error),
+        };
+
+        foreach (var (response, expected) in cases)
+        {
+            var (behavior, writer) = Build();
+            await behavior.Handle(new FakeAuditable(), (_, _) => ValueTask.FromResult(response), CancellationToken.None);
+            await writer.Received(1).WriteAsync(Arg.Is<AuditEntry>(e => e.Outcome == expected), Arg.Any<CancellationToken>());
+        }
+    }
+
+    [Fact(DisplayName = "ТБ-080: исключение сценария — исход «ошибка», отмена — «отмена»")]
+    public async Task Outcome_of_failure_and_cancellation()
+    {
+        var (failing, failingWriter) = Build();
+        await Should.ThrowAsync<InvalidOperationException>(async () =>
+            await failing.Handle(new FakeAuditable(), (_, _) => throw new InvalidOperationException("сбой"), CancellationToken.None));
+        await failingWriter.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.Outcome == AuditOutcome.Error), Arg.Any<CancellationToken>());
+
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+        var (cancelled, cancelledWriter) = Build();
+        await Should.ThrowAsync<OperationCanceledException>(async () =>
+            await cancelled.Handle(
+                new FakeAuditable(), (_, token) => throw new OperationCanceledException(token), cancellation.Token));
+        await cancelledWriter.Received(1).WriteAsync(
+            Arg.Is<AuditEntry>(e => e.Outcome == AuditOutcome.Cancelled), CancellationToken.None);
+    }
+
     [Fact(DisplayName = "Аудит FAIL-CLOSED: сбой журнала пробрасывается (результат не выдаётся)")]
     public async Task Audit_write_failure_is_fail_closed()
     {

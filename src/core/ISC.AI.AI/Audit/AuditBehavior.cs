@@ -51,23 +51,37 @@ public sealed class AuditBehavior<TMessage, TResponse>(
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             // Отмена: обращение могло уже коснуться данных — фиксируем попытку не-отменяемой записью.
-            await WriteAuditAsync(message, CancellationToken.None);
+            await WriteAuditAsync(message, AuditOutcome.Cancelled, CancellationToken.None);
             throw;
         }
         catch
         {
             // Обращение было, но упало — фиксируем факт и пробрасываем (ошибку оформит ExceptionHandlingBehavior).
-            await WriteAuditAsync(message, cancellationToken);
+            await WriteAuditAsync(message, AuditOutcome.Error, cancellationToken);
             throw;
         }
 
         // Успешный путь — ВНЕ try выше: сбой записи журнала здесь fail-closed пробрасывается наружу
         // (не перехватывается catch'ами хендлера и не приводит к повторной записи).
-        await WriteAuditAsync(message, cancellationToken);
+        await WriteAuditAsync(message, OutcomeOf(response), cancellationToken);
         return response;
     }
 
-    private async Task WriteAuditAsync(TMessage message, CancellationToken cancellationToken)
+    /// <summary>
+    /// Исход операции по ответу сценария (ТБ-080, ADR-0066): успешный ответ — успех; внутренняя ошибка и недоступная
+    /// внешняя зависимость — ошибка (операция упала); остальные неуспешные ответы — отказ: нет права, не найдено, не прошла
+    /// проверка, конфликт — система не выполнила операцию по правилам.
+    /// </summary>
+    internal static AuditOutcome OutcomeOf(IResponseDto? response) =>
+        response is null
+            ? AuditOutcome.Error
+            : response.Status
+                ? AuditOutcome.Success
+                : response.StatusCode is ResponseStatusCode.InternalServerError or ResponseStatusCode.ServiceUnavailable
+                    ? AuditOutcome.Error
+                    : AuditOutcome.Denied;
+
+    private async Task WriteAuditAsync(TMessage message, AuditOutcome outcome, CancellationToken cancellationToken)
     {
         short subjectCeiling;
         int? subjectId = null;
@@ -97,9 +111,10 @@ public sealed class AuditBehavior<TMessage, TResponse>(
         // Не ниже и допуска субъекта, и объявленного грифа объекта (напр. грифа загружаемого документа).
         var classification = Math.Max(subjectCeiling, message.AuditClassification ?? (short)0);
 
+        // Адрес клиента и сеанс (ТБ-080) писатель журнала берёт из контекста субъекта сам (ADR-0066).
         await auditWriter.WriteAsync(
             new AuditEntry(message.AuditAction, classification, SubjectId: subjectId,
-                PayloadSensitive: message.AuditSummary),
+                PayloadSensitive: message.AuditSummary, Outcome: outcome),
             cancellationToken);
     }
 

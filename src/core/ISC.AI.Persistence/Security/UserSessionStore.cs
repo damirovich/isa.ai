@@ -15,7 +15,8 @@ public sealed class UserSessionStore(IDbContextFactory<CoreDbContext> contextFac
         var now = DateTime.UtcNow;
         var session = new UserSessionEntity
         {
-            Id = Guid.NewGuid(),
+            // Номер, выданный хостом заранее, — тот, что уже стоит в записи входа журнала (ТБ-080, ADR-0066).
+            Id = start.SessionId ?? Guid.NewGuid(),
             UserId = start.UserId,
             ClientAddress = Trim(start.ClientAddress, UserSessionEntity.MaxClientAddressLength),
             UserAgent = Trim(start.UserAgent, UserSessionEntity.MaxUserAgentLength),
@@ -34,6 +35,16 @@ public sealed class UserSessionStore(IDbContextFactory<CoreDbContext> contextFac
     {
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
         return await db.UserSessions.AnyAsync(s => s.Id == sessionId && s.EndedAt == null, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<string?> GetClientAddressAsync(Guid sessionId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        return await db.UserSessions.AsNoTracking()
+            .Where(s => s.Id == sessionId)
+            .Select(s => s.ClientAddress)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 
     /// <inheritdoc />

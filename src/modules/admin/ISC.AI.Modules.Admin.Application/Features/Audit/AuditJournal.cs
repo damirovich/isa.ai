@@ -50,8 +50,9 @@ public static class AuditJournal
         return new AuditNames(logins, divisionNames);
     }
 
-    /// <summary>Заголовок CSV.</summary>
-    public const string CsvHeader = "№ записи;Время;Кто;Имя входа;Действие;Что произошло;Сводка;Объект;Гриф;Подразделение";
+    /// <summary>Заголовок CSV. Исход, IP-адрес и сеанс (ТБ-080) — в конце: прежние столбцы остаются на своих местах.</summary>
+    public const string CsvHeader =
+        "№ записи;Время;Кто;Имя входа;Действие;Что произошло;Сводка;Объект;Гриф;Подразделение;Исход;IP-адрес;Сеанс";
 
     /// <summary>Строка CSV (разделитель «;» — так Excel с русской локалью открывает файл по столбцам).</summary>
     public static string ToCsvLine(AuditJournalRow row)
@@ -70,6 +71,9 @@ public static class AuditJournal
             r.ObjectRef ?? string.Empty,
             ClassificationLevels.Label(r.Classification),
             row.DivisionName ?? string.Empty,
+            AuditText.OutcomeLabel(r.Outcome),
+            r.ClientAddress ?? string.Empty,
+            r.SessionId?.ToString("D", CultureInfo.InvariantCulture) ?? string.Empty,
         ];
         return string.Join(';', cells.Select(Escape));
     }

@@ -66,7 +66,9 @@ public sealed class GroundedGenerator(
             // ТБ-030: retrieval уже прочитал защищённые фрагменты под допуском субъекта — фиксируем ПОПЫТКУ
             // в неизменяемом журнале даже при сбое/отмене модели («данные могли быть уже извлечены»), затем
             // пробрасываем. Иначе обращение к ДСП внутри упавшей генерации осталось бы вне журнала.
-            await AuditFailedAttemptAsync(request, included, access, exception.GetType().Name);
+            await AuditFailedAttemptAsync(
+                request, included, access, exception.GetType().Name,
+                exception is OperationCanceledException ? AuditOutcome.Cancelled : AuditOutcome.Error);
             throw;
         }
 
@@ -124,7 +126,9 @@ public sealed class GroundedGenerator(
             // недопустим, поэтому исключение здесь недоступно — пишем нейтральную причину. finalized → успех уже записан.
             if (!finalized)
             {
-                await AuditFailedAttemptAsync(request, included, access, "поток прерван до завершения");
+                // Исход — «отмена»: поток прерван до завершения (в finally сбой от раннего выхода не отличить, а
+                // чаще всего это остановка ответа или уход со страницы).
+                await AuditFailedAttemptAsync(request, included, access, "поток прерван до завершения", AuditOutcome.Cancelled);
             }
         }
     }
@@ -234,7 +238,8 @@ public sealed class GroundedGenerator(
     // ТБ-030: запись ПОПЫТКИ генерации в неизменяемый журнал при сбое/отмене (retrieval уже прочитал ДСП).
     // CancellationToken.None: запись обязана появиться даже когда исходный вызов отменён.
     private Task AuditFailedAttemptAsync(
-        GroundedRequest request, IReadOnlyList<RetrievedChunk> fragments, AccessContext access, string reason) =>
+        GroundedRequest request, IReadOnlyList<RetrievedChunk> fragments, AccessContext access, string reason,
+        AuditOutcome outcome) =>
         auditWriter.WriteAsync(
             new AuditEntry(
                 AuditAction.Generate,
@@ -242,7 +247,8 @@ public sealed class GroundedGenerator(
                 SubjectId: access.NumericSubjectId,
                 ObjectRef: string.Join(",", fragments.Select(f => f.ChunkId)),
                 DivisionId: request.InputDivisionId,
-                PayloadSensitive: $"Генерация НЕ завершена: {reason}. Запрос: {request.Query}"),
+                PayloadSensitive: $"Генерация НЕ завершена: {reason}. Запрос: {request.Query}",
+                Outcome: outcome),
             CancellationToken.None);
 
     private static List<ChatMessage> BuildMessages(GroundedRequest request, IReadOnlyList<RetrievedChunk> fragments)

@@ -111,9 +111,11 @@ public sealed class UserSessionTrackerTests
         _store.StartAsync(Arg.Any<UserSessionStart>(), Arg.Any<CancellationToken>()).Returns(OtherSession);
         _store.EndAsync(OtherSession, UserSessionEndReason.SignedOut, null, null, Arg.Any<CancellationToken>()).Returns(true);
 
-        var id = await _tracker.StartAsync(7, "10.0.0.5", "Edg/141", CancellationToken.None);
+        // Номер сеанса выдан заранее (ТБ-080, ADR-0066) — тот, что уже стоит в записи входа журнала, уходит в хранилище.
+        var planned = Guid.NewGuid();
+        var id = await _tracker.StartAsync(7, "10.0.0.5", "Edg/141", planned, CancellationToken.None);
         id.ShouldBe(OtherSession);
-        await _store.Received(1).StartAsync(new UserSessionStart(7, "10.0.0.5", "Edg/141"), Arg.Any<CancellationToken>());
+        await _store.Received(1).StartAsync(new UserSessionStart(7, "10.0.0.5", "Edg/141", planned), Arg.Any<CancellationToken>());
         (await _tracker.IsActiveAsync(OtherSession, CancellationToken.None)).ShouldBeTrue();
         await _store.DidNotReceive().IsActiveAsync(OtherSession, Arg.Any<CancellationToken>()); // только что заведён — из кэша
 

@@ -163,7 +163,9 @@ public sealed class MediaImportRunner(
         {
             if (await imports.TryCompleteJobAsync(context.Job.JobId, cancellationToken))
             {
-                await WriteJobAuditAsync(context.Job, "завершено: все строки разобраны", context.Access.MaxClassification, cancellationToken);
+                await WriteJobAuditAsync(
+                    context.Job, "завершено: все строки разобраны", context.Access.MaxClassification, AuditOutcome.Success,
+                    cancellationToken);
             }
 
             return MediaImportStep.JobCompleted;
@@ -371,11 +373,14 @@ public sealed class MediaImportRunner(
     {
         if (await imports.StopAsync(job.JobId, reason, cancellationToken))
         {
-            await WriteJobAuditAsync(job, "остановлено системой: " + reason, ClassificationLevels.Max, cancellationToken);
+            await WriteJobAuditAsync(
+                job, "остановлено системой: " + reason, ClassificationLevels.Max, AuditOutcome.Error, cancellationToken);
         }
     }
 
-    private Task WriteJobAuditAsync(MediaImportJobRun job, string what, short classification, CancellationToken cancellationToken) =>
+    // Исход (ТБ-080): задание, остановленное системой, — ошибка; завершённое — успех.
+    private Task WriteJobAuditAsync(
+        MediaImportJobRun job, string what, short classification, AuditOutcome outcome, CancellationToken cancellationToken) =>
         audit.WriteAsync(
             new AuditEntry(
                 AuditAction.Ingest,
@@ -383,7 +388,8 @@ public sealed class MediaImportRunner(
                 SubjectId: null,
                 ObjectRef: "media:import:job=" + job.JobId.ToString(CultureInfo.InvariantCulture),
                 PayloadSensitive: $"импорт архива, задание {job.JobId.ToString(CultureInfo.InvariantCulture)} "
-                    + $"(запустил пользователь {job.OperatorUserId.ToString(CultureInfo.InvariantCulture)}): {what}"),
+                    + $"(запустил пользователь {job.OperatorUserId.ToString(CultureInfo.InvariantCulture)}): {what}",
+                Outcome: outcome),
             cancellationToken);
 
     private Task WriteItemAuditAsync(
@@ -411,7 +417,12 @@ public sealed class MediaImportRunner(
                 draft.DivisionId,
                 PayloadSensitive: $"импорт архива: {result}; файл «{draft.RelativePath}»; дело № {draft.CaseNumber}; "
                     + $"sha256 до переноса={draft.ExpectedSha256 ?? "—"}; после={outcome.ContentSha256 ?? "—"}"
-                    + (outcome.Reason is null ? string.Empty : "; причина: " + outcome.Reason)),
+                    + (outcome.Reason is null ? string.Empty : "; причина: " + outcome.Reason),
+
+                // Исход (ТБ-080): строка, которую импорт отклонил, — отказ; принятая и дубликат — успех.
+                Outcome: outcome.Status is MediaImportItemStatus.Accepted or MediaImportItemStatus.Duplicate
+                    ? AuditOutcome.Success
+                    : AuditOutcome.Denied),
             cancellationToken);
     }
 }

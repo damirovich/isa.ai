@@ -152,6 +152,21 @@ public sealed class AuditJournalTests
         line.Split(';').ShouldContain(expectedCell.Contains(';') ? expectedCell.Split(';')[0] : expectedCell);
     }
 
+    [Fact(DisplayName = "ТБ-080: в выгрузке — исход, IP-адрес и сеанс; у записи до обновления — «Не записан» и пустые поля")]
+    public void Csv_carries_client_context()
+    {
+        var names = new AuditNames(new Dictionary<int, string>(), new Dictionary<int, string>());
+        var session = Guid.Parse("4f1c2b7e-0d3a-4c55-9e21-7a6b5c4d3e2f");
+
+        var line = AuditJournal.ToCsvLine(names.ToJournalRow(
+            Row(1, 7, 5, "case:4") with { Outcome = AuditOutcome.Denied, ClientAddress = "10.0.12.7", SessionId = session }));
+        line.ShouldEndWith(";Отказ;10.0.12.7;4f1c2b7e-0d3a-4c55-9e21-7a6b5c4d3e2f");
+
+        AuditJournal.ToCsvLine(names.ToJournalRow(Row(2, 7, 5, "case:4"))).ShouldEndWith(";Не записан;;");
+        AuditJournal.CsvHeader.ShouldEndWith(";Исход;IP-адрес;Сеанс");
+        AuditText.ShortSession(session).ShouldBe("4f1c2b7e");
+    }
+
     private ExportAuditJournalQuery.Handler ExportHandler() =>
         new(_reader, _access, _administration, _accounts, _divisions, TimeProvider.System);
 

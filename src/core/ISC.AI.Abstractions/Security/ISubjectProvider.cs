@@ -31,4 +31,11 @@ public interface ISubjectProvider
     /// дал завершить его вместо «Выхода». <see langword="null"/> — сеанса нет (dev-заглушка входа, фоновая работа).
     /// </summary>
     Task<Guid?> GetCurrentSessionIdAsync(CancellationToken cancellationToken = default) => Task.FromResult<Guid?>(null);
+
+    /// <summary>
+    /// IP-адрес клиента текущего действия (ТБ-080, ADR-0066) — для записи журнала аудита: адрес соединения, через
+    /// которое пришло действие, а если соединение адреса не даёт — адрес, захваченный при входе в сеанс.
+    /// <see langword="null"/> — неизвестен (фоновая работа, процесс без хоста).
+    /// </summary>
+    Task<string?> GetCurrentClientAddressAsync(CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);
 }

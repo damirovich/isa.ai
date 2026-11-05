@@ -38,9 +38,27 @@ public class AuditRecordEntity
     /// <summary>Чувствительное содержимое (под решёткой, ТБ-032). Отделено от метаданных.</summary>
     public string? PayloadSensitive { get; set; }
 
+    /// <summary>Исход операции (ТБ-080). <see langword="null"/> — запись до ADR-0066: исход не записывался.</summary>
+    public AuditOutcome? Outcome { get; set; }
+
+    /// <summary>IP-адрес клиента (ТБ-080). <see langword="null"/> — неизвестен или запись до ADR-0066.</summary>
+    public string? ClientAddress { get; set; }
+
+    /// <summary>Сеанс входа субъекта (<c>core.user_session</c>, ТБ-080). <see langword="null"/> — нет сеанса или запись до ADR-0066.</summary>
+    public Guid? SessionId { get; set; }
+
+    /// <summary>
+    /// Версия формулы <see cref="RecordHash"/> (ADR-0066): 1 — записи до обновления, 2 — с исходом, адресом и сеансом.
+    /// Проверка цепочки выбирает формулу по ней — старые записи не пересчитываются (ТБ-031).
+    /// </summary>
+    public short HashVersion { get; set; } = 1;
+
     /// <summary>Хеш предыдущей записи (звено цепочки, ТБ-031). Для первой записи — нули (генезис).</summary>
     public byte[] PrevHash { get; set; } = [];
 
     /// <summary>Хеш текущей записи (SHA-256 от <see cref="PrevHash"/> + каноничных полей записи).</summary>
     public byte[] RecordHash { get; set; } = [];
+
+    /// <summary>Наибольшая длина <see cref="ClientAddress"/> — как у адреса в сеансе (<c>core.user_session</c>).</summary>
+    public const int MaxClientAddressLength = UserSessionEntity.MaxClientAddressLength;
 }

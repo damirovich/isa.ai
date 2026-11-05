@@ -48,13 +48,22 @@ public sealed partial class UserSessionTracker(
         Guid.TryParse(principal?.FindFirst(UserSessionClaims.SessionId)?.Value, out var id) ? id : null;
 
     /// <summary>Заводит сеанс при входе.</summary>
-    public async Task<Guid> StartAsync(int userId, string? clientAddress, string? userAgent, CancellationToken cancellationToken)
+    /// <param name="userId">Сотрудник.</param>
+    /// <param name="clientAddress">IP-адрес клиента.</param>
+    /// <param name="userAgent">Строка браузера.</param>
+    /// <param name="sessionId">
+    /// Номер, выданный заранее, — тот, что уже стоит в записи входа журнала (ТБ-080, ADR-0066); <see langword="null"/> —
+    /// номер выдаёт хранилище.
+    /// </param>
+    /// <param name="cancellationToken">Отмена.</param>
+    public async Task<Guid> StartAsync(
+        int userId, string? clientAddress, string? userAgent, Guid? sessionId = null, CancellationToken cancellationToken = default)
     {
-        var sessionId = await store.StartAsync(new UserSessionStart(userId, clientAddress, userAgent), cancellationToken);
+        var started = await store.StartAsync(new UserSessionStart(userId, clientAddress, userAgent, sessionId), cancellationToken);
         var now = timeProvider.GetUtcNow();
-        _status[sessionId] = (true, now);
-        _touched[sessionId] = now;
-        return sessionId;
+        _status[started] = (true, now);
+        _touched[started] = now;
+        return started;
     }
 
     /// <summary>Действует ли сеанс — с кэшем на <see cref="StatusCacheTime"/>.</summary>

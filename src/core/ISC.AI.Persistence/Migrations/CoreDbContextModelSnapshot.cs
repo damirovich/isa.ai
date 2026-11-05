@@ -134,9 +134,18 @@ namespace ISC.AI.Persistence.Migrations
                         .HasColumnType("smallint")
                         .HasColumnName("classification");
 
+                    b.Property<string>("ClientAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("client_address");
+
                     b.Property<int?>("DivisionId")
                         .HasColumnType("integer")
                         .HasColumnName("division_id");
+
+                    b.Property<short>("HashVersion")
+                        .HasColumnType("smallint")
+                        .HasColumnName("hash_version");
 
                     b.Property<string>("ObjectRef")
                         .HasMaxLength(2000)
@@ -146,6 +155,10 @@ namespace ISC.AI.Persistence.Migrations
                     b.Property<DateTime>("OccurredAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("occurred_at");
+
+                    b.Property<short?>("Outcome")
+                        .HasColumnType("smallint")
+                        .HasColumnName("outcome");
 
                     b.Property<string>("PayloadSensitive")
                         .HasColumnType("text")
@@ -161,6 +174,10 @@ namespace ISC.AI.Persistence.Migrations
                         .HasColumnType("bytea")
                         .HasColumnName("record_hash");
 
+                    b.Property<Guid?>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
                     b.Property<int?>("SubjectId")
                         .HasColumnType("integer")
                         .HasColumnName("subject_id");
@@ -170,6 +187,9 @@ namespace ISC.AI.Persistence.Migrations
 
                     b.HasIndex("OccurredAt")
                         .HasDatabaseName("ix_audit_record_occurred_at");
+
+                    b.HasIndex("SessionId")
+                        .HasDatabaseName("ix_audit_record_session_id");
 
                     b.HasIndex("Classification", "DivisionId")
                         .HasDatabaseName("ix_audit_record_classification_division_id");

@@ -17,7 +17,11 @@ public enum UserSessionEndReason : short
 /// <param name="UserId">Сотрудник (<c>core.app_user</c>).</param>
 /// <param name="ClientAddress">IP-адрес клиента; <see langword="null"/> — неизвестен.</param>
 /// <param name="UserAgent">Строка браузера (User-Agent); <see langword="null"/> — не передана.</param>
-public sealed record UserSessionStart(int UserId, string? ClientAddress, string? UserAgent);
+/// <param name="SessionId">
+/// Номер сеанса, выданный хостом заранее: запись успешного входа в журнале несёт номер сеанса, который откроется
+/// (ТБ-080, ADR-0066). <see langword="null"/> — номер выдаёт хранилище (случайный).
+/// </param>
+public sealed record UserSessionStart(int UserId, string? ClientAddress, string? UserAgent, Guid? SessionId = null);
 
 /// <summary>Открытый сеанс для экрана «Активные сеансы».</summary>
 /// <param name="SessionId">Номер сеанса.</param>
@@ -55,6 +59,13 @@ public interface IUserSessionStore
 
     /// <summary>Действует ли сеанс: есть и не завершён. Неизвестный номер — <see langword="false"/>.</summary>
     Task<bool> IsActiveAsync(Guid sessionId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// IP-адрес, захваченный при входе в сеанс (ТБ-080): запасной адрес клиента для журнала аудита, когда соединение
+    /// своего адреса не дало (ADR-0066). Неизвестный номер — <see langword="null"/>.
+    /// </summary>
+    Task<string?> GetClientAddressAsync(Guid sessionId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<string?>(null);
 
     /// <summary>Отмечает активность действующего сеанса (завершённый не трогается).</summary>
     Task TouchAsync(Guid sessionId, DateTime atUtc, CancellationToken cancellationToken = default);
