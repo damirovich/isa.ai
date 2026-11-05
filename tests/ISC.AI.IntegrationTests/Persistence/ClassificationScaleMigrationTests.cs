@@ -56,8 +56,30 @@ public sealed class ClassificationScaleMigrationTests : IAsyncLifetime
             await db.GetService<IMigrator>().MigrateAsync("20260826062909_HnswIslandRecall");
         }
 
-        var writer = new ISC.AI.Persistence.Audit.AuditWriter(core);
-        await writer.WriteAsync(new ISC.AI.Abstractions.Audit.AuditEntry(ISC.AI.Abstractions.Audit.AuditAction.View, 9, 7, "legacy", DivisionId: 5));
+        // Запись прежнего писателя — прямой вставкой по формуле хеша версии 1: на этой миграции у журнала ещё нет столбцов
+        // ADR-0066 (исход, адрес, сеанс), а нынешняя модель EF их знает.
+        var now = System.DateTime.UtcNow;
+        var occurredAt = new System.DateTime(now.Ticks - (now.Ticks % System.TimeSpan.TicksPerMicrosecond), System.DateTimeKind.Utc);
+        var legacy = new ISC.AI.Persistence.Entities.AuditRecordEntity
+        {
+            OccurredAt = occurredAt,
+            SubjectId = 7,
+            Action = ISC.AI.Abstractions.Audit.AuditAction.View,
+            ObjectRef = "legacy",
+            Classification = 9,
+            DivisionId = 5,
+            HashVersion = 1,
+        };
+        var genesis = new byte[32];
+        var hash = ISC.AI.Persistence.Audit.AuditWriter.ComputeRecordHash(genesis, legacy);
+        await using (var db = core.CreateDbContext())
+        {
+            await db.Database.ExecuteSqlAsync(
+                $"""
+                INSERT INTO core.audit_record (occurred_at, subject_id, action, object_ref, classification, division_id, payload_sensitive, prev_hash, record_hash)
+                VALUES ({occurredAt}, {7}, {(int)ISC.AI.Abstractions.Audit.AuditAction.View}, {"legacy"}, {(short)9}, {5}, {(string?)null}, {genesis}, {hash})
+                """);
+        }
 
         await using (var db = core.CreateDbContext())
         {
@@ -66,7 +88,12 @@ public sealed class ClassificationScaleMigrationTests : IAsyncLifetime
 
         await using (var db = core.CreateDbContext())
         {
-            (await db.AuditRecords.AsNoTracking().SingleAsync()).Classification.ShouldBe((short)9);
+            var record = await db.AuditRecords.AsNoTracking().SingleAsync();
+            record.Classification.ShouldBe((short)9);
+
+            // Ни шкала грифов, ни контекст записи (ADR-0066) запись не переписали: версия 1, её хеш сходится.
+            record.HashVersion.ShouldBe((short)1);
+            ISC.AI.Persistence.Audit.AuditWriter.ComputeRecordHash(record.PrevHash, record).ShouldBe(record.RecordHash);
         }
     }
 

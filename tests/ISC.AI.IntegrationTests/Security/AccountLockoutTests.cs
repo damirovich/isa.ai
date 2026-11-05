@@ -65,6 +65,28 @@ public sealed class AccountLockoutTests : IAsyncLifetime
         var lockout = await db.AuditRecords.SingleAsync(r => r.Action == AuditAction.Modify && r.ObjectRef == LoginLockout.LockoutObjectRef(userId));
         lockout.PayloadSensitive.ShouldBe(LoginLockout.LockoutObjectRef(userId) + ":attempts=5");
         lockout.SubjectId.ShouldBeNull(); // блокирует система, а не человек
+
+        // ТБ-080: каждая неудачная попытка — исход «отказ», в том числе на заблокированной учётке; сеанса у отказа нет.
+        var attempts = await db.AuditRecords.Where(r => r.Action == AuditAction.Login).ToListAsync();
+        attempts.Count.ShouldBe(7);
+        attempts.ShouldAllBe(r => r.Outcome == AuditOutcome.Denied && r.SessionId == null);
+    }
+
+    [Fact(DisplayName = "ТБ-080: запись успешного входа — исход «успех» и номер сеанса, который откроется")]
+    public async Task Granted_login_record_carries_the_planned_session()
+    {
+        await CreateAccountAsync("orlova");
+        var planned = Guid.NewGuid();
+
+        var audit = new AuditWriter(_core);
+        var service = new LoginService(
+            new LocalIdentityProvider(_core), _core, audit, new LoginLockout(_core, audit), NullLogger<LoginService>.Instance);
+        (await service.AuthenticateAsync("orlova", Password, planned)).ShouldNotBeNull();
+
+        await using var db = _core.CreateDbContext();
+        var granted = await db.AuditRecords.SingleAsync(r => r.Action == AuditAction.Login && r.ObjectRef == "login=orlova;result=granted");
+        granted.Outcome.ShouldBe(AuditOutcome.Success);
+        granted.SessionId.ShouldBe(planned);
     }
 
     [Fact(DisplayName = "ТБ-081: успешный вход обнуляет счётчик — блокируют только 5 неудач ПОДРЯД")]

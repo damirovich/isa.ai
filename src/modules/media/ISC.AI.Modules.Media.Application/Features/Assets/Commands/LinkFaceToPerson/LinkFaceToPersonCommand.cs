@@ -144,7 +144,8 @@ public sealed record LinkFaceToPersonCommand(int FaceId, int AuthorizationId, in
                     access.NumericSubjectId,
                     ObjectRef: $"media:search:denied;manual-link:{command.FaceId};auth:{command.AuthorizationId}",
                     DivisionId: caseItem?.DivisionId,
-                    PayloadSensitive: $"ручная привязка отклонена: {reason}; фигурант {command.PersonRef}"),
+                    PayloadSensitive: $"ручная привязка отклонена: {reason}; фигурант {command.PersonRef}",
+                    Outcome: AuditOutcome.Denied),
                 cancellationToken);
     }
 }

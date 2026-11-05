@@ -54,8 +54,15 @@ public sealed class LoginService(
     /// при отказе (без различения причин наружу — кроме отдельно обрабатываемой недоступности внешней
     /// системы, см. <see cref="AuthEndpoints"/>). Успех и отказ фиксируются в журнале аудита.
     /// </summary>
+    /// <param name="login">Имя входа.</param>
+    /// <param name="password">Пароль.</param>
+    /// <param name="sessionId">
+    /// Номер сеанса, который хост откроет при успехе (ТБ-080, ADR-0066): попадает в запись успешного входа; при отказе
+    /// не пишется — сеанс не открывается. <see langword="null"/> — запись входа без сеанса.
+    /// </param>
+    /// <param name="cancellationToken">Отмена.</param>
     public async Task<ClaimsPrincipal?> AuthenticateAsync(
-        string login, string password, CancellationToken cancellationToken = default)
+        string login, string password, Guid? sessionId = null, CancellationToken cancellationToken = default)
     {
         var external = await identityProvider.VerifyCredentialsAsync(login, password, cancellationToken);
         if (external is null)
@@ -135,8 +142,9 @@ public sealed class LoginService(
             }
         }
 
-        // Аудит успешного входа — ДО выдачи сессии (fail-closed: нет записи — нет входа).
-        await WriteLoginAuditAsync(user.Id, login, GrantedResult, cancellationToken);
+        // Аудит успешного входа — ДО выдачи сессии (fail-closed: нет записи — нет входа). Запись уже несёт номер сеанса,
+        // который хост откроет (ТБ-080).
+        await WriteLoginAuditAsync(user.Id, login, GrantedResult, sessionId, cancellationToken);
 
         var identity = new ClaimsIdentity(
             [
@@ -159,13 +167,21 @@ public sealed class LoginService(
         return new ClaimsPrincipal(identity);
     }
 
-    // Гриф записи — 0: событие входа не несёт содержимого документов, только метаданные (ТБ-032).
+    // Гриф записи — 0: событие входа не несёт содержимого документов, только метаданные (ТБ-032). Исход (ТБ-080): вход —
+    // успех, любой отказ, в том числе по блокировке, — отказ; result= в тексте остаётся — по нему читаются старые записи.
+    // Адрес — запроса входа: писатель журнала берёт его из контекста субъекта (ADR-0066).
     private Task WriteLoginAuditAsync(int? subjectId, string login, string result, CancellationToken cancellationToken) =>
+        WriteLoginAuditAsync(subjectId, login, result, sessionId: null, cancellationToken);
+
+    private Task WriteLoginAuditAsync(
+        int? subjectId, string login, string result, Guid? sessionId, CancellationToken cancellationToken) =>
         auditWriter.WriteAsync(
             new AuditEntry(
                 AuditAction.Login,
                 Classification: 0,
                 SubjectId: subjectId,
-                ObjectRef: $"login={login};result={result}"),
+                ObjectRef: $"login={login};result={result}",
+                Outcome: result == GrantedResult ? AuditOutcome.Success : AuditOutcome.Denied,
+                SessionId: sessionId),
             cancellationToken);
 }

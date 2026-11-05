@@ -178,6 +178,10 @@ try
     builder.Services.AddSingleton<UserSessionTracker>();
     builder.Services.AddSingleton<IUserSessionMonitor>(sp => sp.GetRequiredService<UserSessionTracker>());
 
+    // Адрес клиента соединения Blazor для журнала аудита (ТБ-080, ADR-0066): один на соединение, захватывает его
+    // SessionCircuitHandler, читает контекст субъекта. В dev-режиме без входа остаётся пустым — адрес берётся из запроса.
+    builder.Services.AddScoped<CircuitClientAddress>();
+
     if (devAuth)
     {
         builder.Services.AddScoped<IAccessContextProvider, DevAccessContextProvider>();

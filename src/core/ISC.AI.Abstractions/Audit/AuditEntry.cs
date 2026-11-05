@@ -13,10 +13,22 @@ namespace ISC.AI.Abstractions.Audit;
 /// Чувствительное содержимое (тексты промптов/выводов, наименования ДСП). Хранится ОТДЕЛЬНО от
 /// метаданных и под решёткой доступа (ТБ-032); срок хранения/обезличивание — ТБ-043/ТБ-064.
 /// </param>
+/// <param name="Outcome">Исход операции (ТБ-080): по умолчанию — успех; отказы и сбои сценарий указывает явно.</param>
+/// <param name="ClientAddress">
+/// IP-адрес клиента (ТБ-080). <see langword="null"/> — писатель берёт адрес из контекста субъекта сам
+/// (<c>ISubjectProvider</c>, ADR-0066); явно передаётся, только если сценарий знает его точнее.
+/// </param>
+/// <param name="SessionId">
+/// Сеанс входа субъекта (ТБ-080). <see langword="null"/> — писатель берёт его из контекста субъекта сам; явно —
+/// например, запись успешного входа несёт номер сеанса, который будет открыт.
+/// </param>
 public sealed record AuditEntry(
     AuditAction Action,
     short Classification,
     int? SubjectId = null,
     string? ObjectRef = null,
     int? DivisionId = null,
-    string? PayloadSensitive = null);
+    string? PayloadSensitive = null,
+    AuditOutcome Outcome = AuditOutcome.Success,
+    string? ClientAddress = null,
+    Guid? SessionId = null);

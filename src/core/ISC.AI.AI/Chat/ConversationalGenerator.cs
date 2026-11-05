@@ -100,6 +100,9 @@ public sealed class ConversationalGenerator(
                 SubjectId: access.NumericSubjectId,
                 ObjectRef: null,
                 PayloadSensitive: (completed ? "Свободный чат (без грунтовки)." : "Свободный чат НЕ завершён.")
-                    + $" Запрос: {query}\nОтвет: {answer}"),
+                    + $" Запрос: {query}\nОтвет: {answer}",
+
+                // Незавершённый поток — «отмена» (ТБ-080): сбой от остановки ответа здесь не отличить.
+                Outcome: completed ? AuditOutcome.Success : AuditOutcome.Cancelled),
             CancellationToken.None);
 }

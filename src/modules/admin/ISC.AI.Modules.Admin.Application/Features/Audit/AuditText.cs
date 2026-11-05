@@ -60,6 +60,23 @@ public static class AuditText
     };
 
     /// <summary>
+    /// Подпись исхода операции (ТБ-080). Записи до ADR-0066 исхода не несут — «не записан», а не «успех»: прежний журнал
+    /// писался и при ошибках, и при отменах.
+    /// </summary>
+    public static string OutcomeLabel(AuditOutcome? outcome) => outcome switch
+    {
+        AuditOutcome.Success => "Успех",
+        AuditOutcome.Denied => "Отказ",
+        AuditOutcome.Error => "Ошибка",
+        AuditOutcome.Cancelled => "Отмена",
+        null => "Не записан",
+        _ => outcome.Value.ToString(),
+    };
+
+    /// <summary>Номер сеанса коротко — первые 8 знаков: для строки журнала; целиком — в карточке записи и в выгрузке.</summary>
+    public static string ShortSession(Guid sessionId) => sessionId.ToString("N", CultureInfo.InvariantCulture)[..8];
+
+    /// <summary>
     /// Что произошло — по сводке сценария (<paramref name="summary"/>), а без неё — по ссылке на объект и действию.
     /// </summary>
     public static string Describe(AuditAction action, string? summary, string? objectRef)

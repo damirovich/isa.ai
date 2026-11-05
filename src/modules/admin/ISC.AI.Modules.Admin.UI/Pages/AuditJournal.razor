@@ -1,7 +1,8 @@
 @namespace ISC.AI.Modules.Admin.UI
 @* Журнал аудита (ТБ-030/032): неизменяемая история действий в пределах допуска смотрящего.
-   Отбор — период одной кнопкой, сотрудник по имени, действие и текст; строка открывается целиком; отбор можно
-   выгрузить в .csv (выгрузка сама пишется в журнал). Право читать журнал решает обработчик
+   Отбор — период одной кнопкой, сотрудник по имени, действие, исход и текст (в том числе IP-адрес); строка открывается
+   целиком — с исходом, IP-адресом и сеансом входа (ТБ-080, ADR-0066), откуда можно перейти ко всем действиям сеанса;
+   отбор можно выгрузить в .csv (выгрузка сама пишется в журнал). Право читать журнал решает обработчик
    (IPlatformAdministration.CanViewAuditAsync — у «Следствия» и «Инспектора» это строка матрицы доступа), отказ
    показывается текстом. Что именно видно — решает решётка гриф/подразделение в порту журнала (ТБ-032). *@
 @page "/admin/audit"
@@ -79,14 +80,33 @@
                 <MudSelectItem T="AuditAction?" Value="@action">@AuditText.Label(action)</MudSelectItem>
             }
         </MudSelect>
+        @* Исход операции (ТБ-080): найти отказы и сбои. Записи до ADR-0066 исхода не несут и в отбор по исходу не попадают. *@
+        <MudSelect T="AuditOutcome?" Value="_outcome" ValueChanged="OnOutcomeChangedAsync" Label="Исход"
+                   Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Placeholder="Любой" Style="width:160px;">
+            @foreach (var outcome in Enum.GetValues<AuditOutcome>())
+            {
+                <MudSelectItem T="AuditOutcome?" Value="@outcome">@AuditText.OutcomeLabel(outcome)</MudSelectItem>
+            }
+        </MudSelect>
         <MudTextField T="string" @bind-Value="_text" Label="Что искать" Variant="Variant.Outlined" Margin="Margin.Dense"
                       Placeholder="дело, фигурант, роль, номер…" Adornment="Adornment.Start"
                       AdornmentIcon="@Icons.Material.Filled.Search" Clearable="true" Style="min-width:240px;" Class="flex-grow-1"
                       OnKeyDown="@(async e => { if (e.Key == "Enter") { await SearchAsync(); } })" />
         <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SearchAsync" Disabled="_busy">Показать</MudButton>
     </div>
+    @if (_sessionId is { } session)
+    {
+        <div class="d-flex align-center gap-2 flex-wrap mt-2">
+            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined" Class="ma-0"
+                     Icon="@Icons.Material.Filled.Link" OnClose="@(() => ClearSessionAsync())">
+                Сеанс @AuditText.ShortSession(session)…
+            </MudChip>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">показаны только действия этого сеанса входа</MudText>
+        </div>
+    }
     <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
-        «Что искать» ищет по сводке действия, например «дело:4», «role», «access-matrix». Нажмите на строку, чтобы открыть запись целиком.
+        «Что искать» ищет по сводке действия, например «дело:4», «role», «access-matrix», и по IP-адресу. Нажмите на строку,
+        чтобы открыть запись целиком.
     </MudText>
 </MudPaper>
 
@@ -97,6 +117,7 @@
         <MudTh>Кто</MudTh>
         <MudTh>Действие</MudTh>
         <MudTh>Что произошло</MudTh>
+        <MudTh>Исход</MudTh>
         <MudTh>Гриф</MudTh>
         <MudTh>Подразделение</MudTh>
     </HeaderContent>
@@ -104,9 +125,10 @@
         <MudTd DataLabel="Время">@Time(context.Record.OccurredAt)</MudTd>
         <MudTd DataLabel="Кто">
             <MudText Typo="Typo.body2">@Who(context.Record)</MudText>
-            @if (context.SubjectLogin is { } login)
+            @* Имя входа и IP-адрес клиента (ТБ-080) — мелко, одной строкой. *@
+            @if (LoginAndAddress(context) is { } secondary)
             {
-                <MudText Typo="Typo.caption" Class="mud-text-secondary">@login</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">@secondary</MudText>
             }
         </MudTd>
         <MudTd DataLabel="Действие">
@@ -119,6 +141,20 @@
             {
                 <MudText Typo="Typo.caption" Class="mud-text-secondary"
                          Style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-family:monospace;">@raw</MudText>
+            }
+        </MudTd>
+        <MudTd DataLabel="Исход">
+            @* Успех — спокойным текстом, отказ, ошибка и отмена — цветом: их и ищут глазами. Запись до ADR-0066 — «—». *@
+            @if (context.Record.Outcome is { } outcome && outcome != AuditOutcome.Success)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@OutcomeColor(outcome)"
+                         Class="ma-0">@AuditText.OutcomeLabel(outcome)</MudChip>
+            }
+            else
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    @(context.Record.Outcome is null ? "—" : AuditText.OutcomeLabel(context.Record.Outcome))
+                </MudText>
             }
         </MudTd>
         <MudTd DataLabel="Гриф">@ClassificationLevels.Label(context.Record.Classification)</MudTd>
@@ -158,6 +194,10 @@
                     <tr><td class="mud-text-secondary">Объект</td><td style="font-family:monospace;word-break:break-all;">@(row.Record.ObjectRef ?? "—")</td></tr>
                     <tr><td class="mud-text-secondary">Гриф</td><td>@ClassificationLevels.Label(row.Record.Classification)</td></tr>
                     <tr><td class="mud-text-secondary">Подразделение</td><td>@(row.DivisionName ?? "—")</td></tr>
+                    @* Контекст записи (ТБ-080). У записей до ADR-0066 его нет — так и сказано, а не «успех». *@
+                    <tr><td class="mud-text-secondary">Исход</td><td>@AuditText.OutcomeLabel(row.Record.Outcome)</td></tr>
+                    <tr><td class="mud-text-secondary">IP-адрес</td><td style="font-family:monospace;">@(row.Record.ClientAddress ?? "—")</td></tr>
+                    <tr><td class="mud-text-secondary">Сеанс входа</td><td style="font-family:monospace;word-break:break-all;">@(row.Record.SessionId?.ToString("D", CultureInfo.InvariantCulture) ?? "—")</td></tr>
                 </tbody>
             </MudSimpleTable>
             <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-2">
@@ -166,6 +206,11 @@
         }
     </DialogContent>
     <DialogActions>
+        @if (_selected?.Record.SessionId is { } selectedSession)
+        {
+            <MudButton Color="Color.Primary" StartIcon="@Icons.Material.Filled.Link"
+                       OnClick="@(() => ShowSessionAsync(selectedSession))">Все действия сеанса</MudButton>
+        }
         <MudButton OnClick="@(() => _selected = null)">Закрыть</MudButton>
     </DialogActions>
 </MudDialog>
@@ -188,6 +233,8 @@
     private DateTime? _to;
     private AuditSubject? _subject;
     private AuditAction? _action;
+    private AuditOutcome? _outcome;
+    private Guid? _sessionId;
     private string? _text;
 
     private AuditJournalRow? _selected;
@@ -235,6 +282,28 @@
 
     private Task OnActionChangedAsync(AuditAction? value) { _action = value; return SearchAsync(); }
 
+    private Task OnOutcomeChangedAsync(AuditOutcome? value) { _outcome = value; return SearchAsync(); }
+
+    // «Все действия сеанса» (ТБ-080): отбор только по сеансу и за всё время — иначе прежний отбор (период, сотрудник,
+    // действие, текст, исход) молча прятал бы часть действий сеанса.
+    private Task ShowSessionAsync(Guid sessionId)
+    {
+        _selected = null;
+        _sessionId = sessionId;
+        _period = Period.All;
+        _subject = null;
+        _action = null;
+        _outcome = null;
+        _text = null;
+        return SearchAsync();
+    }
+
+    private Task ClearSessionAsync()
+    {
+        _sessionId = null;
+        return SearchAsync();
+    }
+
     private Task SearchAsync()
     {
         // Новый отбор — с первой страницы: иначе после сужения можно остаться на несуществующей странице.
@@ -263,7 +332,8 @@
 
         return new AuditFilter(
             from?.ToUniversalTime(), to?.ToUniversalTime(), _subject?.UserId, _action,
-            string.IsNullOrWhiteSpace(_text) ? null : _text.Trim(), _page, PageSize);
+            string.IsNullOrWhiteSpace(_text) ? null : _text.Trim(), _page, PageSize,
+            Outcome: _outcome, SessionId: _sessionId);
     }
 
     private async Task LoadAsync()
@@ -328,6 +398,20 @@
         record.SubjectName ?? (record.SubjectId is { } id ? $"пользователь № {id.ToString(CultureInfo.InvariantCulture)}" : "система");
 
     private static string? Code(AuditRecordRow record) => record.PayloadSensitive ?? record.ObjectRef;
+
+    // Имя входа и IP-адрес (ТБ-080) одной строкой; нет ни того, ни другого — строки нет.
+    private static string? LoginAndAddress(AuditJournalRow row)
+    {
+        var parts = new[] { row.SubjectLogin, row.Record.ClientAddress }.Where(p => !string.IsNullOrEmpty(p)).ToList();
+        return parts.Count == 0 ? null : string.Join(" · ", parts);
+    }
+
+    private static Color OutcomeColor(AuditOutcome outcome) => outcome switch
+    {
+        AuditOutcome.Error => Color.Error,
+        AuditOutcome.Denied => Color.Warning,
+        _ => Color.Default,
+    };
 
     private static Color ActionColor(AuditAction action) => action switch
     {

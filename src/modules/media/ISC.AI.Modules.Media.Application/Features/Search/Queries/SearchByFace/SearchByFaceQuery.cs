@@ -644,7 +644,8 @@ public sealed record SearchByFaceQuery(
                     access.NumericSubjectId,
                     ObjectRef: $"media:search:denied;case:{query.CaseId};auth:{query.AuthorizationId}",
                     DivisionId: caseItem?.DivisionId,
-                    PayloadSensitive: $"поиск отклонён: {reason}; область: {query.Scope}"),
+                    PayloadSensitive: $"поиск отклонён: {reason}; область: {query.Scope}",
+                    Outcome: AuditOutcome.Denied),
                 cancellationToken);
         }
 
@@ -658,7 +659,8 @@ public sealed record SearchByFaceQuery(
                     access.NumericSubjectId,
                     ObjectRef: $"media:search:failed;case:{caseItem.CaseId};auth:{query.AuthorizationId}",
                     DivisionId: caseItem.DivisionId,
-                    PayloadSensitive: $"поиск не выполнен: {error}; область: {query.Scope}"),
+                    PayloadSensitive: $"поиск не выполнен: {error}; область: {query.Scope}",
+                    Outcome: AuditOutcome.Error),
                 cancellationToken);
 
         /// <summary>Порог поиска (ТФ-ПЛ-08): запрошенный оператором (может не быть), действующий и нижняя граница — для журнала.</summary>

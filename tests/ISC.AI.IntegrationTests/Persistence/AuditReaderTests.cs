@@ -126,6 +126,34 @@ public sealed class AuditReaderTests : IAsyncLifetime
         capped.Rows.Count.ShouldBeLessThanOrEqualTo(AuditReader.MaxPageSize);
     }
 
+    [Fact(DisplayName = "ТБ-080: строка журнала несёт исход, IP и сеанс; отбор по исходу и сеансу, «Что искать» находит по IP")]
+    public async Task Reader_returns_and_filters_client_context()
+    {
+        var (writer, reader) = await BuildAsync();
+        var access = new AccessContext("42", 9, [5]);
+        var session = Guid.NewGuid();
+
+        await writer.WriteAsync(new AuditEntry(AuditAction.View, 0, 7, "doc:1", DivisionId: 5,
+            ClientAddress: "10.0.12.7", SessionId: session));
+        await writer.WriteAsync(new AuditEntry(AuditAction.Search, 0, 7, "case:4", DivisionId: 5,
+            Outcome: AuditOutcome.Denied, ClientAddress: "10.0.12.7", SessionId: session));
+        await writer.WriteAsync(new AuditEntry(AuditAction.Export, 0, 8, "case:5", DivisionId: 5,
+            Outcome: AuditOutcome.Error, ClientAddress: "192.168.1.15", SessionId: Guid.NewGuid()));
+
+        var all = await reader.QueryAsync(new AuditFilter(), access);
+        var denied = all.Rows.Single(r => r.ObjectRef == "case:4");
+        denied.Outcome.ShouldBe(AuditOutcome.Denied);
+        denied.ClientAddress.ShouldBe("10.0.12.7");
+        denied.SessionId.ShouldBe(session);
+
+        (await reader.QueryAsync(new AuditFilter(Outcome: AuditOutcome.Error), access)).Rows
+            .ShouldHaveSingleItem().ObjectRef.ShouldBe("case:5");
+        (await reader.QueryAsync(new AuditFilter(SessionId: session), access)).Rows
+            .Select(r => r.ObjectRef).ShouldBe(["case:4", "doc:1"]);
+        (await reader.QueryAsync(new AuditFilter(ObjectRef: "192.168."), access)).Rows
+            .ShouldHaveSingleItem().ObjectRef.ShouldBe("case:5");
+    }
+
     private async Task<(AuditWriter Writer, AuditReader Reader)> BuildAsync()
     {
         var factory = new CoreContextFactory(_postgres.GetConnectionString());

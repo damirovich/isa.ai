@@ -19,6 +19,13 @@ public class AuditRecordEntityConfiguration : IEntityTypeConfiguration<AuditReco
         builder.Property(e => e.PrevHash).IsRequired();
         builder.Property(e => e.RecordHash).IsRequired();
 
+        // Контекст записи (ТБ-080, ADR-0066). Версия хеша обязательна: проверка цепочки выбирает по ней формулу.
+        builder.Property(e => e.ClientAddress).HasMaxLength(AuditRecordEntity.MaxClientAddressLength);
+        builder.Property(e => e.HashVersion).IsRequired();
+
+        // «Все действия сеанса» — отбор журнала по номеру сеанса.
+        builder.HasIndex(e => e.SessionId);
+
         // Индекс для решётки доступа к самому журналу (ТБ-032) и быстрой выборки по времени.
         builder.HasIndex(e => new { e.Classification, e.DivisionId });
         builder.HasIndex(e => e.OccurredAt);
