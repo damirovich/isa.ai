@@ -89,13 +89,24 @@
             <SectionCaption Text="Нарушения" />
             <MudTextField @bind-Value="_violations" Variant="Variant.Outlined" Lines="5" Immediate="true"
                           Disabled="_busy"
-                          Placeholder="Опишите нарушения в произвольной форме:&#10;— отсутствие контакта с конфидентами&#10;— формальный подход к АОД" />
+                          Placeholder="@ViolationsPlaceholder" />
 
             <div class="d-flex gap-2 flex-wrap my-2">
                 @foreach (var hint in ViolationHints)
                 {
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default"
                              OnClick="@(() => AddHint(hint))">@hint</MudChip>
+                }
+            </div>
+
+            @* Готовые примеры целиком: щелчок заменяет текст поля — чтобы сразу показать, как пишется описание. *@
+            <div class="d-flex align-center gap-1 flex-wrap mb-2">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary mr-1">Пример:</MudText>
+                @foreach (var example in ViolationExamples)
+                {
+                    var item = example;
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" Disabled="_busy"
+                             Icon="@Icons.Material.Filled.Lightbulb" OnClick="@(() => _violations = item.Text)">@item.Title</MudChip>
                 }
             </div>
 
@@ -214,6 +225,28 @@
     // Типы документов §5.2.1.1 (ТФ-ГЕН-01): перечень — ЕДИНЫЙ источник ReferenceDocumentTypes
     // (там же ключи промпт-шаблонов; «в селекте есть, шаблона нет» невозможно по построению).
     private static readonly string[] ViolationHints = ["Агентурная", "АОД", "Нацменьшинства", "Соц. напряжённость"];
+
+    // Подсказка в пустом поле: переносы строк — в C#-строке (сущность &#10; в атрибуте Razor выводилась буквально).
+    private const string ViolationsPlaceholder =
+        "Опишите нарушения в произвольной форме:\n— отсутствие контакта с конфидентами\n— формальный подход к АОД";
+
+    // Примеры описания нарушений целиком — по темам, на которые в корпусе есть нормы (трудовое право, обращения,
+    // секретное делопроизводство), чтобы черновик получил ссылки, а не пометки «не проверено».
+    private static readonly (string Title, string Text)[] ViolationExamples =
+    [
+        ("Кадры и трудовая дисциплина",
+            "— трём вновь принятым сотрудникам установлен испытательный срок 6 месяцев;\n"
+            + "— трудовые договоры с двумя сотрудниками не подписаны работодателем;\n"
+            + "— график отпусков на 2024 год не утверждён, учёт рабочего времени ведётся с пропусками."),
+        ("Секретное делопроизводство",
+            "— журнал учёта секретных документов не ведётся с марта 2024 года;\n"
+            + "— два сотрудника допущены к работе с секретными документами без оформленного допуска;\n"
+            + "— копии служебных документов хранятся в незапираемом шкафу."),
+        ("Обращения граждан",
+            "— в 5 случаях нарушены сроки рассмотрения обращений граждан;\n"
+            + "— ответы на обращения подписаны неуполномоченным лицом;\n"
+            + "— журнал регистрации обращений ведётся с исправлениями и без нумерации листов."),
+    ];
 
     private string _docType = ReferenceDocumentTypes.Reference;
     private readonly List<DivisionNode> _divisions = [];

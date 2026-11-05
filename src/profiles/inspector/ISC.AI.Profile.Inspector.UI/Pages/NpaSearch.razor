@@ -33,6 +33,16 @@
             <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _result = null)">Скрыть результаты</MudButton>
         }
     </div>
+    @* Готовые запросы: щелчок подставляет фразу и сразу ищет — тот же вид, что у подсказок поиска в чате. *@
+    <div class="d-flex align-center flex-wrap gap-1 mt-2">
+        <MudText Typo="Typo.caption" Class="mud-text-secondary mr-1">Например:</MudText>
+        @foreach (var example in SearchExamples)
+        {
+            var text = example;
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" Disabled="_searchBusy"
+                     Icon="@Icons.Material.Filled.Lightbulb" OnClick="@(() => SearchExampleAsync(text))">@text</MudChip>
+        }
+    </div>
 </MudPaper>
 
 @if (_searchBusy)
@@ -217,6 +227,16 @@
 
 
     // Поиск по смыслу.
+    // Примеры запросов — под то, что есть в корпусе (кодексы, конституционные законы, внутренние инструкции).
+    private static readonly string[] SearchExamples =
+    [
+        "испытательный срок при приёме на работу",
+        "разглашение государственной тайны",
+        "полномочия прокурора при проверке",
+        "конфликт интересов государственного служащего",
+        "налоговая проверка и её сроки",
+    ];
+
     private string _query = string.Empty;
     private bool _searchBusy;
     private SearchNpaResult? _result;
@@ -314,6 +334,12 @@
         {
             _busy = false;
         }
+    }
+
+    private Task SearchExampleAsync(string example)
+    {
+        _query = example;
+        return SearchAsync();
     }
 
     private async Task SearchAsync()
