@@ -98,7 +98,13 @@ install -m 0644 "$PKG"/tessdata/*.traineddata "$BASE/tessdata/"
 # Пакет Tesseract для .NET ищет на Linux x64/libtesseract50.so и x64/libleptonica-1.82.0.so рядом с программой, а
 # свои библиотеки везёт только для Windows. Подставляем системные (пакеты дистрибутива tesseract 5 и leptonica)
 # ссылками с ожидаемыми именами. Без них OCR отключится при первом скане: текстовые PDF, DOCX, TXT грузятся и так.
-find_lib() { ldconfig -p | awk -v pat="$1" '$1 ~ pat && /x86-64/ { print $NF; exit }'; }
+# Список библиотек системы — ОДИН раз в переменную, поиск — по ней. Не «ldconfig -p | awk … exit» и не «| grep -q»:
+# при set -o pipefail ранний выход читателя убивает ldconfig сигналом SIGPIPE (код 141), и set -e молча обрывает
+# установку посреди шага — тем вероятнее, чем больше библиотек в системе (сотни строк при tesseract и клиенте
+# PostgreSQL). Здесь-строку shell отдаёт целиком сам — читателю можно выходить когда угодно.
+LDCACHE="$(ldconfig -p)"
+find_lib() { awk -v pat="$1" '$1 ~ pat && /x86-64/ { print $NF; exit }' <<<"$LDCACHE"; }
+has_lib() { grep -qE "$1" <<<"$LDCACHE"; }
 tess="$(find_lib '^libtesseract\.so\.5')"
 lept="$(find_lib '^libleptonica\.so\.6')"
 [[ -z "$lept" ]] && lept="$(find_lib '^liblept\.so\.5')"
@@ -112,7 +118,7 @@ else
 fi
 # Загрузчик библиотек того же пакета обращается к «libdl.so» — на новых glibc есть только libdl.so.2 (без пакета
 # разработчика libc6-dev). Ссылка рядом с программой снимает зависимость от него.
-if ! ldconfig -p | grep -q 'libdl\.so '; then
+if ! has_lib 'libdl\.so '; then
     libdl="$(find_lib '^libdl\.so\.2')"
     [[ -n "$libdl" ]] && ln -sfn "$libdl" "$RELEASE/app/libdl.so"
 fi
@@ -174,8 +180,8 @@ systemctl enable isc-ai.service >/dev/null
 echo "   isc-ai.service установлена и включена в автозапуск"
 
 say "Проверка окружения"
-ldconfig -p | grep -q 'libicuuc\.so' || warn "нет ICU (libicu): без неё программа не запустится — поставьте пакет libicu"
-ldconfig -p | grep -qE 'libssl\.so\.(3|1\.1)' || warn "нет OpenSSL (libssl 3 или 1.1): HTTPS и SSL к БД не заработают"
+has_lib 'libicuuc\.so' || warn "нет ICU (libicu): без неё программа не запустится — поставьте пакет libicu"
+has_lib 'libssl\.so\.(3|1\.1)' || warn "нет OpenSSL (libssl 3 или 1.1): HTTPS и SSL к БД не заработают"
 fonts_ok=0
 for f in /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf /usr/share/fonts/dejavu/DejaVuSans.ttf \
          /usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf \
@@ -186,7 +192,7 @@ done
 if [[ "$PROFILE" == "investigation" ]]; then
     # Нативный Skia (обработка изображений: лица, вырезки, лента кадров, печать фото) загружается вместе с fontconfig —
     # без него не обработается ни одно фото и видео.
-    ldconfig -p | grep -q 'libfontconfig\.so\.1' \
+    has_lib 'libfontconfig\.so\.1' \
         || warn "нет fontconfig (libfontconfig.so.1): распознавание лиц и печать фото не заработают — поставьте пакет fontconfig"
 fi
 command -v pg_dump >/dev/null || ls /usr/lib/postgresql/*/bin/pg_dump &>/dev/null \
