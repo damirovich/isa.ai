@@ -35,9 +35,9 @@ TimeoutStopSec=90
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 
-# Песочница: программа и системные каталоги — только чтение; писать можно лишь в каталог данных и на носитель
-# резервных копий (приставка «-» — каталога может не быть, пока носитель не подключён). MemoryDenyWriteExecute
-# не включать: .NET компилирует код на лету (JIT).
+# Песочница: программа и системные каталоги — только чтение; писать можно лишь в каталог данных, на носитель
+# резервных копий и на носитель обмена между офисами, ADR-0068 (приставка «-» — каталога может не быть, пока носитель
+# не подключён). MemoryDenyWriteExecute не включать: .NET компилирует код на лету (JIT).
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true
@@ -50,6 +50,7 @@ RestrictSUIDSGID=true
 LockPersonality=true
 ReadWritePaths=/var/lib/isc-ai
 ReadWritePaths=-/mnt/isc-backup
+ReadWritePaths=-/mnt/isc-exchange
 UMask=0077
 LimitNOFILE=65536
 SyslogIdentifier=isc-ai

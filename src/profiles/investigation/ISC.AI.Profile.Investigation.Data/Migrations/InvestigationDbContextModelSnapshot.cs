@@ -791,6 +791,139 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.ExchangeExport", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("Appearances")
+                        .HasColumnType("integer")
+                        .HasColumnName("appearances");
+
+                    b.Property<int>("Assets")
+                        .HasColumnType("integer")
+                        .HasColumnName("assets");
+
+                    b.Property<long>("BytesWritten")
+                        .HasColumnType("bigint")
+                        .HasColumnName("bytes_written");
+
+                    b.Property<string>("CaseNumbers")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("case_numbers");
+
+                    b.Property<int>("Cases")
+                        .HasColumnType("integer")
+                        .HasColumnName("cases");
+
+                    b.Property<short?>("Classification")
+                        .HasColumnType("smallint")
+                        .HasColumnName("classification");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("error");
+
+                    b.Property<int>("Files")
+                        .HasColumnType("integer")
+                        .HasColumnName("files");
+
+                    b.Property<DateTime?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("finished_at");
+
+                    b.Property<int>("Links")
+                        .HasColumnType("integer")
+                        .HasColumnName("links");
+
+                    b.Property<string>("MediaKinds")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("media_kinds");
+
+                    b.Property<int>("Month")
+                        .HasColumnType("integer")
+                        .HasColumnName("month");
+
+                    b.Property<string>("PackageName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("package_name");
+
+                    b.Property<int>("Persons")
+                        .HasColumnType("integer")
+                        .HasColumnName("persons");
+
+                    b.Property<int>("Reports")
+                        .HasColumnType("integer")
+                        .HasColumnName("reports");
+
+                    b.Property<bool>("ResendFiles")
+                        .HasColumnType("boolean")
+                        .HasColumnName("resend_files");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at");
+
+                    b.Property<int>("StartedByUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("started_by_user_id");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint")
+                        .HasColumnName("status");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("integer")
+                        .HasColumnName("year");
+
+                    b.HasKey("Id")
+                        .HasName("pk_exchange_export");
+
+                    b.HasIndex("StartedAt")
+                        .HasDatabaseName("ix_exchange_export_started_at");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("ix_exchange_export_status");
+
+                    b.ToTable("exchange_export", "investigation");
+                });
+
+            modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.ExchangeExportFile", b =>
+                {
+                    b.Property<int>("ExportId")
+                        .HasColumnType("integer")
+                        .HasColumnName("export_id");
+
+                    b.Property<int>("AssetId")
+                        .HasColumnType("integer")
+                        .HasColumnName("asset_id");
+
+                    b.HasKey("ExportId", "AssetId")
+                        .HasName("pk_exchange_export_file");
+
+                    b.HasIndex("AssetId")
+                        .HasDatabaseName("ix_exchange_export_file_asset_id");
+
+                    b.ToTable("exchange_export_file", "investigation");
+                });
+
             modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.IntersectionReview", b =>
                 {
                     b.Property<int>("Id")
@@ -1831,6 +1964,16 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                         .HasForeignKey("ParentId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_division_division_parent_id");
+                });
+
+            modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.ExchangeExportFile", b =>
+                {
+                    b.HasOne("ISC.AI.Profile.Investigation.Domain.Entities.ExchangeExport", null)
+                        .WithMany()
+                        .HasForeignKey("ExportId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_exchange_export_file_exchange_export_export_id");
                 });
 
             modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.IntersectionReview", b =>

@@ -62,6 +62,9 @@ public sealed class AccessMatrixTests
         [InvestigationPermissions.AdminSessions] = [InvestigationRole.Administrator, InvestigationRole.SecurityOfficer],
         // Новое право (ADR-0063): экрана резервных копий прежде не было; по умолчанию — Администратор.
         [InvestigationPermissions.AdminBackups] = [InvestigationRole.Administrator],
+        // Новое право (ADR-0068): обмена между офисами прежде не было; по умолчанию — Администратор, и без роли при
+        // первичной настройке не открывается (выгрузка всего месяца, ТБ-083).
+        [InvestigationPermissions.AdminExchange] = [InvestigationRole.Administrator],
         // Новое право (ADR-0061): статистических отчётов [АИС 6] прежде не было; по умолчанию — Руководитель,
         // Администратор и Офицер ИБ (аудит работы распознавания).
         [InvestigationPermissions.ReportsStatistics] = [InvestigationRole.Head, InvestigationRole.Administrator, InvestigationRole.SecurityOfficer],

@@ -94,6 +94,12 @@ public class InvestigationDbContext(DbContextOptions<InvestigationDbContext> opt
     /// <summary>Материалы дел в корпусе ядра: сведения дела, сводки и справки (ADR-0051).</summary>
     public DbSet<CaseCorpusEntry> CaseCorpusEntries { get; set; } = null!;
 
+    /// <summary>Журнал выгрузок пакетов обмена между офисами (ADR-0068).</summary>
+    public DbSet<ExchangeExport> ExchangeExports { get; set; } = null!;
+
+    /// <summary>Файлы носителей, ушедшие успешными выгрузками (ADR-0068).</summary>
+    public DbSet<ExchangeExportFile> ExchangeExportFiles { get; set; } = null!;
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

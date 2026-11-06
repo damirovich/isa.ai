@@ -109,6 +109,10 @@ public static class CorePersistenceServiceCollectionExtensions
         services.AddScoped<Backup.BackupService>();
         services.AddScoped<Abstractions.Backup.IBackupService>(sp => sp.GetRequiredService<Backup.BackupService>());
 
+        // Пакет обмена между офисами (ТФ-ОБМ-01, ТБ-083, ADR-0068): формат, шифрование, подпись и закрепление ключей — ядро;
+        // содержимое и отбор — профиль, через этот порт (на ISC.AI.Backup профиль не ссылается — правило зависимостей).
+        services.AddSingleton<Abstractions.Exchange.IExchangePackages, global::ISC.AI.Backup.ExchangePackages>();
+
         return services;
     }
 }

@@ -32,9 +32,17 @@ public static class BackupKeys
     /// Открытый ключ из PEM-файла (<c>BEGIN PUBLIC KEY</c>). Короче <see cref="MinKeyBits"/> бит — отказ.
     /// </summary>
     /// <exception cref="InvalidOperationException">Файл не содержит ключ RSA нужной длины.</exception>
-    public static RSA LoadPublicKey(string pemPath)
+    public static RSA LoadPublicKey(string pemPath) => LoadPublicKey(pemPath, "резервных копий");
+
+    /// <summary>
+    /// Открытый ключ из PEM-файла для указанного назначения: те же RSA-ключи шифруют и подписывают пакеты обмена между
+    /// офисами (ADR-0068). <paramref name="purpose"/> — в сообщении об ошибке: «Ключ обмена — 2048 бит…».
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Файл не содержит ключ RSA нужной длины.</exception>
+    public static RSA LoadPublicKey(string pemPath, string purpose)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pemPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(purpose);
         var rsa = RSA.Create();
         try
         {
@@ -50,7 +58,7 @@ public static class BackupKeys
         {
             var bits = rsa.KeySize;
             rsa.Dispose();
-            throw new InvalidOperationException($"Ключ резервных копий — {bits} бит; нужен RSA не короче {MinKeyBits} бит.");
+            throw new InvalidOperationException($"Ключ {purpose} — {bits} бит; нужен RSA не короче {MinKeyBits} бит.");
         }
 
         return rsa;

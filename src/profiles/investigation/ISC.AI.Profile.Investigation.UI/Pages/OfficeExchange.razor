@@ -1,0 +1,307 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@page "/admin/exchange"
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@inject ISnackbar Snackbar
+@using System.Globalization
+@using ISC.AI.Abstractions.Security
+@using ISC.AI.Modules.Media.Domain.Model
+@using ISC.AI.Profile.Investigation.Application.Features.Exchange
+@using ISC.AI.Profile.Investigation.Domain.Entities
+@using ISC.AI.Profile.Investigation.Domain.Services
+
+@* Обмен между офисами — сторона источника (ТФ-АДМ-05, ТФ-ОБМ-01, ADR-0068). Администратор выбирает период, номера дел и
+   виды носителей; хранитель ключа вводит пароль ключа подписи; пакет формируется в фоне на носитель обмена (страницу можно
+   закрыть). Экран показывает только состав и счётчики — содержимое пакета зашифровано для офиса-получателя (ТБ-079).
+   Право и готовность проверяет сервер: экран лишь показывает отказ текстом. *@
+
+<PageHeader Title="Обмен между офисами" Icon="@Icons.Material.Filled.SwapHoriz"
+            Subtitle="Пакет за месяц для другого офиса — на носитель обмена; шифруется ключом офиса-получателя и подписывается ключом этого офиса" />
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="my-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+@if (_view is { } view)
+{
+    var readiness = view.Readiness;
+    <MudPaper Outlined="true" Class="pa-3 mb-3">
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Этот офис</MudText>
+        <MudSimpleTable Dense="true" Elevation="0" Bordered="false">
+            <tbody>
+                <tr><td class="mud-text-secondary" style="width:240px;">Номер экземпляра</td><td>@(readiness.InstanceId ?? "—")</td></tr>
+                <tr><td class="mud-text-secondary">Носитель обмена</td><td style="font-family:monospace;">@(readiness.TargetFolder ?? "—")</td></tr>
+                <tr><td class="mud-text-secondary">Ключ получателя (отпечаток)</td><td style="font-family:monospace;word-break:break-all;">@(readiness.RecipientKeyFingerprint ?? "—")</td></tr>
+                <tr><td class="mud-text-secondary">Ключ подписи этого офиса</td><td style="font-family:monospace;word-break:break-all;">@(readiness.SigningKeyFingerprint ?? "—")</td></tr>
+            </tbody>
+        </MudSimpleTable>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
+            Отпечаток ключа подписи сообщают офису-получателю: по нему он проверит, что пакет сформирован здесь.
+        </MudText>
+        @if (!readiness.Ready)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-3">
+                Обмен не настроен:
+                <ul class="mb-0">
+                    @foreach (var problem in readiness.Problems)
+                    {
+                        <li>@problem</li>
+                    }
+                </ul>
+            </MudAlert>
+        }
+    </MudPaper>
+
+    <MudPaper Outlined="true" Class="pa-3 mb-3">
+        <MudText Typo="Typo.subtitle2" Class="mb-3">Сформировать пакет</MudText>
+        <div class="d-flex gap-3 align-start flex-wrap">
+            <MudNumericField T="int" @bind-Value="_year" Label="Год" Variant="Variant.Outlined" Margin="Margin.Dense"
+                             Min="2000" Max="2100" Style="width:120px;" Disabled="@Locked" />
+            <MudSelect T="int" @bind-Value="_month" Label="Месяц" Variant="Variant.Outlined" Margin="Margin.Dense"
+                       Style="width:170px;" Disabled="@Locked">
+                @for (var m = 1; m <= 12; m++)
+                {
+                    var month = m;
+                    <MudSelectItem T="int" Value="@month">@MonthName(month)</MudSelectItem>
+                }
+            </MudSelect>
+            <MudTextField T="string" @bind-Value="_caseNumbers" Label="Номера дел (необязательно)" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Lines="2" Placeholder="через запятую; пусто — все дела с движением за месяц"
+                          Class="flex-grow-1" Style="min-width:260px;" Disabled="@Locked" />
+        </div>
+        <div class="d-flex gap-4 align-center flex-wrap mt-2">
+            <MudText Typo="Typo.body2">Файлы носителей:</MudText>
+            <MudCheckBox T="bool" @bind-Value="_images" Label="фото" Dense="true" Disabled="@Locked" />
+            <MudCheckBox T="bool" @bind-Value="_videos" Label="видео" Dense="true" Disabled="@Locked" />
+            <MudCheckBox T="bool" @bind-Value="_audio" Label="звук" Dense="true" Disabled="@Locked" />
+            <MudCheckBox T="bool" @bind-Value="_resend" Label="отправить повторно и ушедшие раньше" Dense="true" Disabled="@Locked" />
+        </div>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+            Носители невыбранных видов идут в пакет только реквизитами. Файл, уже ушедший прежним пакетом, не повторяется —
+            кроме случая, когда носитель обмена потерян: тогда отметьте «отправить повторно».
+        </MudText>
+        <div class="d-flex gap-3 align-center flex-wrap mt-3">
+            @* Пароль вводит хранитель ключа подписи (не Администратор, ТО-орг-07); на сервере он живёт только в памяти задания.
+               Immediate — кнопка включается по мере ввода: без него значение приходит лишь при уходе фокуса, и первое
+               нажатие кнопки сразу после ввода пропадало (живая проверка 06.11.2026). *@
+            <MudTextField T="string" @bind-Value="_password" Immediate="true" Label="Пароль ключа подписи (вводит хранитель ключа)"
+                          InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Style="min-width:320px;" Disabled="@Locked" autocomplete="off" />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Inventory2"
+                       OnClick="StartAsync" Disabled="@(Locked || !readiness.Ready || string.IsNullOrEmpty(_password))">
+                @(_busy ? "Запускаю…" : "Сформировать пакет")
+            </MudButton>
+        </div>
+        @if (view.RunningBytes is { } bytes)
+        {
+            <div class="d-flex align-center gap-2 mt-3">
+                <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary" />
+                <MudText Typo="Typo.body2">Пакет формируется: записано @FormatBytes(bytes). Страницу можно закрыть — работа идёт на сервере.</MudText>
+            </div>
+        }
+    </MudPaper>
+
+    <MudText Typo="Typo.subtitle2" Class="mb-2">Сформированные пакеты</MudText>
+    <MudTable T="ExchangeExportRow" Items="view.Recent" Dense="true" Hover="true" Outlined="true">
+        <HeaderContent>
+            <MudTh>Начат</MudTh>
+            <MudTh>Период</MudTh>
+            <MudTh>Состояние</MudTh>
+            <MudTh>Состав</MudTh>
+            <MudTh>Объём</MudTh>
+            <MudTh>Маркировка</MudTh>
+            <MudTh>Пакет на носителе</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Начат">@Time(context.StartedAt)</MudTd>
+            <MudTd DataLabel="Период">
+                @context.Month.ToString("D2", CultureInfo.InvariantCulture).@context.Year.ToString(CultureInfo.InvariantCulture)
+                @if (context.CaseNumbers is { } numbers)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">дела: @numbers</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Состояние">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@StatusColor(context.Status)" Class="ma-0">
+                    @StatusLabel(context.Status)
+                </MudChip>
+                @if (context.Error is { } error)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Error" Class="d-block">@error</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Состав">
+                @if (context.Status == ExchangeExportStatus.Succeeded)
+                {
+                    <span>дел @context.Cases · объектов @context.Persons · связей @context.Links · сводок @context.Reports ·
+                        носителей @context.Assets (файлов @context.Files) · появлений @context.Appearances</span>
+                }
+                else
+                {
+                    <span class="mud-text-secondary">—</span>
+                }
+            </MudTd>
+            <MudTd DataLabel="Объём">@(context.Status == ExchangeExportStatus.Succeeded ? FormatBytes(context.BytesWritten) : "—")</MudTd>
+            <MudTd DataLabel="Маркировка">@(context.Classification is { } c ? ClassificationLevels.Label(c) : "—")</MudTd>
+            <MudTd DataLabel="Пакет" Style="font-family:monospace;word-break:break-all;">@(context.PackageName ?? "—")</MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Пакетов ещё не формировали.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+}
+else if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+
+@code {
+    private readonly CancellationTokenSource _disposed = new();
+    private Task? _refreshLoop;
+
+    private ExchangeOverview? _view;
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+
+    // Отбор по умолчанию — прошлый месяц: пакет за месяц формируют после его окончания (ТФ-ОБМ-03).
+    private int _year = DateTime.Today.AddMonths(-1).Year;
+    private int _month = DateTime.Today.AddMonths(-1).Month;
+    private string? _caseNumbers;
+    private bool _images = true;
+    private bool _videos = true;
+    private bool _audio = true;
+    private bool _resend;
+    private string? _password;
+
+    private bool Locked => _busy || _view?.RunningBytes is not null;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        if (!RendererInfo.IsInteractive) { return; }
+
+        await LoadAsync();
+        _refreshLoop = RefreshWhileRunningAsync(_disposed.Token);
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var response = await Dispatcher.Send(new GetExchangeOverviewQuery());
+            if (response is { Status: true, Data: { } view })
+            {
+                _view = view;
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    // Пока формируется пакет — перечитывать каждые 3 с (ход и итог); иначе — ничего не запрашивать.
+    private async Task RefreshWhileRunningAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                if (_view?.RunningBytes is not null && !_busy)
+                {
+                    await InvokeAsync(async () =>
+                    {
+                        await LoadAsync();
+                        StateHasChanged();
+                    });
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Страница закрыта.
+        }
+    }
+
+    private async Task StartAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var kinds = new List<MediaKind>();
+            if (_images) { kinds.Add(MediaKind.Image); }
+            if (_videos) { kinds.Add(MediaKind.Video); }
+            if (_audio) { kinds.Add(MediaKind.Audio); }
+
+            var response = await Dispatcher.Send(
+                new StartExchangeExportCommand(_year, _month, _caseNumbers, kinds, _resend, _password ?? string.Empty));
+            if (response.Status)
+            {
+                Snackbar.Add(response.StatusMessage, Severity.Success);
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            // Пароль на странице не остаётся ни в каком исходе.
+            _password = null;
+            _busy = false;
+        }
+
+        await LoadAsync();
+    }
+
+    private static string MonthName(int month) =>
+        CultureInfo.GetCultureInfo("ru-RU").DateTimeFormat.GetMonthName(month) is { Length: > 0 } name
+            ? char.ToUpper(name[0], CultureInfo.GetCultureInfo("ru-RU")) + name[1..]
+            : month.ToString(CultureInfo.InvariantCulture);
+
+    private static string Time(DateTime utc) => utc.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture);
+
+    private static string FormatBytes(long bytes) => bytes switch
+    {
+        >= 1L << 30 => (bytes / (double)(1L << 30)).ToString("0.0", CultureInfo.GetCultureInfo("ru-RU")) + " ГБ",
+        >= 1L << 20 => (bytes / (double)(1L << 20)).ToString("0.0", CultureInfo.GetCultureInfo("ru-RU")) + " МБ",
+        _ => (bytes / 1024.0).ToString("0", CultureInfo.GetCultureInfo("ru-RU")) + " КБ",
+    };
+
+    private static string StatusLabel(ExchangeExportStatus status) => status switch
+    {
+        ExchangeExportStatus.Running => "формируется",
+        ExchangeExportStatus.Succeeded => "готов",
+        ExchangeExportStatus.Failed => "сбой",
+        ExchangeExportStatus.Interrupted => "прерван",
+        _ => status.ToString(),
+    };
+
+    private static Color StatusColor(ExchangeExportStatus status) => status switch
+    {
+        ExchangeExportStatus.Running => Color.Info,
+        ExchangeExportStatus.Succeeded => Color.Success,
+        _ => Color.Error,
+    };
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        await _disposed.CancelAsync();
+        if (_refreshLoop is not null)
+        {
+            await _refreshLoop;
+        }
+
+        _disposed.Dispose();
+    }
+}

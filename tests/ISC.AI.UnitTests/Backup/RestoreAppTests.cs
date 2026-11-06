@@ -69,6 +69,31 @@ public sealed class RestoreAppTests : IDisposable
         (await RunAsync(["keygen", "--out", folder], "пароль хранителя ключа", "пароль хранителя ключа")).Code.ShouldBe(1);
     }
 
+    [Fact(DisplayName = "keygen для обмена (ADR-0068): ключ получателя и ключ подписи — свои имена файлов и свои указания; неизвестное назначение — отказ")]
+    public async Task Keygen_creates_exchange_pairs()
+    {
+        var folder = Path.Combine(_dir, "exchange-keys");
+
+        var recipient = await RunAsync(
+            ["keygen", "--out", folder, "--purpose", RestoreApp.ExchangeRecipientPurpose], "пароль хранителя ключа", "пароль хранителя ключа");
+        var signing = await RunAsync(
+            ["keygen", "--out", folder, "--purpose", RestoreApp.ExchangeSigningPurpose], "пароль хранителя ключа", "пароль хранителя ключа");
+
+        (recipient.Code, signing.Code).ShouldBe((0, 0));
+        recipient.Output.ShouldContain("Exchange:Recipient:PublicKey:Path");
+        signing.Output.ShouldContain("Exchange:Signing:PrivateKey:Path");
+        signing.Output.ShouldNotContain("НЕ на сервере");
+        using (var key = BackupKeys.LoadPrivateKey(Path.Combine(folder, "exchange-signing-private.pem"), "пароль хранителя ключа"))
+        {
+            signing.Output.ShouldContain(BackupKeys.FingerprintHex(key));
+        }
+
+        File.Exists(Path.Combine(folder, "exchange-recipient-public.pem")).ShouldBeTrue();
+        File.Exists(Path.Combine(folder, RestoreApp.PrivateKeyFile)).ShouldBeFalse();
+        var unknown = await RunAsync(["keygen", "--out", folder, "--purpose", "all"]);
+        (unknown.Code, unknown.Output.Contains(RestoreApp.ExchangeSigningPurpose, StringComparison.Ordinal)).ShouldBe((2, true));
+    }
+
     [Fact(DisplayName = "verify: целая копия — код 0; изменённый файл — код 1 и расхождение")]
     public async Task Verify_reports()
     {

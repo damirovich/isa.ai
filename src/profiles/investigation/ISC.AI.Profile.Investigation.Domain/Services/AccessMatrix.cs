@@ -149,6 +149,9 @@ public static class InvestigationPermissions
     /// <summary>Резервные копии: зашифрованная копия на носитель и проверка манифеста (ТФ-АДМ-04, ADR-0063).</summary>
     public const string AdminBackups = "admin.backups";
 
+    /// <summary>Обмен между офисами: формирование пакета на носитель обмена (ТФ-АДМ-05, ТФ-ОБМ-01, ADR-0068).</summary>
+    public const string AdminExchange = "admin.exchange";
+
     /// <summary>Статистические отчёты [АИС 6]: результативность распознавания и другие сводные формы (ADR-0061).</summary>
     public const string ReportsStatistics = "reports.statistics";
 
@@ -243,6 +246,10 @@ public static class InvestigationPermissions
         new(AdminBackups, PermissionSection.Administration, "Резервные копии",
             "Зашифрованная копия баз и хранилища на носитель, проверка манифеста; содержимого копии право не открывает",
             Roles(InvestigationRole.Administrator), OpenDuringInitialSetup: true),
+        new(AdminExchange, PermissionSection.Administration, "Обмен между офисами",
+            "Пакет для другого офиса за месяц на носитель обмена: отбор периодом, номерами дел и видами носителей; содержимое "
+                + "шифруется для офиса-получателя, сотрудник видит только состав и счётчики",
+            Roles(InvestigationRole.Administrator)),
 
         new(ReportsStatistics, PermissionSection.Reports, "Статистические отчёты",
             "Результативность распознавания, журнал суточной активности, статистика карточек объектов — в пределах допуска; выгрузка с грифом",
@@ -272,6 +279,7 @@ public static class InvestigationPermissions
         new("admin-audit", "Журнал аудита", [AdminAudit]),
         new("admin-sessions", "Активные сеансы", [AdminSessions]),
         new("admin-backups", "Резервные копии", [AdminBackups]),
+        new("admin-exchange", "Обмен между офисами", [AdminExchange]),
         new("reports-recognition", "Результативность распознавания", [ReportsStatistics]),
         new("reports-activity", "Журнал суточной активности", [ReportsStatistics]),
         new("reports-object-cards", "Статистика карточек объектов", [ReportsStatistics]),
