@@ -41,6 +41,39 @@ public sealed class MediaExchangeSource(IDbContextFactory<MediaDbContext> contex
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<MediaExchangeIndexState>> GetIndexStatesAsync(
+        IReadOnlyCollection<int> assetIds, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(assetIds);
+        var result = new List<MediaExchangeIndexState>(assetIds.Count);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        foreach (var chunk in assetIds.Distinct().Chunk(Batch))
+        {
+            result.AddRange(await db.Assets.AsNoTracking()
+                .Where(a => chunk.Contains(a.Id))
+                .Select(a => new MediaExchangeIndexState(a.Id, a.IndexStatus, a.IndexedAt, a.IndexError, a.Classification, a.DivisionId))
+                .ToListAsync(cancellationToken));
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<MediaExchangeFace>> ListAssetFacesAsync(int assetId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Фото кадров не имеет — номер и таймкод 0 (как у GetFacesAsync).
+        return await db.Faces.AsNoTracking()
+            .Where(f => f.AssetId == assetId)
+            .OrderBy(f => f.Id)
+            .Select(f => new MediaExchangeFace(
+                f.Id, f.AssetId, f.Frame == null ? 0 : f.Frame.Index, f.Frame == null ? 0 : f.Frame.TimestampMs,
+                f.BoxX, f.BoxY, f.BoxWidth, f.BoxHeight))
+            .ToListAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<MediaExchangeFace>> GetFacesAsync(
         IReadOnlyCollection<int> faceIds, CancellationToken cancellationToken = default)
     {

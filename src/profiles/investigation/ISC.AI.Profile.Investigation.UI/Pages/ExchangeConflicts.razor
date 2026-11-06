@@ -1,0 +1,286 @@
+@namespace ISC.AI.Profile.Investigation.UI
+@page "/exchange/conflicts"
+@rendermode InteractiveServer
+@inject ISnackbar Snackbar
+@using System.Globalization
+@using ISC.AI.Abstractions.Security
+@using ISC.AI.Profile.Investigation.Application.Features.Directory
+@using ISC.AI.Profile.Investigation.Application.Features.Exchange
+@using ISC.AI.Profile.Investigation.Domain.Entities
+@using ISC.AI.Profile.Investigation.Domain.Services
+
+@* Очередь Руководителя «Конфликты обмена» (ТФ-ОБМ-02, ТФ-АДМ-05, ADR-0068 v0.3): дела и носители пакета другого офиса,
+   совпавшие со своими. Видны только конфликты в пределах допуска (гриф и подразделение записи, ТБ-020/021); право
+   «Конфликты обмена между офисами» проверяет обработчик. Решение лишь записывается — применяет его повторный приём пакета
+   ключом хранителя: содержимое конфликтного дела и файлы лежат в пакете зашифрованными. *@
+
+<PageHeader Title="Конфликты обмена" Subtitle="Дела и носители из пакетов другого офиса, совпавшие со своими · решает Руководитель"
+            Icon="@Icons.Material.Filled.CallMerge">
+    <MudSwitch T="bool" Value="_history" ValueChanged="OnHistoryChangedAsync" Color="Color.Primary" Label="Показать применённые" />
+    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Disabled="_busy" OnClick="ReloadAsync">Обновить</MudButton>
+</PageHeader>
+
+<MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+    <b>Объединить</b> — запись другого офиса становится вашей записью: объекты и сводки его дела добавятся в ваше дело,
+    носитель с тем же файлом привяжется к принятым делам. <b>Создать новое</b> — дело заведётся отдельно (при совпадении номера —
+    под новым номером). <b>Пропустить</b> — запись и всё, что от неё зависит, не переносятся. Решение применяется, когда
+    Администратор и хранитель ключа примут пакет повторно; до этого его можно изменить.
+</MudAlert>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
+}
+
+<MudTable T="ExchangeConflictRow" Items="_rows" Hover="true" Dense="true" Outlined="true" Loading="_busy">
+    <HeaderContent>
+        <MudTh Style="width:170px;">Найден</MudTh>
+        <MudTh>Запись другого офиса</MudTh>
+        <MudTh>С чем совпала</MudTh>
+        <MudTh Style="width:220px;">Состояние</MudTh>
+        <MudTh Style="width:300px;">Решение</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Найден">
+            @context.FoundAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture)
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">из @context.SourceInstance</MudText>
+            @if (context.PackageName is { } package)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block" Style="font-family:monospace;word-break:break-all;">@package</MudText>
+            }
+        </MudTd>
+        <MudTd DataLabel="Запись другого офиса">
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0 mr-1">@(context.Kind == ExchangeConflictKind.Case ? "дело" : "носитель")</MudChip>
+            <b>@context.Label</b>
+            @if (context.Details is { } details)
+            {
+                <MudText Typo="Typo.caption" Class="d-block">@details</MudText>
+            }
+        </MudTd>
+        <MudTd DataLabel="С чем совпала">
+            <MudText Typo="Typo.body2">@context.Reason</MudText>
+            @if (context.LocalId is { } localId)
+            {
+                @if (context.Kind == ExchangeConflictKind.Case)
+                {
+                    @if (context.LocalLabel is { } label)
+                    {
+                        <MudLink Href="@($"/cases/{localId}")" Target="_blank">@label</MudLink>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">своё дело вне вашего допуска — объединить нельзя</MudText>
+                    }
+                }
+                else
+                {
+                    <MudLink Href="@($"/media/assets/{localId}")" Target="_blank">свой носитель № @localId</MudLink>
+                }
+            }
+        </MudTd>
+        <MudTd DataLabel="Состояние">
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@StatusColor(context.Status)" Class="ma-0">@StatusLabel(context)</MudChip>
+            @if (context.Decision is not null && context.DecidedAt is { } decidedAt)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                    @DecisionLabel(context.Decision.Value)@(context.DecisionNumber is { } number ? $" (№ {number})" : string.Empty) —
+                    @UserName(context.DecidedByUserId), @decidedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture)
+                </MudText>
+                @if (context.DecisionComment is { } comment)
+                {
+                    <MudText Typo="Typo.caption" Class="d-block">«@comment»</MudText>
+                }
+            }
+            @if (context.AppliedAt is { } appliedAt)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">применено @appliedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture)</MudText>
+            }
+        </MudTd>
+        <MudTd DataLabel="Решение">
+            @if (context.CanDecide)
+            {
+                <div class="d-flex flex-wrap gap-1">
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CallMerge"
+                               Disabled="@(_busy || !CanMerge(context))" OnClick="@(() => Open(context, ExchangeConflictDecision.Merge))">Объединить</MudButton>
+                    @if (context.Kind == ExchangeConflictKind.Case)
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.AddCircleOutline"
+                                   Disabled="_busy" OnClick="@(() => Open(context, ExchangeConflictDecision.CreateNew))">Создать новое</MudButton>
+                    }
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Block"
+                               Disabled="_busy" OnClick="@(() => Open(context, ExchangeConflictDecision.Skip))">Пропустить</MudButton>
+                </div>
+            }
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+            Конфликтов нет: всё из принятых пакетов перенесено без совпадений — либо конфликты вне вашего допуска.
+        </MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@* --- Решение: комментарий (необязателен) и — при совпадении номера дела — новый номер для «Создать новое». --- *@
+<MudDialog @bind-Visible="_dialogOpen">
+    <TitleContent><MudText Typo="Typo.h6">@(_decision is { } d ? DecisionLabel(d) : string.Empty)</MudText></TitleContent>
+    <DialogContent>
+        @if (_target is { } target && _decision is { } decision)
+        {
+            <MudText Typo="Typo.body2" Class="mb-2">
+                @(target.Kind == ExchangeConflictKind.Case ? "Дело" : "Носитель") «@target.Label» из @target.SourceInstance:
+                @DecisionHint(target, decision)
+            </MudText>
+            @if (decision == ExchangeConflictDecision.CreateNew && target.NumberClash)
+            {
+                <MudTextField T="string" @bind-Value="_number" Immediate="true" Label="Номер нового дела *" Variant="Variant.Outlined"
+                              MaxLength="100" HelperText="Номер источника в подразделении уже занят — задайте свой" Class="mb-2" />
+            }
+            <MudTextField T="string" @bind-Value="_comment" Immediate="true" Label="Комментарий (необязательно)" Variant="Variant.Outlined"
+                          Lines="2" MaxLength="@DecideExchangeConflictValidator.MaxCommentLength" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _dialogOpen = false)">Отмена</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_busy || NumberMissing)" OnClick="DecideAsync">Записать решение</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private readonly List<ExchangeConflictRow> _rows = [];
+    private readonly List<UserAccountRow> _accounts = [];
+    private bool _history;
+    private bool _busy;
+    private string? _error;
+
+    private bool _dialogOpen;
+    private ExchangeConflictRow? _target;
+    private ExchangeConflictDecision? _decision;
+    private string? _number;
+    private string? _comment;
+
+    private bool NumberMissing =>
+        _decision == ExchangeConflictDecision.CreateNew && _target is { NumberClash: true } && string.IsNullOrWhiteSpace(_number);
+
+    protected override async Task OnInitializedAsync()
+    {
+        // ТБ-030 «одно открытие — одна запись»: на предрендере не грузим.
+        if (!RendererInfo.IsInteractive) { return; }
+
+        var accounts = await Dispatcher.Send(new ListUserDirectoryQuery());
+        if (accounts is { Status: true, Data: { } rows }) { _accounts.AddRange(rows); }
+
+        await ReloadAsync();
+    }
+
+    private Task OnHistoryChangedAsync(bool value)
+    {
+        _history = value;
+        return ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new ListExchangeConflictsQuery(_history));
+            _rows.Clear();
+            if (response is { Status: true, Data: { } rows }) { _rows.AddRange(rows); }
+            else { _error = response.StatusMessage; }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Open(ExchangeConflictRow row, ExchangeConflictDecision decision)
+    {
+        _target = row;
+        _decision = decision;
+        _comment = row.DecisionComment;
+
+        // Предложение номера — «номер (офис)»: видно, откуда дело, и номер подразделения не занят им же.
+        _number = decision == ExchangeConflictDecision.CreateNew && row.NumberClash
+            ? row.DecisionNumber ?? $"{row.Label} ({row.SourceInstance})"
+            : null;
+        _dialogOpen = true;
+    }
+
+    private async Task DecideAsync()
+    {
+        if (_target is not { } target || _decision is not { } decision) { return; }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new DecideExchangeConflictCommand(target.Id, decision, _number, _comment));
+            if (!response.Status)
+            {
+                _error = response.StatusMessage;
+                return;
+            }
+
+            _dialogOpen = false;
+            Snackbar.Add(response.StatusMessage ?? "Решение записано.", Severity.Success);
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await ReloadAsync();
+    }
+
+    // Объединить дело можно только со своим делом, которое Руководитель видит (сервер проверяет то же).
+    private static bool CanMerge(ExchangeConflictRow row) =>
+        row.LocalId is not null && (row.Kind == ExchangeConflictKind.Asset || row.LocalLabel is not null);
+
+    private static string DecisionLabel(ExchangeConflictDecision decision) => decision switch
+    {
+        ExchangeConflictDecision.Merge => "Объединить",
+        ExchangeConflictDecision.CreateNew => "Создать новое",
+        _ => "Пропустить",
+    };
+
+    private static string DecisionHint(ExchangeConflictRow row, ExchangeConflictDecision decision) => (row.Kind, decision) switch
+    {
+        (ExchangeConflictKind.Case, ExchangeConflictDecision.Merge) =>
+            $"объекты и сводки этого дела добавятся в {row.LocalLabel ?? "ваше дело"}; следующие пакеты тоже будут дополнять его.",
+        (ExchangeConflictKind.Case, ExchangeConflictDecision.CreateNew) =>
+            "дело заведётся отдельным делом со всем содержимым.",
+        (ExchangeConflictKind.Asset, ExchangeConflictDecision.Merge) =>
+            $"файл тот же, что у вашего носителя № {row.LocalId}: он привяжется к принятым делам пакета, второй копии не будет.",
+        (ExchangeConflictKind.Case, _) =>
+            "дело, его объекты, сводки и носители не переносятся — ни сейчас, ни следующими пакетами.",
+        _ => "носитель не переносится; эталоны и появления на нём — тоже.",
+    };
+
+    private static string StatusLabel(ExchangeConflictRow row) => row.Status switch
+    {
+        ExchangeConflictStatus.Pending when row.Decision is not null => "решите заново",
+        ExchangeConflictStatus.Pending => "ждёт решения",
+        ExchangeConflictStatus.Decided => "решено — ждёт повторного приёма",
+        ExchangeConflictStatus.Applied => "применено",
+        _ => "снят — совпадения больше нет",
+    };
+
+    private static Color StatusColor(ExchangeConflictStatus status) => status switch
+    {
+        ExchangeConflictStatus.Pending => Color.Warning,
+        ExchangeConflictStatus.Decided => Color.Info,
+        ExchangeConflictStatus.Applied => Color.Success,
+        _ => Color.Default,
+    };
+
+    private string UserName(int? id)
+    {
+        if (id is not { } userId) { return "—"; }
+        var account = _accounts.FirstOrDefault(a => a.UserId == userId);
+        if (account is null) { return $"пользователь № {userId}"; }
+        return string.IsNullOrWhiteSpace(account.DisplayName) ? account.UserName : account.DisplayName;
+    }
+}

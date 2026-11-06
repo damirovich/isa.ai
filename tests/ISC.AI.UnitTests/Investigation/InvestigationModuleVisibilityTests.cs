@@ -32,10 +32,11 @@ public sealed class InvestigationModuleVisibilityTests
             .ShouldBe(new[] { "cases", "dashboard", "docflow-documents", "docflow-reports", "media-verification", "search" }.Order());
     }
 
-    [Fact(DisplayName = "Администратор видит всё")]
+    [Fact(DisplayName = "Администратор видит всё, кроме очереди конфликтов обмена: решение по содержанию — Руководителя (ТБ-079, ADR-0068 v0.3)")]
     public void Administrator_sees_everything()
     {
-        Visible(InvestigationRole.Administrator).Count.ShouldBe(AllIds.Length);
+        AllIds.Except(Visible(InvestigationRole.Administrator)).ShouldBe(["exchange-conflicts"]);
+        Visible(InvestigationRole.Head).ShouldContain("exchange-conflicts");
     }
 
     [Fact(DisplayName = "Следователь ищет по лицу, но не верифицирует и не администрирует")]

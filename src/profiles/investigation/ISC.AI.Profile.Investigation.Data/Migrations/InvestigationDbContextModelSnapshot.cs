@@ -88,7 +88,7 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<int>("CandidateId")
+                    b.Property<int?>("CandidateId")
                         .HasColumnType("integer")
                         .HasColumnName("candidate_id");
 
@@ -112,7 +112,7 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("division_id");
 
-                    b.Property<int>("ExpertUserId")
+                    b.Property<int?>("ExpertUserId")
                         .HasColumnType("integer")
                         .HasColumnName("expert_user_id");
 
@@ -149,13 +149,22 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("revoked_by_user_id");
 
-                    b.Property<int>("SearchSessionId")
+                    b.Property<int?>("SearchSessionId")
                         .HasColumnType("integer")
                         .HasColumnName("search_session_id");
 
                     b.Property<double>("Similarity")
                         .HasColumnType("double precision")
                         .HasColumnName("similarity");
+
+                    b.Property<string>("SourceInstance")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("source_instance");
+
+                    b.Property<string>("SourceProvenance")
+                        .HasColumnType("text")
+                        .HasColumnName("source_provenance");
 
                     b.Property<int>("Status")
                         .HasColumnType("integer")
@@ -185,7 +194,10 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                     b.HasIndex("PersonId")
                         .HasDatabaseName("ix_appearance_person_id");
 
-                    b.ToTable("appearance", "investigation");
+                    b.ToTable("appearance", "investigation", t =>
+                        {
+                            t.HasCheckConstraint("ck_appearance_origin", "(search_session_id IS NOT NULL AND candidate_id IS NOT NULL AND expert_user_id IS NOT NULL) OR source_instance IS NOT NULL");
+                        });
                 });
 
             modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.CaseClosureAct", b =>
@@ -974,6 +986,14 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("events_created");
 
+                    b.Property<int>("FacesLinked")
+                        .HasColumnType("integer")
+                        .HasColumnName("faces_linked");
+
+                    b.Property<int>("FacesNotFound")
+                        .HasColumnType("integer")
+                        .HasColumnName("faces_not_found");
+
                     b.Property<int>("FilesReceived")
                         .HasColumnType("integer")
                         .HasColumnName("files_received");
@@ -990,6 +1010,10 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)")
                         .HasColumnName("manifest_sha256");
+
+                    b.Property<int>("Merged")
+                        .HasColumnType("integer")
+                        .HasColumnName("merged");
 
                     b.Property<int>("MissingFiles")
                         .HasColumnType("integer")
@@ -1010,6 +1034,15 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("persons_created");
 
+                    b.Property<string>("Reconciliation")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("reconciliation");
+
+                    b.Property<bool?>("ReconciliationOk")
+                        .HasColumnType("boolean")
+                        .HasColumnName("reconciliation_ok");
+
                     b.Property<int>("Rejected")
                         .HasColumnType("integer")
                         .HasColumnName("rejected");
@@ -1017,6 +1050,10 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                     b.Property<int>("ReportsCreated")
                         .HasColumnType("integer")
                         .HasColumnName("reports_created");
+
+                    b.Property<int>("SkippedByDecision")
+                        .HasColumnType("integer")
+                        .HasColumnName("skipped_by_decision");
 
                     b.Property<string>("SourceInstance")
                         .HasMaxLength(32)
@@ -1063,6 +1100,14 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<DateTime?>("AppliedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("applied_at");
+
+                    b.Property<int?>("AppliedImportId")
+                        .HasColumnType("integer")
+                        .HasColumnName("applied_import_id");
+
                     b.Property<short>("Classification")
                         .HasColumnType("smallint")
                         .HasColumnName("classification");
@@ -1070,6 +1115,37 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<DateTime?>("DecidedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("decided_at");
+
+                    b.Property<int?>("DecidedByUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("decided_by_user_id");
+
+                    b.Property<short?>("Decision")
+                        .HasColumnType("smallint")
+                        .HasColumnName("decision");
+
+                    b.Property<string>("DecisionComment")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("decision_comment");
+
+                    b.Property<int?>("DecisionLocalId")
+                        .HasColumnType("integer")
+                        .HasColumnName("decision_local_id");
+
+                    b.Property<string>("DecisionNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("decision_number");
+
+                    b.Property<string>("Details")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("details");
 
                     b.Property<int>("DivisionId")
                         .HasColumnType("integer")
@@ -1129,7 +1205,98 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                         .IsUnique()
                         .HasDatabaseName("ix_exchange_import_conflict_source_instance_kind_source_id");
 
-                    b.ToTable("exchange_import_conflict", "investigation");
+                    b.ToTable("exchange_import_conflict", "investigation", t =>
+                        {
+                            t.HasCheckConstraint("ck_exchange_conflict_decided", "status NOT IN (3, 4) OR decision IS NOT NULL");
+
+                            t.HasCheckConstraint("ck_exchange_conflict_new_case", "decision IS NULL OR decision <> 2 OR kind = 1");
+                        });
+                });
+
+            modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.ExchangePendingFace", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("CheckedIndexAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("checked_index_at");
+
+                    b.Property<short>("Classification")
+                        .HasColumnType("smallint")
+                        .HasColumnName("classification");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("ImportId")
+                        .HasColumnType("integer")
+                        .HasColumnName("import_id");
+
+                    b.Property<short>("Kind")
+                        .HasColumnType("smallint")
+                        .HasColumnName("kind");
+
+                    b.Property<int?>("LocalId")
+                        .HasColumnType("integer")
+                        .HasColumnName("local_id");
+
+                    b.Property<string>("PackageName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("package_name");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("payload");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reason");
+
+                    b.Property<int>("SourceId")
+                        .HasColumnType("integer")
+                        .HasColumnName("source_id");
+
+                    b.Property<string>("SourceInstance")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("source_instance");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint")
+                        .HasColumnName("status");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_exchange_pending_face");
+
+                    b.HasIndex("ImportId")
+                        .HasDatabaseName("ix_exchange_pending_face_import_id");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("ix_exchange_pending_face_status");
+
+                    b.HasIndex("SourceInstance", "Kind", "SourceId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_exchange_pending_face_source_instance_kind_source_id");
+
+                    b.ToTable("exchange_pending_face", "investigation", t =>
+                        {
+                            t.HasCheckConstraint("ck_exchange_pending_face_kind", "kind IN (10, 11)");
+                        });
                 });
 
             modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.ExchangeSourceRecord", b =>
@@ -2243,6 +2410,16 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_exchange_import_conflict_exchange_import_import_id");
+                });
+
+            modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.ExchangePendingFace", b =>
+                {
+                    b.HasOne("ISC.AI.Profile.Investigation.Domain.Entities.ExchangeImport", null)
+                        .WithMany()
+                        .HasForeignKey("ImportId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_exchange_pending_face_exchange_import_import_id");
                 });
 
             modelBuilder.Entity("ISC.AI.Profile.Investigation.Domain.Entities.ExchangeSourceRecord", b =>

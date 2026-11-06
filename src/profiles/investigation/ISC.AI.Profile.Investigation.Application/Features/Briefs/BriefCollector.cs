@@ -5,6 +5,7 @@ using ISC.AI.Modules.Media.Application;
 using ISC.AI.Modules.Media.Domain.Model;
 using ISC.AI.Modules.Media.Domain.Services;
 using ISC.AI.Profile.Investigation.Domain.Enums;
+using ISC.AI.Profile.Investigation.Domain.Exchange;
 using ISC.AI.Profile.Investigation.Domain.Services;
 
 namespace ISC.AI.Profile.Investigation.Application.Features.Briefs;
@@ -486,14 +487,20 @@ public sealed class BriefCollector(
         var rows = new List<IReadOnlyList<string>>();
         foreach (var appearance in shown)
         {
-            if (await sessions.GetCandidateAsync(appearance.CandidateId, access, cancellationToken) is { } candidate)
+            // Появление из другого офиса (ADR-0068 v0.3) кандидата получателя не имеет: подписи — источника, с пометкой.
+            if (appearance.CandidateId is { } candidateId
+                && await sessions.GetCandidateAsync(candidateId, access, cancellationToken) is { } candidate)
             {
                 candidates[appearance.Id] = candidate;
                 grade.Add(candidate.Classification);
             }
 
+            var provenance = appearance.IsImported ? AppearanceProvenance.Parse(appearance.SourceProvenance) : null;
             assets.TryGetValue(appearance.MediaAssetId, out var asset);
             spans.TryGetValue(appearance.MediaFaceId, out var span);
+            var status = appearance.IsRevoked
+                ? "отозвано" + (appearance.RevokedAtUtc is { } revoked ? " " + Date(LocalDate(revoked)) : string.Empty)
+                : TwoPersonRule.ConfirmedMarker;
             rows.Add(
             [
                 Date(LocalDate(appearance.ConfirmedAtUtc)),
@@ -501,12 +508,14 @@ public sealed class BriefCollector(
                 Moment(appearance.FrameTimestampMs, span),
                 RecordedMoment(asset, appearance.FrameTimestampMs),
                 _scale.DisplayPercent(appearance.Similarity).ToString(Ru) + " %",
-                Name(names, appearance.ExpertUserId) ?? string.Empty,
+                appearance.IsImported
+                    ? SourceSignature(provenance?.Expert, appearance.SourceInstance!)
+                    : Name(names, appearance.ExpertUserId) ?? string.Empty,
                 // Режим одного оператора (ADR-0054): вторая подпись отсутствует, а не неизвестна.
-                appearance.VerifierUserId is null ? "— (один оператор)" : Name(names, appearance.VerifierUserId) ?? string.Empty,
-                appearance.IsRevoked
-                    ? "отозвано" + (appearance.RevokedAtUtc is { } revoked ? " " + Date(LocalDate(revoked)) : string.Empty)
-                    : TwoPersonRule.ConfirmedMarker,
+                appearance.IsImported
+                    ? provenance?.Verifier is { } verifier ? SourceSignature(verifier, appearance.SourceInstance!) : "— (один оператор)"
+                    : appearance.VerifierUserId is null ? "— (один оператор)" : Name(names, appearance.VerifierUserId) ?? string.Empty,
+                appearance.IsImported ? status + "; импортировано из " + appearance.SourceInstance : status,
             ]);
         }
 
@@ -535,6 +544,30 @@ public sealed class BriefCollector(
         var total = 0;
         foreach (var appearance in appearances)
         {
+            // Появление из другого офиса (ADR-0068 v0.3): решения источника с его подписями — не решения получателя (ТБ-073).
+            if (appearance.IsImported)
+            {
+                var provenance = AppearanceProvenance.Parse(appearance.SourceProvenance);
+                foreach (var decision in provenance?.Decisions.OrderBy(d => d.DecidedAtUtc) ?? Enumerable.Empty<ProvenanceDecision>())
+                {
+                    total++;
+                    if (rows.Count < BriefLimits.MaxRows)
+                    {
+                        rows.Add(
+                        [
+                            Date(LocalDate(appearance.ConfirmedAtUtc)),
+                            decision.StageLabel,
+                            decision.VerdictLabel,
+                            SourceSignature(decision.By, appearance.SourceInstance!),
+                            DateTimeText(decision.DecidedAtUtc),
+                            Clip(decision.Rationale),
+                        ]);
+                    }
+                }
+
+                continue;
+            }
+
             if (!candidates.TryGetValue(appearance.Id, out var candidate))
             {
                 continue;
@@ -560,7 +593,7 @@ public sealed class BriefCollector(
 
         // Решения читаются по кандидатам появлений из таблицы появлений (не больше BriefLimits.MaxRows); остальные —
         // числом, без молчаливого обрезания.
-        var unread = appearances.Count(a => !candidates.ContainsKey(a.Id));
+        var unread = appearances.Count(a => !a.IsImported && !candidates.ContainsKey(a.Id));
         return new BriefSection(
             "История верификаций",
             [new BriefFact("Решений по появлениям", Count(total))],
@@ -795,6 +828,10 @@ public sealed class BriefCollector(
         SearchScopeKind.SelectedCases => "выбранные дела (" + Count(session.CaseIds.Count) + ")",
         _ => "все доступные дела (" + Count(session.CaseIds.Count) + ")",
     };
+
+    // Подпись сотрудника другого офиса: его ФИО (или имя входа) и офис — это не учётка получателя (ADR-0068 v0.3).
+    private static string SourceSignature(ProvenanceSignature? signature, string sourceInstance) =>
+        (signature?.Label ?? "не указан") + " (" + sourceInstance + ")";
 
     private static string StageLabel(VerificationStage stage) => stage switch
     {

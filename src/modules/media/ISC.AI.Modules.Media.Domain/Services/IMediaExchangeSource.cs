@@ -17,6 +17,18 @@ public interface IMediaExchangeSource
     /// <summary>Реквизиты носителей по номерам (неизвестные номера пропускаются).</summary>
     Task<IReadOnlyList<MediaExchangeAsset>> GetAssetsAsync(IReadOnlyCollection<int> assetIds, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Состояние индексации носителей получателя (ADR-0068 v0.3): сопоставлять лица пакета обмена можно только с
+    /// проиндексированным носителем; время индексации — чтобы «лицо не найдено» перепроверялось после переиндексации.
+    /// </summary>
+    Task<IReadOnlyList<MediaExchangeIndexState>> GetIndexStatesAsync(IReadOnlyCollection<int> assetIds, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Все лица носителя получателя: кадр, таймкод и рамка (ADR-0068 v0.3) — среди них приём ищет лицо источника по месту в
+    /// кадре. Шаблонов и векторов здесь нет (ТБ-076).
+    /// </summary>
+    Task<IReadOnlyList<MediaExchangeFace>> ListAssetFacesAsync(int assetId, CancellationToken cancellationToken = default);
+
     /// <summary>Лица по номерам: кадр, таймкод и рамка — по ним получатель найдёт то же лицо в своей индексации.</summary>
     Task<IReadOnlyList<MediaExchangeFace>> GetFacesAsync(IReadOnlyCollection<int> faceIds, CancellationToken cancellationToken = default);
 
@@ -108,6 +120,16 @@ public sealed record MediaExchangeDecision(
     DateTime DecidedAtUtc,
     int UserId,
     ConfirmationMode ConfirmationMode);
+
+/// <summary>Состояние индексации носителя получателя (ADR-0068 v0.3).</summary>
+/// <param name="AssetId">Носитель.</param>
+/// <param name="Status">Состояние конвейера поиска лиц.</param>
+/// <param name="IndexedAt">Когда проиндексирован последний раз (UTC).</param>
+/// <param name="Error">Причина неудачи индексации.</param>
+/// <param name="Classification">Гриф носителя — гриф перенесённого эталона и появления не ниже его (ТБ-070).</param>
+/// <param name="DivisionId">Подразделение носителя.</param>
+public sealed record MediaExchangeIndexState(
+    int AssetId, MediaIndexStatus Status, DateTime? IndexedAt, string? Error, short Classification, int DivisionId);
 
 /// <summary>Носитель получателя с тем же файлом, что у носителя пакета.</summary>
 /// <param name="AssetId">Номер носителя у получателя.</param>

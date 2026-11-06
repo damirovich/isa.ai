@@ -74,7 +74,8 @@ public sealed record PersonRow(
 /// Подтверждённое появление (ТФ-ПЕР-02). Отрезок появления в видео (<c>TrackStartMs</c>..<c>TrackEndMs</c>, кадров —
 /// <c>TrackFrames</c>) заполняет сценарий чтения по треку лица пакета «Медиа» (ADR-0037); хранилище его не знает.
 /// <c>Classification</c> — гриф строки появления (с кандидата, может быть выше грифа фигуранта): на экран не выводится,
-/// нужен для грифа справки (ТБ-033, ADR-0053).
+/// нужен для грифа справки (ТБ-033, ADR-0053). У появления из другого офиса (ADR-0068 v0.3) сеанса, кандидата и, бывает,
+/// первой подписи получателя нет — <c>SourceInstance</c> и <c>SourceProvenance</c> несут пометку и решения источника.
 /// </summary>
 public sealed record AppearanceRow(
     int Id,
@@ -84,12 +85,12 @@ public sealed record AppearanceRow(
     int MediaFaceId,
     int? FrameIndex,
     long? FrameTimestampMs,
-    int SearchSessionId,
-    int CandidateId,
+    int? SearchSessionId,
+    int? CandidateId,
     double Similarity,
     AppearanceStatus Status,
     DateTime ConfirmedAtUtc,
-    int ExpertUserId,
+    int? ExpertUserId,
     int? VerifierUserId,
     DateTime? RevokedAtUtc = null,
     int? RevokedByUserId = null,
@@ -97,10 +98,15 @@ public sealed record AppearanceRow(
     long? TrackStartMs = null,
     long? TrackEndMs = null,
     int? TrackFrames = null,
-    short Classification = 0)
+    short Classification = 0,
+    string? SourceInstance = null,
+    string? SourceProvenance = null)
 {
     /// <summary>Появление отозвано как ошибочное.</summary>
     public bool IsRevoked => Status == AppearanceStatus.Revoked;
+
+    /// <summary>Появление перенесено из другого офиса: подписи и решения — источника (ТБ-073, ADR-0068 v0.3).</summary>
+    public bool IsImported => SourceInstance is not null;
 }
 
 /// <summary>Итог отзыва появления (ADR-0034).</summary>

@@ -109,6 +109,9 @@ public class InvestigationDbContext(DbContextOptions<InvestigationDbContext> opt
     /// <summary>Конфликты приёма — для очереди Руководителя (ADR-0068 v0.2).</summary>
     public DbSet<ExchangeImportConflict> ExchangeImportConflicts { get; set; } = null!;
 
+    /// <summary>Эталоны и появления пакета, ждущие лица в индексации получателя (ADR-0068 v0.3).</summary>
+    public DbSet<ExchangePendingFace> ExchangePendingFaces { get; set; } = null!;
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
