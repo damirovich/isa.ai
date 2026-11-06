@@ -86,7 +86,9 @@ public sealed record ExchangeImportRow(
     int FacesLinked = 0,
     int FacesNotFound = 0,
     bool? ReconciliationOk = null,
-    string? Reconciliation = null);
+    string? Reconciliation = null,
+    int RecordsUpdated = 0,
+    int UpdateConflicts = 0);
 
 /// <summary>
 /// Эталоны и появления из пакетов, ждущие лица в индексации получателя (ADR-0068 v0.3) — только числа, без содержимого.

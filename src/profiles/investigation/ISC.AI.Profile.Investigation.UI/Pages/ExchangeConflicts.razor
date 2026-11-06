@@ -9,12 +9,13 @@
 @using ISC.AI.Profile.Investigation.Domain.Entities
 @using ISC.AI.Profile.Investigation.Domain.Services
 
-@* Очередь Руководителя «Конфликты обмена» (ТФ-ОБМ-02, ТФ-АДМ-05, ADR-0068 v0.3): дела и носители пакета другого офиса,
-   совпавшие со своими. Видны только конфликты в пределах допуска (гриф и подразделение записи, ТБ-020/021); право
-   «Конфликты обмена между офисами» проверяет обработчик. Решение лишь записывается — применяет его повторный приём пакета
-   ключом хранителя: содержимое конфликтного дела и файлы лежат в пакете зашифрованными. *@
+@* Очередь Руководителя «Конфликты обмена» (ТФ-ОБМ-02, ТФ-АДМ-05, ADR-0068 v0.3–v0.4): дела и носители пакета другого
+   офиса, совпавшие со своими, и изменения уже принятых записей, сделанные и там, и здесь. Видны только конфликты в пределах
+   допуска (гриф и подразделение записи, ТБ-020/021); право «Конфликты обмена между офисами» проверяет обработчик. Решение по
+   делу и носителю лишь записывается — применяет его повторный приём пакета ключом хранителя: содержимое конфликтного дела и
+   файлы лежат в пакете зашифрованными. Решение по конфликту изменений применяется сразу: значения источника уже в строке. *@
 
-<PageHeader Title="Конфликты обмена" Subtitle="Дела и носители из пакетов другого офиса, совпавшие со своими · решает Руководитель"
+<PageHeader Title="Конфликты обмена" Subtitle="Дела и носители из пакетов другого офиса, совпавшие со своими, и изменения принятых записей · решает Руководитель"
             Icon="@Icons.Material.Filled.CallMerge">
     <MudSwitch T="bool" Value="_history" ValueChanged="OnHistoryChangedAsync" Color="Color.Primary" Label="Показать применённые" />
     <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Disabled="_busy" OnClick="ReloadAsync">Обновить</MudButton>
@@ -23,8 +24,11 @@
 <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
     <b>Объединить</b> — запись другого офиса становится вашей записью: объекты и сводки его дела добавятся в ваше дело,
     носитель с тем же файлом привяжется к принятым делам. <b>Создать новое</b> — дело заведётся отдельно (при совпадении номера —
-    под новым номером). <b>Пропустить</b> — запись и всё, что от неё зависит, не переносятся. Решение применяется, когда
-    Администратор и хранитель ключа примут пакет повторно; до этого его можно изменить.
+    под новым номером). <b>Пропустить</b> — запись и всё, что от неё зависит, не переносятся. Эти решения применяются, когда
+    Администратор и хранитель ключа примут пакет повторно; до этого их можно изменить.
+    <br />
+    <b>Изменения</b> — поле принятой записи изменили и в другом офисе, и у вас: <b>Принять версию источника</b> запишет значение
+    другого офиса (у сводки — новой редакцией), <b>Оставить свою</b> — запись не изменится. Эти решения применяются сразу.
 </MudAlert>
 
 @if (_error is not null)
@@ -51,16 +55,43 @@
             }
         </MudTd>
         <MudTd DataLabel="Запись другого офиса">
-            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0 mr-1">@(context.Kind == ExchangeConflictKind.Case ? "дело" : "носитель")</MudChip>
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0 mr-1">@KindLabel(context)</MudChip>
             <b>@context.Label</b>
-            @if (context.Details is { } details)
+            @if (context.IsUpdate && context.Changes is { Count: > 0 } changes)
+            {
+                @* Поля конфликта изменений: было (снимок), у источника, у вас — значения словами (ADR-0068 v0.4). *@
+                <MudSimpleTable Dense="true" Bordered="true" Class="mt-1" Style="font-size:0.8rem;">
+                    <thead>
+                        <tr><th>Поле</th><th>Было</th><th>В другом офисе</th><th>У вас</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var change in changes)
+                        {
+                            <tr>
+                                <td>@change.Label</td>
+                                <td class="mud-text-secondary">@(change.BaseKnown ? change.BaseText ?? "—" : "неизвестно")</td>
+                                <td>@(change.SourceText ?? "—")</td>
+                                <td>@(change.LocalText ?? "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            }
+            else if (context.Details is { } details)
             {
                 <MudText Typo="Typo.caption" Class="d-block">@details</MudText>
             }
         </MudTd>
         <MudTd DataLabel="С чем совпала">
             <MudText Typo="Typo.body2">@context.Reason</MudText>
-            @if (context.LocalId is { } localId)
+            @if (context.IsUpdate)
+            {
+                @if (LocalHref(context) is { } href)
+                {
+                    <MudLink Href="@href" Target="_blank">открыть свою запись</MudLink>
+                }
+            }
+            else if (context.LocalId is { } localId)
             {
                 @if (context.Kind == ExchangeConflictKind.Case)
                 {
@@ -98,7 +129,16 @@
             }
         </MudTd>
         <MudTd DataLabel="Решение">
-            @if (context.CanDecide)
+            @if (context.CanDecide && context.IsUpdate)
+            {
+                <div class="d-flex flex-wrap gap-1">
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download"
+                               Disabled="_busy" OnClick="@(() => Open(context, ExchangeConflictDecision.AcceptSource))">Принять версию источника</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Lock"
+                               Disabled="_busy" OnClick="@(() => Open(context, ExchangeConflictDecision.KeepLocal))">Оставить свою</MudButton>
+                </div>
+            }
+            else if (context.CanDecide)
             {
                 <div class="d-flex flex-wrap gap-1">
                     <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CallMerge"
@@ -128,7 +168,14 @@
         @if (_target is { } target && _decision is { } decision)
         {
             <MudText Typo="Typo.body2" Class="mb-2">
-                @(target.Kind == ExchangeConflictKind.Case ? "Дело" : "Носитель") «@target.Label» из @target.SourceInstance:
+                @if (target.IsUpdate)
+                {
+                    <text>Изменения записи «@target.Label» из @target.SourceInstance:</text>
+                }
+                else
+                {
+                    <text>@(target.Kind == ExchangeConflictKind.Case ? "Дело" : "Носитель") «@target.Label» из @target.SourceInstance:</text>
+                }
                 @DecisionHint(target, decision)
             </MudText>
             @if (decision == ExchangeConflictDecision.CreateNew && target.NumberClash)
@@ -142,7 +189,9 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _dialogOpen = false)">Отмена</MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_busy || NumberMissing)" OnClick="DecideAsync">Записать решение</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_busy || NumberMissing)" OnClick="DecideAsync">
+            @(_target is { IsUpdate: true } ? "Применить решение" : "Записать решение")
+        </MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -243,11 +292,49 @@
     {
         ExchangeConflictDecision.Merge => "Объединить",
         ExchangeConflictDecision.CreateNew => "Создать новое",
+        ExchangeConflictDecision.AcceptSource => "Принять версию источника",
+        ExchangeConflictDecision.KeepLocal => "Оставить свою",
         _ => "Пропустить",
+    };
+
+    private static string KindLabel(ExchangeConflictRow row) => row.Kind switch
+    {
+        ExchangeConflictKind.Case => "дело",
+        ExchangeConflictKind.Asset => "носитель",
+        _ => "изменения: " + row.RecordKind switch
+        {
+            ExchangeRecordKind.Case => "дело",
+            ExchangeRecordKind.Person => "объект",
+            ExchangeRecordKind.Address => "адрес",
+            ExchangeRecordKind.Phone => "телефон",
+            ExchangeRecordKind.Vehicle => "транспорт",
+            ExchangeRecordKind.Report => "сводка",
+            ExchangeRecordKind.LinkEvent => "событие связи",
+            ExchangeRecordKind.Participant => "участник события",
+            _ => "запись",
+        },
+    };
+
+    // Своя запись конфликта изменений открывается своей карточкой — по обычным правам доступа.
+    private static string? LocalHref(ExchangeConflictRow row) => (row.RecordKind, row.LocalId, row.LocalOwnerId) switch
+    {
+        (ExchangeRecordKind.Case, { } id, _) => $"/cases/{id}",
+        (ExchangeRecordKind.Person, { } id, _) => $"/persons/{id}",
+        (ExchangeRecordKind.Address or ExchangeRecordKind.Phone or ExchangeRecordKind.Vehicle, _, { } person) => $"/persons/{person}",
+        (ExchangeRecordKind.Report, { } id, _) => $"/reports/{id}",
+        (ExchangeRecordKind.LinkEvent, { } id, _) => $"/events/{id}/graph",
+        (ExchangeRecordKind.Participant, _, { } linkEvent) => $"/events/{linkEvent}/graph",
+        _ => null,
     };
 
     private static string DecisionHint(ExchangeConflictRow row, ExchangeConflictDecision decision) => (row.Kind, decision) switch
     {
+        (ExchangeConflictKind.RecordUpdate, ExchangeConflictDecision.AcceptSource) =>
+            row.RecordKind == ExchangeRecordKind.Report
+                ? "содержимое другого офиса станет новой редакцией вашей сводки (прежние останутся в истории); остальные поля запишутся сразу."
+                : "значения другого офиса запишутся в вашу запись сразу.",
+        (ExchangeConflictKind.RecordUpdate, _) =>
+            "ваша запись не изменится; эти изменения другого офиса больше не предлагаются — следующие будут сравниваться уже с ними.",
         (ExchangeConflictKind.Case, ExchangeConflictDecision.Merge) =>
             $"объекты и сводки этого дела добавятся в {row.LocalLabel ?? "ваше дело"}; следующие пакеты тоже будут дополнять его.",
         (ExchangeConflictKind.Case, ExchangeConflictDecision.CreateNew) =>
@@ -265,6 +352,7 @@
         ExchangeConflictStatus.Pending => "ждёт решения",
         ExchangeConflictStatus.Decided => "решено — ждёт повторного приёма",
         ExchangeConflictStatus.Applied => "применено",
+        _ when row.IsUpdate => "снят — расхождения больше нет",
         _ => "снят — совпадения больше нет",
     };
 

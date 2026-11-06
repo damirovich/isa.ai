@@ -173,9 +173,18 @@ public sealed class ExchangePackageWriter(
         }
         else
         {
+            // Движение объекта — и его реквизиты, и события связи с его участием (ADR-0068 v0.4): изменённый телефон или
+            // событие без правки самого объекта иначе не дошли бы до получателя.
             casesQuery = casesQuery.Where(c =>
                 (c.CreatedAt >= from && c.CreatedAt < to) || (c.UpdatedAt >= from && c.UpdatedAt < to)
-                || db.Persons.Any(p => p.CaseId == c.Id && ((p.CreatedAt >= from && p.CreatedAt < to) || (p.UpdatedAt >= from && p.UpdatedAt < to)))
+                || db.Persons.Any(p => p.CaseId == c.Id && (
+                    (p.CreatedAt >= from && p.CreatedAt < to) || (p.UpdatedAt >= from && p.UpdatedAt < to)
+                    || db.PersonAddresses.Any(a => a.PersonId == p.Id && ((a.CreatedAt >= from && a.CreatedAt < to) || (a.UpdatedAt >= from && a.UpdatedAt < to)))
+                    || db.PersonPhones.Any(f => f.PersonId == p.Id && ((f.CreatedAt >= from && f.CreatedAt < to) || (f.UpdatedAt >= from && f.UpdatedAt < to)))
+                    || db.PersonVehicles.Any(v => v.PersonId == p.Id && ((v.CreatedAt >= from && v.CreatedAt < to) || (v.UpdatedAt >= from && v.UpdatedAt < to)))
+                    || db.LinkEventParticipants.Any(lp => lp.PersonId == p.Id && (
+                        (lp.CreatedAt >= from && lp.CreatedAt < to) || (lp.UpdatedAt >= from && lp.UpdatedAt < to)
+                        || db.LinkEvents.Any(e => e.Id == lp.EventId && ((e.CreatedAt >= from && e.CreatedAt < to) || (e.UpdatedAt >= from && e.UpdatedAt < to)))))))
                 || db.CaseMediaLinks.Any(l => l.CaseId == c.Id && l.CreatedAt >= from && l.CreatedAt < to)
                 || db.CaseReports.Any(r => r.CaseId == c.Id && ((r.CreatedAt >= from && r.CreatedAt < to) || (r.UpdatedAt >= from && r.UpdatedAt < to)))
                 || db.Appearances.Any(a => a.CaseId == c.Id

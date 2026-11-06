@@ -52,8 +52,23 @@ public sealed class ExchangeImportTally
     /// <summary>Объём полученных файлов, байт.</summary>
     public long BytesReceived { get; set; }
 
-    /// <summary>Записей, уже принятых прежде.</summary>
+    /// <summary>Записей, уже принятых прежде и не изменившихся у источника.</summary>
     public int AlreadyImported { get; set; }
+
+    /// <summary>Принятых прежде записей, изменения которых перенесены (ADR-0068 v0.4).</summary>
+    public int RecordsUpdated { get; set; }
+
+    /// <summary>Принятых прежде записей с конфликтом изменений — ждут Руководителя (ADR-0068 v0.4).</summary>
+    public int UpdateConflicts { get; set; }
+
+    /// <summary>Что изменено и где конфликт изменений — в защищённую часть акта.</summary>
+    public List<string> UpdateLabels { get; } = [];
+
+    /// <summary>Свои дела, закрытые вслед за источником, с итогом регламента закрытия (ТБ-074, v0.4) — в акт.</summary>
+    public List<string> ClosureLabels { get; } = [];
+
+    /// <summary>Регламент закрытия не исполнен — причина в журнал приёмов и в акт.</summary>
+    public List<string> ClosureProblems { get; } = [];
 
     /// <summary>Конфликтов без применённого решения.</summary>
     public int Conflicts { get; set; }
@@ -129,8 +144,14 @@ public sealed class ExchangeOutcomes
     /// <summary>Исход «заведено».</summary>
     public const string Created = "заведено";
 
-    /// <summary>Исход «уже было» (по карте).</summary>
+    /// <summary>Исход «уже было» (по карте, у источника не менялось).</summary>
     public const string Already = "уже было";
+
+    /// <summary>Исход «обновлено» — изменения источника перенесены (ADR-0068 v0.4).</summary>
+    public const string Updated = "обновлено";
+
+    /// <summary>Исход «конфликт изменений» — поле изменено и у источника, и у получателя (ADR-0068 v0.4).</summary>
+    public const string UpdateConflict = "конфликт изменений";
 
     /// <summary>Исход «объединено по решению Руководителя».</summary>
     public const string Merged = "объединено";
@@ -237,16 +258,19 @@ public sealed class ExchangeOutcomes
 /// <param name="Users">Сотрудники: номер источника → своя учётка (по имени входа).</param>
 /// <param name="AssetDecisions">Решения Руководителя по конфликтам носителей: номер источника → конфликт с решением.</param>
 /// <param name="SkippedCases">Дела источника, пропущенные по решению Руководителя.</param>
+/// <param name="ClosedCases">Свои дела, закрытые этим приёмом вслед за источником (v0.4) — им регламент закрытия (ТБ-074).</param>
 public sealed record ExchangeRecordResult(
     IReadOnlyDictionary<int, ExchangeImportedCase> Cases,
     IReadOnlyDictionary<int, int> Users,
     IReadOnlyDictionary<int, ExchangeImportConflict> AssetDecisions,
-    IReadOnlySet<int> SkippedCases);
+    IReadOnlySet<int> SkippedCases,
+    IReadOnlyList<int> ClosedCases);
 
 /// <summary>
 /// Перенос записей пакета в базу получателя (ТФ-ОБМ-02, ADR-0068 v0.2): подразделения — по коду, справочник — по виду и
 /// названию (недостающее заводится), сотрудники — по имени входа; дела, объекты с реквизитами, сводки и события связи —
-/// новые записи с грифом и подразделением источника; совпадения с делами получателя — конфликты (этап 3).
+/// новые записи с грифом и подразделением источника; совпадения с делами получателя — конфликты (этап 3); изменения уже
+/// принятых записей — трёхсторонним сравнением со снимком (v0.4, <see cref="ExchangeRecordUpdater"/>).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -287,24 +311,49 @@ public sealed class ExchangeRecordImporter(
                 .ToListAsync(cancellationToken))
             .ToDictionary(r => (r.Kind, r.SourceId), r => r.LocalId);
 
+        var names = new ExchangeNames();
         var divisions = await ResolveDivisionsAsync(db, data, cancellationToken);
-        var references = await ResolveReferencesAsync(db, data, tally, cancellationToken);
-        var users = await ResolveUsersAsync(data, cancellationToken);
+        var references = await ResolveReferencesAsync(db, data, tally, names, cancellationToken);
+        var users = await ResolveUsersAsync(data, names, cancellationToken);
 
-        // Решения Руководителя по конфликтам этого источника (ADR-0068 v0.3): решённые ждут применения этим приёмом,
-        // применённые «пропустить» действуют при каждом приёме.
+        // Решения Руководителя по конфликтам дел и носителей этого источника (ADR-0068 v0.3): решённые ждут применения этим
+        // приёмом, применённые «пропустить» действуют при каждом приёме. Конфликты изменений (v0.4) решаются сразу — здесь
+        // их нет.
         var decisions = await db.ExchangeImportConflicts.AsNoTracking()
-            .Where(c => c.SourceInstance == source && c.Decision != null
+            .Where(c => c.SourceInstance == source && c.Decision != null && c.Kind != ExchangeConflictKind.RecordUpdate
                         && (c.Status == ExchangeConflictStatus.Decided || c.Status == ExchangeConflictStatus.Applied))
             .ToListAsync(cancellationToken);
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        var persons = new Dictionary<int, int>();
+
+        // Перенос изменений уже принятых записей (ADR-0068 v0.4): окончание прежних приёмов — для записей, принятых до v0.4
+        // (снимка нет), объединённые дела — их снимок запоминается без сравнения.
+        var updates = new ExchangeUpdateContext
+        {
+            Source = source,
+            ImportId = importId,
+            Note = "изменение из " + source + " (пакет за " + ExchangePackageWriter.Period(data.Year, data.Month) + ")",
+            Users = users,
+            References = references,
+            Persons = persons,
+            ImportFinished = await db.ExchangeImports.AsNoTracking()
+                .Select(i => new { i.Id, i.FinishedAt })
+                .ToDictionaryAsync(i => i.Id, i => i.FinishedAt, cancellationToken),
+            MergedCases = decisions
+                .Where(d => d.Kind == ExchangeConflictKind.Case && d.Decision == ExchangeConflictDecision.Merge && d.Status == ExchangeConflictStatus.Applied)
+                .Select(d => d.SourceId)
+                .ToHashSet(),
+            Names = names,
+            Now = now,
+        };
         var run = new Run(
-            importId, source, map, divisions, references, users, tally, timeProvider.GetUtcNow().UtcDateTime,
+            importId, source, map, divisions, references, users, tally, now,
             decisions.Where(d => d.Kind == ExchangeConflictKind.Case).ToDictionary(d => d.SourceId),
             data.References.ToDictionary(r => r.SourceId),
-            []);
+            [],
+            updates);
 
         var cases = new Dictionary<int, ExchangeImportedCase>();
-        var persons = new Dictionary<int, int>();
         var personsByCase = data.Persons.ToLookup(p => p.CaseSourceId);
         var reportsByCase = data.Reports.ToLookup(r => r.CaseSourceId);
         foreach (var exchangeCase in data.Cases.OrderBy(c => c.SourceId))
@@ -321,7 +370,8 @@ public sealed class ExchangeRecordImporter(
 
         // Эталоны и появления — после носителей: им нужно лицо в индексации получателя (ExchangeFaceLinker).
         return new ExchangeRecordResult(
-            cases, users, decisions.Where(d => d.Kind == ExchangeConflictKind.Asset).ToDictionary(d => d.SourceId), run.SkippedCases);
+            cases, users, decisions.Where(d => d.Kind == ExchangeConflictKind.Asset).ToDictionary(d => d.SourceId), run.SkippedCases,
+            run.ClosedCases);
     }
 
     /// <summary>Своя запись, сопоставленная записи источника; <see langword="null"/> — ещё не принималась.</summary>
@@ -454,7 +504,7 @@ public sealed class ExchangeRecordImporter(
 
     // Справочник — по виду и названию без учёта регистра; недостающее заводится (как при переносе из Access, ADR-0043).
     private static async Task<Dictionary<int, int>> ResolveReferencesAsync(
-        InvestigationDbContext db, ExchangePackageData data, ExchangeImportTally tally, CancellationToken cancellationToken)
+        InvestigationDbContext db, ExchangePackageData data, ExchangeImportTally tally, ExchangeNames names, CancellationToken cancellationToken)
     {
         var local = await db.ReferenceItems.AsNoTracking()
             .Select(r => new { r.Id, r.Kind, r.Name, r.SortOrder })
@@ -463,6 +513,7 @@ public sealed class ExchangeRecordImporter(
         foreach (var item in local)
         {
             index.TryAdd((item.Kind, NameKey(item.Name)), item.Id);
+            names.References[item.Id] = item.Name;
         }
 
         var nextOrder = local.GroupBy(r => r.Kind).ToDictionary(g => g.Key, g => g.Max(r => r.SortOrder) + 1);
@@ -485,6 +536,7 @@ public sealed class ExchangeRecordImporter(
                 nextOrder[reference.Kind] = created.SortOrder + 1;
                 id = created.Id;
                 index[key] = id;
+                names.References[id] = created.Name;
                 tally.ReferencesCreated++;
             }
 
@@ -499,9 +551,15 @@ public sealed class ExchangeRecordImporter(
 
     // Сотрудник — по имени входа: номера учёток у офисов разные. Нет учётки — ссылка пустая (сведения не теряются: имя
     // и ФИО в пакете, акт приёма называет пакет).
-    private async Task<Dictionary<int, int>> ResolveUsersAsync(ExchangePackageData data, CancellationToken cancellationToken)
+    private async Task<Dictionary<int, int>> ResolveUsersAsync(ExchangePackageData data, ExchangeNames names, CancellationToken cancellationToken)
     {
-        var local = (await accounts.ListAsync(cancellationToken))
+        var all = await accounts.ListAsync(cancellationToken);
+        foreach (var account in all)
+        {
+            names.Users[account.UserId] = string.IsNullOrWhiteSpace(account.DisplayName) ? account.UserName : account.DisplayName;
+        }
+
+        var local = all
             .GroupBy(a => a.UserName.Trim(), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First().UserId, StringComparer.OrdinalIgnoreCase);
         var result = new Dictionary<int, int>();
@@ -533,11 +591,10 @@ public sealed class ExchangeRecordImporter(
         run.CaseDecisions.TryGetValue(exchangeCase.SourceId, out var decision);
         ExchangeImportedCase? imported = null;
         ExchangeImportConflict? applying = null;
+        var mappedCase = false;
         if (run.Map.TryGetValue((ExchangeRecordKind.Case, exchangeCase.SourceId), out var mappedId))
         {
             imported = await FindCaseAsync(db, mappedId, cancellationToken);
-            run.Tally.AlreadyImported++;
-            run.Tally.Outcomes.Add(ExchangeOutcomes.Cases, ExchangeOutcomes.Already);
             if (decision is { Status: ExchangeConflictStatus.Decided })
             {
                 // Решённый конфликт, запись которого уже сопоставлена, — решение исполнено, очередь его больше не держит.
@@ -547,9 +604,13 @@ public sealed class ExchangeRecordImporter(
             if (imported is null)
             {
                 // Принятое прежде дело у получателя уничтожено (ADR-0025) — заново его приём не заводит.
+                run.Tally.AlreadyImported++;
+                run.Tally.Outcomes.Add(ExchangeOutcomes.Cases, ExchangeOutcomes.Already);
                 HoldContents(run, personList, reportList, ExchangeOutcomes.Held);
                 return null;
             }
+
+            mappedCase = true;
         }
         else
         {
@@ -610,10 +671,27 @@ public sealed class ExchangeRecordImporter(
         }
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        if (applying is { Decision: ExchangeConflictDecision.Merge })
+        if (mappedCase)
+        {
+            // Дело принято прежде — переносятся его изменения у источника (ADR-0068 v0.4). Гриф и реквизиты дела могли
+            // измениться — содержимое и носители дальше идут по нынешнему состоянию.
+            var wasClosed = await IsClosedAsync(db, imported!.LocalId, cancellationToken);
+            var update = await ExchangeRecordUpdater.UpdateCaseAsync(db, run.Updates, exchangeCase, imported.LocalId, cancellationToken);
+            run.Tally.Outcomes.Add(ExchangeOutcomes.Cases, CountUpdate(run, update));
+            if (!wasClosed && update.Applied.Contains("status") && await IsClosedAsync(db, imported.LocalId, cancellationToken))
+            {
+                // Закрыто вслед за источником — регламент закрытия (ТБ-074) исполнит приём после носителей.
+                run.ClosedCases.Add(imported.LocalId);
+            }
+
+            imported = await FindCaseAsync(db, imported.LocalId, cancellationToken) ?? imported;
+        }
+        else if (applying is { Decision: ExchangeConflictDecision.Merge })
         {
             // Объединение: карта ведёт на своё дело — этот и следующие пакеты добавляют содержимое в него, второго дела нет.
-            db.ExchangeSourceRecords.Add(NewMapping(run, ExchangeRecordKind.Case, exchangeCase.SourceId, imported!.LocalId));
+            // Снимок — дело источника: его следующие изменения сравниваются со своим делом, а не перезаписывают его.
+            db.ExchangeSourceRecords.Add(NewMapping(
+                run, ExchangeRecordKind.Case, exchangeCase.SourceId, imported!.LocalId, ExchangeRecordUpdater.SnapshotOf(exchangeCase, run.Updates)));
             run.Tally.Merged++;
             run.Tally.Outcomes.Add(ExchangeOutcomes.Cases, ExchangeOutcomes.Merged);
             run.Tally.DecisionLabels.Add("дело " + number + " объединено со своим делом " + imported.Number);
@@ -623,7 +701,8 @@ public sealed class ExchangeRecordImporter(
             var entity = NewCase(run, exchangeCase, number);
             db.Cases.Add(entity);
             await db.SaveChangesAsync(cancellationToken);
-            db.ExchangeSourceRecords.Add(NewMapping(run, ExchangeRecordKind.Case, exchangeCase.SourceId, entity.Id));
+            db.ExchangeSourceRecords.Add(NewMapping(
+                run, ExchangeRecordKind.Case, exchangeCase.SourceId, entity.Id, ExchangeRecordUpdater.SnapshotOf(exchangeCase, run.Updates)));
             await ClearConflictAsync(db, run.Source, ExchangeConflictKind.Case, exchangeCase.SourceId, run.Now, cancellationToken);
             imported = new ExchangeImportedCase(entity.Id, entity.Number, entity.Title, entity.Classification, entity.DivisionId);
             run.Tally.CasesCreated++;
@@ -645,37 +724,35 @@ public sealed class ExchangeRecordImporter(
         var divisionOfCase = imported.DivisionId;
 
         // Объекты: сначала все (номера нужны связям внутри дела), затем связи «связь объекта» — в той же транзакции.
-        var created = new List<(ExchangePerson Source, Person Entity)>();
+        var created = new List<(ExchangePerson Source, Person Entity, ExchangeSourceRecord Mapping)>();
+        var mappedPersons = new List<(ExchangePerson Source, int LocalId)>();
+        var newPersons = new List<(ExchangePerson Source, Person Entity)>();
         foreach (var person in personList)
         {
             if (run.Map.TryGetValue((ExchangeRecordKind.Person, person.SourceId), out var localPerson))
             {
                 persons[person.SourceId] = localPerson;
-                run.Tally.AlreadyImported++;
-                run.Tally.Outcomes.Add(ExchangeOutcomes.Persons, ExchangeOutcomes.Already);
-                if (person.LinkedToPersonSourceId is not null)
-                {
-                    run.Tally.Outcomes.Add(ExchangeOutcomes.Links, ExchangeOutcomes.Already);
-                }
-
+                mappedPersons.Add((person, localPerson));
                 continue;
             }
 
             var entity = await NewPersonAsync(db, run, imported.LocalId, divisionOfCase, person, cancellationToken);
             db.Persons.Add(entity);
-            created.Add((person, entity));
+            newPersons.Add((person, entity));
         }
 
         await db.SaveChangesAsync(cancellationToken);
-        foreach (var (person, entity) in created)
+        foreach (var (person, entity) in newPersons)
         {
             persons[person.SourceId] = entity.Id;
-            db.ExchangeSourceRecords.Add(NewMapping(run, ExchangeRecordKind.Person, person.SourceId, entity.Id));
+            var mapping = NewMapping(run, ExchangeRecordKind.Person, person.SourceId, entity.Id);
+            db.ExchangeSourceRecords.Add(mapping);
+            created.Add((person, entity, mapping));
             run.Tally.PersonsCreated++;
             run.Tally.Outcomes.Add(ExchangeOutcomes.Persons, ExchangeOutcomes.Created);
         }
 
-        foreach (var (person, entity) in created.Where(c => c.Source.LinkedToPersonSourceId is not null))
+        foreach (var (person, entity, _) in created.Where(c => c.Source.LinkedToPersonSourceId is not null))
         {
             // Связь — только с объектом того же дела, уже принятым (ограничение таблицы держит роль «связь»).
             if (entity.Role == PersonRole.Link
@@ -693,7 +770,29 @@ public sealed class ExchangeRecordImporter(
             }
         }
 
+        // Снимок нового объекта — значения источника (ADR-0068 v0.4); связь в нём — по объектам, сопоставленным выше.
+        foreach (var (person, _, mapping) in created)
+        {
+            mapping.Snapshot = ExchangeRecordUpdater.SnapshotOf(person, run.Updates);
+        }
+
         await db.SaveChangesAsync(cancellationToken);
+
+        // Принятые прежде объекты — изменения источника (ADR-0068 v0.4): после новых, чтобы связь могла указать и на объект,
+        // заведённый этим приёмом.
+        foreach (var (person, localPerson) in mappedPersons)
+        {
+            var update = await ExchangeRecordUpdater.UpdatePersonAsync(db, run.Updates, person, localPerson, cancellationToken);
+            run.Tally.Outcomes.Add(ExchangeOutcomes.Persons, CountUpdate(run, update));
+            if (person.LinkedToPersonSourceId is not null)
+            {
+                run.Tally.Outcomes.Add(
+                    ExchangeOutcomes.Links,
+                    update.Conflicts.Contains("role") ? ExchangeOutcomes.UpdateConflict
+                    : update.Applied.Contains("role") ? ExchangeOutcomes.Updated
+                    : ExchangeOutcomes.Already);
+            }
+        }
 
         // Реквизиты объектов дела — и у новых, и у принятых прежде (новый телефон уже принятого объекта — новая запись).
         foreach (var person in personList)
@@ -706,10 +805,11 @@ public sealed class ExchangeRecordImporter(
 
         foreach (var report in reportList)
         {
-            if (run.Map.TryGetValue((ExchangeRecordKind.Report, report.SourceId), out _))
+            if (run.Map.TryGetValue((ExchangeRecordKind.Report, report.SourceId), out var localReport))
             {
-                run.Tally.AlreadyImported++;
-                run.Tally.Outcomes.Add(ExchangeOutcomes.Reports, ExchangeOutcomes.Already);
+                // Принятая прежде сводка: изменённое у источника содержимое — новой редакцией получателя (ADR-0068 v0.4).
+                var update = await ExchangeRecordUpdater.UpdateReportAsync(db, run.Updates, report, localReport, cancellationToken);
+                run.Tally.Outcomes.Add(ExchangeOutcomes.Reports, CountUpdate(run, update));
                 continue;
             }
 
@@ -717,7 +817,8 @@ public sealed class ExchangeRecordImporter(
             db.CaseReports.Add(entity.Report);
             db.CaseReportRevisions.Add(entity.Revision);
             await db.SaveChangesAsync(cancellationToken);
-            db.ExchangeSourceRecords.Add(NewMapping(run, ExchangeRecordKind.Report, report.SourceId, entity.Report.Id));
+            db.ExchangeSourceRecords.Add(NewMapping(
+                run, ExchangeRecordKind.Report, report.SourceId, entity.Report.Id, ExchangeRecordUpdater.SnapshotOf(report, run.Updates)));
             run.Tally.ReportsCreated++;
             run.Tally.Outcomes.Add(ExchangeOutcomes.Reports, ExchangeOutcomes.Created);
         }
@@ -727,6 +828,9 @@ public sealed class ExchangeRecordImporter(
         db.ChangeTracker.Clear();
         return imported;
     }
+
+    private static Task<bool> IsClosedAsync(InvestigationDbContext db, int caseId, CancellationToken cancellationToken) =>
+        db.Cases.AsNoTracking().AnyAsync(c => c.Id == caseId && c.Status == CaseStatus.Closed, cancellationToken);
 
     private static Task<ExchangeImportedCase?> FindCaseAsync(InvestigationDbContext db, int caseId, CancellationToken cancellationToken) =>
         db.Cases.AsNoTracking()
@@ -894,10 +998,36 @@ public sealed class ExchangeRecordImporter(
     private static async Task AddRequisitesAsync(
         InvestigationDbContext db, Run run, ExchangePerson source, int personId, int divisionId, CancellationToken cancellationToken)
     {
-        var mappings = new List<(ExchangeRecordKind Kind, int SourceId, object Entity)>();
+        // Принятые прежде реквизиты — изменения источника (ADR-0068 v0.4), до заведения новых: сбой записи одного реквизита
+        // откатывает только его.
         foreach (var address in source.Addresses.OrderBy(a => a.SourceId))
         {
-            if (Skip(run, ExchangeRecordKind.Address, address.SourceId))
+            if (run.Map.TryGetValue((ExchangeRecordKind.Address, address.SourceId), out var localId))
+            {
+                CountUpdate(run, await ExchangeRecordUpdater.UpdateAddressAsync(db, run.Updates, address, localId, cancellationToken));
+            }
+        }
+
+        foreach (var phone in source.Phones.OrderBy(p => p.SourceId))
+        {
+            if (run.Map.TryGetValue((ExchangeRecordKind.Phone, phone.SourceId), out var localId))
+            {
+                CountUpdate(run, await ExchangeRecordUpdater.UpdatePhoneAsync(db, run.Updates, phone, localId, cancellationToken));
+            }
+        }
+
+        foreach (var vehicle in source.Vehicles.OrderBy(v => v.SourceId))
+        {
+            if (run.Map.TryGetValue((ExchangeRecordKind.Vehicle, vehicle.SourceId), out var localId))
+            {
+                CountUpdate(run, await ExchangeRecordUpdater.UpdateVehicleAsync(db, run.Updates, vehicle, localId, cancellationToken));
+            }
+        }
+
+        var mappings = new List<(ExchangeRecordKind Kind, int SourceId, object Entity, string Snapshot)>();
+        foreach (var address in source.Addresses.OrderBy(a => a.SourceId))
+        {
+            if (run.Map.ContainsKey((ExchangeRecordKind.Address, address.SourceId)))
             {
                 continue;
             }
@@ -913,12 +1043,12 @@ public sealed class ExchangeRecordImporter(
                 DivisionId = divisionId,
             };
             db.PersonAddresses.Add(entity);
-            mappings.Add((ExchangeRecordKind.Address, address.SourceId, entity));
+            mappings.Add((ExchangeRecordKind.Address, address.SourceId, entity, ExchangeRecordUpdater.SnapshotOf(address)));
         }
 
         foreach (var phone in source.Phones.OrderBy(p => p.SourceId))
         {
-            if (Skip(run, ExchangeRecordKind.Phone, phone.SourceId))
+            if (run.Map.ContainsKey((ExchangeRecordKind.Phone, phone.SourceId)))
             {
                 continue;
             }
@@ -941,12 +1071,12 @@ public sealed class ExchangeRecordImporter(
                 DivisionId = divisionId,
             };
             db.PersonPhones.Add(entity);
-            mappings.Add((ExchangeRecordKind.Phone, phone.SourceId, entity));
+            mappings.Add((ExchangeRecordKind.Phone, phone.SourceId, entity, ExchangeRecordUpdater.SnapshotOf(phone)));
         }
 
         foreach (var vehicle in source.Vehicles.OrderBy(v => v.SourceId))
         {
-            if (Skip(run, ExchangeRecordKind.Vehicle, vehicle.SourceId))
+            if (run.Map.ContainsKey((ExchangeRecordKind.Vehicle, vehicle.SourceId)))
             {
                 continue;
             }
@@ -964,7 +1094,7 @@ public sealed class ExchangeRecordImporter(
                 DivisionId = divisionId,
             };
             db.PersonVehicles.Add(entity);
-            mappings.Add((ExchangeRecordKind.Vehicle, vehicle.SourceId, entity));
+            mappings.Add((ExchangeRecordKind.Vehicle, vehicle.SourceId, entity, ExchangeRecordUpdater.SnapshotOf(vehicle)));
         }
 
         if (mappings.Count == 0)
@@ -973,7 +1103,7 @@ public sealed class ExchangeRecordImporter(
         }
 
         await db.SaveChangesAsync(cancellationToken);
-        foreach (var (kind, sourceId, entity) in mappings)
+        foreach (var (kind, sourceId, entity, snapshot) in mappings)
         {
             var localId = entity switch
             {
@@ -982,9 +1112,11 @@ public sealed class ExchangeRecordImporter(
                 PersonVehicle v => v.Id,
                 _ => throw new InvalidOperationException("Неизвестный реквизит."),
             };
-            db.ExchangeSourceRecords.Add(NewMapping(run, kind, sourceId, localId));
+            db.ExchangeSourceRecords.Add(NewMapping(run, kind, sourceId, localId, snapshot));
             run.Tally.RequisitesCreated++;
         }
+
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private static (CaseReport Report, CaseReportRevision Revision) NewReport(
@@ -1039,8 +1171,9 @@ public sealed class ExchangeRecordImporter(
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             if (mapped)
             {
-                run.Tally.AlreadyImported++;
-                run.Tally.Outcomes.Add(ExchangeOutcomes.Links, ExchangeOutcomes.Already);
+                // Принятое прежде событие — изменения источника (ADR-0068 v0.4).
+                var update = await ExchangeRecordUpdater.UpdateEventAsync(db, run.Updates, exchangeEvent, localEventId, cancellationToken);
+                run.Tally.Outcomes.Add(ExchangeOutcomes.Links, CountUpdate(run, update));
             }
             else
             {
@@ -1056,16 +1189,26 @@ public sealed class ExchangeRecordImporter(
                 };
                 db.LinkEvents.Add(entity);
                 await db.SaveChangesAsync(cancellationToken);
-                db.ExchangeSourceRecords.Add(NewMapping(run, ExchangeRecordKind.LinkEvent, exchangeEvent.SourceId, entity.Id));
+                db.ExchangeSourceRecords.Add(NewMapping(
+                    run, ExchangeRecordKind.LinkEvent, exchangeEvent.SourceId, entity.Id, ExchangeRecordUpdater.SnapshotOf(exchangeEvent)));
                 localEventId = entity.Id;
                 run.Tally.EventsCreated++;
                 run.Tally.Outcomes.Add(ExchangeOutcomes.Links, ExchangeOutcomes.Created);
             }
 
-            var added = new List<(int SourceId, LinkEventParticipant Entity)>();
+            // Принятые прежде участники — изменения источника (ADR-0068 v0.4), до заведения новых.
             foreach (var participant in participants)
             {
-                if (Skip(run, ExchangeRecordKind.Participant, participant.SourceId))
+                if (run.Map.TryGetValue((ExchangeRecordKind.Participant, participant.SourceId), out var localParticipant))
+                {
+                    CountUpdate(run, await ExchangeRecordUpdater.UpdateParticipantAsync(db, run.Updates, participant, localParticipant, cancellationToken));
+                }
+            }
+
+            var added = new List<(ExchangeParticipant Source, LinkEventParticipant Entity)>();
+            foreach (var participant in participants)
+            {
+                if (run.Map.ContainsKey((ExchangeRecordKind.Participant, participant.SourceId)))
                 {
                     continue;
                 }
@@ -1095,13 +1238,14 @@ public sealed class ExchangeRecordImporter(
                     DivisionId = personDivision,
                 };
                 db.LinkEventParticipants.Add(entity);
-                added.Add((participant.SourceId, entity));
+                added.Add((participant, entity));
             }
 
             await db.SaveChangesAsync(cancellationToken);
-            foreach (var (sourceId, entity) in added)
+            foreach (var (participant, entity) in added)
             {
-                db.ExchangeSourceRecords.Add(NewMapping(run, ExchangeRecordKind.Participant, sourceId, entity.Id));
+                db.ExchangeSourceRecords.Add(NewMapping(
+                    run, ExchangeRecordKind.Participant, participant.SourceId, entity.Id, ExchangeRecordUpdater.SnapshotOf(participant)));
                 run.Tally.ParticipantsCreated++;
             }
 
@@ -1113,15 +1257,23 @@ public sealed class ExchangeRecordImporter(
 
     // ---------- общее ----------
 
-    private static bool Skip(Run run, ExchangeRecordKind kind, int sourceId)
+    // Исход обновления принятой записи (ADR-0068 v0.4) — в счётчики и перечень акта; для сверки — исход записи.
+    private static string CountUpdate(Run run, ExchangeUpdateResult update)
     {
-        if (!run.Map.ContainsKey((kind, sourceId)))
+        switch (update.Status)
         {
-            return false;
+            case ExchangeUpdateStatus.Updated:
+                run.Tally.RecordsUpdated++;
+                run.Tally.UpdateLabels.Add(update.Summary ?? update.Label);
+                return ExchangeOutcomes.Updated;
+            case ExchangeUpdateStatus.Conflict:
+                run.Tally.UpdateConflicts++;
+                run.Tally.UpdateLabels.Add(update.Summary ?? update.Label);
+                return ExchangeOutcomes.UpdateConflict;
+            default:
+                run.Tally.AlreadyImported++;
+                return ExchangeOutcomes.Already;
         }
-
-        run.Tally.AlreadyImported++;
-        return true;
     }
 
     private static int? User(Run run, int? sourceId) =>
@@ -1130,10 +1282,14 @@ public sealed class ExchangeRecordImporter(
     private static int? Reference(Run run, int? sourceId) =>
         sourceId is { } id && run.References.TryGetValue(id, out var local) ? local : null;
 
-    private static ExchangeSourceRecord NewMapping(Run run, ExchangeRecordKind kind, int sourceId, int localId)
+    // Строка карты со снимком записи источника (ADR-0068 v0.4): по нему следующий пакет отличит изменение источника от
+    // правки получателя.
+    private static ExchangeSourceRecord NewMapping(Run run, ExchangeRecordKind kind, int sourceId, int localId, string? snapshot = null)
     {
         run.Map[(kind, sourceId)] = localId;
-        return NewMapping(run.ImportId, run.Source, kind, sourceId, localId, run.Now);
+        var mapping = NewMapping(run.ImportId, run.Source, kind, sourceId, localId, run.Now);
+        mapping.Snapshot = snapshot;
+        return mapping;
     }
 
     private static ExchangeSourceRecord NewMapping(
@@ -1239,5 +1395,10 @@ public sealed class ExchangeRecordImporter(
         DateTime Now,
         IReadOnlyDictionary<int, ExchangeImportConflict> CaseDecisions,
         IReadOnlyDictionary<int, ExchangeReference> SourceReferences,
-        HashSet<int> SkippedCases);
+        HashSet<int> SkippedCases,
+        ExchangeUpdateContext Updates)
+    {
+        /// <summary>Свои дела, закрытые этим приёмом вслед за источником (ADR-0068 v0.4).</summary>
+        public List<int> ClosedCases { get; } = [];
+    }
 }

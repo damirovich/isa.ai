@@ -1043,6 +1043,10 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("reconciliation_ok");
 
+                    b.Property<int>("RecordsUpdated")
+                        .HasColumnType("integer")
+                        .HasColumnName("records_updated");
+
                     b.Property<int>("Rejected")
                         .HasColumnType("integer")
                         .HasColumnName("rejected");
@@ -1071,6 +1075,10 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                     b.Property<short>("Status")
                         .HasColumnType("smallint")
                         .HasColumnName("status");
+
+                    b.Property<int>("UpdateConflicts")
+                        .HasColumnType("integer")
+                        .HasColumnName("update_conflicts");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -1107,6 +1115,10 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                     b.Property<int?>("AppliedImportId")
                         .HasColumnType("integer")
                         .HasColumnName("applied_import_id");
+
+                    b.Property<string>("Changes")
+                        .HasColumnType("text")
+                        .HasColumnName("changes");
 
                     b.Property<short>("Classification")
                         .HasColumnType("smallint")
@@ -1174,6 +1186,10 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                         .HasColumnType("character varying(500)")
                         .HasColumnName("reason");
 
+                    b.Property<short>("RecordKind")
+                        .HasColumnType("smallint")
+                        .HasColumnName("record_kind");
+
                     b.Property<int>("SourceId")
                         .HasColumnType("integer")
                         .HasColumnName("source_id");
@@ -1201,13 +1217,15 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                     b.HasIndex("Status")
                         .HasDatabaseName("ix_exchange_import_conflict_status");
 
-                    b.HasIndex("SourceInstance", "Kind", "SourceId")
+                    b.HasIndex("SourceInstance", "Kind", "RecordKind", "SourceId")
                         .IsUnique()
-                        .HasDatabaseName("ix_exchange_import_conflict_source_instance_kind_source_id");
+                        .HasDatabaseName("ix_exchange_import_conflict_source_instance_kind_record_kind_s");
 
                     b.ToTable("exchange_import_conflict", "investigation", t =>
                         {
                             t.HasCheckConstraint("ck_exchange_conflict_decided", "status NOT IN (3, 4) OR decision IS NOT NULL");
+
+                            t.HasCheckConstraint("ck_exchange_conflict_decision_kind", "decision IS NULL OR (kind IN (1, 2) AND decision IN (1, 2, 3)) OR (kind = 3 AND decision IN (4, 5))");
 
                             t.HasCheckConstraint("ck_exchange_conflict_new_case", "decision IS NULL OR decision <> 2 OR kind = 1");
                         });
@@ -1323,6 +1341,10 @@ namespace ISC.AI.Profile.Investigation.Data.Migrations
                     b.Property<int>("LocalId")
                         .HasColumnType("integer")
                         .HasColumnName("local_id");
+
+                    b.Property<string>("Snapshot")
+                        .HasColumnType("text")
+                        .HasColumnName("snapshot");
 
                     b.Property<int>("SourceId")
                         .HasColumnType("integer")

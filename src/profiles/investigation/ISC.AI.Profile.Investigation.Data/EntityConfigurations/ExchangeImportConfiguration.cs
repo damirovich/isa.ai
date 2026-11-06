@@ -37,6 +37,9 @@ public sealed class ExchangeSourceRecordConfiguration : IEntityTypeConfiguration
         builder.HasKey(e => e.Id);
         builder.Property(e => e.SourceInstance).HasMaxLength(32).IsRequired();
 
+        // Снимок записи источника (ADR-0068 v0.4) — JSON без предела длины: у сводки в нём всё содержимое редакции.
+        builder.Property(e => e.Snapshot);
+
         // ИНВАРИАНТ идемпотентности: запись источника сопоставлена не больше одного раза — повтор приёма дубля не заведёт
         // даже при гонке двух заданий (второе упадёт на индексе, а не продублирует дело).
         builder.HasIndex(e => new { e.SourceInstance, e.Kind, e.SourceId }).IsUnique();
@@ -53,10 +56,15 @@ public sealed class ExchangeImportConflictConfiguration : IEntityTypeConfigurati
     {
         // Решение «создать новое» — только для дела (одинаковый файл — один носитель, ТФ-МЕД-04); решённый и применённый
         // конфликт обязан нести решение — иначе приём не знал бы, что применять.
+        // Решения — по виду конфликта (v0.4): у дела и носителя — объединить / создать новое / пропустить, у конфликта
+        // изменений — принять версию источника / оставить свою.
         builder.ToTable("exchange_import_conflict", InvestigationDbContext.Schema, table =>
         {
             table.HasCheckConstraint("ck_exchange_conflict_new_case", "decision IS NULL OR decision <> 2 OR kind = 1");
             table.HasCheckConstraint("ck_exchange_conflict_decided", "status NOT IN (3, 4) OR decision IS NOT NULL");
+            table.HasCheckConstraint(
+                "ck_exchange_conflict_decision_kind",
+                "decision IS NULL OR (kind IN (1, 2) AND decision IN (1, 2, 3)) OR (kind = 3 AND decision IN (4, 5))");
         });
         builder.HasKey(e => e.Id);
         builder.Property(e => e.SourceInstance).HasMaxLength(32).IsRequired();
@@ -65,9 +73,11 @@ public sealed class ExchangeImportConflictConfiguration : IEntityTypeConfigurati
         builder.Property(e => e.Details).HasMaxLength(2000);
         builder.Property(e => e.DecisionNumber).HasMaxLength(100);
         builder.Property(e => e.DecisionComment).HasMaxLength(1000);
+        builder.Property(e => e.Changes);
 
-        // Один конфликт на запись источника: повторный приём обновляет его, а не множит очередь.
-        builder.HasIndex(e => new { e.SourceInstance, e.Kind, e.SourceId }).IsUnique();
+        // Один конфликт на запись источника: повторный приём обновляет его, а не множит очередь. У конфликта изменений номер
+        // источника уникален только вместе с видом записи (дело № 5 и объект № 5 — разные записи).
+        builder.HasIndex(e => new { e.SourceInstance, e.Kind, e.RecordKind, e.SourceId }).IsUnique();
         builder.HasIndex(e => e.Status);
         builder.HasOne<ExchangeImport>().WithMany().HasForeignKey(e => e.ImportId).OnDelete(DeleteBehavior.Restrict);
     }

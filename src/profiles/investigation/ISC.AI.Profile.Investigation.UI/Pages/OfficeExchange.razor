@@ -296,9 +296,10 @@
                     <MudText Typo="Typo.body2" Style="font-family:monospace;word-break:break-all;">@chosen.FolderName</MudText>
                     <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
                         Новые дела, объекты, сводки, события связи и носители заводятся с грифом источника; принятое прежде не
-                        повторяется. Совпадения с делами и файлами этого офиса уходят в конфликты — их разбирает Руководитель, а его
-                        решения применяются повторным приёмом пакета. Эталоны и появления переносятся, когда в обработанном носителе
-                        найдено то же лицо — с пометкой «импортировано» и решениями источника.
+                        повторяется, а его изменения у источника переносятся — кроме полей, которые изменили и здесь: такие уходят
+                        Руководителю конфликтом изменений. Совпадения с делами и файлами этого офиса уходят в конфликты — их разбирает
+                        Руководитель, а его решения применяются повторным приёмом пакета. Эталоны и появления переносятся, когда в
+                        обработанном носителе найдено то же лицо — с пометкой «импортировано» и решениями источника.
                     </MudText>
                     <MudCheckBox T="bool" @bind-Value="_gateway" Dense="true" Disabled="@ImportLocked"
                                  Label="Пакет прошёл проверку на шлюзе" />
@@ -360,6 +361,13 @@
                                 уже было @context.AlreadyImported · конфликтов без решения @context.Conflicts · объединено @context.Merged ·
                                 пропущено по решению @context.SkippedByDecision · без файла @context.MissingFiles · отклонено @context.Rejected
                             </MudText>
+                            @* Изменения принятых прежде записей (ADR-0068 v0.4): перенесено и ушло Руководителю конфликтом изменений. *@
+                            @if (context.RecordsUpdated > 0 || context.UpdateConflicts > 0)
+                            {
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                                    изменения принятых записей: обновлено @context.RecordsUpdated · конфликтов изменений @context.UpdateConflicts
+                                </MudText>
+                            }
                             <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
                                 эталонов и появлений перенесено @context.FacesLinked · ждут лица @context.Deferred · лицо не найдено @context.FacesNotFound
                             </MudText>
