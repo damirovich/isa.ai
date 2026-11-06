@@ -100,6 +100,13 @@ public static class InvestigationPersistenceServiceCollectionExtensions
         services.AddScoped<IExchangeImport>(sp => sp.GetRequiredService<Exchange.ExchangeImportService>());
         services.AddHostedService<Exchange.ExchangeImportWorker>();
 
+        // Этап 3 (ADR-0068 v0.3): эталоны и появления — после индексации получателя (проход в конце приёма и фоном, один в
+        // каждый момент); очередь конфликтов Руководителя.
+        services.AddSingleton<Exchange.ExchangeFaceLinkGate>();
+        services.AddScoped<Exchange.ExchangeFaceLinker>();
+        services.AddHostedService<Exchange.ExchangeFaceLinkWorker>();
+        services.AddScoped<IExchangeConflicts, Exchange.ExchangeConflictStore>();
+
         // Порты пакета «Документооборот» (ADR-0017): справочник подразделений, право настройки,
         // кандидаты в ответственные/исполнители. Без реализаций модуль fail-closed.
         services.AddScoped<ISC.AI.Modules.DocFlow.Domain.Services.IDivisionDirectory, InvestigationDivisionDirectory>();

@@ -86,6 +86,11 @@ public static class InvestigationPermissions
     /// <summary>Перенос баз Access: задания, объекты и связи пачкой (ADR-0043).</summary>
     public const string CasesImport = "cases.import";
 
+    /// <summary>
+    /// Конфликты обмена между офисами: решения по делам и носителям пакета, совпавшим со своими (ТФ-ОБМ-02, ADR-0068 v0.3).
+    /// </summary>
+    public const string ExchangeConflicts = "exchange.conflicts";
+
     /// <summary>Чат и поиск по смыслу по материалам дел — локальная модель (ADR-0051).</summary>
     public const string CasesChat = "cases.chat";
 
@@ -174,6 +179,11 @@ public static class InvestigationPermissions
         new(CasesImport, PermissionSection.Cases, "Перенос баз Access",
             "Задания, объекты и связи из базы отдела пачкой: гриф и подразделение — выбор оператора, в пределах допуска",
             Roles(InvestigationRole.Administrator)),
+        // Решение «объединить / создать новое / пропустить» — по содержанию, поэтому Руководителю, а не Администратору (ТБ-079).
+        new(ExchangeConflicts, PermissionSection.Cases, "Конфликты обмена между офисами",
+            "Решения по делам и носителям из пакета другого офиса, совпавшим со своими: объединить, создать новое или пропустить; "
+                + "видны конфликты в пределах допуска, решение применяется при повторном приёме пакета",
+            Roles(InvestigationRole.Head)),
         new(CasesChat, PermissionSection.Cases, "Чат по материалам дел",
             "Вопросы к документам, расшифровкам, сводкам и сведениям доступных дел и поиск по смыслу: локальная модель отвечает только по найденным фрагментам, со ссылками",
             Roles(InvestigationRole.Investigator, InvestigationRole.Head, InvestigationRole.Administrator)),
@@ -287,6 +297,7 @@ public static class InvestigationPermissions
         new("admin-divisions", "Подразделения", [AdminDirectories]),
         new("admin-references", "Справочники", [AdminDirectories]),
         new("admin-access-import", "Перенос из Access", [CasesImport]),
+        new("exchange-conflicts", "Конфликты обмена", [ExchangeConflicts]),
         new("admin-report-permits", "Запросы на правку сводок", [ReportPermits]),
     ];
 

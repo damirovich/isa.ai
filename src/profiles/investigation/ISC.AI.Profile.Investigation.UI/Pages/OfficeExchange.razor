@@ -201,6 +201,31 @@
                 }
             </MudPaper>
 
+            @* Этап 3 (ADR-0068 v0.3): только числа — сами конфликты видит Руководитель в своей очереди под допуском (ТБ-079). *@
+            @if (import.ConflictsPending > 0 || import.DecisionsAwaiting > 0 || import.Faces is { Waiting: > 0 } or { NotFound: > 0 })
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                    @if (import.ConflictsPending > 0)
+                    {
+                        <div>Конфликтов ждут решения Руководителя: @import.ConflictsPending (очередь «Дела → Конфликты обмена»).</div>
+                    }
+                    @if (import.DecisionsAwaiting > 0)
+                    {
+                        <div>
+                            Решений Руководителя ждут применения: @import.DecisionsAwaiting — примите повторно пакеты, отмеченные ниже:
+                            решение применяется приёмом с ключом хранителя.
+                        </div>
+                    }
+                    @if (import.Faces is { } faceQueue && (faceQueue.Waiting > 0 || faceQueue.NotFound > 0))
+                    {
+                        <div>
+                            Эталоны и появления: ждут лица @faceQueue.Waiting, лицо не найдено @faceQueue.NotFound, перенесено @faceQueue.Linked.
+                            Перенос идёт сам, когда принятые носители проиндексированы.
+                        </div>
+                    }
+                </MudAlert>
+            }
+
             <MudText Typo="Typo.subtitle2" Class="mb-2">Пакеты на носителе</MudText>
             <MudTable T="ExchangePackageRow" Items="import.Packages" Dense="true" Hover="true" Outlined="true" Class="mb-3"
                       OnRowClick="@((TableRowClickEventArgs<ExchangePackageRow> e) => Select(e.Item))"
@@ -249,6 +274,12 @@
                                 принимался @(context.LastImportAt is { } when ? Time(when) : string.Empty): @ImportLabel(last)
                             </MudText>
                         }
+                        @if (context.DecisionsAwaiting > 0)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" Class="ma-0 mt-1">
+                                решений ждут повторного приёма: @context.DecisionsAwaiting
+                            </MudChip>
+                        }
                     </MudTd>
                 </RowTemplate>
                 <NoRecordsContent>
@@ -265,8 +296,9 @@
                     <MudText Typo="Typo.body2" Style="font-family:monospace;word-break:break-all;">@chosen.FolderName</MudText>
                     <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
                         Новые дела, объекты, сводки, события связи и носители заводятся с грифом источника; принятое прежде не
-                        повторяется. Совпадения с делами и файлами этого офиса уходят в конфликты — их разбирает Руководитель.
-                        Эталоны и появления переносятся следующим этапом, после обработки принятых носителей.
+                        повторяется. Совпадения с делами и файлами этого офиса уходят в конфликты — их разбирает Руководитель, а его
+                        решения применяются повторным приёмом пакета. Эталоны и появления переносятся, когда в обработанном носителе
+                        найдено то же лицо — с пометкой «импортировано» и решениями источника.
                     </MudText>
                     <MudCheckBox T="bool" @bind-Value="_gateway" Dense="true" Disabled="@ImportLocked"
                                  Label="Пакет прошёл проверку на шлюзе" />
@@ -325,9 +357,21 @@
                             <span>заведено: дел @context.CasesCreated · объектов @context.PersonsCreated · событий @context.EventsCreated ·
                                 сводок @context.ReportsCreated · носителей @context.AssetsCreated (файлов @context.FilesReceived)</span>
                             <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
-                                уже было @context.AlreadyImported · конфликтов @context.Conflicts · отложено до этапа 3 @context.Deferred ·
-                                без файла @context.MissingFiles · отклонено @context.Rejected
+                                уже было @context.AlreadyImported · конфликтов без решения @context.Conflicts · объединено @context.Merged ·
+                                пропущено по решению @context.SkippedByDecision · без файла @context.MissingFiles · отклонено @context.Rejected
                             </MudText>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                                эталонов и появлений перенесено @context.FacesLinked · ждут лица @context.Deferred · лицо не найдено @context.FacesNotFound
+                            </MudText>
+                            @* Сверка с манифестом (ЦС-08): итог словами — по видам; текст — во всплывающей подсказке. *@
+                            @if (context.ReconciliationOk is { } reconciled)
+                            {
+                                <MudTooltip Text="@(context.Reconciliation ?? string.Empty)">
+                                    <MudText Typo="Typo.caption" Color="@(reconciled ? Color.Success : Color.Error)" Class="d-block">
+                                        @(reconciled ? "сверка с манифестом сошлась" : "сверка с манифестом НЕ сошлась — подробности по наведению")
+                                    </MudText>
+                                </MudTooltip>
+                            }
                         }
                         else
                         {

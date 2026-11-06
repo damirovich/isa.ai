@@ -55,14 +55,26 @@ public sealed class ExchangeImportTally
     /// <summary>Записей, уже принятых прежде.</summary>
     public int AlreadyImported { get; set; }
 
-    /// <summary>Конфликтов.</summary>
+    /// <summary>Конфликтов без применённого решения.</summary>
     public int Conflicts { get; set; }
+
+    /// <summary>Объединено со своими делами и носителями по решению Руководителя.</summary>
+    public int Merged { get; set; }
+
+    /// <summary>Дел и носителей, пропущенных по решению Руководителя.</summary>
+    public int SkippedByDecision { get; set; }
 
     /// <summary>Записей, не перенесённых вместе с конфликтным делом (объекты, сводки, носители).</summary>
     public int HeldWithConflict { get; set; }
 
-    /// <summary>Отложено до этапа 3 (эталоны, появления).</summary>
+    /// <summary>Эталонов и появлений, перенесённых при приёме (лицо нашлось).</summary>
+    public int FacesLinked { get; set; }
+
+    /// <summary>Эталонов и появлений, ждущих сопоставления лица после приёма.</summary>
     public int Deferred { get; set; }
+
+    /// <summary>Эталонов и появлений, лицо которых в индексации получателя не нашлось.</summary>
+    public int FacesNotFound { get; set; }
 
     /// <summary>Носителей без файла в пакете и ещё не принятых.</summary>
     public int MissingFiles { get; set; }
@@ -73,16 +85,163 @@ public sealed class ExchangeImportTally
     /// <summary>Номера дел-конфликтов и имена файлов носителей-конфликтов — в защищённую часть акта.</summary>
     public List<string> ConflictLabels { get; } = [];
 
+    /// <summary>Применённые решения Руководителя — в защищённую часть акта.</summary>
+    public List<string> DecisionLabels { get; } = [];
+
+    /// <summary>Перенесённые прежде появления, которые этот приём отозвал вслед за источником (номера у получателя).</summary>
+    public List<int> SourceRevocations { get; } = [];
+
     /// <summary>Причины отклонения файлов — в акт.</summary>
     public List<string> Rejections { get; } = [];
+
+    /// <summary>Исход каждой записи по видам манифеста — для сверки (ЦС-08).</summary>
+    public ExchangeOutcomes Outcomes { get; } = new();
 }
 
-/// <summary>Итог переноса записей — карты, нужные приёму носителей.</summary>
+/// <summary>
+/// Исходы приёма по видам манифеста (ЦС-08, ADR-0068 v0.3): каждая запись пакета получает ровно один исход там, где приём
+/// принял о ней решение. Сумма исходов вида сверяется с числом в манифесте — так видно, что ни одна запись не потерялась
+/// молча.
+/// </summary>
+public sealed class ExchangeOutcomes
+{
+    /// <summary>Вид «дела» — ключ счётчика манифеста.</summary>
+    public const string Cases = "cases";
+
+    /// <summary>Вид «объекты».</summary>
+    public const string Persons = "persons";
+
+    /// <summary>Вид «связи» (связь объекта внутри дела и события связи).</summary>
+    public const string Links = "links";
+
+    /// <summary>Вид «сводки».</summary>
+    public const string Reports = "reports";
+
+    /// <summary>Вид «носители».</summary>
+    public const string Assets = "assets";
+
+    /// <summary>Вид «появления».</summary>
+    public const string Appearances = "appearances";
+
+    /// <summary>Вид «эталоны» — в манифесте числа нет, сверяется с содержимым пакета.</summary>
+    public const string ReferencePhotos = "referencePhotos";
+
+    /// <summary>Исход «заведено».</summary>
+    public const string Created = "заведено";
+
+    /// <summary>Исход «уже было» (по карте).</summary>
+    public const string Already = "уже было";
+
+    /// <summary>Исход «объединено по решению Руководителя».</summary>
+    public const string Merged = "объединено";
+
+    /// <summary>Исход «пропущено по решению Руководителя».</summary>
+    public const string Skipped = "пропущено";
+
+    /// <summary>Исход «конфликт — ждёт решения».</summary>
+    public const string Conflict = "конфликт";
+
+    /// <summary>Исход «не перенесено вместе с делом» (дело в конфликте или уничтожено у получателя).</summary>
+    public const string Held = "не перенесено с делом";
+
+    /// <summary>Исход «без файла» (файл ушёл прежним пакетом).</summary>
+    public const string MissingFile = "без файла";
+
+    /// <summary>Исход «отклонено общим приёмом».</summary>
+    public const string Rejected = "отклонено";
+
+    /// <summary>Исход «перенесено» (эталон или появление — лицо нашлось).</summary>
+    public const string Linked = "перенесено";
+
+    /// <summary>Исход «ждёт сопоставления лица».</summary>
+    public const string Pending = "ждёт сопоставления";
+
+    /// <summary>Исход «лицо не найдено».</summary>
+    public const string NotFound = "лицо не найдено";
+
+    /// <summary>Исход связи объекта «не установлена» (второго объекта связи у получателя нет или роль не «связь»).</summary>
+    public const string Unlinked = "связь не установлена";
+
+    /// <summary>Виды в порядке показа.</summary>
+    public static IReadOnlyList<string> Kinds { get; } = [Cases, Persons, Links, Reports, Assets, Appearances, ReferencePhotos];
+
+    private readonly Dictionary<string, Dictionary<string, int>> counts = new(StringComparer.Ordinal);
+
+    /// <summary>Отмечает исход записей вида.</summary>
+    public void Add(string kind, string outcome, int count = 1)
+    {
+        if (count <= 0)
+        {
+            return;
+        }
+
+        if (!counts.TryGetValue(kind, out var byOutcome))
+        {
+            counts[kind] = byOutcome = new Dictionary<string, int>(StringComparer.Ordinal);
+        }
+
+        byOutcome[outcome] = byOutcome.GetValueOrDefault(outcome) + count;
+    }
+
+    /// <summary>Исходы вида.</summary>
+    public IReadOnlyDictionary<string, int> For(string kind) =>
+        counts.TryGetValue(kind, out var byOutcome) ? byOutcome : new Dictionary<string, int>();
+
+    /// <summary>Сколько записей вида получили исход.</summary>
+    public int Total(string kind) => For(kind).Values.Sum();
+
+    /// <summary>
+    /// Сверка с ожидаемыми числами (манифест и содержимое пакета): строки по видам и признак «сошлась». Вид без записей и
+    /// без исходов не показывается.
+    /// </summary>
+    public (bool Ok, string Text) Reconcile(IReadOnlyDictionary<string, int> expected)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        var ok = true;
+        var lines = new List<string>();
+        foreach (var kind in Kinds)
+        {
+            var want = expected.GetValueOrDefault(kind);
+            var got = Total(kind);
+            if (want == 0 && got == 0)
+            {
+                continue;
+            }
+
+            var parts = string.Join(", ", For(kind).OrderByDescending(o => o.Value).Select(o => o.Key + " " + o.Value.ToString(CultureInfo.InvariantCulture)));
+            var match = want == got;
+            ok &= match;
+            lines.Add(KindLabel(kind) + ": " + want.ToString(CultureInfo.InvariantCulture) + " в пакете — " + parts
+                      + (match ? string.Empty : " — НЕ СХОДИТСЯ (" + got.ToString(CultureInfo.InvariantCulture) + ")"));
+        }
+
+        return (ok, string.Join("; ", lines));
+    }
+
+    /// <summary>Вид словами.</summary>
+    public static string KindLabel(string kind) => kind switch
+    {
+        Cases => "дела",
+        Persons => "объекты",
+        Links => "связи",
+        Reports => "сводки",
+        Assets => "носители",
+        Appearances => "появления",
+        ReferencePhotos => "эталоны",
+        _ => kind,
+    };
+}
+
+/// <summary>Итог переноса записей — карты и решения, нужные приёму носителей и сопоставлению лиц.</summary>
 /// <param name="Cases">Дела пакета, принятые сейчас или прежде: номер источника → дело получателя.</param>
 /// <param name="Users">Сотрудники: номер источника → своя учётка (по имени входа).</param>
+/// <param name="AssetDecisions">Решения Руководителя по конфликтам носителей: номер источника → конфликт с решением.</param>
+/// <param name="SkippedCases">Дела источника, пропущенные по решению Руководителя.</param>
 public sealed record ExchangeRecordResult(
     IReadOnlyDictionary<int, ExchangeImportedCase> Cases,
-    IReadOnlyDictionary<int, int> Users);
+    IReadOnlyDictionary<int, int> Users,
+    IReadOnlyDictionary<int, ExchangeImportConflict> AssetDecisions,
+    IReadOnlySet<int> SkippedCases);
 
 /// <summary>
 /// Перенос записей пакета в базу получателя (ТФ-ОБМ-02, ADR-0068 v0.2): подразделения — по коду, справочник — по виду и
@@ -106,6 +265,12 @@ public sealed class ExchangeRecordImporter(
     IUserAccountStore accounts,
     TimeProvider timeProvider)
 {
+    /// <summary>Предел описания записи источника в строке конфликта (столбец <c>details</c>).</summary>
+    public const int DetailsLimit = 2000;
+
+    /// <summary>Причина конфликта «тот же номер в подразделении» — по ней очередь предлагает новый номер.</summary>
+    public const string NumberClashReason = "в подразделении уже есть дело с тем же номером";
+
     /// <summary>Переносит записи пакета; носители — отдельно (<see cref="ExchangeImportService"/>).</summary>
     /// <exception cref="ExchangeImportRefusedException">У получателя нет подразделений источника — ничего не записано.</exception>
     public async Task<ExchangeRecordResult> ImportAsync(
@@ -125,7 +290,18 @@ public sealed class ExchangeRecordImporter(
         var divisions = await ResolveDivisionsAsync(db, data, cancellationToken);
         var references = await ResolveReferencesAsync(db, data, tally, cancellationToken);
         var users = await ResolveUsersAsync(data, cancellationToken);
-        var run = new Run(importId, source, map, divisions, references, users, tally, timeProvider.GetUtcNow().UtcDateTime);
+
+        // Решения Руководителя по конфликтам этого источника (ADR-0068 v0.3): решённые ждут применения этим приёмом,
+        // применённые «пропустить» действуют при каждом приёме.
+        var decisions = await db.ExchangeImportConflicts.AsNoTracking()
+            .Where(c => c.SourceInstance == source && c.Decision != null
+                        && (c.Status == ExchangeConflictStatus.Decided || c.Status == ExchangeConflictStatus.Applied))
+            .ToListAsync(cancellationToken);
+        var run = new Run(
+            importId, source, map, divisions, references, users, tally, timeProvider.GetUtcNow().UtcDateTime,
+            decisions.Where(d => d.Kind == ExchangeConflictKind.Case).ToDictionary(d => d.SourceId),
+            data.References.ToDictionary(r => r.SourceId),
+            []);
 
         var cases = new Dictionary<int, ExchangeImportedCase>();
         var persons = new Dictionary<int, int>();
@@ -143,9 +319,9 @@ public sealed class ExchangeRecordImporter(
 
         await ImportLinkEventsAsync(db, run, data.LinkEvents, persons, cancellationToken);
 
-        // Эталоны и появления ждут этапа 3: им нужно лицо в индексации получателя, а она идёт после приёма носителей.
-        tally.Deferred += data.ReferencePhotos.Count + data.Appearances.Count;
-        return new ExchangeRecordResult(cases, users);
+        // Эталоны и появления — после носителей: им нужно лицо в индексации получателя (ExchangeFaceLinker).
+        return new ExchangeRecordResult(
+            cases, users, decisions.Where(d => d.Kind == ExchangeConflictKind.Asset).ToDictionary(d => d.SourceId), run.SkippedCases);
     }
 
     /// <summary>Своя запись, сопоставленная записи источника; <see langword="null"/> — ещё не принималась.</summary>
@@ -189,7 +365,7 @@ public sealed class ExchangeRecordImporter(
     }
 
     /// <summary>
-    /// Записывает конфликт для очереди Руководителя (этап 3); повтор приёма обновляет прежний, а не множит очередь.
+    /// Записывает конфликт для очереди Руководителя; повтор приёма обновляет прежний, а не множит очередь.
     /// </summary>
     public async Task AddConflictAsync(
         int importId,
@@ -199,14 +375,29 @@ public sealed class ExchangeRecordImporter(
         int? localId,
         string reason,
         string? label,
+        string? details,
         short classification,
         int divisionId,
         CancellationToken cancellationToken)
     {
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-        await UpsertConflictAsync(db, importId, source, kind, sourceId, localId, reason, label, classification, divisionId,
+        await UpsertConflictAsync(db, importId, source, kind, sourceId, localId, reason, label, details, classification, divisionId,
             timeProvider.GetUtcNow().UtcDateTime, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>Решение Руководителя применено приёмом <paramref name="importId"/> (ADR-0068 v0.3).</summary>
+    public async Task MarkAppliedAsync(int conflictId, int importId, CancellationToken cancellationToken)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await MarkAppliedAsync(db, conflictId, importId, timeProvider.GetUtcNow().UtcDateTime, cancellationToken);
+    }
+
+    /// <summary>Решение применить нельзя — конфликт снова в очереди Руководителя с причиной (ADR-0068 v0.3).</summary>
+    public async Task ReopenAsync(int conflictId, int importId, string reason, CancellationToken cancellationToken)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await ReopenAsync(db, conflictId, importId, reason, timeProvider.GetUtcNow().UtcDateTime, cancellationToken);
     }
 
     // ---------- справочники ----------
@@ -338,50 +529,120 @@ public sealed class ExchangeRecordImporter(
     {
         var personList = casePersons.OrderBy(p => p.SourceId).ToList();
         var reportList = caseReports.OrderBy(r => r.SourceId).ToList();
+        var number = exchangeCase.Number.Trim();
+        run.CaseDecisions.TryGetValue(exchangeCase.SourceId, out var decision);
         ExchangeImportedCase? imported = null;
+        ExchangeImportConflict? applying = null;
         if (run.Map.TryGetValue((ExchangeRecordKind.Case, exchangeCase.SourceId), out var mappedId))
         {
-            imported = await db.Cases.AsNoTracking()
-                .Where(c => c.Id == mappedId)
-                .Select(c => new ExchangeImportedCase(c.Id, c.Number, c.Title, c.Classification, c.DivisionId))
-                .FirstOrDefaultAsync(cancellationToken);
+            imported = await FindCaseAsync(db, mappedId, cancellationToken);
             run.Tally.AlreadyImported++;
+            run.Tally.Outcomes.Add(ExchangeOutcomes.Cases, ExchangeOutcomes.Already);
+            if (decision is { Status: ExchangeConflictStatus.Decided })
+            {
+                // Решённый конфликт, запись которого уже сопоставлена, — решение исполнено, очередь его больше не держит.
+                await MarkAppliedAsync(db, run, decision, cancellationToken);
+            }
+
             if (imported is null)
             {
                 // Принятое прежде дело у получателя уничтожено (ADR-0025) — заново его приём не заводит.
-                run.Tally.HeldWithConflict += personList.Count + reportList.Count;
+                HoldContents(run, personList, reportList, ExchangeOutcomes.Held);
                 return null;
             }
         }
         else
         {
             var divisionId = run.Divisions[exchangeCase.DivisionSourceId];
-            var number = exchangeCase.Number.Trim();
-            var conflict = await FindCaseConflictAsync(db, run, exchangeCase, divisionId, number, cancellationToken);
-            if (conflict is { } clash)
+            if (decision is not null)
+            {
+                // Решение Руководителя (ТФ-ОБМ-02, ADR-0068 v0.3) применяет этот приём: содержимое дела лежало в пакете под
+                // ключом хранителя. Решение, которое применить нельзя, возвращает конфликт в очередь с причиной.
+                switch (decision.Decision)
+                {
+                    case ExchangeConflictDecision.Skip:
+                        await MarkAppliedAsync(db, run, decision, cancellationToken);
+                        run.SkippedCases.Add(exchangeCase.SourceId);
+                        run.Tally.SkippedByDecision++;
+                        run.Tally.Outcomes.Add(ExchangeOutcomes.Cases, ExchangeOutcomes.Skipped);
+                        run.Tally.DecisionLabels.Add("дело " + number + ": пропущено по решению Руководителя");
+                        HoldContents(run, personList, reportList, ExchangeOutcomes.Skipped);
+                        return null;
+
+                    case ExchangeConflictDecision.Merge:
+                        imported = (decision.DecisionLocalId ?? decision.LocalId) is { } target
+                            ? await FindCaseAsync(db, target, cancellationToken)
+                            : null;
+                        if (imported is null)
+                        {
+                            await ReopenAsync(db, run, decision, "своего дела для объединения больше нет — решите заново", cancellationToken);
+                            CountConflict(run, number, "решение «объединить» не применено: своего дела нет", personList, reportList);
+                            return null;
+                        }
+
+                        break;
+
+                    default:
+                        // «Создать новое»: номер — заданный Руководителем, иначе источника; занятый номер дела не заведёт.
+                        var wanted = string.IsNullOrWhiteSpace(decision.DecisionNumber) ? number : decision.DecisionNumber.Trim();
+                        if (await db.Cases.AnyAsync(c => c.DivisionId == divisionId && c.Number == wanted, cancellationToken))
+                        {
+                            await ReopenAsync(db, run, decision, "номер «" + wanted + "» в подразделении уже занят — решите заново", cancellationToken);
+                            CountConflict(run, number, "решение «создать новое» не применено: номер занят", personList, reportList);
+                            return null;
+                        }
+
+                        number = wanted;
+                        break;
+                }
+
+                applying = decision;
+            }
+            else if (await FindCaseConflictAsync(db, run, exchangeCase, divisionId, number, cancellationToken) is { } clash)
             {
                 await UpsertConflictAsync(db, run.ImportId, run.Source, ExchangeConflictKind.Case, exchangeCase.SourceId, clash.LocalId,
-                    clash.Reason, number, exchangeCase.Classification, divisionId, run.Now, cancellationToken);
+                    clash.Reason, number, CaseDetails(run, exchangeCase), exchangeCase.Classification, divisionId, run.Now, cancellationToken);
                 await db.SaveChangesAsync(cancellationToken);
                 db.ChangeTracker.Clear();
-                run.Tally.Conflicts++;
-                run.Tally.ConflictLabels.Add("дело " + number + " (" + clash.Reason + ")");
-                run.Tally.HeldWithConflict += personList.Count + reportList.Count;
+                CountConflict(run, number, clash.Reason, personList, reportList);
                 return null;
             }
         }
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        if (imported is null)
+        if (applying is { Decision: ExchangeConflictDecision.Merge })
         {
-            var entity = NewCase(run, exchangeCase);
+            // Объединение: карта ведёт на своё дело — этот и следующие пакеты добавляют содержимое в него, второго дела нет.
+            db.ExchangeSourceRecords.Add(NewMapping(run, ExchangeRecordKind.Case, exchangeCase.SourceId, imported!.LocalId));
+            run.Tally.Merged++;
+            run.Tally.Outcomes.Add(ExchangeOutcomes.Cases, ExchangeOutcomes.Merged);
+            run.Tally.DecisionLabels.Add("дело " + number + " объединено со своим делом " + imported.Number);
+        }
+        else if (imported is null)
+        {
+            var entity = NewCase(run, exchangeCase, number);
             db.Cases.Add(entity);
             await db.SaveChangesAsync(cancellationToken);
             db.ExchangeSourceRecords.Add(NewMapping(run, ExchangeRecordKind.Case, exchangeCase.SourceId, entity.Id));
             await ClearConflictAsync(db, run.Source, ExchangeConflictKind.Case, exchangeCase.SourceId, run.Now, cancellationToken);
             imported = new ExchangeImportedCase(entity.Id, entity.Number, entity.Title, entity.Classification, entity.DivisionId);
             run.Tally.CasesCreated++;
+            run.Tally.Outcomes.Add(ExchangeOutcomes.Cases, ExchangeOutcomes.Created);
+            if (applying is not null)
+            {
+                run.Tally.DecisionLabels.Add("дело " + exchangeCase.Number.Trim() + " заведено новым по решению Руководителя"
+                                             + (number == exchangeCase.Number.Trim() ? string.Empty : " под номером " + number));
+            }
         }
+
+        if (applying is not null)
+        {
+            await MarkAppliedAsync(db, run, applying, cancellationToken);
+        }
+
+        // Содержимое — с подразделением СВОЕГО дела: у объектов и сводок оно денормализовано с дела (PersonStore,
+        // CaseReportStore), а у объединённого дела материал теперь принадлежит ему (ADR-0068 v0.3).
+        var divisionOfCase = imported.DivisionId;
 
         // Объекты: сначала все (номера нужны связям внутри дела), затем связи «связь объекта» — в той же транзакции.
         var created = new List<(ExchangePerson Source, Person Entity)>();
@@ -391,10 +652,16 @@ public sealed class ExchangeRecordImporter(
             {
                 persons[person.SourceId] = localPerson;
                 run.Tally.AlreadyImported++;
+                run.Tally.Outcomes.Add(ExchangeOutcomes.Persons, ExchangeOutcomes.Already);
+                if (person.LinkedToPersonSourceId is not null)
+                {
+                    run.Tally.Outcomes.Add(ExchangeOutcomes.Links, ExchangeOutcomes.Already);
+                }
+
                 continue;
             }
 
-            var entity = await NewPersonAsync(db, run, imported.LocalId, person, cancellationToken);
+            var entity = await NewPersonAsync(db, run, imported.LocalId, divisionOfCase, person, cancellationToken);
             db.Persons.Add(entity);
             created.Add((person, entity));
         }
@@ -405,6 +672,7 @@ public sealed class ExchangeRecordImporter(
             persons[person.SourceId] = entity.Id;
             db.ExchangeSourceRecords.Add(NewMapping(run, ExchangeRecordKind.Person, person.SourceId, entity.Id));
             run.Tally.PersonsCreated++;
+            run.Tally.Outcomes.Add(ExchangeOutcomes.Persons, ExchangeOutcomes.Created);
         }
 
         foreach (var (person, entity) in created.Where(c => c.Source.LinkedToPersonSourceId is not null))
@@ -417,6 +685,11 @@ public sealed class ExchangeRecordImporter(
             {
                 entity.LinkedToPersonId = target;
                 entity.LinkTypeId = person.LinkTypeSourceId is { } type && run.References.TryGetValue(type, out var localType) ? localType : null;
+                run.Tally.Outcomes.Add(ExchangeOutcomes.Links, ExchangeOutcomes.Created);
+            }
+            else
+            {
+                run.Tally.Outcomes.Add(ExchangeOutcomes.Links, ExchangeOutcomes.Unlinked);
             }
         }
 
@@ -427,7 +700,7 @@ public sealed class ExchangeRecordImporter(
         {
             if (persons.TryGetValue(person.SourceId, out var personId))
             {
-                await AddRequisitesAsync(db, run, person, personId, cancellationToken);
+                await AddRequisitesAsync(db, run, person, personId, divisionOfCase, cancellationToken);
             }
         }
 
@@ -436,21 +709,70 @@ public sealed class ExchangeRecordImporter(
             if (run.Map.TryGetValue((ExchangeRecordKind.Report, report.SourceId), out _))
             {
                 run.Tally.AlreadyImported++;
+                run.Tally.Outcomes.Add(ExchangeOutcomes.Reports, ExchangeOutcomes.Already);
                 continue;
             }
 
-            var entity = NewReport(run, imported.LocalId, report, persons);
+            var entity = NewReport(run, imported.LocalId, divisionOfCase, report, persons);
             db.CaseReports.Add(entity.Report);
             db.CaseReportRevisions.Add(entity.Revision);
             await db.SaveChangesAsync(cancellationToken);
             db.ExchangeSourceRecords.Add(NewMapping(run, ExchangeRecordKind.Report, report.SourceId, entity.Report.Id));
             run.Tally.ReportsCreated++;
+            run.Tally.Outcomes.Add(ExchangeOutcomes.Reports, ExchangeOutcomes.Created);
         }
 
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         db.ChangeTracker.Clear();
         return imported;
+    }
+
+    private static Task<ExchangeImportedCase?> FindCaseAsync(InvestigationDbContext db, int caseId, CancellationToken cancellationToken) =>
+        db.Cases.AsNoTracking()
+            .Where(c => c.Id == caseId)
+            .Select(c => new ExchangeImportedCase(c.Id, c.Number, c.Title, c.Classification, c.DivisionId))
+            .FirstOrDefaultAsync(cancellationToken);
+
+    // Дело в конфликте: оно и его содержимое ждут решения Руководителя.
+    private static void CountConflict(Run run, string number, string reason, List<ExchangePerson> personList, List<ExchangeReport> reportList)
+    {
+        run.Tally.Conflicts++;
+        run.Tally.ConflictLabels.Add("дело " + number + " (" + reason + ")");
+        run.Tally.Outcomes.Add(ExchangeOutcomes.Cases, ExchangeOutcomes.Conflict);
+        HoldContents(run, personList, reportList, ExchangeOutcomes.Held);
+    }
+
+    // Содержимое не перенесённого дела: объекты, их связи и сводки получают исход дела (сверка ЦС-08).
+    private static void HoldContents(Run run, List<ExchangePerson> personList, List<ExchangeReport> reportList, string outcome)
+    {
+        run.Tally.HeldWithConflict += personList.Count + reportList.Count;
+        run.Tally.Outcomes.Add(ExchangeOutcomes.Persons, outcome, personList.Count);
+        run.Tally.Outcomes.Add(ExchangeOutcomes.Links, outcome, personList.Count(p => p.LinkedToPersonSourceId is not null));
+        run.Tally.Outcomes.Add(ExchangeOutcomes.Reports, outcome, reportList.Count);
+    }
+
+    // Описание дела источника для очереди Руководителя: содержимое пакета зашифровано, а решать надо по сути (ADR-0068 v0.3).
+    private static string CaseDetails(Run run, ExchangeCase source)
+    {
+        var parts = new List<string>
+        {
+            "дело № " + source.Number.Trim() + " «" + source.Title.Trim() + "»",
+            source.Kind.Label(),
+            "статус: " + source.Status.Label(),
+            "открыто " + source.OpenedAt.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture),
+        };
+        if (source.Task is { } task && (!string.IsNullOrWhiteSpace(task.TaskNumber) || task.InitiatorUnitSourceId is not null))
+        {
+            var unit = task.InitiatorUnitSourceId is { } unitId && run.SourceReferences.TryGetValue(unitId, out var reference)
+                ? reference.Name
+                : null;
+            parts.Add("ГУ и № задания: " + (unit ?? "—") + " / " + (string.IsNullOrWhiteSpace(task.TaskNumber) ? "—" : task.TaskNumber.Trim()));
+        }
+
+        parts.Add("гриф: " + ClassificationLevels.Label(source.Classification));
+        var text = string.Join("; ", parts);
+        return text.Length <= DetailsLimit ? text : text[..DetailsLimit];
     }
 
     // Конфликт дела (ТФ-ОБМ-02): тот же номер в том же подразделении (его и не завести — уникальный индекс) или та же
@@ -464,7 +786,7 @@ public sealed class ExchangeRecordImporter(
             .FirstOrDefaultAsync(cancellationToken);
         if (sameNumber is { } numberClash)
         {
-            return (numberClash, "в подразделении уже есть дело с тем же номером");
+            return (numberClash, NumberClashReason);
         }
 
         if (exchangeCase.Task is { TaskNumber: { Length: > 0 } taskNumber, InitiatorUnitSourceId: { } unitSource }
@@ -489,12 +811,12 @@ public sealed class ExchangeRecordImporter(
         return null;
     }
 
-    private static CaseFile NewCase(Run run, ExchangeCase source)
+    private static CaseFile NewCase(Run run, ExchangeCase source, string number)
     {
         var task = source.Task;
         return new CaseFile
         {
-            Number = source.Number.Trim(),
+            Number = number,
             Title = source.Title.Trim(),
             Kind = source.Kind,
             OpenedAt = source.OpenedAt,
@@ -521,7 +843,7 @@ public sealed class ExchangeRecordImporter(
     }
 
     private static async Task<Person> NewPersonAsync(
-        InvestigationDbContext db, Run run, int caseId, ExchangePerson source, CancellationToken cancellationToken)
+        InvestigationDbContext db, Run run, int caseId, int divisionId, ExchangePerson source, CancellationToken cancellationToken)
     {
         int? unidentifiedNumber = null;
         if (source.IsUnidentified)
@@ -559,7 +881,7 @@ public sealed class ExchangeRecordImporter(
             Orientation = source.Orientation,
             Notes = source.Notes,
             Classification = source.Classification,
-            DivisionId = run.Divisions[source.DivisionSourceId],
+            DivisionId = divisionId,
         };
 
         // Нормализация — те же правила, что у ручного ввода (PersonStore): пересечения и поиск видят принятых так же.
@@ -568,10 +890,10 @@ public sealed class ExchangeRecordImporter(
         return entity;
     }
 
+    // Подразделение реквизитов — объекта (денормализовано с него), а у объекта — его дела у получателя.
     private static async Task AddRequisitesAsync(
-        InvestigationDbContext db, Run run, ExchangePerson source, int personId, CancellationToken cancellationToken)
+        InvestigationDbContext db, Run run, ExchangePerson source, int personId, int divisionId, CancellationToken cancellationToken)
     {
-        var divisionId = run.Divisions[source.DivisionSourceId];
         var mappings = new List<(ExchangeRecordKind Kind, int SourceId, object Entity)>();
         foreach (var address in source.Addresses.OrderBy(a => a.SourceId))
         {
@@ -666,11 +988,11 @@ public sealed class ExchangeRecordImporter(
     }
 
     private static (CaseReport Report, CaseReportRevision Revision) NewReport(
-        Run run, int caseId, ExchangeReport source, Dictionary<int, int> persons)
+        Run run, int caseId, int divisionId, ExchangeReport source, Dictionary<int, int> persons)
     {
         // Содержимое — через ту же нормализацию, что при вводе сводки (CaseReportStore): поиск по тексту сводок одинаков.
+        // Подразделение — дела у получателя (у сводки оно с дела).
         var content = CaseReportContent.FromJson(source.ContentJson).Normalize(source.Kind);
-        var divisionId = run.Divisions[source.DivisionSourceId];
         var report = new CaseReport
         {
             CaseId = caseId,
@@ -710,6 +1032,7 @@ public sealed class ExchangeRecordImporter(
             if (!mapped && participants.Count == 0)
             {
                 run.Tally.HeldWithConflict++;
+                run.Tally.Outcomes.Add(ExchangeOutcomes.Links, ExchangeOutcomes.Held);
                 continue;
             }
 
@@ -717,6 +1040,7 @@ public sealed class ExchangeRecordImporter(
             if (mapped)
             {
                 run.Tally.AlreadyImported++;
+                run.Tally.Outcomes.Add(ExchangeOutcomes.Links, ExchangeOutcomes.Already);
             }
             else
             {
@@ -735,6 +1059,7 @@ public sealed class ExchangeRecordImporter(
                 db.ExchangeSourceRecords.Add(NewMapping(run, ExchangeRecordKind.LinkEvent, exchangeEvent.SourceId, entity.Id));
                 localEventId = entity.Id;
                 run.Tally.EventsCreated++;
+                run.Tally.Outcomes.Add(ExchangeOutcomes.Links, ExchangeOutcomes.Created);
             }
 
             var added = new List<(int SourceId, LinkEventParticipant Entity)>();
@@ -831,6 +1156,7 @@ public sealed class ExchangeRecordImporter(
         int? localId,
         string reason,
         string? label,
+        string? details,
         short classification,
         int divisionId,
         DateTime now,
@@ -857,6 +1183,7 @@ public sealed class ExchangeRecordImporter(
         conflict.LocalId = localId;
         conflict.Reason = reason.Length <= 500 ? reason : reason[..500];
         conflict.Label = label is { Length: > 500 } ? label[..500] : label;
+        conflict.Details = details is { Length: > DetailsLimit } ? details[..DetailsLimit] : details;
         conflict.Classification = classification;
         conflict.DivisionId = divisionId;
         conflict.UpdatedAt = now;
@@ -870,6 +1197,37 @@ public sealed class ExchangeRecordImporter(
                 .SetProperty(c => c.Status, ExchangeConflictStatus.Cleared)
                 .SetProperty(c => c.UpdatedAt, now), cancellationToken);
 
+    // Решение применено этим приёмом: «применено», каким приёмом и когда. Уже применённое («пропустить» при каждом приёме)
+    // свою первую отметку сохраняет.
+    private static Task<int> MarkAppliedAsync(InvestigationDbContext db, Run run, ExchangeImportConflict decision, CancellationToken cancellationToken) =>
+        MarkAppliedAsync(db, decision.Id, run.ImportId, run.Now, cancellationToken);
+
+    private static Task<int> MarkAppliedAsync(InvestigationDbContext db, int conflictId, int importId, DateTime now, CancellationToken cancellationToken) =>
+        db.ExchangeImportConflicts
+            .Where(c => c.Id == conflictId && c.Status == ExchangeConflictStatus.Decided)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(c => c.Status, ExchangeConflictStatus.Applied)
+                .SetProperty(c => c.AppliedAt, now)
+                .SetProperty(c => c.AppliedImportId, importId)
+                .SetProperty(c => c.UpdatedAt, now), cancellationToken);
+
+    // Решение применить нельзя (своей записи нет, номер занят) — конфликт снова ждёт Руководителя, причина — почему.
+    private static Task<int> ReopenAsync(InvestigationDbContext db, Run run, ExchangeImportConflict decision, string reason, CancellationToken cancellationToken) =>
+        ReopenAsync(db, decision.Id, run.ImportId, reason, run.Now, cancellationToken);
+
+    private static Task<int> ReopenAsync(
+        InvestigationDbContext db, int conflictId, int importId, string reason, DateTime now, CancellationToken cancellationToken)
+    {
+        var text = reason.Length <= 500 ? reason : reason[..500];
+        return db.ExchangeImportConflicts
+            .Where(c => c.Id == conflictId && c.Status == ExchangeConflictStatus.Decided)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(c => c.Status, ExchangeConflictStatus.Pending)
+                .SetProperty(c => c.Reason, text)
+                .SetProperty(c => c.ImportId, importId)
+                .SetProperty(c => c.UpdatedAt, now), cancellationToken);
+    }
+
     private sealed record Run(
         int ImportId,
         string Source,
@@ -878,5 +1236,8 @@ public sealed class ExchangeRecordImporter(
         IReadOnlyDictionary<int, int> References,
         IReadOnlyDictionary<int, int> Users,
         ExchangeImportTally Tally,
-        DateTime Now);
+        DateTime Now,
+        IReadOnlyDictionary<int, ExchangeImportConflict> CaseDecisions,
+        IReadOnlyDictionary<int, ExchangeReference> SourceReferences,
+        HashSet<int> SkippedCases);
 }

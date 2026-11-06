@@ -8,6 +8,7 @@
 @using ISC.AI.Profile.Investigation.Application.Features.Persons
 @using ISC.AI.Profile.Investigation.Application.Features.References
 @using ISC.AI.Profile.Investigation.Domain.Enums
+@using ISC.AI.Profile.Investigation.Domain.Exchange
 @using ISC.AI.Profile.Investigation.Domain.Services
 @using ISC.AI.Modules.Media.Application.Features.Scope
 @using ISC.AI.Modules.Media.Domain.Services
@@ -439,7 +440,7 @@ else
                         {
                             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error">отозвано</MudChip>
                             <MudText Typo="Typo.caption" Class="mud-text-secondary d-block" Style="max-width:260px;">
-                                @(context.RevokedAtUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm")) · @UserName(context.RevokedByUserId)<br />@context.RevokeReason
+                                @(context.RevokedAtUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm")) · @RevokerLabel(context)<br />@context.RevokeReason
                             </MudText>
                         }
                         else
@@ -447,11 +448,24 @@ else
                             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info">следственная версия</MudChip>
                         }
                     </MudTd>
-                    <MudTd DataLabel="Эксперт">@UserName(context.ExpertUserId)</MudTd>
+                    @* Появление из другого офиса (ADR-0068 v0.3): подписи — источника, с пометкой офиса; это не решения получателя (ТБ-073). *@
+                    <MudTd DataLabel="Эксперт">@ExpertLabel(context)</MudTd>
                     @* Режим одного оператора (ADR-0054): подпись одна — второй подписи нет, а не «неизвестна». *@
-                    <MudTd DataLabel="Верификатор">@(context.VerifierUserId is null ? "— (один оператор)" : UserName(context.VerifierUserId))</MudTd>
+                    <MudTd DataLabel="Верификатор">@VerifierLabel(context)</MudTd>
                     <MudTd DataLabel="Подтверждено">@context.ConfirmedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</MudTd>
-                    <MudTd DataLabel="Сессия"><MudLink Href="@($"/media/sessions/{context.SearchSessionId}")">№ @context.SearchSessionId</MudLink></MudTd>
+                    <MudTd DataLabel="Сессия">
+                        @if (context.IsImported)
+                        {
+                            <MudTooltip Text="@ProvenanceTip(context)">
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Secondary"
+                                         Icon="@Icons.Material.Filled.SwapHoriz">импортировано из @context.SourceInstance</MudChip>
+                            </MudTooltip>
+                        }
+                        else
+                        {
+                            <MudLink Href="@($"/media/sessions/{context.SearchSessionId}")">№ @context.SearchSessionId</MudLink>
+                        }
+                    </MudTd>
                     <MudTd>
                         @if (!context.IsRevoked)
                         {
@@ -560,9 +574,11 @@ else
         @if (_revokeTarget is { } target)
         {
             <MudText Typo="Typo.body2" Class="mb-2">
-                Носитель № @target.MediaAssetId · лицо № @target.MediaFaceId · @(target.VerifierUserId is null
-                    ? $"подтвердил {UserName(target.ExpertUserId)} (один оператор)."
-                    : $"подтвердили {UserName(target.ExpertUserId)} и {UserName(target.VerifierUserId)}.")
+                Носитель № @target.MediaAssetId · лицо № @target.MediaFaceId · @(target.IsImported
+                    ? $"импортировано из {target.SourceInstance}: подтвердил {ExpertLabel(target)}" + (Provenance(target)?.Verifier is null ? " (один оператор)." : $" и {VerifierLabel(target)}.")
+                    : target.VerifierUserId is null
+                        ? $"подтвердил {UserName(target.ExpertUserId)} (один оператор)."
+                        : $"подтвердили {UserName(target.ExpertUserId)} и {UserName(target.VerifierUserId)}.")
             </MudText>
         }
         <MudTextField T="string" @bind-Value="_revokeReason" Label="Причина отзыва *" Variant="Variant.Outlined" Lines="3"
@@ -1533,6 +1549,40 @@ else
         var account = _accounts.FirstOrDefault(a => a.UserId == userId);
         if (account is null) { return $"пользователь № {userId}"; }
         return string.IsNullOrWhiteSpace(account.DisplayName) ? account.UserName : account.DisplayName;
+    }
+
+    // Появление из другого офиса (ТФ-ОБМ-02, ADR-0068 v0.3): подписи и решения — источника. Показываются ФИО (или имя
+    // входа) сотрудников источника с пометкой офиса, а не учётки получателя: решения ТБ-073 у получателя не было.
+    private static AppearanceProvenance? Provenance(AppearanceRow row) =>
+        row.IsImported ? AppearanceProvenance.Parse(row.SourceProvenance) : null;
+
+    private static string SourceSign(ProvenanceSignature? signature, AppearanceRow row) =>
+        (signature?.Label ?? "не указан") + " (" + row.SourceInstance + ")";
+
+    private string ExpertLabel(AppearanceRow row) =>
+        row.IsImported ? SourceSign(Provenance(row)?.Expert, row) : UserName(row.ExpertUserId);
+
+    private string VerifierLabel(AppearanceRow row) => row.IsImported
+        ? Provenance(row)?.Verifier is { } verifier ? SourceSign(verifier, row) : "— (один оператор)"
+        : row.VerifierUserId is null ? "— (один оператор)" : UserName(row.VerifierUserId);
+
+    // Отозвано здесь — своя учётка; отозвано у источника и пришло пакетом — подпись источника.
+    private string RevokerLabel(AppearanceRow row) =>
+        row.IsImported && row.RevokedByUserId is null ? SourceSign(Provenance(row)?.RevokedBy, row) : UserName(row.RevokedByUserId);
+
+    private static string ProvenanceTip(AppearanceRow row)
+    {
+        var provenance = Provenance(row);
+        if (provenance is null)
+        {
+            return $"Появление перенесено из {row.SourceInstance}: подтверждено там, не здесь.";
+        }
+
+        var decisions = provenance.Decisions
+            .OrderBy(d => d.DecidedAtUtc)
+            .Select(d => $"{d.StageLabel}: {d.VerdictLabel} — {d.By?.Label ?? "не указан"}, {d.DecidedAtUtc.ToLocalTime():dd.MM.yyyy HH:mm}");
+        return $"Перенесено из {provenance.SourceInstance} (пакет {provenance.PackageName}, появление № {provenance.SourceAppearanceId} у источника). "
+               + "Решения источника, не получателя: " + string.Join("; ", decisions) + ".";
     }
 
     // Балл схожести — в процентах шкалы пакета «Медиа» (ADR-0054), тем же числом, что на чипе схожести и в пороге поиска:

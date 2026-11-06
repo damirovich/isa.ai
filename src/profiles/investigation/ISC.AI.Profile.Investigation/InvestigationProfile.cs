@@ -92,6 +92,11 @@ public sealed class InvestigationProfile : IProfile
         // Страницу даёт пакет «Чат» (ADR-0052), профиль — название, секцию и порт IChatProfile.
         ChatModule.Page("Чат по материалам", GroupCases, Icons.Material.Filled.QuestionAnswer),
 
+        // Конфликты обмена между офисами (ТФ-ОБМ-02, ADR-0068 v0.3): дела и носители пакета другого офиса, совпавшие со
+        // своими, — решение по содержанию, поэтому право «Конфликты обмена между офисами» у Руководителя, не у Администратора.
+        new ModuleDescriptor("exchange-conflicts", "/exchange/conflicts", "Конфликты обмена",
+            Icons.Material.Filled.CallMerge, typeof(ExchangeConflicts), ReadPolicy, GroupCases),
+
         // --- Секция «Медиа»: страницы объявляет САМ пакет (носители, «Поиск по лицу», «Верификация»);
         // профиль лишь включает их в реестр (ADR-0017/0022).
         .. MediaModule.Modules,

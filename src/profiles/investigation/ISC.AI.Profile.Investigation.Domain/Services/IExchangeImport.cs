@@ -36,6 +36,9 @@ public sealed record ExchangeImportReadiness(
 /// <param name="Problem">Почему пакет нельзя принять; <see langword="null"/> — можно.</param>
 /// <param name="LastStatus">Итог последнего приёма этого пакета.</param>
 /// <param name="LastImportAt">Когда его принимали последний раз (UTC).</param>
+/// <param name="DecisionsAwaiting">
+/// Решения Руководителя по конфликтам, найденным этим пакетом, которые ждут повторного приёма (ADR-0068 v0.3) — только число.
+/// </param>
 public sealed record ExchangePackageRow(
     string FolderName,
     string? SourceInstance,
@@ -46,7 +49,8 @@ public sealed record ExchangePackageRow(
     long? Bytes,
     string? Problem,
     ExchangeImportStatus? LastStatus,
-    DateTime? LastImportAt)
+    DateTime? LastImportAt,
+    int DecisionsAwaiting = 0)
 {
     /// <summary>Пакет можно принять.</summary>
     public bool CanImport => Problem is null;
@@ -76,18 +80,39 @@ public sealed record ExchangeImportRow(
     int MissingFiles,
     int Rejected,
     short? Classification,
-    string? Error);
+    string? Error,
+    int Merged = 0,
+    int SkippedByDecision = 0,
+    int FacesLinked = 0,
+    int FacesNotFound = 0,
+    bool? ReconciliationOk = null,
+    string? Reconciliation = null);
+
+/// <summary>
+/// Эталоны и появления из пакетов, ждущие лица в индексации получателя (ADR-0068 v0.3) — только числа, без содержимого.
+/// </summary>
+/// <param name="Waiting">Ждут: дело, объект или носитель ещё не приняты либо носитель индексируется.</param>
+/// <param name="NotFound">Лицо не найдено — повторится после переиндексации носителя.</param>
+/// <param name="Linked">Перенесено.</param>
+/// <param name="Skipped">Пропущено вместе с делом или носителем по решению Руководителя.</param>
+public sealed record ExchangeFaceBacklog(int Waiting, int NotFound, int Linked, int Skipped);
 
 /// <summary>Экран приёма: готовность, пакеты на носителе, журнал приёмов и ход текущего.</summary>
 /// <param name="Readiness">Готовность.</param>
 /// <param name="Packages">Пакеты на носителе.</param>
 /// <param name="Recent">Последние приёмы.</param>
 /// <param name="RunningStage">Ход текущего приёма словами; <see langword="null"/> — приёма нет.</param>
+/// <param name="ConflictsPending">Конфликтов ждут решения Руководителя (число; сами конфликты — в его очереди).</param>
+/// <param name="DecisionsAwaiting">Решений Руководителя ждут повторного приёма пакета.</param>
+/// <param name="Faces">Эталоны и появления, ждущие лица.</param>
 public sealed record ExchangeImportOverview(
     ExchangeImportReadiness Readiness,
     IReadOnlyList<ExchangePackageRow> Packages,
     IReadOnlyList<ExchangeImportRow> Recent,
-    string? RunningStage);
+    string? RunningStage,
+    int ConflictsPending = 0,
+    int DecisionsAwaiting = 0,
+    ExchangeFaceBacklog? Faces = null);
 
 /// <summary>Итог запуска приёма.</summary>
 /// <param name="ImportId">Номер приёма; <see langword="null"/> — не запущен.</param>

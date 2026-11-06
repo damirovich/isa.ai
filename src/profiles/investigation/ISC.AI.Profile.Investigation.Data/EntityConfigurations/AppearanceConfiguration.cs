@@ -10,13 +10,19 @@ public class AppearanceConfiguration : IEntityTypeConfiguration<Appearance>
     /// <inheritdoc />
     public void Configure(EntityTypeBuilder<Appearance> builder)
     {
-        builder.ToTable("appearance", InvestigationDbContext.Schema);
+        // ИНВАРИАНТ ПРОИСХОЖДЕНИЯ (ТБ-073, ADR-0068 v0.3): локальное появление — только из подтверждённого кандидата
+        // (сеанс, кандидат и первая подпись заданы); без них — только перенесённое из другого офиса, с пометкой источника.
+        // Ограничение держит это и против записи в обход хранилища.
+        builder.ToTable("appearance", InvestigationDbContext.Schema, table => table.HasCheckConstraint(
+            "ck_appearance_origin",
+            "(search_session_id IS NOT NULL AND candidate_id IS NOT NULL AND expert_user_id IS NOT NULL) OR source_instance IS NOT NULL"));
         builder.HasKey(e => e.Id);
 
         builder.Property(e => e.Classification).IsRequired();
         builder.Property(e => e.DivisionId).IsRequired();
         builder.Property(e => e.Status).IsRequired();
         builder.Property(e => e.RevokeReason).HasMaxLength(1000);
+        builder.Property(e => e.SourceInstance).HasMaxLength(32);
 
         // FK внутри схемы (ТО-инф-08); носитель/лицо/сессия/кандидат — по значению → схема media.
         builder.HasOne(e => e.Person).WithMany()

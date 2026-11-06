@@ -52,12 +52,40 @@ public sealed partial class ExchangeSettings
     public IReadOnlyDictionary<string, ExchangeSourceKey> Sources { get; init; } =
         new Dictionary<string, ExchangeSourceKey>(StringComparer.Ordinal);
 
+    /// <summary>Допуск таймкода по умолчанию — половина шага выборки кадров при 1 кадре/с.</summary>
+    public const long DefaultFaceMatchMaxTimeOffsetMs = 500;
+
+    /// <summary>Порог перекрытия рамок (IoU) по умолчанию.</summary>
+    public const double DefaultFaceMatchMinOverlap = 0.5;
+
+    /// <summary>Период фонового сопоставления по умолчанию, с.</summary>
+    public const int DefaultFaceMatchPollSeconds = 60;
+
+    /// <summary>
+    /// Допуск таймкода при поиске того же лица в индексации получателя, мс (<c>Exchange:Import:FaceMatch:MaxTimeOffsetMs</c>,
+    /// ADR-0068 v0.3): кадр получателя должен отстоять от кадра источника не дальше.
+    /// </summary>
+    public long FaceMatchMaxTimeOffsetMs { get; init; } = DefaultFaceMatchMaxTimeOffsetMs;
+
+    /// <summary>Порог перекрытия рамок, IoU 0–1 (<c>Exchange:Import:FaceMatch:MinOverlap</c>).</summary>
+    public double FaceMatchMinOverlap { get; init; } = DefaultFaceMatchMinOverlap;
+
+    /// <summary>Период фонового сопоставления лиц после приёма, с (<c>Exchange:Import:FaceMatch:PollSeconds</c>).</summary>
+    public int FaceMatchPollSeconds { get; init; } = DefaultFaceMatchPollSeconds;
+
     /// <summary>Настройки из конфигурации.</summary>
     public static ExchangeSettings Read(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         return new ExchangeSettings
         {
+            // Пределы держат настройку в разумном: допуск не шире 10 с (дальше «то же лицо» — уже другое), порог не ниже 0,1.
+            FaceMatchMaxTimeOffsetMs = Math.Clamp(
+                Number(configuration["Exchange:Import:FaceMatch:MaxTimeOffsetMs"]) is { } offset ? (long)offset : DefaultFaceMatchMaxTimeOffsetMs, 0, 10_000),
+            FaceMatchMinOverlap = Math.Clamp(
+                Number(configuration["Exchange:Import:FaceMatch:MinOverlap"]) ?? DefaultFaceMatchMinOverlap, 0.1, 1.0),
+            FaceMatchPollSeconds = Math.Clamp(
+                Number(configuration["Exchange:Import:FaceMatch:PollSeconds"]) is { } poll ? (int)poll : DefaultFaceMatchPollSeconds, 10, 3600),
             InstanceId = Value(configuration["Exchange:InstanceId"]),
             TargetFolder = Value(configuration["Exchange:TargetFolder"]),
             RecipientKeyPath = Value(configuration["Exchange:Recipient:PublicKey:Path"]),
@@ -261,6 +289,13 @@ public sealed partial class ExchangeSettings
     }
 
     private static string? Value(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+
+    // Число из конфигурации — с точкой, независимо от культуры сервера; нечитаемое — умолчание.
+    private static double? Number(string? text) =>
+        double.TryParse(Value(text), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value)
+        && double.IsFinite(value)
+            ? value
+            : null;
 
     [GeneratedRegex("^[a-z0-9-]{1,32}$")]
     private static partial Regex InstanceIdPattern();

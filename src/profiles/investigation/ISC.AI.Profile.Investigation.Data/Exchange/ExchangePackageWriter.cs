@@ -212,9 +212,11 @@ public sealed class ExchangePackageWriter(
         var revisions = (await db.CaseReportRevisions.AsNoTracking().Where(v => reportIds.Contains(v.ReportId)).ToListAsync(cancellationToken))
             .ToLookup(v => v.ReportId);
 
-        // --- Появления, подтверждённые или отозванные за период.
+        // --- Появления, подтверждённые или отозванные за период. Только свои: появление, перенесённое из другого офиса
+        // (ADR-0068 v0.3), дальше не пересылается — у него нет своих решений верификации (ТБ-073), а обратного потока нет.
+        // У своих сеанс, кандидат и первая подпись заданы всегда — это держит ограничение ck_appearance_origin.
         var appearances = await db.Appearances.AsNoTracking()
-            .Where(a => caseIds.Contains(a.CaseId) && personIds.Contains(a.PersonId)
+            .Where(a => caseIds.Contains(a.CaseId) && personIds.Contains(a.PersonId) && a.SourceInstance == null
                 && ((a.ConfirmedAtUtc >= from && a.ConfirmedAtUtc < to) || (a.RevokedAtUtc >= from && a.RevokedAtUtc < to)))
             .OrderBy(a => a.Id)
             .ToListAsync(cancellationToken);
@@ -245,7 +247,7 @@ public sealed class ExchangePackageWriter(
             .Concat(appearances.Select(a => a.MediaFaceId))
             .ToHashSet();
         var faces = await media.GetFacesAsync([.. faceIds], cancellationToken);
-        var decisions = (await media.GetDecisionsAsync([.. appearances.Select(a => a.CandidateId)], cancellationToken))
+        var decisions = (await media.GetDecisionsAsync([.. appearances.Select(a => a.CandidateId!.Value)], cancellationToken))
             .ToLookup(d => d.CandidateId);
 
         // --- Модель пакета.
@@ -300,8 +302,8 @@ public sealed class ExchangePackageWriter(
 
         var exchangeAppearances = appearances.Select(a => new ExchangeAppearance(
             a.Id, a.PersonId, a.CaseId, a.MediaAssetId, a.MediaFaceId, a.FrameIndex, a.FrameTimestampMs, a.Similarity, a.Status,
-            a.ConfirmedAtUtc, a.ExpertUserId, a.VerifierUserId, a.RevokedAtUtc, a.RevokedByUserId, a.RevokeReason, a.Classification,
-            [.. decisions[a.CandidateId].Select(d => new ExchangeDecision(
+            a.ConfirmedAtUtc, a.ExpertUserId!.Value, a.VerifierUserId, a.RevokedAtUtc, a.RevokedByUserId, a.RevokeReason, a.Classification,
+            [.. decisions[a.CandidateId!.Value].Select(d => new ExchangeDecision(
                 d.Stage.ToString(), d.Verdict.ToString(), d.Rationale, d.DecidedAtUtc, d.UserId, d.ConfirmationMode.ToString()))]))
             .ToList();
 

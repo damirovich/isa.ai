@@ -181,7 +181,7 @@ public sealed class PersonStore(
                 a.Id, a.PersonId, a.CaseId, a.MediaAssetId, a.MediaFaceId, a.FrameIndex, a.FrameTimestampMs,
                 a.SearchSessionId, a.CandidateId, a.Similarity, a.Status, a.ConfirmedAtUtc,
                 a.ExpertUserId, a.VerifierUserId, a.RevokedAtUtc, a.RevokedByUserId, a.RevokeReason,
-                null, null, null, a.Classification))
+                null, null, null, a.Classification, a.SourceInstance, a.SourceProvenance))
             .ToListAsync(cancellationToken);
     }
 

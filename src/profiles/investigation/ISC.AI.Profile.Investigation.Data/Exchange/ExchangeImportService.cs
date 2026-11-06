@@ -68,6 +68,7 @@ public sealed partial class ExchangeImportService(
     IExchangePackages packages,
     ExchangeImportChannel channel,
     ExchangeRecordImporter records,
+    ExchangeFaceLinker faces,
     IMediaExchangeSource mediaLookup,
     IMediaStore mediaStore,
     ICaseScope caseScope,
@@ -86,11 +87,33 @@ public sealed partial class ExchangeImportService(
     // Источник носителя — для сотрудников (откуда файл) и для разбора; длина поля носителя.
     private const int SourceTextLimit = 500;
 
+    // Текст сверки в журнале приёмов — длина столбца.
+    private const int ReconciliationLimit = 4000;
+
     /// <inheritdoc />
     public async Task<ExchangeImportOverview> GetImportOverviewAsync(CancellationToken cancellationToken = default)
     {
         var readiness = settings.CheckImport(packages);
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Только числа (ТБ-079): сами конфликты — в очереди Руководителя под его допуском.
+        var conflictsPending = await db.ExchangeImportConflicts.CountAsync(c => c.Status == ExchangeConflictStatus.Pending, cancellationToken);
+        var awaiting = (await db.ExchangeImportConflicts.AsNoTracking()
+                .Where(c => c.Status == ExchangeConflictStatus.Decided)
+                .Join(db.ExchangeImports, c => c.ImportId, i => i.Id, (c, i) => i.PackageName)
+                .ToListAsync(cancellationToken))
+            .GroupBy(name => name, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+        var faceCounts = await db.ExchangePendingFaces.AsNoTracking()
+            .GroupBy(r => r.Status)
+            .Select(g => new { Status = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(g => g.Status, g => g.Count, cancellationToken);
+        var faces = new ExchangeFaceBacklog(
+            faceCounts.GetValueOrDefault(ExchangePendingFaceStatus.Pending),
+            faceCounts.GetValueOrDefault(ExchangePendingFaceStatus.NotFound),
+            faceCounts.GetValueOrDefault(ExchangePendingFaceStatus.Linked),
+            faceCounts.GetValueOrDefault(ExchangePendingFaceStatus.Skipped));
+
         var rows = new List<ExchangePackageRow>();
         if (settings.ImportFolder is { } folder)
         {
@@ -117,7 +140,8 @@ public sealed partial class ExchangeImportService(
                     manifest?.Files.Sum(f => f.Bytes),
                     header.Problem ?? Unacceptable(manifest),
                     previous?.Status,
-                    previous?.StartedAt));
+                    previous?.StartedAt,
+                    awaiting.GetValueOrDefault(name)));
             }
         }
 
@@ -128,10 +152,11 @@ public sealed partial class ExchangeImportService(
                 i.Id, i.StartedAt, i.FinishedAt, i.Status, i.StartedByUserId, i.PackageName, i.SourceInstance, i.Period,
                 i.GatewayConfirmed, i.CasesCreated, i.PersonsCreated, i.EventsCreated, i.ReportsCreated, i.AssetsCreated,
                 i.FilesReceived, i.BytesReceived, i.AlreadyImported, i.Conflicts, i.Deferred, i.MissingFiles, i.Rejected,
-                i.Classification, i.Error))
+                i.Classification, i.Error, i.Merged, i.SkippedByDecision, i.FacesLinked, i.FacesNotFound, i.ReconciliationOk,
+                i.Reconciliation))
             .ToListAsync(cancellationToken);
         var running = recent.Any(r => r.Status == ExchangeImportStatus.Running) ? channel.Stage ?? "Приём идёт…" : null;
-        return new ExchangeImportOverview(readiness, rows, recent, running);
+        return new ExchangeImportOverview(readiness, rows, recent, running, conflictsPending, awaiting.Values.Sum(), faces);
     }
 
     /// <inheritdoc />
@@ -231,8 +256,18 @@ public sealed partial class ExchangeImportService(
             var result = await records.ImportAsync(job.ImportId, manifest.SourceInstance, data, tally, cancellationToken);
 
             await ImportAssetsAsync(job, folder, manifest, data, result, receivingKey, tally, cancellationToken);
-            await FinishAsync(job.ImportId, tally, cancellationToken);
-            await WriteActAsync(job, manifest, tally, cancellationToken);
+
+            // Эталоны и появления (ADR-0068 v0.3): в ожидание, и сразу — проход по носителям, уже проиндексированным у
+            // получателя; остальное перенесёт фоновое сопоставление после их индексации. Проход переносит и ждавшее из
+            // прежних пакетов — поэтому свой акт переноса он пишет всегда (ТБ-030), а не только в акте этого приёма.
+            channel.Stage = "Эталоны и появления: сопоставление лиц…";
+            var queued = await faces.QueueAsync(job.ImportId, job.PackageName, manifest.SourceInstance, data, tally, cancellationToken);
+            var linked = await faces.LinkAsync(manifest.SourceInstance, auditLinks: true, cancellationToken);
+            CountFaces(queued, linked, tally);
+
+            var reconciliation = tally.Outcomes.Reconcile(Expected(data));
+            await FinishAsync(job.ImportId, tally, reconciliation, cancellationToken);
+            await WriteActAsync(job, manifest, tally, reconciliation, cancellationToken);
             LogImported(logger, job.ImportId, job.PackageName);
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
@@ -392,6 +427,7 @@ public sealed partial class ExchangeImportService(
         CancellationToken cancellationToken)
     {
         var source = manifest.SourceInstance;
+        var outcomes = tally.Outcomes;
 
         // Носители, принятые из этого же источника, — не конфликт: у источника один файл может лежать в двух носителях
         // (разные подразделения или гриф). Конфликт ТФ-ОБМ-02 — совпадение со своим носителем получателя.
@@ -412,21 +448,71 @@ public sealed partial class ExchangeImportService(
                 .Where(l => result.Cases.ContainsKey(l.CaseSourceId))
                 .Select(l => (Link: l, Case: result.Cases[l.CaseSourceId]))
                 .ToList();
+            result.AssetDecisions.TryGetValue(asset.SourceId, out var decision);
             if (await records.FindMappedAsync(source, ExchangeRecordKind.Asset, asset.SourceId, cancellationToken) is { } mapped)
             {
-                // Принят прежде — привязать к делам, принятым теперь (привязка идемпотентна).
+                // Принят (или объединён) прежде — привязать к делам, принятым теперь (привязка идемпотентна).
                 foreach (var (link, linked) in targets)
                 {
                     await caseScope.LinkAssetAsync(linked.LocalId, mapped, link.Place, job.UserId, cancellationToken);
                 }
 
+                if (decision is { Status: ExchangeConflictStatus.Decided })
+                {
+                    await records.MarkAppliedAsync(decision.Id, job.ImportId, cancellationToken);
+                }
+
                 tally.AlreadyImported++;
+                outcomes.Add(ExchangeOutcomes.Assets, ExchangeOutcomes.Already);
+                continue;
+            }
+
+            // «Пропустить» (ADR-0068 v0.3) действует при каждом приёме: носитель не переносится, его эталоны и появления — тоже.
+            if (decision is { Decision: ExchangeConflictDecision.Skip })
+            {
+                await records.MarkAppliedAsync(decision.Id, job.ImportId, cancellationToken);
+                tally.SkippedByDecision++;
+                tally.DecisionLabels.Add("носитель «" + asset.OriginalFileName + "»: пропущен по решению Руководителя");
+                outcomes.Add(ExchangeOutcomes.Assets, ExchangeOutcomes.Skipped);
                 continue;
             }
 
             if (targets.Count == 0)
             {
+                // Ни одно дело носителя не принято: все пропущены по решению — носитель пропущен с ними, иначе ждёт их.
+                var skipped = asset.Cases.Count > 0 && asset.Cases.All(l => result.SkippedCases.Contains(l.CaseSourceId));
                 tally.HeldWithConflict++;
+                outcomes.Add(ExchangeOutcomes.Assets, skipped ? ExchangeOutcomes.Skipped : ExchangeOutcomes.Held);
+                continue;
+            }
+
+            if (decision is { Decision: ExchangeConflictDecision.Merge })
+            {
+                // «Объединить»: носитель источника = свой носитель с тем же файлом. Свой проверяется заново — его могли удалить,
+                // а хеш подтверждает, что содержимое то же (ТФ-МЕД-04). Гриф своего носителя не меняется (ADR-0068 v0.3).
+                var target = decision.DecisionLocalId ?? decision.LocalId;
+                var same = target is { } targetId
+                           && (await mediaLookup.FindByContentHashAsync([asset.ContentHash], cancellationToken)).Any(m => m.AssetId == targetId);
+                if (!same)
+                {
+                    await records.ReopenAsync(decision.Id, job.ImportId, "своего носителя с тем же файлом больше нет — решите заново", cancellationToken);
+                    tally.Conflicts++;
+                    tally.ConflictLabels.Add("носитель «" + asset.OriginalFileName + "» (решение «объединить» не применено: своего носителя нет)");
+                    outcomes.Add(ExchangeOutcomes.Assets, ExchangeOutcomes.Conflict);
+                    continue;
+                }
+
+                await records.MapAsync(job.ImportId, source, ExchangeRecordKind.Asset, asset.SourceId, target!.Value, cancellationToken);
+                foreach (var (link, linked) in targets)
+                {
+                    await caseScope.LinkAssetAsync(linked.LocalId, target.Value, link.Place, job.UserId, cancellationToken);
+                }
+
+                await records.MarkAppliedAsync(decision.Id, job.ImportId, cancellationToken);
+                tally.Merged++;
+                tally.DecisionLabels.Add("носитель «" + asset.OriginalFileName + "» объединён со своим носителем № "
+                                         + target.Value.ToString(CultureInfo.InvariantCulture));
+                outcomes.Add(ExchangeOutcomes.Assets, ExchangeOutcomes.Merged);
                 continue;
             }
 
@@ -435,10 +521,11 @@ public sealed partial class ExchangeImportService(
             {
                 var label = asset.OriginalFileName;
                 await records.AddConflictAsync(job.ImportId, source, ExchangeConflictKind.Asset, asset.SourceId, match.AssetId,
-                    "у получателя уже есть носитель с тем же файлом (SHA-256)", label, asset.Classification, targets[0].Case.DivisionId,
-                    cancellationToken);
+                    "у получателя уже есть носитель с тем же файлом (SHA-256)", label, AssetDetails(asset), asset.Classification,
+                    targets[0].Case.DivisionId, cancellationToken);
                 tally.Conflicts++;
                 tally.ConflictLabels.Add("носитель «" + label + "» (тот же файл, что носитель № " + match.AssetId.ToString(CultureInfo.InvariantCulture) + ")");
+                outcomes.Add(ExchangeOutcomes.Assets, ExchangeOutcomes.Conflict);
                 continue;
             }
 
@@ -446,16 +533,17 @@ public sealed partial class ExchangeImportService(
             {
                 // Файл ушёл прежним пакетом (или его вид не выбирали) — сначала надо принять тот пакет.
                 tally.MissingFiles++;
+                outcomes.Add(ExchangeOutcomes.Assets, ExchangeOutcomes.MissingFile);
                 continue;
             }
 
             var (firstLink, firstCase) = targets[0];
 
             // Гриф носителя — не ниже грифа дела и не ниже грифа источника: приём гриф не понижает.
-            var target = new CaseScopeItem(
+            var targetCase = new CaseScopeItem(
                 firstCase.LocalId, firstCase.Number, firstCase.Title, Math.Max(firstCase.Classification, asset.Classification), firstCase.DivisionId);
             var request = new MediaIntakeRequest(
-                target,
+                targetCase,
                 asset.OriginalFileName,
                 asset.ContentType,
                 asset.ByteSize,
@@ -469,6 +557,7 @@ public sealed partial class ExchangeImportService(
             {
                 tally.Rejected++;
                 tally.Rejections.Add(asset.OriginalFileName + ": " + (received.Message ?? "отказ приёма"));
+                outcomes.Add(ExchangeOutcomes.Assets, ExchangeOutcomes.Rejected);
                 continue;
             }
 
@@ -489,8 +578,45 @@ public sealed partial class ExchangeImportService(
             tally.AssetsCreated++;
             tally.FilesReceived++;
             tally.BytesReceived += asset.ByteSize;
+            outcomes.Add(ExchangeOutcomes.Assets, ExchangeOutcomes.Created);
         }
     }
+
+    // Описание носителя источника для очереди Руководителя (ADR-0068 v0.3): по нему и по своему носителю решают «объединить».
+    private static string AssetDetails(ExchangeAsset asset)
+    {
+        var parts = new List<string>
+        {
+            MediaKindLabel(asset.Kind) + " «" + asset.OriginalFileName + "»",
+            (asset.ByteSize / 1048576.0).ToString("0.0", CultureInfo.InvariantCulture) + " МБ",
+        };
+        if (asset.CapturedAt is { } captured)
+        {
+            parts.Add("снято " + captured.ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture));
+        }
+
+        if (asset.DurationMs is { } duration)
+        {
+            parts.Add("длительность " + TimeSpan.FromMilliseconds(duration).ToString(@"h\:mm\:ss", CultureInfo.InvariantCulture));
+        }
+
+        if (!string.IsNullOrWhiteSpace(asset.Source))
+        {
+            parts.Add("источник: " + asset.Source.Trim());
+        }
+
+        parts.Add("гриф: " + ClassificationLevels.Label(asset.Classification));
+        var text = string.Join("; ", parts);
+        return text.Length <= ExchangeRecordImporter.DetailsLimit ? text : text[..ExchangeRecordImporter.DetailsLimit];
+    }
+
+    private static string MediaKindLabel(string kind) => kind switch
+    {
+        "Photo" => "фото",
+        "Video" => "видео",
+        "Audio" => "звукозапись",
+        _ => kind,
+    };
 
     /// <summary>
     /// Файл носителя — расшифровкой прямо в общий приём «Медиа», без открытой копии на диске: приём сверяет сигнатуру,
@@ -577,14 +703,55 @@ public sealed partial class ExchangeImportService(
             .SetProperty(i => i.Classification, manifest.Classification), cancellationToken);
     }
 
-    private async Task FinishAsync(int importId, ExchangeImportTally tally, CancellationToken cancellationToken)
+    private async Task FinishAsync(
+        int importId, ExchangeImportTally tally, (bool Ok, string Text) reconciliation, CancellationToken cancellationToken)
     {
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
         var row = await db.ExchangeImports.SingleAsync(i => i.Id == importId, cancellationToken);
         Apply(row, tally);
+        row.ReconciliationOk = reconciliation.Ok;
+        row.Reconciliation = reconciliation.Text.Length <= ReconciliationLimit ? reconciliation.Text : reconciliation.Text[..ReconciliationLimit];
         row.Status = ExchangeImportStatus.Succeeded;
         row.FinishedAt = timeProvider.GetUtcNow().UtcDateTime;
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    // Сверка ЦС-08: ждём по каждому виду столько исходов, сколько записей в содержимом (оно уже сверено с подписанным
+    // манифестом); эталонов в манифесте нет — их число берётся из содержимого.
+    private static Dictionary<string, int> Expected(ExchangePackageData data)
+    {
+        var expected = data.Counts().ToDictionary(c => c.Key, c => c.Value, StringComparer.Ordinal);
+        expected[ExchangeOutcomes.ReferencePhotos] = data.ReferencePhotos.Count;
+        return expected;
+    }
+
+    // Исход эталонов и появлений ЭТОГО пакета после прохода сопоставления (прочие строки прохода — прежних пакетов).
+    private static void CountFaces(
+        IReadOnlySet<(ExchangeRecordKind Kind, int SourceId)> queued, ExchangeFaceLinkResult linked, ExchangeImportTally tally)
+    {
+        foreach (var (kind, sourceId) in queued)
+        {
+            var outcomeKind = kind == ExchangeRecordKind.Appearance ? ExchangeOutcomes.Appearances : ExchangeOutcomes.ReferencePhotos;
+            var status = linked.Statuses.TryGetValue((kind, sourceId), out var known) ? known : ExchangePendingFaceStatus.Pending;
+            switch (status)
+            {
+                case ExchangePendingFaceStatus.Linked:
+                    tally.FacesLinked++;
+                    tally.Outcomes.Add(outcomeKind, ExchangeOutcomes.Linked);
+                    break;
+                case ExchangePendingFaceStatus.NotFound:
+                    tally.FacesNotFound++;
+                    tally.Outcomes.Add(outcomeKind, ExchangeOutcomes.NotFound);
+                    break;
+                case ExchangePendingFaceStatus.Skipped:
+                    tally.Outcomes.Add(outcomeKind, ExchangeOutcomes.Skipped);
+                    break;
+                default:
+                    tally.Deferred++;
+                    tally.Outcomes.Add(outcomeKind, ExchangeOutcomes.Pending);
+                    break;
+            }
+        }
     }
 
     private async Task FailAsync(int importId, ExchangeImportTally tally, string reason, CancellationToken cancellationToken)
@@ -616,14 +783,20 @@ public sealed partial class ExchangeImportService(
         row.BytesReceived = tally.BytesReceived;
         row.AlreadyImported = tally.AlreadyImported;
         row.Conflicts = tally.Conflicts;
+        row.Merged = tally.Merged;
+        row.SkippedByDecision = tally.SkippedByDecision;
+        row.FacesLinked = tally.FacesLinked;
         row.Deferred = tally.Deferred;
+        row.FacesNotFound = tally.FacesNotFound;
         row.MissingFiles = tally.MissingFiles;
         row.Rejected = tally.Rejected;
     }
 
-    // Акт приёма (ТФ-ОБМ-02, ЦС-08): гриф — маркировка пакета; счётчики манифеста и итог по видам — для сверки; перечень
-    // конфликтов (номера дел, имена файлов) — в защищённой части (ТБ-032).
-    private Task WriteActAsync(ExchangeImportJob job, ExchangeManifestInfo manifest, ExchangeImportTally tally, CancellationToken cancellationToken)
+    // Акт приёма (ТФ-ОБМ-02, ЦС-08): гриф — маркировка пакета; счётчики манифеста, исходы по видам и сверка; перечень
+    // конфликтов и применённых решений (номера дел, имена файлов) — в защищённой части (ТБ-032).
+    private Task WriteActAsync(
+        ExchangeImportJob job, ExchangeManifestInfo manifest, ExchangeImportTally tally, (bool Ok, string Text) reconciliation,
+        CancellationToken cancellationToken)
     {
         var counts = string.Join(", ", manifest.Counts.Select(c => c.Key + "=" + c.Value.ToString(CultureInfo.InvariantCulture)));
         var text = string.Create(
@@ -633,11 +806,24 @@ public sealed partial class ExchangeImportService(
             + $"заведено: дел {tally.CasesCreated}, объектов {tally.PersonsCreated}, реквизитов {tally.RequisitesCreated}, "
             + $"событий связи {tally.EventsCreated}, участников {tally.ParticipantsCreated}, сводок {tally.ReportsCreated}, "
             + $"записей справочника {tally.ReferencesCreated}, носителей {tally.AssetsCreated} (файлов {tally.FilesReceived}, байт {tally.BytesReceived}); "
-            + $"уже принято прежде: {tally.AlreadyImported}; конфликтов: {tally.Conflicts}; не перенесено с конфликтными делами: {tally.HeldWithConflict}; "
-            + $"отложено до этапа 3 (эталоны, появления): {tally.Deferred}; носителей без файла: {tally.MissingFiles}; отклонено файлов: {tally.Rejected}");
+            + $"уже принято прежде: {tally.AlreadyImported}; конфликтов без решения: {tally.Conflicts}; объединено по решению: {tally.Merged}; "
+            + $"пропущено по решению: {tally.SkippedByDecision}; не перенесено с конфликтными делами: {tally.HeldWithConflict}; "
+            + $"эталонов и появлений перенесено: {tally.FacesLinked}, ждут сопоставления лица: {tally.Deferred}, лицо не найдено: {tally.FacesNotFound}; "
+            + $"отозвано вслед за источником: {tally.SourceRevocations.Count}; носителей без файла: {tally.MissingFiles}; отклонено файлов: {tally.Rejected}; "
+            + $"сверка с манифестом — {(reconciliation.Ok ? "сошлась" : "НЕ СОШЛАСЬ")}: {reconciliation.Text}");
         if (tally.ConflictLabels.Count > 0)
         {
             text += "; конфликты: " + string.Join("; ", tally.ConflictLabels);
+        }
+
+        if (tally.DecisionLabels.Count > 0)
+        {
+            text += "; решения Руководителя: " + string.Join("; ", tally.DecisionLabels);
+        }
+
+        if (tally.SourceRevocations.Count > 0)
+        {
+            text += "; отозваны появления № " + string.Join(", ", tally.SourceRevocations.Select(id => id.ToString(CultureInfo.InvariantCulture)));
         }
 
         if (tally.Rejections.Count > 0)
