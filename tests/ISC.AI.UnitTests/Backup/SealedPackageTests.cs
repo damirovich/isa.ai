@@ -208,6 +208,96 @@ public sealed class SealedPackageTests : IDisposable
         check.Manifest.Files.Count.ShouldBe(2);
     }
 
+    [Fact(DisplayName = "Приём (ADR-0068 v0.2): перечень — готовые пакеты без «.partial»; быстрая проверка подписи — по ключу источника, которого называет манифест")]
+    public async Task Receiver_lists_and_reads_headers()
+    {
+        var packages = new ExchangePackages();
+        var first = await MakePackageAsync("isc-exchange-office-2-2026-10-2026-11-01_090000");
+        await MakePackageAsync("isc-exchange-office-2-2026-09-2026-10-01_090000");
+        Directory.CreateDirectory(Path.Combine(_dir, "isc-exchange-office-2-2026-11-x" + SealedPackageWriter.PartialSuffix));
+        Directory.CreateDirectory(Path.Combine(_dir, "чужой-каталог"));
+
+        packages.ListPackages(_dir, "isc-exchange-").ShouldBe(
+            ["isc-exchange-office-2-2026-09-2026-10-01_090000", "isc-exchange-office-2-2026-10-2026-11-01_090000"]);
+        packages.ListPackages(Path.Combine(_dir, "нет-носителя"), "isc-exchange-").ShouldBeEmpty();
+
+        var requested = new List<string>();
+        var valid = await packages.ReadHeaderAsync(first, source => { requested.Add(source); return Signing.Value; });
+        valid.SignatureValid.ShouldBeTrue(valid.Problem);
+        requested.ShouldBe(["office-2"]);
+        var manifest = valid.Manifest.ShouldNotBeNull();
+        (manifest.SourceInstance, manifest.Period, manifest.Counts["cases"]).ShouldBe(("office-2", "2026-10", 1));
+        manifest.ManifestSha256.ShouldBe(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(Path.Combine(first, SealedPackageManifest.FileName)))));
+        manifest.Files.Select(f => f.Name).ShouldBe(["data.json.enc", "media/000001.enc"]);
+
+        var unknown = await packages.ReadHeaderAsync(first, _ => null);
+        (unknown.SignatureValid, unknown.ClaimedSource).ShouldBe((false, "office-2"));
+        unknown.Problem.ShouldNotBeNull().ShouldContain("не настроен");
+
+        var foreign = await packages.ReadHeaderAsync(first, _ => Stranger.Value);
+        foreign.Manifest.ShouldBeNull();
+        foreign.Problem.ShouldNotBeNull().ShouldContain("Подпись манифеста не сходится");
+
+        File.Delete(Path.Combine(first, SealedPackageManifest.SignatureFileName));
+        (await packages.ReadHeaderAsync(first, _ => Signing.Value)).Problem.ShouldNotBeNull().ShouldContain("Нет манифеста");
+    }
+
+    [Fact(DisplayName = "Приём: полная проверка — пакет для другого ключа отклоняется; расшифровка со сверкой SHA-256 ловит подмену после проверки; имя «../» не пускается")]
+    public async Task Receiver_verifies_and_decrypts()
+    {
+        var packages = new ExchangePackages();
+        var folder = await MakePackageAsync("isc-exchange-office-2-2026-10-2026-11-01_090000");
+
+        var verified = await packages.VerifyAsync(folder, Signing.Value, BackupKeys.FingerprintHex(Recipient.Value));
+        verified.Ok.ShouldBeTrue(string.Join("; ", verified.Problems));
+        var data = verified.Manifest!.Files.Single(f => f.Name == "data.json.enc");
+        (await packages.VerifyAsync(folder, Signing.Value, BackupKeys.FingerprintHex(Stranger.Value))).Problems
+            .ShouldContain(p => p.StartsWith("Пакет зашифрован для другого ключа", StringComparison.Ordinal));
+
+        using (var plain = new MemoryStream())
+        {
+            (await packages.DecryptAsync(folder, data.Name, plain, Recipient.Value, data.Sha256)).ShouldBe(Data.Length);
+            plain.ToArray().ShouldBe(Data);
+        }
+
+        // Подмена после проверки: другой, но правильно зашифрованный для получателя файл — сверка с манифестом его ловит.
+        var swapped = await EncryptAsync(Encoding.UTF8.GetBytes("{\"cases\":[]}"), SealedFormat.Exchange, Recipient.Value);
+        await File.WriteAllBytesAsync(Path.Combine(folder, "data.json.enc"), swapped);
+        await Should.ThrowAsync<InvalidDataException>(() => packages.DecryptAsync(folder, data.Name, new MemoryStream(), Recipient.Value, data.Sha256));
+        (await packages.DecryptAsync(folder, data.Name, new MemoryStream(), Recipient.Value)).ShouldBeGreaterThan(0, "без сверки расшифровывается");
+
+        await Should.ThrowAsync<ArgumentException>(() => packages.DecryptAsync(folder, "../data.json.enc", new MemoryStream(), Recipient.Value));
+        await Should.ThrowAsync<CryptographicException>(() =>
+            packages.DecryptAsync(folder, "media/000001.enc", new MemoryStream(), Stranger.Value));
+    }
+
+    [Fact(DisplayName = "Приём: ключ источника — по пину; ключ приёма — с паролем хранителя и пином; сообщения называют ключ приёма")]
+    public async Task Receiver_keys_are_pinned()
+    {
+        var packages = new ExchangePackages();
+        var sourcePem = Path.Combine(_dir, "source.pem");
+        var receivingPem = Path.Combine(_dir, "receiving.pem");
+        await File.WriteAllTextAsync(sourcePem, BackupKeys.ExportPublicPem(Signing.Value));
+        await File.WriteAllTextAsync(receivingPem, BackupKeys.ExportPrivatePem(Recipient.Value, "пароль приёма"));
+
+        using (var key = packages.LoadSourceKey(sourcePem, BackupKeys.FingerprintHex(Signing.Value)))
+        {
+            packages.Fingerprint(key).ShouldBe(BackupKeys.FingerprintHex(Signing.Value));
+        }
+
+        using (var key = packages.LoadReceivingKey(receivingPem, BackupKeys.FingerprintHex(Recipient.Value), "пароль приёма"))
+        {
+            packages.Fingerprint(key).ShouldBe(BackupKeys.FingerprintHex(Recipient.Value));
+        }
+
+        Should.Throw<InvalidOperationException>(() => packages.LoadSourceKey(sourcePem, BackupKeys.FingerprintHex(Stranger.Value)))
+            .Message.ShouldContain("Ключ подписи источника");
+        Should.Throw<InvalidOperationException>(() => packages.LoadReceivingKey(receivingPem, BackupKeys.FingerprintHex(Recipient.Value), "не тот"))
+            .Message.ShouldStartWith("Пароль ключа приёма неверен");
+        Should.Throw<InvalidOperationException>(() => packages.LoadReceivingKey(Path.Combine(_dir, "нет.pem"), BackupKeys.FingerprintHex(Recipient.Value), "x"))
+            .Message.ShouldContain("ключа приёма");
+    }
+
     [Fact(DisplayName = "Порт ядра: ключи — только с закреплённым отпечатком и верным паролем; недописанные пакеты с префиксом убираются, чужие каталоги — нет")]
     public async Task Core_port_pins_keys_and_removes_unfinished()
     {

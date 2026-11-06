@@ -43,8 +43,8 @@ public static class RestoreApp
     public const string ExchangeSigningPurpose = "exchange-signing";
 
     // Что делать с каждой парой. Закрытые части у назначений живут в разных местах: ключ копий — НЕ на сервере (им
-    // расшифровывают копию при восстановлении), ключ подписи обмена — на сервере источника под паролем хранителя (им
-    // подписывают каждый пакет, пароль вводится при формировании), ключ получателя обмена — у хранителя в офисе-получателе.
+    // расшифровывают копию при восстановлении), ключи обмена — на сервере своего офиса под паролем хранителя: подписи — у
+    // источника (пароль вводится при формировании пакета), приёма — у получателя (пароль вводится при приёме, ADR-0068 v0.2).
     private static readonly Dictionary<string, KeyPurpose> KeyPurposes = new(StringComparer.Ordinal)
     {
         [BackupPurpose] = new(
@@ -60,9 +60,10 @@ public static class RestoreApp
             "exchange-recipient-private.pem",
             [
                 "  exchange-recipient-public.pem — открытый: передать Администратору офиса-источника (Exchange:Recipient:PublicKey:Path);",
-                "  exchange-recipient-private.pem — закрытый, под паролем: остаётся в этом офисе у хранителя ключа приёма, никуда не передаётся.",
+                "  exchange-recipient-private.pem — закрытый, под паролем: на сервер этого офиса (Exchange:Import:PrivateKey:Path, root:iscai 0640),",
+                "    в другие офисы не передаётся; пароль знает только хранитель ключа — он вводит его при приёме каждого пакета.",
             ],
-            "Отпечаток для Exchange:Recipient:PublicKey:Sha256 в офисе-источнике (сообщить отдельно от ключа — не на носителе обмена):"),
+            "Отпечаток для Exchange:Import:PrivateKey:Sha256 здесь и для Exchange:Recipient:PublicKey:Sha256 в офисе-источнике (сообщить отдельно от ключа — не на носителе обмена):"),
         [ExchangeSigningPurpose] = new(
             "exchange-signing-public.pem",
             "exchange-signing-private.pem",
@@ -71,7 +72,7 @@ public static class RestoreApp
                 "    пароль знает только хранитель ключа — он вводит его при формировании каждого пакета;",
                 "  exchange-signing-public.pem — открытый: передать в офис-получатель — им проверяется подпись пакетов.",
             ],
-            "Отпечаток для Exchange:Signing:PrivateKey:Sha256 здесь и для проверки подписи в офисе-получателе:"),
+            "Отпечаток для Exchange:Signing:PrivateKey:Sha256 здесь и для Exchange:Import:Sources:<номер этого офиса>:PublicKey:Sha256 в офисе-получателе:"),
     };
 
     /// <summary>Начало ключа, задающего каталог восстановления каталога файлов копии: <c>--files-&lt;имя&gt;</c>.</summary>

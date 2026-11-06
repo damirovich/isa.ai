@@ -81,6 +81,26 @@ public sealed class MediaExchangeSource(IDbContextFactory<MediaDbContext> contex
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<MediaExchangeHashMatch>> FindByContentHashAsync(
+        IReadOnlyCollection<string> contentHashes, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(contentHashes);
+        var result = new List<MediaExchangeHashMatch>();
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Хеш в базе — HEX прописными (так его пишет хранилище); входные приводятся к тому же виду.
+        foreach (var chunk in contentHashes.Select(h => h.Trim().ToUpperInvariant()).Distinct(StringComparer.Ordinal).Chunk(Batch))
+        {
+            result.AddRange(await db.Assets.AsNoTracking()
+                .Where(a => chunk.Contains(a.ContentHash))
+                .Select(a => new MediaExchangeHashMatch(a.Id, a.ContentHash, a.Classification, a.DivisionId))
+                .ToListAsync(cancellationToken));
+        }
+
+        return result.OrderBy(m => m.AssetId).ToList();
+    }
+
+    /// <inheritdoc />
     public async Task<Stream> OpenOriginalAsync(int assetId, CancellationToken cancellationToken = default)
     {
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);

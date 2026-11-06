@@ -26,13 +26,166 @@ public sealed class ExchangePackages : IExchangePackages
     public string Fingerprint(RSA key) => BackupKeys.FingerprintHex(key);
 
     /// <inheritdoc />
-    public RSA LoadRecipientKey(string pemPath, string pinnedSha256)
+    public RSA LoadRecipientKey(string pemPath, string pinnedSha256) =>
+        LoadPinnedPublicKey(pemPath, pinnedSha256, "ключа получателя", "Ключ получателя");
+
+    /// <inheritdoc />
+    public RSA LoadSigningKey(string pemPath, string pinnedSha256, ReadOnlySpan<char> password) =>
+        LoadPinnedPrivateKey(pemPath, pinnedSha256, password, "ключа подписи", "Пароль ключа подписи", "Ключ подписи");
+
+    /// <inheritdoc />
+    public RSA LoadSourceKey(string pemPath, string pinnedSha256) =>
+        LoadPinnedPublicKey(pemPath, pinnedSha256, "ключа источника", "Ключ подписи источника");
+
+    /// <inheritdoc />
+    public RSA LoadReceivingKey(string pemPath, string pinnedSha256, ReadOnlySpan<char> password) =>
+        LoadPinnedPrivateKey(pemPath, pinnedSha256, password, "ключа приёма", "Пароль ключа приёма", "Ключ приёма");
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> ListPackages(string folder, string folderPrefix)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(folderPrefix);
+        if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
+        {
+            return [];
+        }
+
+        // Недописанный пакет (.partial) — не пакет: его не показывают и не принимают.
+        return Directory.EnumerateDirectories(folder, folderPrefix + "*")
+            .Select(Path.GetFileName)
+            .OfType<string>()
+            .Where(name => !name.EndsWith(SealedPackageWriter.PartialSuffix, StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<ExchangePackageHeader> ReadHeaderAsync(
+        string packageFolder, Func<string, RSA?> sourceKeyFor, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageFolder);
+        ArgumentNullException.ThrowIfNull(sourceKeyFor);
+        var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(packageFolder));
+        var manifestPath = Path.Combine(packageFolder, SealedPackageManifest.FileName);
+        var signaturePath = Path.Combine(packageFolder, SealedPackageManifest.SignatureFileName);
+        if (!File.Exists(manifestPath) || !File.Exists(signaturePath))
+        {
+            return new ExchangePackageHeader(name, null, null, "Нет манифеста пакета или его подписи — это не пакет обмена или он не дописан.");
+        }
+
+        // Манифесту до проверки подписи не верят ни в чём: из него берётся только имя источника — чтобы найти ключ, которым
+        // подпись и проверяется. Чужой манифест с именем настроенного источника подпись этого источника не пройдёт.
+        var bytes = await File.ReadAllBytesAsync(manifestPath, cancellationToken).ConfigureAwait(false);
+        SealedPackageManifest claimed;
+        try
+        {
+            claimed = SealedPackageManifest.FromBytes(bytes);
+        }
+        catch (InvalidDataException exception)
+        {
+            return new ExchangePackageHeader(name, null, null, exception.Message);
+        }
+
+        byte[] signature;
+        try
+        {
+            signature = Convert.FromBase64String(
+                (await File.ReadAllTextAsync(signaturePath, cancellationToken).ConfigureAwait(false)).Trim());
+        }
+        catch (FormatException)
+        {
+            return new ExchangePackageHeader(name, claimed.SourceInstance, null, "Подпись манифеста повреждена (не Base64).");
+        }
+
+        var key = sourceKeyFor(claimed.SourceInstance);
+        if (key is null)
+        {
+            return new ExchangePackageHeader(
+                name, claimed.SourceInstance, null,
+                $"Источник «{claimed.SourceInstance}» не настроен: нет его открытого ключа подписи (Exchange:Import:Sources).");
+        }
+
+        if (!SealedSignature.Verify(bytes, signature, key))
+        {
+            return new ExchangePackageHeader(
+                name, claimed.SourceInstance, null,
+                $"Подпись манифеста не сходится с ключом источника «{claimed.SourceInstance}» {BackupKeys.FingerprintHex(key)}: пакет подписан другим ключом или изменён.");
+        }
+
+        return new ExchangePackageHeader(name, claimed.SourceInstance, Info(claimed, bytes), null);
+    }
+
+    /// <inheritdoc />
+    public async Task<ExchangePackageVerification> VerifyAsync(
+        string packageFolder, RSA sourceKey, string expectedRecipientFingerprint, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageFolder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedRecipientFingerprint);
+        var manifestPath = Path.Combine(packageFolder, SealedPackageManifest.FileName);
+        var before = File.Exists(manifestPath)
+            ? await File.ReadAllBytesAsync(manifestPath, cancellationToken).ConfigureAwait(false)
+            : null;
+        var check = await SealedPackageVerifier.VerifyAsync(
+            packageFolder, sourceKey, SealedFormat.Exchange, expectedRecipientFingerprint, cancellationToken).ConfigureAwait(false);
+        if (check.Manifest is null)
+        {
+            return new ExchangePackageVerification(null, check.Problems);
+        }
+
+        // SHA-256 манифеста (для акта приёма) — тех байтов, чья подпись сошлась: байты до и после проверки обязаны совпасть,
+        // иначе манифест меняли во время проверки.
+        var after = await File.ReadAllBytesAsync(manifestPath, cancellationToken).ConfigureAwait(false);
+        var problems = check.Problems.ToList();
+        if (before is null || !before.AsSpan().SequenceEqual(after))
+        {
+            problems.Add("Манифест изменился во время проверки — проверьте пакет заново.");
+        }
+
+        return new ExchangePackageVerification(Info(check.Manifest, after), problems);
+    }
+
+    /// <inheritdoc />
+    public async Task<long> DecryptAsync(
+        string packageFolder,
+        string fileName,
+        Stream output,
+        RSA receivingKey,
+        string? expectedSha256 = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageFolder);
+        ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(receivingKey);
+        if (!SealedPackageWriter.IsSafeName(fileName))
+        {
+            // Имя — из манифеста; «../» и абсолютные пути за пределы каталога пакета не пускаются.
+            throw new ArgumentException($"Недопустимое имя файла пакета «{fileName}».", nameof(fileName));
+        }
+
+        var path = Path.Combine(packageFolder, fileName.Replace('/', Path.DirectorySeparatorChar));
+        await using var file = new FileStream(
+            path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        await using var input = new HashingReadStream(file, hash);
+        var length = await SealedFile.DecryptAsync(input, output, receivingKey, SealedFormat.Exchange, cancellationToken).ConfigureAwait(false);
+
+        // Расшифровка дочитывает файл до конца (данные после последней порции — отказ), поэтому хеш — всего файла.
+        if (expectedSha256 is not null
+            && !string.Equals(Convert.ToHexString(hash.GetHashAndReset()), expectedSha256.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException($"Файл пакета {fileName} изменён после проверки: SHA-256 не совпал с манифестом.");
+        }
+
+        return length;
+    }
+
+    private static RSA LoadPinnedPublicKey(string pemPath, string pinnedSha256, string fileWhat, string keyWhat)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pemPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(pinnedSha256);
         if (!File.Exists(pemPath))
         {
-            throw new InvalidOperationException($"Файла ключа получателя {pemPath} нет.");
+            throw new InvalidOperationException($"Файла {fileWhat} {pemPath} нет.");
         }
 
         RSA key;
@@ -46,17 +199,17 @@ public sealed class ExchangePackages : IExchangePackages
             throw new InvalidOperationException($"В файле {pemPath} нет открытого ключа RSA в формате PEM.", exception);
         }
 
-        return Pinned(key, pinnedSha256, $"Ключ получателя {pemPath}");
+        return Pinned(key, pinnedSha256, $"{keyWhat} {pemPath}");
     }
 
-    /// <inheritdoc />
-    public RSA LoadSigningKey(string pemPath, string pinnedSha256, ReadOnlySpan<char> password)
+    private static RSA LoadPinnedPrivateKey(
+        string pemPath, string pinnedSha256, ReadOnlySpan<char> password, string fileWhat, string passwordWhat, string keyWhat)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pemPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(pinnedSha256);
         if (!File.Exists(pemPath))
         {
-            throw new InvalidOperationException($"Файла ключа подписи {pemPath} нет.");
+            throw new InvalidOperationException($"Файла {fileWhat} {pemPath} нет.");
         }
 
         RSA key;
@@ -67,11 +220,28 @@ public sealed class ExchangePackages : IExchangePackages
         catch (Exception exception) when (exception is CryptographicException or ArgumentException)
         {
             // Неверный пароль и испорченный файл неразличимы — и не должны различаться для того, кто подбирает пароль.
-            throw new InvalidOperationException("Пароль ключа подписи неверен (или файл ключа повреждён).", exception);
+            throw new InvalidOperationException($"{passwordWhat} неверен (или файл ключа повреждён).", exception);
         }
 
-        return Pinned(key, pinnedSha256, "Ключ подписи");
+        return Pinned(key, pinnedSha256, keyWhat);
     }
+
+    private static ExchangeManifestInfo Info(SealedPackageManifest manifest, byte[] bytes) => new(
+        manifest.FormatVersion,
+        manifest.Kind,
+        manifest.SystemVersion,
+        manifest.SourceInstance,
+        manifest.Period,
+        manifest.CreatedAt,
+        manifest.CreatedByUserId,
+        manifest.Classification,
+        manifest.Marking,
+        manifest.RecipientKeyFingerprint,
+        manifest.SigningKeyFingerprint,
+        manifest.Selection,
+        manifest.Counts,
+        [.. manifest.Files.Select(f => new ExchangePackageFileInfo(f.Name, f.Bytes, f.Sha256))],
+        Convert.ToHexString(SHA256.HashData(bytes)));
 
     /// <inheritdoc />
     public IExchangePackageBuilder Create(string targetFolder, string folderName, RSA recipientKey) =>

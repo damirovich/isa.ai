@@ -214,7 +214,118 @@ public sealed class OfficeExchangeTests : IDisposable
         SealedPackageWriter.IsSafeName(ExchangePackageWriter.FolderNameFor("office-2", 2026, 1, DateTimeOffset.UnixEpoch)).ShouldBeTrue();
     }
 
+    [Fact(DisplayName = "Приём (v0.2): настройка читается с источниками; ничего не задано — замечание по каждому ключу; настроено — готов, отпечатки источников видны")]
+    public void Import_readiness_lists_missing_settings()
+    {
+        var empty = ExchangeSettings.Read(new ConfigurationBuilder().Build()).CheckImport(Packages);
+        empty.Ready.ShouldBeFalse();
+        foreach (var key in new[] { "Exchange:InstanceId", "Exchange:Import:Folder", "Exchange:Import:PrivateKey:Path",
+                                    "Exchange:Import:PrivateKey:Sha256", "Exchange:Import:Sources" })
+        {
+            empty.Problems.ShouldContain(p => p.Contains(key), key);
+        }
+
+        var receiver = Receiver();
+        var read = ExchangeSettings.Read(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Exchange:InstanceId"] = "office-1",
+            ["Exchange:Import:Folder"] = receiver.ImportFolder,
+            ["Exchange:Import:PrivateKey:Path"] = receiver.ReceivingKeyPath,
+            ["Exchange:Import:PrivateKey:Sha256"] = receiver.ReceivingKeySha256!.ToLowerInvariant(),
+            ["Exchange:Import:Sources:office-2:PublicKey:Path"] = receiver.Sources["office-2"].Path,
+            ["Exchange:Import:Sources:office-2:PublicKey:Sha256"] = receiver.Sources["office-2"].Sha256,
+        }).Build());
+
+        var ready = read.CheckImport(Packages);
+        ready.Ready.ShouldBeTrue(string.Join("; ", ready.Problems));
+        ready.ReceivingKeyFingerprint.ShouldBe(BackupKeys.FingerprintHex(Recipient.Value));
+        ready.Sources.ShouldHaveSingleItem().ShouldBe(new ExchangeSourceInfo("office-2", BackupKeys.FingerprintHex(Signing.Value), null));
+        using (var key = read.LoadReceivingKey(Packages, Password))
+        {
+            BackupKeys.FingerprintHex(key).ShouldBe(BackupKeys.FingerprintHex(Recipient.Value));
+        }
+
+        read.LoadSourceKey(Packages, "office-9").ShouldBeNull("не настроенный источник — нет ключа");
+    }
+
+    [Fact(DisplayName = "Приём: источник с чужим ключом или неверным номером — замечание по источнику, носителя нет — замечание")]
+    public void Import_readiness_checks_sources()
+    {
+        var wrongPin = Receiver(sources: new() { ["office-2"] = new(Receiver().Sources["office-2"].Path, BackupKeys.FingerprintHex(Recipient.Value)) });
+        var check = wrongPin.CheckImport(Packages);
+        check.Sources.ShouldHaveSingleItem().Problem.ShouldNotBeNull().ShouldContain("не совпал с закреплённым отпечатком");
+        check.Ready.ShouldBeFalse();
+
+        var badName = Receiver(sources: new() { ["Офис 2"] = Receiver().Sources["office-2"] });
+        badName.CheckImport(Packages).Problems.ShouldContain(p => p.Contains("Номер источника"));
+
+        Receiver(importFolder: Path.Combine(_dir, "нет-носителя")).CheckImport(Packages).Problems
+            .ShouldHaveSingleItem().ShouldContain("не подключён");
+    }
+
+    [Fact(DisplayName = "ТБ-083: пароль ключа приёма не попадает ни в текст запроса, ни в сводку журнала; без отметки шлюза и с чужим именем — отказ проверки")]
+    public void Import_command_hides_password_and_needs_gateway()
+    {
+        var command = new StartExchangeImportCommand("isc-exchange-office-2-2026-10-2026-11-01_090000", true, Password);
+
+        command.ToString().ShouldNotContain(Password);
+        command.AuditSummary.ShouldBe("investigation:exchange:import:isc-exchange-office-2-2026-10-2026-11-01_090000;gateway=yes");
+        command.AuditSummary.ShouldNotContain(Password);
+
+        var validator = new StartExchangeImportValidator();
+        validator.Validate(command).IsValid.ShouldBeTrue();
+        validator.Validate(command with { GatewayConfirmed = false }).Errors.ShouldContain(e => e.ErrorMessage.Contains("шлюзе"));
+        validator.Validate(command with { ReceivingKeyPassword = "" }).IsValid.ShouldBeFalse();
+        validator.Validate(command with { PackageName = "../isc-exchange-office-2" }).IsValid.ShouldBeFalse();
+        validator.Validate(command with { PackageName = "backup-2026" }).IsValid.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Право «Обмен между офисами» на приёме: не Администратору — отказ, приём не запускается; Администратору — запуск")]
+    public async Task Import_requires_exchange_permission()
+    {
+        var import = Substitute.For<IExchangeImport>();
+        var command = new StartExchangeImportCommand("isc-exchange-office-2-2026-10-2026-11-01_090000", true, Password);
+        _roles.GetRoleAsync(Me, Arg.Any<CancellationToken>()).Returns(InvestigationRole.Investigator);
+
+        (await new StartExchangeImportCommand.Handler(_roles, _subject, import).Handle(command, CancellationToken.None)).Status.ShouldBeFalse();
+        (await new GetExchangeImportOverviewQuery.Handler(_roles, _subject, import).Handle(new GetExchangeImportOverviewQuery(), CancellationToken.None))
+            .Status.ShouldBeFalse();
+        await import.DidNotReceiveWithAnyArgs().StartImportAsync(default!, default, default, default!, default);
+
+        _roles.GetRoleAsync(Me, Arg.Any<CancellationToken>()).Returns(InvestigationRole.Administrator);
+        import.StartImportAsync(command.PackageName, true, Me, Password, Arg.Any<CancellationToken>()).Returns(new ExchangeImportStartResult(9, null));
+
+        var started = await new StartExchangeImportCommand.Handler(_roles, _subject, import).Handle(command, CancellationToken.None);
+
+        (started.Status, started.Data).ShouldBe((true, 9));
+    }
+
     // ---------- окружение ----------
+
+    private ExchangeSettings Receiver(string? importFolder = null, Dictionary<string, ExchangeSourceKey>? sources = null)
+    {
+        Settings();
+        var keys = Path.Combine(_dir, "keys");
+        var receiving = Path.Combine(keys, "receiving-private.pem");
+        var source = Path.Combine(keys, "source-public.pem");
+        if (!File.Exists(receiving))
+        {
+            File.WriteAllText(receiving, BackupKeys.ExportPrivatePem(Recipient.Value, Password));
+            File.WriteAllText(source, BackupKeys.ExportPublicPem(Signing.Value));
+        }
+
+        return new ExchangeSettings
+        {
+            InstanceId = "office-1",
+            ImportFolder = importFolder ?? Path.Combine(_dir, "medium"),
+            ReceivingKeyPath = receiving,
+            ReceivingKeySha256 = BackupKeys.FingerprintHex(Recipient.Value),
+            Sources = sources ?? new Dictionary<string, ExchangeSourceKey>(StringComparer.Ordinal)
+            {
+                ["office-2"] = new(source, BackupKeys.FingerprintHex(Signing.Value)),
+            },
+        };
+    }
 
     private static StartExchangeExportCommand Command(string? cases = null, bool resend = true) =>
         new(2026, 10, cases, [MediaKind.Image, MediaKind.Video], resend, Password);

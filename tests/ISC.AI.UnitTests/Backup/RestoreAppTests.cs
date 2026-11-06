@@ -81,6 +81,8 @@ public sealed class RestoreAppTests : IDisposable
 
         (recipient.Code, signing.Code).ShouldBe((0, 0));
         recipient.Output.ShouldContain("Exchange:Recipient:PublicKey:Path");
+        recipient.Output.ShouldContain("Exchange:Import:PrivateKey:Path");
+        signing.Output.ShouldContain("Exchange:Import:Sources");
         signing.Output.ShouldContain("Exchange:Signing:PrivateKey:Path");
         signing.Output.ShouldNotContain("НЕ на сервере");
         using (var key = BackupKeys.LoadPrivateKey(Path.Combine(folder, "exchange-signing-private.pem"), "пароль хранителя ключа"))

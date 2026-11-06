@@ -10,13 +10,14 @@
 @using ISC.AI.Profile.Investigation.Domain.Entities
 @using ISC.AI.Profile.Investigation.Domain.Services
 
-@* Обмен между офисами — сторона источника (ТФ-АДМ-05, ТФ-ОБМ-01, ADR-0068). Администратор выбирает период, номера дел и
-   виды носителей; хранитель ключа вводит пароль ключа подписи; пакет формируется в фоне на носитель обмена (страницу можно
-   закрыть). Экран показывает только состав и счётчики — содержимое пакета зашифровано для офиса-получателя (ТБ-079).
-   Право и готовность проверяет сервер: экран лишь показывает отказ текстом. *@
+@* Обмен между офисами (ТФ-АДМ-05, ADR-0068). «Отправка» (ТФ-ОБМ-01): Администратор выбирает период, номера дел и виды
+   носителей, хранитель ключа вводит пароль ключа подписи, пакет формируется в фоне на носитель обмена. «Приём» (ТФ-ОБМ-02,
+   v0.2): пакеты на носителе с проверкой подписи; Администратор отмечает проверку на шлюзе, хранитель вводит пароль ключа
+   приёма, пакет принимается в фоне. Экран показывает только состав, счётчики и итог — содержимое пакета Администратору не
+   показывается (ТБ-079). Право и готовность проверяет сервер: экран лишь показывает отказ текстом. *@
 
 <PageHeader Title="Обмен между офисами" Icon="@Icons.Material.Filled.SwapHoriz"
-            Subtitle="Пакет за месяц для другого офиса — на носитель обмена; шифруется ключом офиса-получателя и подписывается ключом этого офиса" />
+            Subtitle="Пакет за месяц между офисами — шифруется ключом офиса-получателя и подписывается ключом офиса-источника" />
 
 @if (_error is not null)
 {
@@ -24,133 +25,324 @@
               ShowCloseIcon="true" CloseIconClicked="@(() => _error = null)">@_error</MudAlert>
 }
 
-@if (_view is { } view)
+@if (_view is { } view && _import is { } import)
 {
-    var readiness = view.Readiness;
-    <MudPaper Outlined="true" Class="pa-3 mb-3">
-        <MudText Typo="Typo.subtitle2" Class="mb-2">Этот офис</MudText>
-        <MudSimpleTable Dense="true" Elevation="0" Bordered="false">
-            <tbody>
-                <tr><td class="mud-text-secondary" style="width:240px;">Номер экземпляра</td><td>@(readiness.InstanceId ?? "—")</td></tr>
-                <tr><td class="mud-text-secondary">Носитель обмена</td><td style="font-family:monospace;">@(readiness.TargetFolder ?? "—")</td></tr>
-                <tr><td class="mud-text-secondary">Ключ получателя (отпечаток)</td><td style="font-family:monospace;word-break:break-all;">@(readiness.RecipientKeyFingerprint ?? "—")</td></tr>
-                <tr><td class="mud-text-secondary">Ключ подписи этого офиса</td><td style="font-family:monospace;word-break:break-all;">@(readiness.SigningKeyFingerprint ?? "—")</td></tr>
-            </tbody>
-        </MudSimpleTable>
-        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
-            Отпечаток ключа подписи сообщают офису-получателю: по нему он проверит, что пакет сформирован здесь.
-        </MudText>
-        @if (!readiness.Ready)
-        {
-            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-3">
-                Обмен не настроен:
-                <ul class="mb-0">
-                    @foreach (var problem in readiness.Problems)
-                    {
-                        <li>@problem</li>
-                    }
-                </ul>
-            </MudAlert>
-        }
-    </MudPaper>
+    <MudTabs @bind-ActivePanelIndex="_tab" Outlined="true" Elevation="0" PanelClass="pa-3" Class="mb-3">
+        <MudTabPanel Text="Отправка" Icon="@Icons.Material.Filled.Outbox">
+            @{ var readiness = view.Readiness; }
+            <MudPaper Outlined="true" Class="pa-3 mb-3">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">Этот офис</MudText>
+                <MudSimpleTable Dense="true" Elevation="0" Bordered="false">
+                    <tbody>
+                        <tr><td class="mud-text-secondary" style="width:240px;">Номер экземпляра</td><td>@(readiness.InstanceId ?? "—")</td></tr>
+                        <tr><td class="mud-text-secondary">Носитель обмена</td><td style="font-family:monospace;">@(readiness.TargetFolder ?? "—")</td></tr>
+                        <tr><td class="mud-text-secondary">Ключ получателя (отпечаток)</td><td style="font-family:monospace;word-break:break-all;">@(readiness.RecipientKeyFingerprint ?? "—")</td></tr>
+                        <tr><td class="mud-text-secondary">Ключ подписи этого офиса</td><td style="font-family:monospace;word-break:break-all;">@(readiness.SigningKeyFingerprint ?? "—")</td></tr>
+                    </tbody>
+                </MudSimpleTable>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
+                    Отпечаток ключа подписи сообщают офису-получателю: по нему он проверит, что пакет сформирован здесь.
+                </MudText>
+                @if (!readiness.Ready)
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-3">
+                        Отправка не настроена:
+                        <ul class="mb-0">
+                            @foreach (var problem in readiness.Problems)
+                            {
+                                <li>@problem</li>
+                            }
+                        </ul>
+                    </MudAlert>
+                }
+            </MudPaper>
 
-    <MudPaper Outlined="true" Class="pa-3 mb-3">
-        <MudText Typo="Typo.subtitle2" Class="mb-3">Сформировать пакет</MudText>
-        <div class="d-flex gap-3 align-start flex-wrap">
-            <MudNumericField T="int" @bind-Value="_year" Label="Год" Variant="Variant.Outlined" Margin="Margin.Dense"
-                             Min="2000" Max="2100" Style="width:120px;" Disabled="@Locked" />
-            <MudSelect T="int" @bind-Value="_month" Label="Месяц" Variant="Variant.Outlined" Margin="Margin.Dense"
-                       Style="width:170px;" Disabled="@Locked">
-                @for (var m = 1; m <= 12; m++)
+            <MudPaper Outlined="true" Class="pa-3 mb-3">
+                <MudText Typo="Typo.subtitle2" Class="mb-3">Сформировать пакет</MudText>
+                <div class="d-flex gap-3 align-start flex-wrap">
+                    <MudNumericField T="int" @bind-Value="_year" Label="Год" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Min="2000" Max="2100" Style="width:120px;" Disabled="@ExportLocked" />
+                    <MudSelect T="int" @bind-Value="_month" Label="Месяц" Variant="Variant.Outlined" Margin="Margin.Dense"
+                               Style="width:170px;" Disabled="@ExportLocked">
+                        @for (var m = 1; m <= 12; m++)
+                        {
+                            var month = m;
+                            <MudSelectItem T="int" Value="@month">@MonthName(month)</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudTextField T="string" @bind-Value="_caseNumbers" Label="Номера дел (необязательно)" Variant="Variant.Outlined"
+                                  Margin="Margin.Dense" Lines="2" Placeholder="через запятую; пусто — все дела с движением за месяц"
+                                  Class="flex-grow-1" Style="min-width:260px;" Disabled="@ExportLocked" />
+                </div>
+                <div class="d-flex gap-4 align-center flex-wrap mt-2">
+                    <MudText Typo="Typo.body2">Файлы носителей:</MudText>
+                    <MudCheckBox T="bool" @bind-Value="_images" Label="фото" Dense="true" Disabled="@ExportLocked" />
+                    <MudCheckBox T="bool" @bind-Value="_videos" Label="видео" Dense="true" Disabled="@ExportLocked" />
+                    <MudCheckBox T="bool" @bind-Value="_audio" Label="звук" Dense="true" Disabled="@ExportLocked" />
+                    <MudCheckBox T="bool" @bind-Value="_resend" Label="отправить повторно и ушедшие раньше" Dense="true" Disabled="@ExportLocked" />
+                </div>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                    Носители невыбранных видов идут в пакет только реквизитами. Файл, уже ушедший прежним пакетом, не повторяется —
+                    кроме случая, когда носитель обмена потерян: тогда отметьте «отправить повторно».
+                </MudText>
+                <div class="d-flex gap-3 align-center flex-wrap mt-3">
+                    @* Пароль вводит хранитель ключа подписи (не Администратор, ТО-орг-07); на сервере он живёт только в памяти задания.
+                       Immediate — кнопка включается по мере ввода: без него значение приходит лишь при уходе фокуса, и первое
+                       нажатие кнопки сразу после ввода пропадало (живая проверка 06.11.2026). *@
+                    <MudTextField T="string" @bind-Value="_password" Immediate="true" Label="Пароль ключа подписи (вводит хранитель ключа)"
+                                  InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Style="min-width:320px;" Disabled="@ExportLocked" autocomplete="off" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Inventory2"
+                               OnClick="StartExportAsync" Disabled="@(ExportLocked || !readiness.Ready || string.IsNullOrEmpty(_password))">
+                        @(_busy ? "Запускаю…" : "Сформировать пакет")
+                    </MudButton>
+                </div>
+                @if (view.RunningBytes is { } bytes)
                 {
-                    var month = m;
-                    <MudSelectItem T="int" Value="@month">@MonthName(month)</MudSelectItem>
+                    <div class="d-flex align-center gap-2 mt-3">
+                        <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary" />
+                        <MudText Typo="Typo.body2">Пакет формируется: записано @FormatBytes(bytes). Страницу можно закрыть — работа идёт на сервере.</MudText>
+                    </div>
                 }
-            </MudSelect>
-            <MudTextField T="string" @bind-Value="_caseNumbers" Label="Номера дел (необязательно)" Variant="Variant.Outlined"
-                          Margin="Margin.Dense" Lines="2" Placeholder="через запятую; пусто — все дела с движением за месяц"
-                          Class="flex-grow-1" Style="min-width:260px;" Disabled="@Locked" />
-        </div>
-        <div class="d-flex gap-4 align-center flex-wrap mt-2">
-            <MudText Typo="Typo.body2">Файлы носителей:</MudText>
-            <MudCheckBox T="bool" @bind-Value="_images" Label="фото" Dense="true" Disabled="@Locked" />
-            <MudCheckBox T="bool" @bind-Value="_videos" Label="видео" Dense="true" Disabled="@Locked" />
-            <MudCheckBox T="bool" @bind-Value="_audio" Label="звук" Dense="true" Disabled="@Locked" />
-            <MudCheckBox T="bool" @bind-Value="_resend" Label="отправить повторно и ушедшие раньше" Dense="true" Disabled="@Locked" />
-        </div>
-        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
-            Носители невыбранных видов идут в пакет только реквизитами. Файл, уже ушедший прежним пакетом, не повторяется —
-            кроме случая, когда носитель обмена потерян: тогда отметьте «отправить повторно».
-        </MudText>
-        <div class="d-flex gap-3 align-center flex-wrap mt-3">
-            @* Пароль вводит хранитель ключа подписи (не Администратор, ТО-орг-07); на сервере он живёт только в памяти задания.
-               Immediate — кнопка включается по мере ввода: без него значение приходит лишь при уходе фокуса, и первое
-               нажатие кнопки сразу после ввода пропадало (живая проверка 06.11.2026). *@
-            <MudTextField T="string" @bind-Value="_password" Immediate="true" Label="Пароль ключа подписи (вводит хранитель ключа)"
-                          InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense"
-                          Style="min-width:320px;" Disabled="@Locked" autocomplete="off" />
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Inventory2"
-                       OnClick="StartAsync" Disabled="@(Locked || !readiness.Ready || string.IsNullOrEmpty(_password))">
-                @(_busy ? "Запускаю…" : "Сформировать пакет")
-            </MudButton>
-        </div>
-        @if (view.RunningBytes is { } bytes)
-        {
-            <div class="d-flex align-center gap-2 mt-3">
-                <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary" />
-                <MudText Typo="Typo.body2">Пакет формируется: записано @FormatBytes(bytes). Страницу можно закрыть — работа идёт на сервере.</MudText>
-            </div>
-        }
-    </MudPaper>
+            </MudPaper>
 
-    <MudText Typo="Typo.subtitle2" Class="mb-2">Сформированные пакеты</MudText>
-    <MudTable T="ExchangeExportRow" Items="view.Recent" Dense="true" Hover="true" Outlined="true">
-        <HeaderContent>
-            <MudTh>Начат</MudTh>
-            <MudTh>Период</MudTh>
-            <MudTh>Состояние</MudTh>
-            <MudTh>Состав</MudTh>
-            <MudTh>Объём</MudTh>
-            <MudTh>Маркировка</MudTh>
-            <MudTh>Пакет на носителе</MudTh>
-        </HeaderContent>
-        <RowTemplate>
-            <MudTd DataLabel="Начат">@Time(context.StartedAt)</MudTd>
-            <MudTd DataLabel="Период">
-                @context.Month.ToString("D2", CultureInfo.InvariantCulture).@context.Year.ToString(CultureInfo.InvariantCulture)
-                @if (context.CaseNumbers is { } numbers)
+            <MudText Typo="Typo.subtitle2" Class="mb-2">Сформированные пакеты</MudText>
+            <MudTable T="ExchangeExportRow" Items="view.Recent" Dense="true" Hover="true" Outlined="true">
+                <HeaderContent>
+                    <MudTh>Начат</MudTh>
+                    <MudTh>Период</MudTh>
+                    <MudTh>Состояние</MudTh>
+                    <MudTh>Состав</MudTh>
+                    <MudTh>Объём</MudTh>
+                    <MudTh>Маркировка</MudTh>
+                    <MudTh>Пакет на носителе</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Начат">@Time(context.StartedAt)</MudTd>
+                    <MudTd DataLabel="Период">
+                        @context.Month.ToString("D2", CultureInfo.InvariantCulture).@context.Year.ToString(CultureInfo.InvariantCulture)
+                        @if (context.CaseNumbers is { } numbers)
+                        {
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">дела: @numbers</MudText>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Состояние">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@ExportColor(context.Status)" Class="ma-0">
+                            @ExportLabel(context.Status)
+                        </MudChip>
+                        @if (context.Error is { } error)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Error" Class="d-block">@error</MudText>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Состав">
+                        @if (context.Status == ExchangeExportStatus.Succeeded)
+                        {
+                            <span>дел @context.Cases · объектов @context.Persons · связей @context.Links · сводок @context.Reports ·
+                                носителей @context.Assets (файлов @context.Files) · появлений @context.Appearances</span>
+                        }
+                        else
+                        {
+                            <span class="mud-text-secondary">—</span>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Объём">@(context.Status == ExchangeExportStatus.Succeeded ? FormatBytes(context.BytesWritten) : "—")</MudTd>
+                    <MudTd DataLabel="Маркировка">@(context.Classification is { } c ? ClassificationLevels.Label(c) : "—")</MudTd>
+                    <MudTd DataLabel="Пакет" Style="font-family:monospace;word-break:break-all;">@(context.PackageName ?? "—")</MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Пакетов ещё не формировали.</MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </MudTabPanel>
+
+        <MudTabPanel Text="Приём" Icon="@Icons.Material.Filled.MoveToInbox">
+            @{ var receive = import.Readiness; }
+            <MudPaper Outlined="true" Class="pa-3 mb-3">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">Этот офис</MudText>
+                <MudSimpleTable Dense="true" Elevation="0" Bordered="false">
+                    <tbody>
+                        <tr><td class="mud-text-secondary" style="width:240px;">Номер экземпляра</td><td>@(receive.InstanceId ?? "—")</td></tr>
+                        <tr><td class="mud-text-secondary">Носитель с пакетами</td><td style="font-family:monospace;">@(receive.ImportFolder ?? "—")</td></tr>
+                        <tr><td class="mud-text-secondary">Ключ приёма (отпечаток)</td><td style="font-family:monospace;word-break:break-all;">@(receive.ReceivingKeyFingerprint ?? "—")</td></tr>
+                        @foreach (var source in receive.Sources)
+                        {
+                            <tr>
+                                <td class="mud-text-secondary">Источник @source.InstanceId</td>
+                                <td style="font-family:monospace;word-break:break-all;">
+                                    @if (source.Fingerprint is { } fingerprint)
+                                    {
+                                        @fingerprint
+                                    }
+                                    else
+                                    {
+                                        <span class="mud-error-text">@source.Problem</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
+                    Отпечаток ключа приёма сообщают офису-источнику: для этого ключа он шифрует пакеты. Отпечатки ключей источников
+                    сверяют с источником отдельно от носителя.
+                </MudText>
+                @if (!receive.Ready)
                 {
-                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">дела: @numbers</MudText>
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mt-3">
+                        Приём не настроен:
+                        <ul class="mb-0">
+                            @foreach (var problem in receive.Problems)
+                            {
+                                <li>@problem</li>
+                            }
+                        </ul>
+                    </MudAlert>
                 }
-            </MudTd>
-            <MudTd DataLabel="Состояние">
-                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@StatusColor(context.Status)" Class="ma-0">
-                    @StatusLabel(context.Status)
-                </MudChip>
-                @if (context.Error is { } error)
-                {
-                    <MudText Typo="Typo.caption" Color="Color.Error" Class="d-block">@error</MudText>
-                }
-            </MudTd>
-            <MudTd DataLabel="Состав">
-                @if (context.Status == ExchangeExportStatus.Succeeded)
-                {
-                    <span>дел @context.Cases · объектов @context.Persons · связей @context.Links · сводок @context.Reports ·
-                        носителей @context.Assets (файлов @context.Files) · появлений @context.Appearances</span>
-                }
-                else
-                {
-                    <span class="mud-text-secondary">—</span>
-                }
-            </MudTd>
-            <MudTd DataLabel="Объём">@(context.Status == ExchangeExportStatus.Succeeded ? FormatBytes(context.BytesWritten) : "—")</MudTd>
-            <MudTd DataLabel="Маркировка">@(context.Classification is { } c ? ClassificationLevels.Label(c) : "—")</MudTd>
-            <MudTd DataLabel="Пакет" Style="font-family:monospace;word-break:break-all;">@(context.PackageName ?? "—")</MudTd>
-        </RowTemplate>
-        <NoRecordsContent>
-            <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Пакетов ещё не формировали.</MudText>
-        </NoRecordsContent>
-    </MudTable>
+            </MudPaper>
+
+            <MudText Typo="Typo.subtitle2" Class="mb-2">Пакеты на носителе</MudText>
+            <MudTable T="ExchangePackageRow" Items="import.Packages" Dense="true" Hover="true" Outlined="true" Class="mb-3"
+                      OnRowClick="@((TableRowClickEventArgs<ExchangePackageRow> e) => Select(e.Item))"
+                      RowClass="cursor-pointer" RowClassFunc="@((row, _) => row.FolderName == _selected ? "mud-selected-item" : string.Empty)">
+                <HeaderContent>
+                    <MudTh>Пакет</MudTh>
+                    <MudTh>Источник</MudTh>
+                    <MudTh>Период</MudTh>
+                    <MudTh>Сформирован</MudTh>
+                    <MudTh>Состав (по манифесту)</MudTh>
+                    <MudTh>Объём</MudTh>
+                    <MudTh>Маркировка</MudTh>
+                    <MudTh>Проверка</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Пакет" Style="font-family:monospace;word-break:break-all;">@context.FolderName</MudTd>
+                    <MudTd DataLabel="Источник">@(context.SourceInstance ?? "—")</MudTd>
+                    <MudTd DataLabel="Период">@(context.Period ?? "—")</MudTd>
+                    <MudTd DataLabel="Сформирован">@(context.CreatedAt is { } at ? Time(at.UtcDateTime) : "—")</MudTd>
+                    <MudTd DataLabel="Состав">
+                        @if (context.Counts is { } counts)
+                        {
+                            <span>дел @Count(counts, "cases") · объектов @Count(counts, "persons") · связей @Count(counts, "links") ·
+                                сводок @Count(counts, "reports") · носителей @Count(counts, "assets") (файлов @Count(counts, "files")) ·
+                                появлений @Count(counts, "appearances")</span>
+                        }
+                        else
+                        {
+                            <span class="mud-text-secondary">—</span>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Объём">@(context.Bytes is { } size ? FormatBytes(size) : "—")</MudTd>
+                    <MudTd DataLabel="Маркировка">@(context.Marking ?? "—")</MudTd>
+                    <MudTd DataLabel="Проверка">
+                        @if (context.CanImport)
+                        {
+                            <MudText Typo="Typo.body2" Color="Color.Success">подпись верна</MudText>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Error">@context.Problem</MudText>
+                        }
+                        @if (context.LastStatus is { } last)
+                        {
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                                принимался @(context.LastImportAt is { } when ? Time(when) : string.Empty): @ImportLabel(last)
+                            </MudText>
+                        }
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                        На носителе нет пакетов обмена (каталогов isc-exchange-…). Подключите носитель после проверки на шлюзе.
+                    </MudText>
+                </NoRecordsContent>
+            </MudTable>
+
+            @if (SelectedPackage(import) is { } chosen)
+            {
+                <MudPaper Outlined="true" Class="pa-3 mb-3">
+                    <MudText Typo="Typo.subtitle2" Class="mb-2">Принять пакет</MudText>
+                    <MudText Typo="Typo.body2" Style="font-family:monospace;word-break:break-all;">@chosen.FolderName</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
+                        Новые дела, объекты, сводки, события связи и носители заводятся с грифом источника; принятое прежде не
+                        повторяется. Совпадения с делами и файлами этого офиса уходят в конфликты — их разбирает Руководитель.
+                        Эталоны и появления переносятся следующим этапом, после обработки принятых носителей.
+                    </MudText>
+                    <MudCheckBox T="bool" @bind-Value="_gateway" Dense="true" Disabled="@ImportLocked"
+                                 Label="Пакет прошёл проверку на шлюзе" />
+                    <div class="d-flex gap-3 align-center flex-wrap mt-2">
+                        @* Пароль вводит хранитель ключа приёма (не Администратор, ТО-орг-07); на сервере он живёт только в памяти задания. *@
+                        <MudTextField T="string" @bind-Value="_receivePassword" Immediate="true" Label="Пароль ключа приёма (вводит хранитель ключа)"
+                                      InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                      Style="min-width:320px;" Disabled="@ImportLocked" autocomplete="off" />
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.MoveToInbox"
+                                   OnClick="StartImportAsync"
+                                   Disabled="@(ImportLocked || !receive.Ready || !chosen.CanImport || !_gateway || string.IsNullOrEmpty(_receivePassword))">
+                            @(_busy ? "Запускаю…" : "Принять пакет")
+                        </MudButton>
+                    </div>
+                </MudPaper>
+            }
+
+            @if (import.RunningStage is { } stage)
+            {
+                <div class="d-flex align-center gap-2 mb-3">
+                    <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary" />
+                    <MudText Typo="Typo.body2">Пакет принимается: @stage Страницу можно закрыть — работа идёт на сервере.</MudText>
+                </div>
+            }
+
+            <MudText Typo="Typo.subtitle2" Class="mb-2">Принятые пакеты</MudText>
+            <MudTable T="ExchangeImportRow" Items="import.Recent" Dense="true" Hover="true" Outlined="true">
+                <HeaderContent>
+                    <MudTh>Начат</MudTh>
+                    <MudTh>Пакет</MudTh>
+                    <MudTh>Состояние</MudTh>
+                    <MudTh>Итог</MudTh>
+                    <MudTh>Объём</MudTh>
+                    <MudTh>Маркировка</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Начат">@Time(context.StartedAt)</MudTd>
+                    <MudTd DataLabel="Пакет">
+                        <span style="font-family:monospace;word-break:break-all;">@context.PackageName</span>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                            @(context.SourceInstance ?? "—"), период @(context.Period ?? "—")
+                        </MudText>
+                    </MudTd>
+                    <MudTd DataLabel="Состояние">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@ImportColor(context.Status)" Class="ma-0">
+                            @ImportLabel(context.Status)
+                        </MudChip>
+                        @if (context.Error is { } error)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Error" Class="d-block">@error</MudText>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Итог">
+                        @if (context.Status != ExchangeImportStatus.Running)
+                        {
+                            <span>заведено: дел @context.CasesCreated · объектов @context.PersonsCreated · событий @context.EventsCreated ·
+                                сводок @context.ReportsCreated · носителей @context.AssetsCreated (файлов @context.FilesReceived)</span>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                                уже было @context.AlreadyImported · конфликтов @context.Conflicts · отложено до этапа 3 @context.Deferred ·
+                                без файла @context.MissingFiles · отклонено @context.Rejected
+                            </MudText>
+                        }
+                        else
+                        {
+                            <span class="mud-text-secondary">—</span>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Объём">@(context.FilesReceived > 0 ? FormatBytes(context.BytesReceived) : "—")</MudTd>
+                    <MudTd DataLabel="Маркировка">@(context.Classification is { } c ? ClassificationLevels.Label(c) : "—")</MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">Пакетов ещё не принимали.</MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </MudTabPanel>
+    </MudTabs>
 }
 else if (_loading)
 {
@@ -162,9 +354,11 @@ else if (_loading)
     private Task? _refreshLoop;
 
     private ExchangeOverview? _view;
+    private ExchangeImportOverview? _import;
     private bool _loading = true;
     private bool _busy;
     private string? _error;
+    private int _tab;
 
     // Отбор по умолчанию — прошлый месяц: пакет за месяц формируют после его окончания (ТФ-ОБМ-03).
     private int _year = DateTime.Today.AddMonths(-1).Year;
@@ -176,7 +370,16 @@ else if (_loading)
     private bool _resend;
     private string? _password;
 
-    private bool Locked => _busy || _view?.RunningBytes is not null;
+    // Приём: выбранный пакет, отметка шлюза, пароль ключа приёма.
+    private string? _selected;
+    private bool _gateway;
+    private string? _receivePassword;
+
+    private bool ExportLocked => _busy || _view?.RunningBytes is not null;
+
+    private bool ImportLocked => _busy || _import?.RunningStage is not null;
+
+    private bool Running => _view?.RunningBytes is not null || _import?.RunningStage is not null;
 
     /// <inheritdoc />
     protected override async Task OnInitializedAsync()
@@ -184,6 +387,13 @@ else if (_loading)
         if (!RendererInfo.IsInteractive) { return; }
 
         await LoadAsync();
+
+        // Офис, который только принимает (отправка не настроена, приём — да), открывается сразу на «Приёме».
+        if (_view?.Readiness.TargetFolder is null && _import?.Readiness.ImportFolder is not null)
+        {
+            _tab = 1;
+        }
+
         _refreshLoop = RefreshWhileRunningAsync(_disposed.Token);
     }
 
@@ -191,14 +401,16 @@ else if (_loading)
     {
         try
         {
-            var response = await Dispatcher.Send(new GetExchangeOverviewQuery());
-            if (response is { Status: true, Data: { } view })
+            var export = await Dispatcher.Send(new GetExchangeOverviewQuery());
+            var import = await Dispatcher.Send(new GetExchangeImportOverviewQuery());
+            if (export is { Status: true, Data: { } view } && import is { Status: true, Data: { } received })
             {
                 _view = view;
+                _import = received;
             }
             else
             {
-                _error = response.StatusMessage;
+                _error = export.Status ? import.StatusMessage : export.StatusMessage;
             }
         }
         finally
@@ -207,7 +419,7 @@ else if (_loading)
         }
     }
 
-    // Пока формируется пакет — перечитывать каждые 3 с (ход и итог); иначе — ничего не запрашивать.
+    // Пока формируется или принимается пакет — перечитывать каждые 3 с (ход и итог); иначе — ничего не запрашивать.
     private async Task RefreshWhileRunningAsync(CancellationToken cancellationToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
@@ -215,7 +427,7 @@ else if (_loading)
         {
             while (await timer.WaitForNextTickAsync(cancellationToken))
             {
-                if (_view?.RunningBytes is not null && !_busy)
+                if (Running && !_busy)
                 {
                     await InvokeAsync(async () =>
                     {
@@ -231,7 +443,7 @@ else if (_loading)
         }
     }
 
-    private async Task StartAsync()
+    private async Task StartExportAsync()
     {
         _busy = true;
         _error = null;
@@ -263,6 +475,56 @@ else if (_loading)
         await LoadAsync();
     }
 
+    private void Select(ExchangePackageRow? row)
+    {
+        if (row is null || ImportLocked || row.FolderName == _selected)
+        {
+            return;
+        }
+
+        // Другой пакет — отметка шлюза и пароль заново: подтверждение относится к конкретному пакету.
+        _selected = row.FolderName;
+        _gateway = false;
+        _receivePassword = null;
+    }
+
+    private ExchangePackageRow? SelectedPackage(ExchangeImportOverview import) =>
+        _selected is null ? null : import.Packages.FirstOrDefault(p => p.FolderName == _selected);
+
+    private async Task StartImportAsync()
+    {
+        if (_selected is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            var response = await Dispatcher.Send(new StartExchangeImportCommand(_selected, _gateway, _receivePassword ?? string.Empty));
+            if (response.Status)
+            {
+                Snackbar.Add(response.StatusMessage, Severity.Success);
+            }
+            else
+            {
+                _error = response.StatusMessage;
+            }
+        }
+        finally
+        {
+            // Пароль на странице не остаётся ни в каком исходе; отметку шлюза — заново для следующего приёма.
+            _receivePassword = null;
+            _gateway = false;
+            _busy = false;
+        }
+
+        await LoadAsync();
+    }
+
+    private static int Count(IReadOnlyDictionary<string, int> counts, string key) => counts.GetValueOrDefault(key);
+
     private static string MonthName(int month) =>
         CultureInfo.GetCultureInfo("ru-RU").DateTimeFormat.GetMonthName(month) is { Length: > 0 } name
             ? char.ToUpper(name[0], CultureInfo.GetCultureInfo("ru-RU")) + name[1..]
@@ -277,7 +539,7 @@ else if (_loading)
         _ => (bytes / 1024.0).ToString("0", CultureInfo.GetCultureInfo("ru-RU")) + " КБ",
     };
 
-    private static string StatusLabel(ExchangeExportStatus status) => status switch
+    private static string ExportLabel(ExchangeExportStatus status) => status switch
     {
         ExchangeExportStatus.Running => "формируется",
         ExchangeExportStatus.Succeeded => "готов",
@@ -286,10 +548,26 @@ else if (_loading)
         _ => status.ToString(),
     };
 
-    private static Color StatusColor(ExchangeExportStatus status) => status switch
+    private static Color ExportColor(ExchangeExportStatus status) => status switch
     {
         ExchangeExportStatus.Running => Color.Info,
         ExchangeExportStatus.Succeeded => Color.Success,
+        _ => Color.Error,
+    };
+
+    private static string ImportLabel(ExchangeImportStatus status) => status switch
+    {
+        ExchangeImportStatus.Running => "принимается",
+        ExchangeImportStatus.Succeeded => "принят",
+        ExchangeImportStatus.Failed => "не принят",
+        ExchangeImportStatus.Interrupted => "прерван",
+        _ => status.ToString(),
+    };
+
+    private static Color ImportColor(ExchangeImportStatus status) => status switch
+    {
+        ExchangeImportStatus.Running => Color.Info,
+        ExchangeImportStatus.Succeeded => Color.Success,
         _ => Color.Error,
     };
 

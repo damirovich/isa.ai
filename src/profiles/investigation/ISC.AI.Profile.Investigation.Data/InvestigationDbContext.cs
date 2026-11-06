@@ -100,6 +100,15 @@ public class InvestigationDbContext(DbContextOptions<InvestigationDbContext> opt
     /// <summary>Файлы носителей, ушедшие успешными выгрузками (ADR-0068).</summary>
     public DbSet<ExchangeExportFile> ExchangeExportFiles { get; set; } = null!;
 
+    /// <summary>Журнал приёмов пакетов обмена (ADR-0068 v0.2).</summary>
+    public DbSet<ExchangeImport> ExchangeImports { get; set; } = null!;
+
+    /// <summary>Карта «запись источника → своя запись» (ADR-0068 v0.2).</summary>
+    public DbSet<ExchangeSourceRecord> ExchangeSourceRecords { get; set; } = null!;
+
+    /// <summary>Конфликты приёма — для очереди Руководителя (ADR-0068 v0.2).</summary>
+    public DbSet<ExchangeImportConflict> ExchangeImportConflicts { get; set; } = null!;
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

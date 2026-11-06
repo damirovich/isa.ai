@@ -27,6 +27,14 @@ public interface IMediaExchangeSource
     /// <summary>Файл оригинала носителя.</summary>
     /// <exception cref="FileNotFoundException">Носителя или его файла нет.</exception>
     Task<Stream> OpenOriginalAsync(int assetId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Носители с такими хешами файла — во всех подразделениях и грифах (сторона получателя, ADR-0068 v0.2): совпавший файл
+    /// у получателя — конфликт для Руководителя (ТФ-ОБМ-02, ТФ-МЕД-04), а не молчаливая дедупликация. Содержимого нет —
+    /// только номер, хеш, гриф и подразделение (для очереди с допуском).
+    /// </summary>
+    Task<IReadOnlyList<MediaExchangeHashMatch>> FindByContentHashAsync(
+        IReadOnlyCollection<string> contentHashes, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Реквизиты носителя для пакета обмена (без производных: индексации, расшифровки, ленты кадров, волны).</summary>
@@ -100,3 +108,10 @@ public sealed record MediaExchangeDecision(
     DateTime DecidedAtUtc,
     int UserId,
     ConfirmationMode ConfirmationMode);
+
+/// <summary>Носитель получателя с тем же файлом, что у носителя пакета.</summary>
+/// <param name="AssetId">Номер носителя у получателя.</param>
+/// <param name="ContentHash">SHA-256 файла, HEX прописными.</param>
+/// <param name="Classification">Гриф носителя.</param>
+/// <param name="DivisionId">Подразделение носителя.</param>
+public sealed record MediaExchangeHashMatch(int AssetId, string ContentHash, short Classification, int DivisionId);

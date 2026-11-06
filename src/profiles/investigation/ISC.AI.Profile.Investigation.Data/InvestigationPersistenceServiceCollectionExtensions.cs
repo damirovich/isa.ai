@@ -92,6 +92,14 @@ public static class InvestigationPersistenceServiceCollectionExtensions
         services.AddScoped<IExchangeExport>(sp => sp.GetRequiredService<Exchange.ExchangeExportService>());
         services.AddHostedService<Exchange.ExchangeExportWorker>();
 
+        // Сторона получателя (ТФ-ОБМ-02, ADR-0068 v0.2): перенос записей с картой номеров источника, приём файлов через общий
+        // приём «Медиа», фоновое задание (один приём в каждый момент), отметка прерванных приёмов при старте.
+        services.AddSingleton<Exchange.ExchangeImportChannel>();
+        services.AddScoped<Exchange.ExchangeRecordImporter>();
+        services.AddScoped<Exchange.ExchangeImportService>();
+        services.AddScoped<IExchangeImport>(sp => sp.GetRequiredService<Exchange.ExchangeImportService>());
+        services.AddHostedService<Exchange.ExchangeImportWorker>();
+
         // Порты пакета «Документооборот» (ADR-0017): справочник подразделений, право настройки,
         // кандидаты в ответственные/исполнители. Без реализаций модуль fail-closed.
         services.AddScoped<ISC.AI.Modules.DocFlow.Domain.Services.IDivisionDirectory, InvestigationDivisionDirectory>();
