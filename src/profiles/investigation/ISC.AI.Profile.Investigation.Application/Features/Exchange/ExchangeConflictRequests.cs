@@ -44,8 +44,9 @@ public sealed record ListExchangeConflictsQuery(bool IncludeHistory = false) : I
 }
 
 /// <summary>
-/// Решение Руководителя по конфликту обмена (ТФ-ОБМ-02, ADR-0068 v0.3): объединить со своим, создать новое (только дело;
-/// при совпадении номера — с новым номером) или пропустить. Решение применяет следующий приём пакета.
+/// Решение Руководителя по конфликту обмена (ТФ-ОБМ-02, ADR-0068 v0.3–v0.4): объединить со своим, создать новое (только дело;
+/// при совпадении номера — с новым номером) или пропустить — применяет следующий приём пакета; по конфликту изменений
+/// принятой записи — принять версию источника или оставить свою, применяется сразу.
 /// </summary>
 /// <param name="ConflictId">Конфликт.</param>
 /// <param name="Decision">Решение.</param>
@@ -68,7 +69,12 @@ public sealed record DecideExchangeConflictCommand(int ConflictId, ExchangeConfl
         + (string.IsNullOrWhiteSpace(Comment) ? string.Empty : ";comment=" + Comment.Trim());
 
     /// <inheritdoc cref="DecideExchangeConflictCommand" />
-    public sealed class Handler(IUserRoleStore roles, ISubjectProvider subjects, IAccessContextProvider accessProvider, IExchangeConflicts conflicts)
+    public sealed class Handler(
+        IUserRoleStore roles,
+        ISubjectProvider subjects,
+        IAccessContextProvider accessProvider,
+        IExchangeConflicts conflicts,
+        ICaseClosureRegulation closures)
         : IRequestHandler<DecideExchangeConflictCommand, ResponseDto<bool>>
     {
         /// <inheritdoc />
@@ -82,11 +88,37 @@ public sealed record DecideExchangeConflictCommand(int ConflictId, ExchangeConfl
 
             var access = await accessProvider.GetCurrentAsync(cancellationToken);
             var result = await conflicts.DecideAsync(command.ConflictId, command.Decision, command.NewNumber, command.Comment, access, cancellationToken);
-            return result.Ok
-                ? ResponseDto<bool>.Ok(true, "Решение записано — оно применится при повторном приёме пакета.")
-                : result.NotFound
+            if (!result.Ok)
+            {
+                return result.NotFound
                     ? ResponseDto<bool>.NotFound(result.Message ?? "Конфликт не найден или недоступен.")
                     : ResponseDto<bool>.Fail(result.Message ?? "Решение не записано.");
+            }
+
+            if (!result.AppliedNow)
+            {
+                return ResponseDto<bool>.Ok(true, "Решение записано — оно применится при повторном приёме пакета.");
+            }
+
+            // ИНВАРИАНТ (ТБ-074): принятое закрытие дела другого офиса исполняет тот же регламент удаления шаблонов, что
+            // закрытие здесь; сбой — не тишина: решение применено, а оператору сказано, что биометрия осталась.
+            if (result.ClosedCaseId is { } caseId)
+            {
+                var closure = await closures.ExecuteAsync(
+                    caseId,
+                    "закрытие дела №" + caseId.ToString(CultureInfo.InvariantCulture) + " по решению о конфликте обмена № "
+                    + command.ConflictId.ToString(CultureInfo.InvariantCulture),
+                    access.NumericSubjectId,
+                    cancellationToken);
+                if (closure.Outcome == CaseClosureRegulationOutcome.Failed)
+                {
+                    return ResponseDto<bool>.BadRequest(
+                        "Решение применено, дело закрыто, но регламент удаления шаблонов НЕ исполнен (журнал аудита недоступен). "
+                        + "Шаблоны лиц дела остались в базе. Закройте дело повторно, когда журнал будет доступен.");
+                }
+            }
+
+            return ResponseDto<bool>.Ok(true, "Решение применено.");
         }
     }
 }
@@ -101,7 +133,8 @@ public sealed class DecideExchangeConflictValidator : AbstractValidator<DecideEx
     public DecideExchangeConflictValidator()
     {
         RuleFor(c => c.ConflictId).GreaterThan(0).WithMessage("Не выбран конфликт.");
-        RuleFor(c => c.Decision).IsInEnum().WithMessage("Выберите решение: объединить, создать новое или пропустить.");
+        RuleFor(c => c.Decision).IsInEnum()
+            .WithMessage("Выберите решение: объединить, создать новое, пропустить — или, для изменений, принять версию источника либо оставить свою.");
         RuleFor(c => c.NewNumber).MaximumLength(100).WithMessage("Номер дела длиннее 100 знаков.");
         RuleFor(c => c.Comment).MaximumLength(MaxCommentLength).WithMessage($"Комментарий длиннее {MaxCommentLength} знаков.");
     }

@@ -23,6 +23,7 @@ using ISC.AI.Profile.Investigation.Domain.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
+using Pgvector;
 using Shouldly;
 using Testcontainers.PostgreSql;
 
@@ -308,7 +309,7 @@ public sealed class ExchangeImportTests : IAsyncLifetime
         (await rx.ExchangeImportConflicts.CountAsync()).ShouldBe(0);
     }
 
-    [Fact(DisplayName = "ADR-0068 v0.3: «объединить» — дело с той же парой «ГУ + № задания» дополняет своё дело другого подразделения, объекты получают его подразделение; конфликт вне допуска не виден и не решается")]
+    [Fact(DisplayName = "ADR-0068 v0.3: «объединить» — дело с той же парой «ГУ + № задания» дополняет своё дело другого подразделения, объекты получают его подразделение; конфликт вне допуска не виден и не решается; изменения источника потом — конфликтом, не перезаписью (v0.4)")]
     public async Task Merge_decision_puts_contents_into_own_case()
     {
         var world = await SeedSourceAsync();
@@ -377,6 +378,25 @@ public sealed class ExchangeImportTests : IAsyncLifetime
         await using var core = _rxCore.CreateDbContext();
         var act = await core.AuditRecords.OrderByDescending(r => r.Id).FirstAsync(r => r.ObjectRef == "investigation:exchange:import:" + package);
         act.PayloadSensitive.ShouldNotBeNull().ShouldContain("объединено со своим делом ОН/5-2026");
+
+        // v0.4: изменения дела источника потом сравниваются со своим делом, а не перезаписывают его — конфликт изменений.
+        await using (var source = _investigation.CreateDbContext())
+        {
+            (await source.Cases.SingleAsync(c => c.Number == TaskCase)).Title = "Задание по объекту (уточнено)";
+            await source.SaveChangesAsync();
+        }
+
+        await Task.Delay(1100); // имя пакета — с точностью до секунды
+        var third = await ImportAsync(service, channel, await ExportAsync(world.Period));
+        third.Status.ShouldBe(ExchangeImportStatus.Succeeded, third.Error);
+        (third.UpdateConflicts, third.Merged, third.RecordsUpdated).ShouldBe((1, 0, 0));
+        third.ReconciliationOk.ShouldBe(true, third.Reconciliation);
+        await using var after = _rxInvestigation.CreateDbContext();
+        (await after.Cases.SingleAsync(c => c.Id == ownCase)).Title.ShouldBe("Своё задание");
+        var update = await after.ExchangeImportConflicts.AsNoTracking().SingleAsync(c => c.Kind == ExchangeConflictKind.RecordUpdate);
+        var change = ExchangeRecordUpdater.ParseChanges(update.Changes).Single();
+        (change.Key, change.BaseText, change.SourceText, change.LocalText)
+            .ShouldBe(("title", "Задание по объекту", "Задание по объекту (уточнено)", "Своё задание"));
     }
 
     [Fact(DisplayName = "ADR-0068 v0.3: «создать новое» с новым номером и «пропустить» носитель применяются повторным приёмом; пропуск действует и дальше, эталон на пропущенном носителе не переносится")]
@@ -513,6 +533,246 @@ public sealed class ExchangeImportTests : IAsyncLifetime
         local.RevokedAtUtc.ShouldNotBeNull();
     }
 
+    [Fact(DisplayName = "ADR-0068 v0.4: изменения источника переносятся в принятые записи, которые у получателя не трогали: дело (закрытие — с регламентом ТБ-074), анкета, телефон, новая редакция сводки, событие и участник; гриф только вверх")]
+    public async Task Source_changes_reach_untouched_records()
+    {
+        var world = await SeedSourceAsync();
+        await SeedReceiverAsync(withDivision: true);
+        var (service, channel, _) = BuildReceiver(purgeOnClosure: true);
+        (await ImportAsync(service, channel, await ExportAsync(world.Period))).Status.ShouldBe(ExchangeImportStatus.Succeeded);
+
+        // У получателя видео дела проиндексировано — есть шаблон лица: его и снимет регламент закрытия.
+        var template = await SeedReceivedTemplateAsync();
+
+        // У источника: дело закрыто и переименовано, объекту — псевдоним и гриф выше, телефон исправлен, новая редакция
+        // сводки, событие переименовано (а его гриф понижен), у участника — роль.
+        await using (var db = _investigation.CreateDbContext())
+        {
+            var targetCase = await db.Cases.SingleAsync(c => c.Id == world.TargetCaseId);
+            targetCase.Title = "Разработка (завершена)";
+            targetCase.Status = CaseStatus.Closed;
+            targetCase.ClosedAt = new DateTime(2026, 3, 20, 9, 30, 0, DateTimeKind.Utc);
+            var target = await db.Persons.SingleAsync(p => p.Id == world.TargetId);
+            target.Alias = "Ваня";
+            target.Classification = ClassificationLevels.TopSecret;
+            var phone = await db.PersonPhones.SingleAsync(p => p.PersonId == world.TargetId);
+            phone.Number = "0555 999 000";
+            phone.NumberNormalized = RequisiteNormalizer.Phone("0555 999 000")!;
+            var report = await db.CaseReports.SingleAsync(r => r.CaseId == world.TargetCaseId);
+            var content = new CaseReportContent(Conclusion: "Встреча подтверждена, установлен второй участник.");
+            db.CaseReportRevisions.Add(new CaseReportRevision
+            {
+                ReportId = report.Id, Number = 2, ContentJson = content.ToJson(), Classification = report.Classification, DivisionId = report.DivisionId,
+            });
+            report.CurrentRevision = 2;
+            report.SearchText = content.SearchText(CaseReportKind.SummaryOn);
+            var linkEvent = await db.LinkEvents.SingleAsync();
+            linkEvent.Title = "Встреча у центрального рынка";
+            linkEvent.Classification = ClassificationLevels.Unclassified;
+            (await db.LinkEventParticipants.SingleAsync(p => p.PersonId == world.TargetId)).Role = "инициатор встречи";
+            await db.SaveChangesAsync();
+        }
+
+        await Task.Delay(1100); // имя пакета — с точностью до секунды
+        var package = await ExportAsync(world.Period);
+        var second = await ImportAsync(service, channel, package);
+
+        second.Status.ShouldBe(ExchangeImportStatus.Succeeded, second.Error);
+        second.Error.ShouldBeNull();
+        (second.CasesCreated, second.PersonsCreated, second.ReportsCreated, second.UpdateConflicts).ShouldBe((0, 0, 0, 0));
+        second.RecordsUpdated.ShouldBe(6);
+        second.ReconciliationOk.ShouldBe(true, second.Reconciliation);
+        second.Reconciliation.ShouldNotBeNull().ShouldContain("обновлено");
+
+        await using var rx = _rxInvestigation.CreateDbContext();
+        var rxCase = await rx.Cases.SingleAsync(c => c.Number == TargetCase);
+        (rxCase.Title, rxCase.Status, rxCase.ClosedAt)
+            .ShouldBe(("Разработка (завершена)", CaseStatus.Closed, (DateTime?)new DateTime(2026, 3, 20, 9, 30, 0, DateTimeKind.Utc)));
+        var rxPerson = await rx.Persons.SingleAsync(p => p.CaseId == rxCase.Id && p.Role == PersonRole.Target);
+        (rxPerson.Alias, rxPerson.Classification).ShouldBe(("Ваня", ClassificationLevels.TopSecret));
+        (await rx.PersonPhones.SingleAsync(p => p.PersonId == rxPerson.Id)).NumberNormalized.ShouldBe(RequisiteNormalizer.Phone("0555 999 000"));
+
+        // Сводка — новой редакцией получателя с пометкой источника; первая осталась в истории (ТФ-ДДЛ-05).
+        var rxReport = await rx.CaseReports.SingleAsync(r => r.CaseId == rxCase.Id);
+        rxReport.CurrentRevision.ShouldBe(2);
+        rxReport.SearchText.ShouldContain(RequisiteNormalizer.SearchText("второй участник"));
+        var revisions = await rx.CaseReportRevisions.Where(v => v.ReportId == rxReport.Id).OrderBy(v => v.Number).ToListAsync();
+        revisions.Select(v => v.Number).ShouldBe([1, 2]);
+        revisions[1].EditReason.ShouldNotBeNull().ShouldContain("office-2");
+        CaseReportContent.FromJson(revisions[0].ContentJson).Conclusion.ShouldBe("Встреча подтверждена наружным наблюдением.");
+
+        // Событие — новое название, а пониженный у источника гриф у получателя не понижен (ТБ-070).
+        var rxEvent = await rx.LinkEvents.SingleAsync();
+        (rxEvent.Title, rxEvent.Classification).ShouldBe(("Встреча у центрального рынка", ClassificationLevels.ForOfficialUse));
+        (await rx.LinkEventParticipants.SingleAsync(p => p.PersonId == rxPerson.Id)).Role.ShouldBe("инициатор встречи");
+
+        // Закрытие вслед за источником — регламент получателя (ТБ-074): шаблон снят, акт закрытия записан.
+        await using (var media = _rxMedia.CreateDbContext())
+        {
+            (await media.Templates.CountAsync(t => t.Id == template)).ShouldBe(0);
+        }
+
+        (await rx.ClosureActs.CountAsync(a => a.CaseId == rxCase.Id)).ShouldBe(1);
+        await using (var core = _rxCore.CreateDbContext())
+        {
+            var act = await core.AuditRecords.OrderByDescending(r => r.Id).FirstAsync(r => r.ObjectRef == "investigation:exchange:import:" + package);
+            act.PayloadSensitive.ShouldNotBeNull().ShouldContain("дело № " + TargetCase + ": изменено — наименование, статус, дата закрытия");
+            act.PayloadSensitive.ShouldContain("шаблонов снято: 1");
+        }
+
+        // Тот же пакет повторно — изменений больше нет, лишней редакции нет.
+        var third = await ImportAsync(service, channel, package);
+        (third.RecordsUpdated, third.UpdateConflicts).ShouldBe((0, 0));
+        third.ReconciliationOk.ShouldBe(true, third.Reconciliation);
+        (await rx.CaseReportRevisions.CountAsync(v => v.ReportId == rxReport.Id)).ShouldBe(2);
+    }
+
+    [Fact(DisplayName = "ADR-0068 v0.4: поле, изменённое и у источника, и у получателя, — конфликт изменений Руководителю, остальное переносится; «принять версию источника» и «оставить свою» применяются сразу и не возвращаются; занятый номер дела — конфликт, а не сбой")]
+    public async Task Edits_on_both_sides_go_to_the_head()
+    {
+        var world = await SeedSourceAsync();
+        await SeedReceiverAsync(withDivision: true);
+        var (service, channel, _) = BuildReceiver();
+        (await ImportAsync(service, channel, await ExportAsync(world.Period))).Status.ShouldBe(ExchangeImportStatus.Succeeded);
+
+        int rxCaseId, rxTaskId, rxPersonId, division;
+        await using (var rx = _rxInvestigation.CreateDbContext())
+        {
+            var rxCase = await rx.Cases.SingleAsync(c => c.Number == TargetCase);
+            rxCase.Title = "Разработка (Офис №1)";
+            var rxPerson = await rx.Persons.SingleAsync(p => p.CaseId == rxCase.Id && p.Role == PersonRole.Target);
+            rxPerson.Alias = "Иван-старший";
+            rx.Cases.Add(new CaseFile
+            {
+                Number = "ОУ-2/99-2026", Title = "Своё дело", Kind = CaseKind.CriminalCase, OpenedAt = new DateOnly(2026, 2, 1),
+                DivisionId = rxCase.DivisionId, Classification = ClassificationLevels.ForOfficialUse, Status = CaseStatus.InProgress,
+            });
+            await rx.SaveChangesAsync();
+            (rxCaseId, rxPersonId, division) = (rxCase.Id, rxPerson.Id, rxCase.DivisionId);
+            rxTaskId = (await rx.Cases.SingleAsync(c => c.Number == TaskCase)).Id;
+        }
+
+        await using (var db = _investigation.CreateDbContext())
+        {
+            var targetCase = await db.Cases.SingleAsync(c => c.Id == world.TargetCaseId);
+            targetCase.Title = "Разработка (Офис №2)";
+            targetCase.Basis = "рапорт № 12";
+            var target = await db.Persons.SingleAsync(p => p.Id == world.TargetId);
+            target.Alias = "Ваня";
+            target.WorkPlace = "рынок «Ош»";
+            (await db.Cases.SingleAsync(c => c.Number == TaskCase)).Number = "ОУ-2/99-2026";
+            await db.SaveChangesAsync();
+        }
+
+        await Task.Delay(1100);
+        var package = await ExportAsync(world.Period);
+        var second = await ImportAsync(service, channel, package);
+
+        second.Status.ShouldBe(ExchangeImportStatus.Succeeded, second.Error);
+        (second.UpdateConflicts, second.RecordsUpdated).ShouldBe((3, 0));
+        second.ReconciliationOk.ShouldBe(true, second.Reconciliation);
+        second.Reconciliation.ShouldNotBeNull().ShouldContain("конфликт изменений");
+        await using (var rx = _rxInvestigation.CreateDbContext())
+        {
+            // Поля без конфликта перенесены, конфликтные — как у получателя; занятый номер не записан.
+            var rxCase = await rx.Cases.SingleAsync(c => c.Id == rxCaseId);
+            (rxCase.Title, rxCase.Basis).ShouldBe(("Разработка (Офис №1)", "рапорт № 12"));
+            var rxPerson = await rx.Persons.SingleAsync(p => p.Id == rxPersonId);
+            (rxPerson.Alias, rxPerson.WorkPlace).ShouldBe(("Иван-старший", "рынок «Ош»"));
+            (await rx.Cases.SingleAsync(c => c.Id == rxTaskId)).Number.ShouldBe(TaskCase);
+        }
+
+        var store = new ExchangeConflictStore(_rxInvestigation, new InvestigationAccessPolicy(_rxInvestigation), TimeProvider.System);
+        var head = InvestigationTestKit.Access(ReceiverHeadId, ClassificationLevels.Secret, division);
+        var rows = await store.ListAsync(head, includeHistory: false);
+        rows.Count.ShouldBe(3);
+        rows.ShouldAllBe(r => r.IsUpdate && r.Status == ExchangeConflictStatus.Pending);
+        var caseRow = rows.Single(r => r.RecordKind == ExchangeRecordKind.Case && r.LocalId == rxCaseId);
+        caseRow.Label.ShouldBe("дело № " + TargetCase);
+        var title = caseRow.Changes.ShouldNotBeNull().Single();
+        (title.Key, title.BaseText, title.SourceText, title.LocalText, title.BaseKnown)
+            .ShouldBe(("title", "Разработка", "Разработка (Офис №2)", "Разработка (Офис №1)", true));
+        var personRow = rows.Single(r => r.RecordKind == ExchangeRecordKind.Person);
+        personRow.Changes.ShouldNotBeNull().Single().Key.ShouldBe("alias");
+        var numberRow = rows.Single(r => r.RecordKind == ExchangeRecordKind.Case && r.LocalId == rxTaskId);
+        numberRow.Changes.ShouldNotBeNull().Single().Key.ShouldBe("number");
+
+        // Гриф конфликта — своей записи: при допуске «ДСП» видна только строка дела «ДСП» (ТБ-020/021).
+        var low = InvestigationTestKit.Access(ReceiverHeadId, ClassificationLevels.ForOfficialUse, division);
+        (await store.ListAsync(low, includeHistory: false)).Select(r => r.Id).ShouldBe([caseRow.Id]);
+
+        // Решения дела и носителя здесь не принимаются; занятый номер принять нельзя — ничего не записано.
+        (await store.DecideAsync(caseRow.Id, ExchangeConflictDecision.Merge, null, null, head)).Ok.ShouldBeFalse();
+        var refused = await store.DecideAsync(numberRow.Id, ExchangeConflictDecision.AcceptSource, null, null, head);
+        refused.Ok.ShouldBeFalse();
+        refused.Message.ShouldNotBeNull().ShouldContain("занят");
+        (await store.DecideAsync(numberRow.Id, ExchangeConflictDecision.KeepLocal, null, null, head)).AppliedNow.ShouldBeTrue();
+
+        var accepted = await store.DecideAsync(personRow.Id, ExchangeConflictDecision.AcceptSource, null, "у источника точнее", head);
+        (accepted.Ok, accepted.AppliedNow, accepted.ClosedCaseId).ShouldBe((true, true, (int?)null));
+        (await store.DecideAsync(caseRow.Id, ExchangeConflictDecision.KeepLocal, null, null, head)).AppliedNow.ShouldBeTrue();
+
+        await using (var rx = _rxInvestigation.CreateDbContext())
+        {
+            (await rx.Persons.SingleAsync(p => p.Id == rxPersonId)).Alias.ShouldBe("Ваня");
+            (await rx.Cases.SingleAsync(c => c.Id == rxCaseId)).Title.ShouldBe("Разработка (Офис №1)");
+            (await rx.Cases.SingleAsync(c => c.Id == rxTaskId)).Number.ShouldBe(TaskCase);
+            var decided = await rx.ExchangeImportConflicts.AsNoTracking().Where(c => c.Kind == ExchangeConflictKind.RecordUpdate).ToListAsync();
+            decided.ShouldAllBe(c => c.Status == ExchangeConflictStatus.Applied && c.DecidedByUserId == ReceiverHeadId);
+        }
+
+        // Тот же пакет повторно — решённые конфликты не возвращаются, новых нет.
+        var third = await ImportAsync(service, channel, package);
+        (third.UpdateConflicts, third.RecordsUpdated).ShouldBe((0, 0));
+        third.ReconciliationOk.ShouldBe(true, third.Reconciliation);
+        (await store.ListAsync(head, includeHistory: false)).ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "ADR-0068 v0.4: записи, принятые до версии 0.4 (без снимка): нетронутая у получателя — изменения источника переносятся; изменённая после приёма — расхождение конфликтом «было — неизвестно»")]
+    public async Task Records_imported_before_snapshots()
+    {
+        var world = await SeedSourceAsync();
+        await SeedReceiverAsync(withDivision: true);
+        var (service, channel, _) = BuildReceiver();
+        (await ImportAsync(service, channel, await ExportAsync(world.Period))).Status.ShouldBe(ExchangeImportStatus.Succeeded);
+
+        int linkId;
+        await using (var rx = _rxInvestigation.CreateDbContext())
+        {
+            // Как после приёма версией 0.3: снимков в карте нет; связь объекта у получателя поправили после приёма.
+            await rx.ExchangeSourceRecords.ExecuteUpdateAsync(s => s.SetProperty(r => r.Snapshot, (string?)null));
+            var link = await rx.Persons.SingleAsync(p => p.Role == PersonRole.Link);
+            link.Notes = "проверить по месту работы";
+            await rx.SaveChangesAsync();
+            linkId = link.Id;
+        }
+
+        await using (var db = _investigation.CreateDbContext())
+        {
+            (await db.Persons.SingleAsync(p => p.Id == world.TargetId)).Alias = "Ваня";
+            (await db.Persons.SingleAsync(p => p.Role == PersonRole.Link)).Notes = "брат по матери";
+            await db.SaveChangesAsync();
+        }
+
+        await Task.Delay(1100);
+        var second = await ImportAsync(service, channel, await ExportAsync(world.Period));
+
+        second.Status.ShouldBe(ExchangeImportStatus.Succeeded, second.Error);
+        (second.RecordsUpdated, second.UpdateConflicts).ShouldBe((1, 1));
+        second.ReconciliationOk.ShouldBe(true, second.Reconciliation);
+        await using var check = _rxInvestigation.CreateDbContext();
+        (await check.Persons.SingleAsync(p => p.DisplayName == "Иванов Иван")).Alias.ShouldBe("Ваня");
+        (await check.Persons.SingleAsync(p => p.Id == linkId)).Notes.ShouldBe("проверить по месту работы");
+        var conflict = await check.ExchangeImportConflicts.AsNoTracking().SingleAsync(c => c.Kind == ExchangeConflictKind.RecordUpdate);
+        var change = ExchangeRecordUpdater.ParseChanges(conflict.Changes).Single();
+        (change.Key, change.BaseKnown, change.BaseText, change.SourceText, change.LocalText)
+            .ShouldBe(("notes", false, "неизвестно", "брат по матери", "проверить по месту работы"));
+
+        // Дальше снимок есть у каждой сведённой записи — следующее изменение сравнится с ним.
+        (await check.ExchangeSourceRecords.CountAsync(r => r.Snapshot == null && r.Kind != ExchangeRecordKind.Asset
+            && r.Kind != ExchangeRecordKind.ReferencePhoto && r.Kind != ExchangeRecordKind.Appearance)).ShouldBe(0);
+    }
+
     [Fact(DisplayName = "ADR-0068 v0.2: у получателя нет подразделения источника по коду — отказ до записи с перечнем, сбой в журнале аудита")]
     public async Task Missing_division_is_refused_before_writing()
     {
@@ -621,7 +881,7 @@ public sealed class ExchangeImportTests : IAsyncLifetime
         new ExchangeFaceLinkGate(),
         TimeProvider.System);
 
-    private (ExchangeImportService Service, ExchangeImportChannel Channel, RecordingQueue Queue) BuildReceiver()
+    private (ExchangeImportService Service, ExchangeImportChannel Channel, RecordingQueue Queue) BuildReceiver(bool purgeOnClosure = false)
     {
         var settings = ReceiverSettings();
         var storage = new LocalFileStorage(ReceiverStorage);
@@ -640,10 +900,17 @@ public sealed class ExchangeImportTests : IAsyncLifetime
             MediaUploadOptions.Default,
             queue,
             new AuditWriter(_rxCore),
+            BuildClosures(purgeOnClosure),
             TimeProvider.System,
             NullLogger<ExchangeImportService>.Instance);
         return (service, channel, queue);
     }
+
+    // Регламент закрытия получателя (ТБ-074) — настоящий: носители дела, снятие шаблонов «Медиа», акт закрытия.
+    private CaseClosureRegulation BuildClosures(bool purgeOnClosure) => new(
+        InvestigationTestKit.CreateCaseStore(_rxInvestigation, _rxCore),
+        new MediaPurger(_rxMedia, new AuditWriter(_rxCore), new LocalFileStorage(ReceiverStorage)),
+        new InvestigationRetentionOptions(purgeOnClosure));
 
     private async Task<ExchangeImport> ImportAsync(ExchangeImportService service, ExchangeImportChannel channel, string package)
     {
@@ -877,6 +1144,29 @@ public sealed class ExchangeImportTests : IAsyncLifetime
         video.IndexedAt = DateTime.UtcNow;
         await media.SaveChangesAsync();
         return (matching.Id, other.Id);
+    }
+
+    // Шаблон лица у получателя на принятом видео (как его запишет индексация «Медиа») — для регламента закрытия (ТБ-074).
+    private async Task<int> SeedReceivedTemplateAsync()
+    {
+        await using var media = _rxMedia.CreateDbContext();
+        var video = await media.Assets.SingleAsync(a => a.ContentHash == Hash(VideoBytes));
+        var frame = new MediaFrame { AssetId = video.Id, Index = 3, TimestampMs = 3_000 };
+        media.Frames.Add(frame);
+        await media.SaveChangesAsync();
+        var face = NewFace(video.Id, frame.Id, 10, 10, 60, 60, video.Classification, video.DivisionId);
+        media.Faces.Add(face);
+        await media.SaveChangesAsync();
+        var values = new float[FaceTemplate.Dimensions];
+        values[0] = 1f;
+        var template = new FaceTemplate
+        {
+            FaceId = face.Id, AssetId = video.Id, Embedding = new Vector(values), ModelVersion = "sface-test", QualityAcceptable = true,
+            Classification = video.Classification, DivisionId = video.DivisionId,
+        };
+        media.Templates.Add(template);
+        await media.SaveChangesAsync();
+        return template.Id;
     }
 
     private static Face NewFace(int assetId, int frameId, float x, float y, float width, float height, short classification, int divisionId) => new()

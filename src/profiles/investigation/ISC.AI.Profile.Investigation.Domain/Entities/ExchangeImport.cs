@@ -100,6 +100,12 @@ public class ExchangeImport : BaseEntity
     /// <summary>Эталонов и появлений, лицо которых в индексации получателя не нашлось.</summary>
     public int FacesNotFound { get; set; }
 
+    /// <summary>Принятых прежде записей, изменения которых перенесены (ADR-0068 v0.4).</summary>
+    public int RecordsUpdated { get; set; }
+
+    /// <summary>Конфликтов изменений — поле изменено и у источника, и у получателя (ADR-0068 v0.4).</summary>
+    public int UpdateConflicts { get; set; }
+
     /// <summary>Носителей пакета без файла и ещё не принятых — файл ушёл прежним пакетом.</summary>
     public int MissingFiles { get; set; }
 
@@ -122,6 +128,9 @@ public class ExchangeImport : BaseEntity
 /// <summary>Вид записи в карте «запись источника → своя запись».</summary>
 public enum ExchangeRecordKind : short
 {
+    /// <summary>Не задан — у конфликтов дела и носителя (вид записи нужен только конфликту изменений, ADR-0068 v0.4).</summary>
+    None = 0,
+
     /// <summary>Дело.</summary>
     Case = 1,
 
@@ -183,6 +192,13 @@ public class ExchangeSourceRecord
 
     /// <summary>Когда (UTC).</summary>
     public DateTime CreatedAt { get; set; }
+
+    /// <summary>
+    /// Снимок записи источника, с которым своя запись последний раз сведена (ADR-0068 v0.4): JSON «поле → значение» в виде
+    /// получателя. По нему следующий пакет отличает изменение источника от правки получателя (трёхстороннее сравнение);
+    /// <see langword="null"/> — запись принята до версии 0.4.
+    /// </summary>
+    public string? Snapshot { get; set; }
 }
 
 /// <summary>Вид конфликта приёма.</summary>
@@ -193,6 +209,11 @@ public enum ExchangeConflictKind : short
 
     /// <summary>У получателя уже есть носитель с тем же файлом (ТФ-МЕД-04), не принятый из этого источника.</summary>
     Asset = 2,
+
+    /// <summary>
+    /// Конфликт изменений (ADR-0068 v0.4): поле принятой записи изменено и у источника, и у получателя — по-разному.
+    /// </summary>
+    RecordUpdate = 3,
 }
 
 /// <summary>Состояние конфликта.</summary>
@@ -224,6 +245,12 @@ public enum ExchangeConflictDecision : short
 
     /// <summary>Не переносить запись и всё, что от неё зависит, — ни сейчас, ни следующими приёмами.</summary>
     Skip = 3,
+
+    /// <summary>Конфликт изменений: записать значения источника (сразу — они в строке конфликта, ADR-0068 v0.4).</summary>
+    AcceptSource = 4,
+
+    /// <summary>Конфликт изменений: оставить своё; снимок принимает значения источника, тот же конфликт не вернётся.</summary>
+    KeepLocal = 5,
 }
 
 /// <summary>
@@ -298,6 +325,15 @@ public class ExchangeImportConflict : BaseEntity, IClassified
 
     /// <summary>Каким приёмом применено.</summary>
     public int? AppliedImportId { get; set; }
+
+    /// <summary>Вид записи конфликта изменений (ADR-0068 v0.4); у конфликтов дела и носителя — <see cref="ExchangeRecordKind.None"/>.</summary>
+    public ExchangeRecordKind RecordKind { get; set; }
+
+    /// <summary>
+    /// Поля конфликта изменений, JSON (<see cref="Services.ExchangeFieldChange"/>): было, у источника, у получателя — значения и
+    /// текст для экрана. Значения источника отсюда записывает решение «принять версию источника».
+    /// </summary>
+    public string? Changes { get; set; }
 }
 
 /// <summary>Состояние эталона или появления из пакета, ждущего лица в индексации получателя (ADR-0068 v0.3).</summary>

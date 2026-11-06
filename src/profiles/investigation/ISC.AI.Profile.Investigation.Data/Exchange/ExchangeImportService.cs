@@ -75,6 +75,7 @@ public sealed partial class ExchangeImportService(
     MediaUploadOptions uploadOptions,
     IBackgroundTaskQueue queue,
     IAuditWriter audit,
+    ICaseClosureRegulation closures,
     TimeProvider timeProvider,
     ILogger<ExchangeImportService> logger) : IExchangeImport
 {
@@ -89,6 +90,9 @@ public sealed partial class ExchangeImportService(
 
     // Текст сверки в журнале приёмов — длина столбца.
     private const int ReconciliationLimit = 4000;
+
+    // Изменённые записи в акте приёма поимённо (ADR-0068 v0.4) — первые; остальное — числом.
+    private const int UpdateLabelsInAct = 200;
 
     /// <inheritdoc />
     public async Task<ExchangeImportOverview> GetImportOverviewAsync(CancellationToken cancellationToken = default)
@@ -153,7 +157,7 @@ public sealed partial class ExchangeImportService(
                 i.GatewayConfirmed, i.CasesCreated, i.PersonsCreated, i.EventsCreated, i.ReportsCreated, i.AssetsCreated,
                 i.FilesReceived, i.BytesReceived, i.AlreadyImported, i.Conflicts, i.Deferred, i.MissingFiles, i.Rejected,
                 i.Classification, i.Error, i.Merged, i.SkippedByDecision, i.FacesLinked, i.FacesNotFound, i.ReconciliationOk,
-                i.Reconciliation))
+                i.Reconciliation, i.RecordsUpdated, i.UpdateConflicts))
             .ToListAsync(cancellationToken);
         var running = recent.Any(r => r.Status == ExchangeImportStatus.Running) ? channel.Stage ?? "Приём идёт…" : null;
         return new ExchangeImportOverview(readiness, rows, recent, running, conflictsPending, awaiting.Values.Sum(), faces);
@@ -264,6 +268,10 @@ public sealed partial class ExchangeImportService(
             var queued = await faces.QueueAsync(job.ImportId, job.PackageName, manifest.SourceInstance, data, tally, cancellationToken);
             var linked = await faces.LinkAsync(manifest.SourceInstance, auditLinks: true, cancellationToken);
             CountFaces(queued, linked, tally);
+
+            // Дела, закрытые вслед за источником (ADR-0068 v0.4), — тот же регламент, что при закрытии здесь (ТБ-074), после
+            // носителей: снимаются шаблоны и тех, что пришли этим пакетом.
+            await ExecuteClosuresAsync(job, manifest.SourceInstance, result.ClosedCases, tally, cancellationToken);
 
             var reconciliation = tally.Outcomes.Reconcile(Expected(data));
             await FinishAsync(job.ImportId, tally, reconciliation, cancellationToken);
@@ -691,6 +699,34 @@ public sealed partial class ExchangeImportService(
         return text.Length <= SourceTextLimit ? text : text[..SourceTextLimit];
     }
 
+    // ИНВАРИАНТ (ТБ-074): закрытие из другого офиса не обходит регламент удаления шаблонов. Сбой — не сбой приёма (записи уже
+    // приняты), но и не тишина: причина — в журнале приёмов и в акте, повторное закрытие дела исполнит регламент.
+    private async Task ExecuteClosuresAsync(
+        ExchangeImportJob job, string source, IReadOnlyList<int> closedCases, ExchangeImportTally tally, CancellationToken cancellationToken)
+    {
+        foreach (var caseId in closedCases)
+        {
+            var number = caseId.ToString(CultureInfo.InvariantCulture);
+            var closure = await closures.ExecuteAsync(
+                caseId, "закрытие дела №" + number + " вслед за " + source + " (пакет " + job.PackageName + ")", job.UserId, cancellationToken);
+            switch (closure.Outcome)
+            {
+                case CaseClosureRegulationOutcome.Executed:
+                    tally.ClosureLabels.Add("дело №" + number + " закрыто вслед за источником, шаблонов снято: "
+                                            + closure.TemplatesRemoved.ToString(CultureInfo.InvariantCulture));
+                    break;
+                case CaseClosureRegulationOutcome.Failed:
+                    tally.ClosureLabels.Add("дело №" + number + " закрыто вслед за источником, регламент удаления шаблонов НЕ исполнен");
+                    tally.ClosureProblems.Add("Дело №" + number + " закрыто вслед за источником, но регламент удаления шаблонов НЕ исполнен ("
+                                              + closure.Problem + ") — закройте дело повторно, когда журнал аудита будет доступен.");
+                    break;
+                default:
+                    tally.ClosureLabels.Add("дело №" + number + " закрыто вслед за источником (шаблоны хранятся по настройке)");
+                    break;
+            }
+        }
+    }
+
     // ---------- журнал и аудит ----------
 
     private async Task UpdateHeaderAsync(int importId, ExchangeManifestInfo manifest, CancellationToken cancellationToken)
@@ -713,6 +749,13 @@ public sealed partial class ExchangeImportService(
         row.Reconciliation = reconciliation.Text.Length <= ReconciliationLimit ? reconciliation.Text : reconciliation.Text[..ReconciliationLimit];
         row.Status = ExchangeImportStatus.Succeeded;
         row.FinishedAt = timeProvider.GetUtcNow().UtcDateTime;
+
+        // Принято, но регламент закрытия не исполнен (ТБ-074) — экран показывает причину у строки журнала.
+        if (tally.ClosureProblems.Count > 0)
+        {
+            var problems = string.Join(" ", tally.ClosureProblems);
+            row.Error = problems.Length <= 2000 ? problems : problems[..2000];
+        }
         await db.SaveChangesAsync(cancellationToken);
     }
 
@@ -790,6 +833,8 @@ public sealed partial class ExchangeImportService(
         row.FacesNotFound = tally.FacesNotFound;
         row.MissingFiles = tally.MissingFiles;
         row.Rejected = tally.Rejected;
+        row.RecordsUpdated = tally.RecordsUpdated;
+        row.UpdateConflicts = tally.UpdateConflicts;
     }
 
     // Акт приёма (ТФ-ОБМ-02, ЦС-08): гриф — маркировка пакета; счётчики манифеста, исходы по видам и сверка; перечень
@@ -806,7 +851,8 @@ public sealed partial class ExchangeImportService(
             + $"заведено: дел {tally.CasesCreated}, объектов {tally.PersonsCreated}, реквизитов {tally.RequisitesCreated}, "
             + $"событий связи {tally.EventsCreated}, участников {tally.ParticipantsCreated}, сводок {tally.ReportsCreated}, "
             + $"записей справочника {tally.ReferencesCreated}, носителей {tally.AssetsCreated} (файлов {tally.FilesReceived}, байт {tally.BytesReceived}); "
-            + $"уже принято прежде: {tally.AlreadyImported}; конфликтов без решения: {tally.Conflicts}; объединено по решению: {tally.Merged}; "
+            + $"уже принято прежде без изменений: {tally.AlreadyImported}; обновлено записей: {tally.RecordsUpdated}; "
+            + $"конфликтов изменений: {tally.UpdateConflicts}; конфликтов без решения: {tally.Conflicts}; объединено по решению: {tally.Merged}; "
             + $"пропущено по решению: {tally.SkippedByDecision}; не перенесено с конфликтными делами: {tally.HeldWithConflict}; "
             + $"эталонов и появлений перенесено: {tally.FacesLinked}, ждут сопоставления лица: {tally.Deferred}, лицо не найдено: {tally.FacesNotFound}; "
             + $"отозвано вслед за источником: {tally.SourceRevocations.Count}; носителей без файла: {tally.MissingFiles}; отклонено файлов: {tally.Rejected}; "
@@ -819,6 +865,20 @@ public sealed partial class ExchangeImportService(
         if (tally.DecisionLabels.Count > 0)
         {
             text += "; решения Руководителя: " + string.Join("; ", tally.DecisionLabels);
+        }
+
+        if (tally.ClosureLabels.Count > 0)
+        {
+            text += "; закрытие вслед за источником (ТБ-074): " + string.Join("; ", tally.ClosureLabels);
+        }
+
+        if (tally.UpdateLabels.Count > 0)
+        {
+            // Перечень изменённых записей (ADR-0068 v0.4) — в защищённой части; длинный — первые записи и сколько ещё.
+            text += "; изменения принятых записей: " + string.Join("; ", tally.UpdateLabels.Take(UpdateLabelsInAct))
+                    + (tally.UpdateLabels.Count > UpdateLabelsInAct
+                        ? " … и ещё " + (tally.UpdateLabels.Count - UpdateLabelsInAct).ToString(CultureInfo.InvariantCulture)
+                        : string.Empty);
         }
 
         if (tally.SourceRevocations.Count > 0)

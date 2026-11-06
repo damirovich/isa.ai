@@ -45,6 +45,9 @@ public static class InvestigationPersistenceServiceCollectionExtensions
         services.AddScoped<ICaseStore, CaseStore>();
         services.AddScoped<IPersonStore, PersonStore>();
 
+        // Регламент удаления шаблонов по закрытию дела, пришедшему из другого офиса (ТБ-074, ADR-0068 v0.4).
+        services.AddScoped<ICaseClosureRegulation, CaseClosureRegulation>();
+
         // Адреса и автотранспорт фигурантов (ТФ-ПЕР-06) — та же решётка через PersonAccess.
         services.AddScoped<IPersonRequisiteStore, PersonRequisiteStore>();
         services.AddScoped<ILinkEventStore, LinkEventStore>();
