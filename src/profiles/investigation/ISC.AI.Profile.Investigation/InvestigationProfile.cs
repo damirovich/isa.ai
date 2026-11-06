@@ -134,6 +134,11 @@ public sealed class InvestigationProfile : IProfile
         new ModuleDescriptor("admin-access-import", "/admin/access-import", "Перенос из Access",
             Icons.Material.Filled.DriveFolderUpload, typeof(AccessTransfer), ReadPolicy, GroupAdmin),
 
+        // Обмен между офисами (ТФ-АДМ-05, ТФ-ОБМ-01, ADR-0068): пакет за месяц для другого офиса на носитель обмена;
+        // право «Обмен между офисами» (по умолчанию Администратор), состав и счётчики — без содержимого.
+        new ModuleDescriptor("admin-exchange", "/admin/exchange", "Обмен между офисами",
+            Icons.Material.Filled.SwapHoriz, typeof(OfficeExchange), ReadPolicy, GroupAdmin),
+
         // Запросы на правку архивных сводок и справок (ТФ-АДМ-06, ADR-0031): решает Администратор по метаданным.
         new ModuleDescriptor("admin-report-permits", "/admin/report-permits", "Запросы на правку сводок",
             Icons.Material.Filled.LockOpen, typeof(ReportPermits), ReadPolicy, GroupAdmin),

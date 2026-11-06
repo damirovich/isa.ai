@@ -10,7 +10,8 @@ public sealed class RestoreUsageException(string message) : Exception(message);
 
 /// <summary>
 /// Программа восстановления из резервной копии (ТФ-АДМ-04, ТБ-082, ADR-0063). Команды:
-/// <c>keygen</c> — пара ключей хранителя; <c>verify</c> — манифест копии; <c>restore</c> — восстановление баз и хранилища.
+/// <c>keygen</c> — пара ключей хранителя (резервных копий или обмена между офисами, ADR-0068); <c>verify</c> — манифест
+/// копии; <c>restore</c> — восстановление баз и хранилища.
 /// </summary>
 /// <remarks>
 /// ИНВАРИАНТЫ: восстановление — двумя лицами (Администратор и хранитель ключа, имена обязательны и различны, оба — в
@@ -32,6 +33,48 @@ public static class RestoreApp
     /// <summary>Имя файла закрытого ключа, который создаёт <c>keygen</c>.</summary>
     public const string PrivateKeyFile = "backup-private.pem";
 
+    /// <summary>Назначение пары ключей <c>keygen</c> по умолчанию — резервные копии.</summary>
+    public const string BackupPurpose = "backup";
+
+    /// <summary>Назначение «получатель пакетов обмена» (ADR-0068): пару создают в офисе, КУДА идут пакеты.</summary>
+    public const string ExchangeRecipientPurpose = "exchange-recipient";
+
+    /// <summary>Назначение «подпись пакетов обмена» (ADR-0068): пару создают в офисе, ОТКУДА идут пакеты.</summary>
+    public const string ExchangeSigningPurpose = "exchange-signing";
+
+    // Что делать с каждой парой. Закрытые части у назначений живут в разных местах: ключ копий — НЕ на сервере (им
+    // расшифровывают копию при восстановлении), ключи обмена — на сервере своего офиса под паролем хранителя: подписи — у
+    // источника (пароль вводится при формировании пакета), приёма — у получателя (пароль вводится при приёме, ADR-0068 v0.2).
+    private static readonly Dictionary<string, KeyPurpose> KeyPurposes = new(StringComparer.Ordinal)
+    {
+        [BackupPurpose] = new(
+            PublicKeyFile,
+            PrivateKeyFile,
+            [
+                $"  {PublicKeyFile} — открытый: передать Администратору (Backup:PublicKey:Path);",
+                $"  {PrivateKeyFile} — закрытый, под паролем: хранить у хранителя ключа, НЕ на сервере системы.",
+            ],
+            "Отпечаток для Backup:PublicKey:Sha256:"),
+        [ExchangeRecipientPurpose] = new(
+            "exchange-recipient-public.pem",
+            "exchange-recipient-private.pem",
+            [
+                "  exchange-recipient-public.pem — открытый: передать Администратору офиса-источника (Exchange:Recipient:PublicKey:Path);",
+                "  exchange-recipient-private.pem — закрытый, под паролем: на сервер этого офиса (Exchange:Import:PrivateKey:Path, root:iscai 0640),",
+                "    в другие офисы не передаётся; пароль знает только хранитель ключа — он вводит его при приёме каждого пакета.",
+            ],
+            "Отпечаток для Exchange:Import:PrivateKey:Sha256 здесь и для Exchange:Recipient:PublicKey:Sha256 в офисе-источнике (сообщить отдельно от ключа — не на носителе обмена):"),
+        [ExchangeSigningPurpose] = new(
+            "exchange-signing-public.pem",
+            "exchange-signing-private.pem",
+            [
+                "  exchange-signing-private.pem — закрытый, под паролем: на сервер этого офиса (Exchange:Signing:PrivateKey:Path, root:iscai 0640);",
+                "    пароль знает только хранитель ключа — он вводит его при формировании каждого пакета;",
+                "  exchange-signing-public.pem — открытый: передать в офис-получатель — им проверяется подпись пакетов.",
+            ],
+            "Отпечаток для Exchange:Signing:PrivateKey:Sha256 здесь и для Exchange:Import:Sources:<номер этого офиса>:PublicKey:Sha256 в офисе-получателе:"),
+    };
+
     /// <summary>Начало ключа, задающего каталог восстановления каталога файлов копии: <c>--files-&lt;имя&gt;</c>.</summary>
     public const string FilesOptionPrefix = "--files-";
 
@@ -43,8 +86,10 @@ public static class RestoreApp
 
     /// <summary>Строка помощи.</summary>
     public const string Usage =
-        "ISC.AI.Backup.Restore keygen --out <каталог>\n"
-        + "    пара ключей резервных копий для хранителя ключа: закрытый — под паролем, открытый и отпечаток — Администратору\n"
+        "ISC.AI.Backup.Restore keygen --out <каталог> [--purpose backup|exchange-recipient|exchange-signing]\n"
+        + "    пара ключей для хранителя ключа: закрытый — под паролем, открытый и отпечаток — Администратору;\n"
+        + "    backup — резервные копии (по умолчанию), exchange-recipient — приём пакетов обмена между офисами,\n"
+        + "    exchange-signing — подпись пакетов обмена\n"
         + "ISC.AI.Backup.Restore verify --backup <каталог копии> [--fingerprint <SHA-256 ключа>]\n"
         + "    проверка манифеста копии без закрытого ключа\n"
         + "ISC.AI.Backup.Restore restore --backup <каталог копии> --server \"Host=..;Port=..;Username=..\"\n"
@@ -91,12 +136,20 @@ public static class RestoreApp
     private static async Task<int> KeygenAsync(Dictionary<string, string> options, IRestoreConsole console, CancellationToken cancellationToken)
     {
         var folder = Required(options, "--out");
+        var purposeName = options.GetValueOrDefault("--purpose", BackupPurpose);
+        if (!KeyPurposes.TryGetValue(purposeName, out var purpose))
+        {
+            throw new RestoreUsageException(
+                $"Назначение ключа «{purposeName}»: {BackupPurpose}, {ExchangeRecipientPurpose} или {ExchangeSigningPurpose}.");
+        }
+
         Directory.CreateDirectory(folder);
-        var publicPath = Path.Combine(folder, PublicKeyFile);
-        var privatePath = Path.Combine(folder, PrivateKeyFile);
+        var publicPath = Path.Combine(folder, purpose.PublicFile);
+        var privatePath = Path.Combine(folder, purpose.PrivateFile);
         if (File.Exists(publicPath) || File.Exists(privatePath))
         {
-            console.WriteLine($"В каталоге {Path.GetFullPath(folder)} уже есть ключи — новые не создаются (старые ключи нужны для старых копий).");
+            console.WriteLine(
+                $"В каталоге {Path.GetFullPath(folder)} уже есть ключи — новые не создаются (старыми ключами зашифрованы или подписаны прежние копии и пакеты).");
             return 1;
         }
 
@@ -117,9 +170,12 @@ public static class RestoreApp
         await WritePrivateKeyAsync(privatePath, BackupKeys.ExportPrivatePem(key, password), cancellationToken);
         await File.WriteAllTextAsync(publicPath, BackupKeys.ExportPublicPem(key), cancellationToken);
         console.WriteLine($"Ключи созданы в {Path.GetFullPath(folder)}:");
-        console.WriteLine($"  {PublicKeyFile} — открытый: передать Администратору (Backup:PublicKey:Path);");
-        console.WriteLine($"  {PrivateKeyFile} — закрытый, под паролем: хранить у хранителя ключа, НЕ на сервере системы.");
-        console.WriteLine("Отпечаток для Backup:PublicKey:Sha256:");
+        foreach (var line in purpose.Instructions)
+        {
+            console.WriteLine(line);
+        }
+
+        console.WriteLine(purpose.FingerprintFor);
         console.WriteLine("  " + BackupKeys.FingerprintHex(key));
         return 0;
     }
@@ -511,6 +567,9 @@ public static class RestoreApp
 
         return options;
     }
+
+    /// <summary>Назначение пары ключей: имена файлов, что с ними делать, для какой настройки отпечаток.</summary>
+    private sealed record KeyPurpose(string PublicFile, string PrivateFile, string[] Instructions, string FingerprintFor);
 
     private static string Required(Dictionary<string, string> options, string name) =>
         options.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value)

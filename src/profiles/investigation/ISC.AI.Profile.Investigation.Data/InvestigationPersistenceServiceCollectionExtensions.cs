@@ -82,6 +82,24 @@ public static class InvestigationPersistenceServiceCollectionExtensions
         // Дозаполнение нормализованных реквизитов прежних фигурантов при старте (ТО-мат-11).
         services.AddHostedService<InvestigationStartupMaintenance>();
 
+        // Обмен между офисами, сторона источника (ТФ-ОБМ-01, ADR-0068): настройки и ключи, сборщик пакета, фоновое задание
+        // (одна выгрузка в каждый момент), уборка прерванных выгрузок при старте.
+        services.AddSingleton(Exchange.ExchangeSettings.Read(configuration));
+        services.AddSingleton<Exchange.ExchangeExportChannel>();
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<Exchange.ExchangePackageWriter>();
+        services.AddScoped<Exchange.ExchangeExportService>();
+        services.AddScoped<IExchangeExport>(sp => sp.GetRequiredService<Exchange.ExchangeExportService>());
+        services.AddHostedService<Exchange.ExchangeExportWorker>();
+
+        // Сторона получателя (ТФ-ОБМ-02, ADR-0068 v0.2): перенос записей с картой номеров источника, приём файлов через общий
+        // приём «Медиа», фоновое задание (один приём в каждый момент), отметка прерванных приёмов при старте.
+        services.AddSingleton<Exchange.ExchangeImportChannel>();
+        services.AddScoped<Exchange.ExchangeRecordImporter>();
+        services.AddScoped<Exchange.ExchangeImportService>();
+        services.AddScoped<IExchangeImport>(sp => sp.GetRequiredService<Exchange.ExchangeImportService>());
+        services.AddHostedService<Exchange.ExchangeImportWorker>();
+
         // Порты пакета «Документооборот» (ADR-0017): справочник подразделений, право настройки,
         // кандидаты в ответственные/исполнители. Без реализаций модуль fail-closed.
         services.AddScoped<ISC.AI.Modules.DocFlow.Domain.Services.IDivisionDirectory, InvestigationDivisionDirectory>();

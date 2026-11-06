@@ -79,6 +79,9 @@ public static class MediaPersistenceServiceCollectionExtensions
 
         // Статистика распознавания для отчётности (ТФ-ОТЧ-07, ADR-0061): счёт записей под той же решёткой, что каталог.
         services.AddScoped<IMediaStatistics, MediaStatistics>();
+
+        // Носители для пакета обмена между офисами (ТФ-ОБМ-01, ADR-0068): без решётки — вызывает только сборщик пакета.
+        services.AddScoped<IMediaExchangeSource, MediaExchangeSource>();
         services.AddScoped<ISearchSessionStore, SearchSessionStore>();
         services.AddScoped<ISuggestionRunStore, SuggestionRunStore>();
 
